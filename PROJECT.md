@@ -90,8 +90,21 @@
 
 ## 5. 总体设计
 
+### 5.0 当前运行基线（Phase 1）
+
+当前先验证 Vanna 本身的真实能力，不提前实现自建平台。唯一运行入口是
+`examples/siliconflow_sqlite_web_demo.py`：它创建本地合成 SQLite fixture，使用
+Vanna 的 `Agent`、`ToolRegistry`、`SqliteRunner`、`OpenAILlmService` 和原生 FastAPI
+路由，页面由 Vanna 原生 `<vanna-chat>` 提供。模型通过 `.env` 中的
+`SILICONFLOW_API_KEY` / `SILICONFLOW_BASE_URL` 调用
+`deepseek-ai/DeepSeek-V4-Flash`，服务监听 `127.0.0.1:32009`。
+
+这一步的目标是确认“中文问题 → LLM 工具调用 → SQL → 结果表 → 中文总结 → SSE/UI”
+闭环，而不是冻结最终数据模型、SQL 安全策略或 Next.js 页面。SQLite fixture 只用于
+可重复的冒烟验证，不代表最终业务数据。
+
 ```text
-Next.js 数据分析后台（TailAdmin）
+后续目标：Next.js 数据分析后台（TailAdmin）
 ├─ 经营概览 / 指标卡
 ├─ 智能分析页：嵌入 Vanna <vanna-chat>
 ├─ 查询历史与审计详情
@@ -115,6 +128,9 @@ PostgreSQL
 ├─ analytics schema：清洗后的业务分析数据（只读查询角色）
 └─ app schema：用户、会话、审计、指标、数据集、评测（应用写入角色）
 ```
+
+上图是通过原生 Vanna 基线后再逐步建设的目标架构，不是当前已完成的实现。当前没有
+`backend/`、`frontend/` 或 PostgreSQL 业务应用；这些目录只在对应阶段确有需求时创建。
 
 ### 5.1 后端模块职责
 
@@ -240,33 +256,43 @@ v1 发布门槛：
 
 ## 9. 分阶段实施路线
 
-### Phase 0：立项与基线（当前）
+### Phase 0：立项与仓库基线（已完成）
 
 - 冻结项目边界、架构、数据策略、风险和协作流程；
 - 建立 GitHub 仓库、`PROJECT.md`、`AGENTS.md` 与飞书项目文档；
-- 不开始业务代码和数据下载。
+- 完成单仓库决策，Vanna 源码与项目文档位于同一仓库；未下载第三方业务数据。
 
 完整的阶段门、仓库边界、交付物、退出条件、接口轮廓、测试策略与风险控制见 [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md)。
 
-### Phase 1：数据与领域建模
+### Phase 1：Vanna 原生垂直原型（当前）
+
+- 使用 Conda 环境 `data-analysis-agent` 运行 Vanna 2.0.2；
+- 使用 SiliconFlow OpenAI-compatible API 和 `DeepSeek-V4-Flash`；
+- 使用 SQLite 合成 fixture 验证 SQL 工具调用、SSE 和原生 Web UI；
+- 记录 Vanna 当前能力、缺口和上游 API 事实，不修改 Vanna 核心。
+
+退出条件：页面可访问，模型可实际调用 `run_sql`，结果表与中文结论在浏览器可见，且
+不提交 `.env` 或生成的 SQLite 文件。
+
+### Phase 2：数据与领域建模（原 Phase 1，原型通过后）
 
 - 确定 Olist 主案例的表范围；
 - 编写数据集清单、下载/加载流程、分析 Schema、数据字典；
 - 冻结第一批指标定义与最小合成测试数据。
 
-### Phase 2：可信查询后端
+### Phase 3：可信查询后端
 
 - 创建 FastAPI 应用、认证/角色占位、PostgreSQL 双角色配置；
 - 接入 Vanna Agent 与受控工具；
 - 实现 `sqlglot` SQL Policy、超时/行数限制、审计与证据对象。
 
-### Phase 3：数据分析前端
+### Phase 4：数据分析前端
 
 - 基于 TailAdmin 建立智能分析、历史审计、指标口径和数据集页面；
 - 嵌入 Vanna Web Component 并打通 SSE；
 - 展示表格、SQL、图表和证据链。
 
-### Phase 4：评测、加固与作品集
+### Phase 5：评测、加固与作品集
 
 - 建立评测集、回归测试和安全测试；
 - 完成部署说明、演示脚本、架构图、数据署名和项目 README；
@@ -274,9 +300,12 @@ v1 发布门槛：
 
 ## 10. 当前决策与待确认项
 
-已确认：Vanna、FastAPI、PostgreSQL、TailAdmin、Vanna Web Component、Olist 主案例、Chinook 回归数据、v1 不引入 Redis。
+已确认：单仓库 Vanna-first、Python/Conda、Vanna 原生 Web Component、SiliconFlow
+开发模型、SQLite 合成冒烟 fixture、后续再引入 PostgreSQL 和数据合同、v1 不引入 Redis。
 
-待在 Phase 1 确认：具体数据表范围、数据加载方式、模型提供方与预算、认证方案、组织/行级权限的演示粒度、首批指标的精确定义、评测题标准答案。
+待在原型通过后确认：具体数据表范围、数据加载方式、PostgreSQL 角色、认证方案、
+组织/行级权限的演示粒度、首批指标的精确定义、评测题标准答案，以及是否需要独立
+Next.js/TailAdmin 外壳。
 
 ## 11. 变更记录
 
@@ -289,3 +318,5 @@ v1 发布门槛：
 | 2026-08-02 | 数据策略 | Chinook 用于回归，Olist 用于主展示，中文电商数据用于后续扩展。 |
 | 2026-08-02 | 项目基线同步 | 已创建飞书项目文档；GitHub SSH 认证已恢复，首个项目基线提交已推送至 `main`。 |
 | 2026-08-02 | 开发计划与目录边界 | 冻结完整阶段计划；自有项目仅在本仓库开发，上游 Vanna/TailAdmin 收纳为 `/disk2/gengnan/_upstream/` 参考缓存。 |
+| 2026-08-02 | 单仓库 Vanna-first | 将 Vanna 源码合并到本仓库并保留 `upstream` 远端；先用原生 FastAPI + `<vanna-chat>` 垂直验证，再建设数据合同和自有平台。 |
+| 2026-08-02 | Phase 1 冒烟验证 | Conda 环境、SiliconFlow `DeepSeek-V4-Flash`、SQLite 合成 fixture、SSE API 和浏览器页面均已验证；服务端口为 `32009`。 |

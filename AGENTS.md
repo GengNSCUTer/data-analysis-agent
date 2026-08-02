@@ -7,7 +7,7 @@
 - `PROJECT.md` 是需求、架构、数据策略、技术决策、阶段路线和变更记录的本地基线；
 - 飞书项目文档（<https://my.feishu.cn/docx/QIr2dfKp7oIJvqxcPerckYd6nfC>）是用户可直接查看的同步项目记录；
 - GitHub 仓库 `GengNSCUTer/data-analysis-agent` 是项目代码、可复现脚本、文档和提交历史的唯一远端；
-- 不把上游 Vanna 或 TailAdmin 的原始克隆直接当作本项目源码。它们只作为上游参考和依赖来源。
+- Vanna 已按当前项目决策合并进本仓库，仓库同时保留 `upstream` 远端用于跟踪上游；不要再创建第二个自有 Vanna 仓库。TailAdmin 仍只作为未来前端参考。
 
 ## 2. 每次迭代的强制闭环
 
@@ -33,9 +33,10 @@
 
 ## 4. v1 架构约束
 
-- 后端：Python 3.12、FastAPI、Vanna、PostgreSQL、SQLAlchemy、Alembic、`sqlglot`、pytest；
-- 前端：Next.js、React、TypeScript、Tailwind，以 TailAdmin 为页面基座，在智能分析页集成 Vanna `<vanna-chat>`；
-- 交互：FastAPI SSE 返回进度、表格、图表、SQL 和证据；
+- 当前基线：Python 3.12、仓库内 Vanna 2.0.2、FastAPI、Vanna 原生 `<vanna-chat>`，先通过 `examples/siliconflow_sqlite_web_demo.py` 跑通最小闭环；
+- 后续目标后端：Python 3.12、FastAPI、Vanna、PostgreSQL、SQLAlchemy、Alembic、`sqlglot`、pytest；
+- 后续目标前端：Next.js、React、TypeScript、Tailwind，以 TailAdmin 为页面基座，在智能分析页集成 Vanna `<vanna-chat>`；
+- 交互：当前使用 Vanna 原生 SSE 返回进度、表格和结论；后续扩展 SQL、图表和证据对象；
 - v1 持久化：PostgreSQL；没有实际缓存、限流、异步导出或多实例协调需求时，不引入 Redis；
 - v1 不做多 Agent、MCP、任意 Python 代码执行、写库操作或多数据库方言支持。
 
@@ -52,5 +53,5 @@
 - 文档、API、数据模型和代码使用清晰的中英文术语；对外展示使用中文业务语言，并保留原始数据字段映射；
 - 长期设计变更可以在 `docs/adr/` 中新增 `NNNN-title.md`；
 - 数据集相关内容位于 `data/` 下，但仅提交 manifest、schema、transforms 与 fixtures，不提交原始数据；
-- 自有目录约定为 `backend/`、`frontend/`、`data/`、`evals/`、`infra/`、`docs/`，并仅在相应阶段创建；上游 Vanna/TailAdmin 位于 `/disk2/gengnan/_upstream/`，只作参考，严禁在其中实现本项目业务代码；
+- 自有目录约定为 Vanna 源码根目录、`examples/`、`tests/`、`docs/`，以及后续按阶段创建的 `backend/`、`frontend/`、`data/`、`evals/`、`infra/`；本仓库是唯一开发、提交和推送位置。`/disk2/gengnan/_upstream/tailadmin-nextjs-dashboard/` 只作前端参考，严禁在其中实现本项目业务代码；
 - 文档更新应陈述已验证事实与未决假设，不能把计划描述成已实现能力。
