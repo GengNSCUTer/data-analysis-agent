@@ -264,7 +264,7 @@ v1 发布门槛：
 
 完整的阶段门、仓库边界、交付物、退出条件、接口轮廓、测试策略与风险控制见 [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md)。
 
-### Phase 1：Vanna 原生垂直原型（当前）
+### Phase 1：Vanna 原生垂直原型（已完成）
 
 - 使用 Conda 环境 `data-analysis-agent` 运行 Vanna 2.0.2；
 - 使用 SiliconFlow OpenAI-compatible API 和 `DeepSeek-V4-Flash`；
@@ -272,13 +272,19 @@ v1 发布门槛：
 - 记录 Vanna 当前能力、缺口和上游 API 事实，不修改 Vanna 核心。
 
 退出条件：页面可访问，模型可实际调用 `run_sql`，结果表与中文结论在浏览器可见，且
-不提交 `.env` 或生成的 SQLite 文件。
+不提交 `.env` 或生成的 SQLite 文件。以上条件已通过。
 
-### Phase 2：数据与领域建模（原 Phase 1，原型通过后）
+### Phase 2：数据与领域建模（当前）
 
 - 确定 Olist 主案例的表范围；
-- 编写数据集清单、下载/加载流程、分析 Schema、数据字典；
-- 冻结第一批指标定义与最小合成测试数据。
+- 编写数据集清单、许可证/署名约束、分析 Schema、数据字典；
+- 起草第一批指标定义、最小合成测试 fixture 和 20 条评测问题；
+- 暂不下载原始数据，不创建 PostgreSQL，不将草案口径描述为已冻结生产能力。
+
+本阶段文档入口：[`data/manifest/datasets.yaml`](data/manifest/datasets.yaml)、
+[`docs/data-dictionary.md`](docs/data-dictionary.md)、[`docs/metric-catalog.md`](docs/metric-catalog.md)、
+[`docs/architecture/data-model.md`](docs/architecture/data-model.md) 和
+[`evals/cases/draft.yaml`](evals/cases/draft.yaml)。
 
 ### Phase 3：可信查询后端
 
@@ -301,10 +307,11 @@ v1 发布门槛：
 ## 10. 当前决策与待确认项
 
 已确认：单仓库 Vanna-first、Python/Conda、Vanna 原生 Web Component、SiliconFlow
-开发模型、SQLite 合成冒烟 fixture、后续再引入 PostgreSQL 和数据合同、v1 不引入 Redis。
+开发模型、SQLite 合成冒烟 fixture、Olist 主展示案例草案、后续再引入 PostgreSQL 和
+v1 不引入 Redis。
 
-待在原型通过后确认：具体数据表范围、数据加载方式、PostgreSQL 角色、认证方案、
-组织/行级权限的演示粒度、首批指标的精确定义、评测题标准答案，以及是否需要独立
+待在 Phase 2 合同冻结后确认：数据加载方式、PostgreSQL 角色、认证方案、组织/行级
+权限的演示粒度、首批指标的人工 golden 结果、评测题标准答案，以及是否需要独立
 Next.js/TailAdmin 外壳。
 
 ## 11. 变更记录
@@ -320,3 +327,4 @@ Next.js/TailAdmin 外壳。
 | 2026-08-02 | 开发计划与目录边界 | 冻结完整阶段计划；自有项目仅在本仓库开发，上游 Vanna/TailAdmin 收纳为 `/disk2/gengnan/_upstream/` 参考缓存。 |
 | 2026-08-02 | 单仓库 Vanna-first | 将 Vanna 源码合并到本仓库并保留 `upstream` 远端；先用原生 FastAPI + `<vanna-chat>` 垂直验证，再建设数据合同和自有平台。 |
 | 2026-08-02 | Phase 1 冒烟验证 | Conda 环境、SiliconFlow `DeepSeek-V4-Flash`、SQLite 合成 fixture、SSE API 和浏览器页面均已验证；服务端口为 `32009`。 |
+| 2026-08-02 | Phase 2 数据合同草案 | 确定 Olist 为主展示案例、Chinook 为回归候选、中文数据和天池 O2O 为后续候选；新增 manifest、字段字典、指标目录、分析模型草案、合成 fixture 和 20 条评测草案，暂不下载原始数据。 |

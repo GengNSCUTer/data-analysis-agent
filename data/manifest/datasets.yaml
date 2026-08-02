@@ -1,0 +1,51 @@
+manifest_version: "0.1"
+last_reviewed: "2026-08-02"
+policy:
+  raw_files_in_git: false
+  required_before_download:
+    - record_source_url_and_license
+    - record_download_date_and_checksum
+    - record_transform_version
+    - review_fields_for_personal_or_sensitive_data
+
+datasets:
+  - id: chinook
+    name: Chinook Database
+    role: regression_fixture_candidate
+    source_url: https://github.com/lerocha/chinook-database
+    license: MIT
+    status: planned
+    notes: Small relational dataset for deterministic SQL and policy tests.
+
+  - id: olist_brazilian_ecommerce
+    name: Olist Brazilian E-Commerce Public Dataset
+    role: primary_showcase
+    source_url: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+    license: CC BY-NC-SA 4.0 (as listed by the Kaggle dataset page; re-check before redistribution)
+    status: planned
+    selected_source_tables:
+      - olist_orders_dataset
+      - olist_order_items_dataset
+      - olist_order_payments_dataset
+      - olist_order_reviews_dataset
+      - olist_products_dataset
+      - olist_sellers_dataset
+      - olist_customers_dataset
+      - product_category_name_translation
+    notes: Primary multi-table commerce case. Raw CSVs stay outside Git.
+
+  - id: taobao_maternal_infant
+    name: Taobao Maternal and Infant Shopping Dataset
+    role: chinese_extension_candidate
+    source_url: https://www.kaggle.com/datasets/akacoder404/taobao-maternal-and-infant-shopping-data-set
+    license: CC BY-NC 4.0 (as listed by the Kaggle dataset page; re-check before redistribution)
+    status: candidate
+    notes: Optional Chinese-language extension after the primary case is stable.
+
+  - id: tianchi_o2o_coupon
+    name: Tianchi O2O Coupon Usage Dataset
+    role: local_life_extension_candidate
+    source_url: https://tianchi.aliyun.com/dataset/dataDetail?dataId=3907
+    license: usage terms must be reviewed on the current Tianchi page
+    status: candidate
+    notes: Do not download or redistribute until the current terms are recorded.

@@ -1,6 +1,6 @@
 # Data Analysis Agent｜开发计划
 
-> 状态：Phase 1 原生 Vanna 垂直原型已跑通，后续按阶段门推进。
+> 状态：Phase 1 原生 Vanna 垂直原型已跑通，Phase 2 数据与领域合同正在进行。
 > 最近更新：2026-08-02
 
 ## 1. 开发原则
@@ -86,7 +86,7 @@ SQLite 合成数据和 SiliconFlow；`backend/`、`frontend/`、PostgreSQL 与 T
 退出条件：上述闭环可重复运行；API Key、SQLite 文件和测试产物不提交；记录 Vanna
 当前缺口（原生认证演示、图表触发、SQL 写操作默认行为等）。
 
-### Phase 2｜数据和领域合同（原型通过后）
+### Phase 2｜数据和领域合同（当前，第一批草案已完成）
 
 目标：把合成表替换为可解释、可复现的数据资产，并冻结第一版业务口径。
 
@@ -99,8 +99,13 @@ SQLite 合成数据和 SiliconFlow；`backend/`、`frontend/`、PostgreSQL 与 T
    和允许维度；
 5. 将 20 个代表性问题写入版本化评测草案，并为核心问题生成 golden 结果。
 
+当前交付：`data/manifest/datasets.yaml`、`docs/data-dictionary.md`、
+`docs/metric-catalog.md`、`docs/architecture/data-model.md`、
+`data/fixtures/sales_daily.csv` 和 `evals/cases/draft.yaml`。这些是版本化草案，
+尚未代表原始数据已下载或生产口径已冻结。
+
 退出条件：每个指标都能由人工依据字典写出明确 SQL；数据可从空环境重建；没有把
-“让模型自行猜口径”当作设计。
+“让模型自行猜口径”当作设计；至少完成一次原始数据许可、质量和 golden 结果复核。
 
 ### Phase 3｜受控查询后端
 
@@ -169,5 +174,5 @@ Conventional Commit 提交并推送 `origin`。
 
 1. 保持 `data-analysis-agent` screen 服务可复现运行，提供 SSH 端口转发给本地浏览器；
 2. 观察 Vanna 原生 UI 的 SQL、图表、认证和结果契约，整理 ADR；
-3. 决定主案例数据集和最小业务问题集后进入 Phase 2；
+3. 对 Olist 数据源、许可、字段质量和指标草案进行人工核验，形成 v1 数据合同；
 4. 在数据合同冻结后再创建 PostgreSQL/自有后端，不提前引入 Redis、队列或大规模前端。
