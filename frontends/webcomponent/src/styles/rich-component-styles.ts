@@ -688,6 +688,45 @@ export const richComponentStyles = css`
     padding: 0;
   }
 
+  .text-markdown blockquote {
+    margin: var(--vanna-space-3) 0;
+    padding: var(--vanna-space-2) var(--vanna-space-3);
+    border-left: 3px solid var(--vanna-accent-primary-default);
+    color: var(--vanna-foreground-dimmer);
+  }
+
+  .text-markdown-table-wrap {
+    max-width: 100%;
+    margin: var(--vanna-space-3) 0;
+    overflow-x: auto;
+    border: 1px solid var(--vanna-outline-dimmer);
+    border-radius: var(--vanna-border-radius-md);
+  }
+
+  .text-markdown-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  .text-markdown-table th,
+  .text-markdown-table td {
+    padding: var(--vanna-space-2) var(--vanna-space-3);
+    border-bottom: 1px solid var(--vanna-outline-dimmer);
+    text-align: left;
+    vertical-align: top;
+    white-space: nowrap;
+  }
+
+  .text-markdown-table th {
+    background: var(--vanna-background-higher);
+    font-weight: 600;
+  }
+
+  .text-markdown-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
   /* Chart */
   .rich-chart {
     padding: var(--vanna-space-4);

@@ -31,6 +31,7 @@ auditability, and evaluation.
 - **CON-002**: Redis, queues, multi-agent orchestration, write operations, and a standalone frontend are out of scope until a concrete requirement is measured.
 - **GUD-001**: Record each completed phase in `PROJECT.md`, `docs/DEVELOPMENT_PLAN.md`, the Feishu project document, Git, and `origin/main`.
 - **PAT-001**: Add project-specific behavior in a new package under `src/data_analysis_agent/`; avoid modifying `src/vanna/` except for upstream merges or isolated bug fixes.
+- **PAT-002**: The Markdown-table renderer correction in `frontends/webcomponent/` is an isolated upstream UI bug fix. Keep it small, test it through the locally built bundle, and avoid turning the Web Component into a separate product frontend.
 
 ## 2. Implementation Steps
 

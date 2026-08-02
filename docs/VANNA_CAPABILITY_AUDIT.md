@@ -12,6 +12,7 @@
 | WebSocket | `/api/vanna/v2/chat_websocket` | 路由存在，未使用 | 不进入首批范围，SSE 足够 |
 | 进度和任务面板 | 状态栏、任务跟踪、输入状态组件 | 已随 SSE 在页面展示 | 保留，后续用业务化状态文本替代通用文本 |
 | 结果表 | `DataFrameComponent` | 已端到端验证 | 后续补列别名、格式化、下载和大结果截断策略 |
+| Markdown 富文本 | `RichTextComponent(markdown=True)` 可承载文本、标题、列表、引用和表格 | 已修复组件原解析器不支持表格的问题；Chrome E2E 验证 Markdown 表格渲染为语义化 HTML table，而非竖线原文 | 这是仓库内 Web Component 的孤立兼容性修复；构建后的本地 bundle 由 FastAPI 提供 |
 | Plotly 图表 | `VisualizeDataTool` + `ChartComponent` + `plotly-chart` | 渲染器和工具存在；当前 Agent 未注册工具，未验证 | Phase 3 优先接入并测试，而不是自建图表框架 |
 | SQL 结果文件 | `RunSqlTool` 默认写 `query_results_*.csv` | 已注入 `LocalFileSystem`，默认写至 `/tmp/data-analysis-agent-vanna-query-results/`，可由 `VANNA_QUERY_RESULTS_DIR` 覆盖；E2E 已验证仓库根目录无结果文件 | 当前仅为原型文件隔离，后续图表工具复用该受控目录并定义保留/清理策略 |
 | 自定义工具 | `Tool` / `ToolRegistry.register_local_tool` | `RunSqlTool` 已注册 | 项目应以自定义安全 SQL 工具和指标上下文工具作为核心扩展点 |

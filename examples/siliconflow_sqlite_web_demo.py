@@ -16,6 +16,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from vanna import Agent
 from vanna.core.agent.config import AgentConfig
@@ -34,6 +35,7 @@ from vanna.tools import RunSqlTool
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DATABASE_PATH = REPOSITORY_ROOT / "examples" / "data" / "vanna_demo.sqlite"
 HOST_PAGE_PATH = REPOSITORY_ROOT / "examples" / "embedded_analyst_host.html"
+WEB_COMPONENT_DIST = REPOSITORY_ROOT / "frontends" / "webcomponent" / "dist"
 QUERY_RESULTS_DIRECTORY = (
     Path(
         os.getenv(
@@ -116,6 +118,11 @@ def create_app() -> FastAPI:
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
     if not api_key:
         raise RuntimeError("SILICONFLOW_API_KEY is missing from the repository root .env file.")
+    if not (WEB_COMPONENT_DIST / "vanna-components.js").is_file():
+        raise RuntimeError(
+            "Vanna Web Component bundle is missing. Run `npm install --package-lock=false "
+            "&& npm run build` in frontends/webcomponent before starting the demo."
+        )
 
     create_demo_database()
     llm = OpenAILlmService(
@@ -141,7 +148,12 @@ def create_app() -> FastAPI:
     )
 
     app = FastAPI(title="Vanna Original Web Demo")
-    register_chat_routes(app, ChatHandler(agent))
+    app.mount("/static", StaticFiles(directory=WEB_COMPONENT_DIST), name="static")
+    register_chat_routes(
+        app,
+        ChatHandler(agent),
+        config={"cdn_url": "/static/vanna-components.js"},
+    )
 
     @app.get("/embedded-demo", include_in_schema=False)
     async def embedded_demo() -> FileResponse:

@@ -106,6 +106,12 @@ Vanna 的 `Agent`、`ToolRegistry`、`SqliteRunner`、`OpenAILlmService` 和原�
 写到 `/tmp/data-analysis-agent-vanna-query-results/`，可通过 `VANNA_QUERY_RESULTS_DIR` 覆盖，
 不再写入仓库根目录。
 
+Vanna 2.0.2 自带的 RichText Markdown 解析器没有实现表格语法，导致模型最终回答中的
+`|`、`---` 和 `**` 被原样显示。本项目在 `frontends/webcomponent/` 中做了局部修复：先
+转义原始 HTML，再将合法 Markdown 表格转为语义化 HTML table；构建后的 bundle 由 FastAPI
+在 `/static/vanna-components.js` 提供，根页面与宿主页共用该 bundle。该改动是为修复已验证
+的原生组件缺陷，不是另建前端框架；`node_modules/` 和 `dist/` 均为忽略的本地构建产物。
+
 这一步的目标是确认“中文问题 → LLM 工具调用 → SQL → 结果表 → 中文总结 → SSE/UI”
 闭环，而不是冻结最终数据模型、SQL 安全策略或 Next.js 页面。SQLite fixture 只用于
 可重复的冒烟验证，不代表最终业务数据。
@@ -337,3 +343,4 @@ v1 不引入 Redis。
 | 2026-08-02 | Phase 2 数据合同草案 | 确定 Olist 为主展示案例、Chinook 为回归候选、中文数据和天池 O2O 为后续候选；新增 manifest、字段字典、指标目录、分析模型草案、合成 fixture 和 20 条评测草案，暂不下载原始数据。 |
 | 2026-08-02 | 嵌入式产品路线 | 确认 Vanna Web Component 可嵌入任意网页并支持最小化/最大化；停止独立 Next.js/TailAdmin 方向，后续以宿主页和 Vanna 原生组件为唯一前端基座。 |
 | 2026-08-02 | 嵌入式基线审计 | 新增 `/embedded-demo` 无框架经营宿主页和 Playwright E2E；已验证窗口状态、真实 SSE 表格、移动端无横向溢出及 CSV 不落仓库根目录。图表、真实认证、SQL 策略和审计仍未实现。 |
+| 2026-08-03 | Markdown 表格兼容性修复 | 修复 Vanna RichText 原解析器不支持 Markdown 表格而原样显示符号的问题；根页面和宿主页改用本地构建 bundle，E2E 已验证语义化表格渲染。 |

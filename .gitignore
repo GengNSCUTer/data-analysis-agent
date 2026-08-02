@@ -22,6 +22,7 @@ milvus.db
 
 # Frontend builds and dependencies
 frontends/**/node_modules/
+frontends/**/dist/
 frontends/**/static/
 frontends/**/.storybook-static/
 frontends/**/package-lock.json

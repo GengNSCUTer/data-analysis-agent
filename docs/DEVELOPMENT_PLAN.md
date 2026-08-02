@@ -85,6 +85,10 @@ SQLite 合成数据和 SiliconFlow；不再计划创建独立 `frontend/`、Next
 - `/embedded-demo` 用无框架经营宿主页嵌入 `<vanna-chat>`，初始最小化，提供中文文案并记录窗口状态事件；
 - Playwright 已验证桌面端最小化、恢复、最大化、真实 SSE 表格结果以及移动端无横向溢出；
 - `RunSqlTool` 的 CSV 结果写入 `/tmp/data-analysis-agent-vanna-query-results/`（可由 `VANNA_QUERY_RESULTS_DIR` 覆盖），不会写入仓库根目录。
+- 修复 Vanna RichText 的 Markdown 表格解析并以语义化 HTML table 展示；根路径和宿主页均改由同一 FastAPI 进程提供本地 bundle。
+
+运行该 demo 前，先在 `frontends/webcomponent/` 执行一次 `npm install --package-lock=false && npm run build`。
+`node_modules/` 和 `dist/` 都是本地生成物，不进入 Git；服务启动时会在 bundle 缺失时明确报错，避免悄然回退到未修复的远程 CDN 版本。
 
 退出条件：上述闭环可重复运行；API Key、SQLite 文件和测试产物不提交；记录 Vanna
 当前缺口（原生认证演示、图表触发、SQL 写操作默认行为等）。

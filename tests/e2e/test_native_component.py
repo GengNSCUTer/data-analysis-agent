@@ -123,3 +123,47 @@ def test_embedded_host_has_no_mobile_horizontal_overflow(page) -> None:
     assert dimensions["scrollWidth"] == dimensions["clientWidth"]
     assert dimensions["chatWidth"] == 64
     assert not console_errors
+
+
+def test_markdown_table_is_rendered_as_html_table(page) -> None:
+    browser_page, console_errors = page
+    browser_page.goto(f"{BASE_URL}/embedded-demo", wait_until="networkidle")
+    browser_page.wait_for_selector("vanna-chat.minimized")
+    chat = browser_page.locator("vanna-chat")
+
+    chat.evaluate(
+        """element => element.componentManager.processUpdate({
+            operation: 'create',
+            target_id: 'markdown-table-regression',
+            timestamp: new Date().toISOString(),
+            component: {
+                id: 'markdown-table-regression',
+                type: 'text',
+                lifecycle: 'create',
+                data: {
+                    markdown: true,
+                    content: '## 经营概览\\n\\n| 指标 | 数值 |\\n| --- | --- |\\n| **总成交额** | 207,630 元 |\\n| 总支付订单数 | 833 单 |\\n\\n> 以上为合成演示数据。'
+                },
+                children: [],
+                visible: true,
+                interactive: false,
+                timestamp: new Date().toISOString()
+            }
+        })"""
+    )
+
+    table = chat.locator("table.text-markdown-table")
+    assert table.count() == 1
+    assert table.locator("th").all_inner_texts() == ["指标", "数值"]
+    assert table.locator("td").all_inner_texts() == ["总成交额", "207,630 元", "总支付订单数", "833 单"]
+    rendered_text = chat.evaluate("element => element.shadowRoot.textContent")
+    assert "| 指标 | 数值 |" not in rendered_text
+    assert not console_errors
+
+
+def test_root_page_uses_the_local_component_bundle(page) -> None:
+    browser_page, console_errors = page
+    browser_page.goto(BASE_URL, wait_until="domcontentloaded")
+
+    assert browser_page.locator('script[type="module"][src="/static/vanna-components.js"]').count() == 1
+    assert not console_errors

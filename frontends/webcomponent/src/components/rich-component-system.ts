@@ -824,16 +824,114 @@ export class TextComponentRenderer extends BaseComponentRenderer {
   }
 
   private renderMarkdown(text: string): string {
-    // Simple markdown rendering - just basic formatting
+    const lines = this.escapeHtml(text).split('\n');
+    const blocks: string[] = [];
+    let index = 0;
+
+    while (index < lines.length) {
+      const line = lines[index].trim();
+      if (!line) {
+        index += 1;
+        continue;
+      }
+
+      if (
+        index + 1 < lines.length &&
+        this.isTableRow(line) &&
+        this.isTableSeparator(lines[index + 1])
+      ) {
+        const headers = this.splitTableRow(line);
+        const rows: string[][] = [];
+        index += 2;
+        while (index < lines.length && this.isTableRow(lines[index])) {
+          rows.push(this.splitTableRow(lines[index]));
+          index += 1;
+        }
+        blocks.push(this.renderTable(headers, rows));
+        continue;
+      }
+
+      if (this.isTableRow(line)) {
+        blocks.push(`<p>${this.renderInlineMarkdown(line)}</p>`);
+        index += 1;
+        continue;
+      }
+
+      const heading = line.match(/^(#{1,3})\s+(.+)$/);
+      if (heading) {
+        const level = heading[1].length;
+        blocks.push(`<h${level}>${this.renderInlineMarkdown(heading[2])}</h${level}>`);
+        index += 1;
+        continue;
+      }
+
+      if (/^---+$/.test(line)) {
+        blocks.push('<hr>');
+        index += 1;
+        continue;
+      }
+
+      if (line.startsWith('&gt; ')) {
+        blocks.push(`<blockquote>${this.renderInlineMarkdown(line.slice(5))}</blockquote>`);
+        index += 1;
+        continue;
+      }
+
+      if (line.startsWith('- ')) {
+        const items: string[] = [];
+        while (index < lines.length && lines[index].trim().startsWith('- ')) {
+          items.push(`<li>${this.renderInlineMarkdown(lines[index].trim().slice(2))}</li>`);
+          index += 1;
+        }
+        blocks.push(`<ul>${items.join('')}</ul>`);
+        continue;
+      }
+
+      const paragraph: string[] = [];
+      while (
+        index < lines.length &&
+        lines[index].trim() &&
+        !this.isTableRow(lines[index]) &&
+        !/^(#{1,3})\s+/.test(lines[index].trim()) &&
+        !/^---+$/.test(lines[index].trim()) &&
+        !lines[index].trim().startsWith('&gt; ') &&
+        !lines[index].trim().startsWith('- ')
+      ) {
+        paragraph.push(this.renderInlineMarkdown(lines[index].trim()));
+        index += 1;
+      }
+      blocks.push(`<p>${paragraph.join('<br>')}</p>`);
+    }
+
+    return blocks.join('');
+  }
+
+  private isTableRow(line: string): boolean {
+    return line.trim().startsWith('|') && line.trim().endsWith('|');
+  }
+
+  private isTableSeparator(line: string): boolean {
+    return this.isTableRow(line) && this.splitTableRow(line).every((cell) => /^:?-{3,}:?$/.test(cell));
+  }
+
+  private splitTableRow(line: string): string[] {
+    return line.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim());
+  }
+
+  private renderTable(headers: string[], rows: string[][]): string {
+    const headerHtml = headers.map((header) => `<th>${this.renderInlineMarkdown(header)}</th>`).join('');
+    const bodyHtml = rows.map((row) => {
+      const cells = headers.map((_, index) => `<td>${this.renderInlineMarkdown(row[index] || '')}</td>`).join('');
+      return `<tr>${cells}</tr>`;
+    }).join('');
+    return `<div class="text-markdown-table-wrap"><table class="text-markdown-table"><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`;
+  }
+
+  private renderInlineMarkdown(text: string): string {
     return text
-      .replace(/^## (.*$)/gm, '<h2>$1</h2>')
-      .replace(/^# (.*$)/gm, '<h1>$1</h1>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/^- (.*$)/gm, '<li>$1</li>')
-      .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
-      .replace(/\n\n/g, '</p><p>')
-      .replace(/^(?!<[h|u|l])(.+)$/gm, '<p>$1</p>');
+      .replace(/\*(.*?)\*/g, '<em>$1</em>');
   }
 }
 
