@@ -299,6 +299,15 @@ v1 发布门槛：
 [`docs/architecture/data-model.md`](docs/architecture/data-model.md) 和
 [`evals/cases/draft.yaml`](evals/cases/draft.yaml)。
 
+### 持续集成基线
+
+GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行时保持一致，
+只运行不依赖外部模型、数据库或私有密钥的核心单元测试，并构建嵌入式 Web Component。
+这条检查还会编译 SQLite/SiliconFlow 演示入口，以尽早发现语法错误。它不执行 Vanna
+上游面向 Anthropic、OpenAI、Snowflake、Oracle、BigQuery、Qdrant、FAISS 等可选集成的
+完整 `tox` 环境，也不执行需要真实 SiliconFlow 调用和浏览器的 E2E；后者必须在本机用
+`RUN_VANNA_E2E=1` 显式触发，不能把开发密钥写入 GitHub Actions。
+
 ### Phase 3：可信查询后端
 
 - 创建 FastAPI 应用、认证/角色占位、PostgreSQL 双角色配置；
@@ -345,3 +354,4 @@ v1 不引入 Redis。
 | 2026-08-02 | 嵌入式基线审计 | 新增 `/embedded-demo` 无框架经营宿主页和 Playwright E2E；已验证窗口状态、真实 SSE 表格、移动端无横向溢出及 CSV 不落仓库根目录。图表、真实认证、SQL 策略和审计仍未实现。 |
 | 2026-08-03 | Markdown 表格兼容性修复 | 修复 Vanna RichText 原解析器不支持 Markdown 表格而原样显示符号的问题；根页面和宿主页改用本地构建 bundle，E2E 已验证语义化表格渲染。 |
 | 2026-08-03 | Olist 来源与文件版本核验 | 通过 Kaggle 公开元数据与文件列表 API 核验 version 2、CC BY-NC-SA 4.0、9 个 CSV 清单；原始数据仅下载到仓库外目录，已记录 ZIP 与逐文件 SHA-256、行数和源列，未提交 Git。 |
+| 2026-08-03 | CI 质量门收敛 | 将上游遗留的全量 `tox` 外部集成矩阵替换为 Python 3.12 核心单元测试、示例编译和 Web Component 构建；本地验证 56 个测试通过，真实模型 E2E 仍只在本机显式运行。 |
