@@ -1,5 +1,5 @@
-manifest_version: "0.1"
-last_reviewed: "2026-08-02"
+manifest_version: "0.2"
+last_reviewed: "2026-08-03"
 policy:
   raw_files_in_git: false
   required_before_download:
@@ -22,7 +22,69 @@ datasets:
     role: primary_showcase
     source_url: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
     license: CC BY-NC-SA 4.0 (as listed by the Kaggle dataset page; re-check before redistribution)
-    status: planned
+    status: downloaded_verified
+    source_metadata:
+      verified_at: "2026-08-03"
+      verification_method: "Kaggle public dataset metadata and file-list API"
+      kaggle_ref: "olistbr/brazilian-ecommerce"
+      kaggle_version: 2
+      source_last_updated: "2021-10-01T19:08:27.970Z"
+      total_bytes: 126186995
+      files:
+        - name: olist_customers_dataset.csv
+          total_bytes: 9033957
+          row_count: 99441
+          sha256: 983a422239e1712ded753b3bf9ecf47dc73f144d306029dcfa99e70a226883d2
+          columns: [customer_id, customer_unique_id, customer_zip_code_prefix, customer_city, customer_state]
+        - name: olist_geolocation_dataset.csv
+          total_bytes: 61273883
+          row_count: 1000163
+          sha256: b514f6fc991b9566aeba02aa5d67e2c3630f034b60a0e05aa0d082a3b66d88d6
+          columns: [geolocation_zip_code_prefix, geolocation_lat, geolocation_lng, geolocation_city, geolocation_state]
+          selected_for_v1: false
+          notes: "Excluded from the first analytical model; precise geolocation is not a default display field."
+        - name: olist_order_items_dataset.csv
+          total_bytes: 15438671
+          row_count: 112650
+          sha256: 0bc4d068c4fe38cbb01bd90e8746e3c613fe7b4baef75fab7b0e329701c3e279
+          columns: [order_id, order_item_id, product_id, seller_id, shipping_limit_date, price, freight_value]
+        - name: olist_order_payments_dataset.csv
+          total_bytes: 5777138
+          row_count: 103886
+          sha256: 4f713964f2815dbbaa40b9488268c55aac3627bfce5aa96cf58d1f3616de3cc0
+          columns: [order_id, payment_sequential, payment_type, payment_installments, payment_value]
+        - name: olist_order_reviews_dataset.csv
+          total_bytes: 14451670
+          row_count: 104719
+          sha256: 012b61c7593e34f51fa614efdf802b9c7056ce6aae5307ddb93236e7cfc797d7
+          columns: [review_id, order_id, review_score, review_comment_title, review_comment_message, review_creation_date, review_answer_timestamp]
+        - name: olist_orders_dataset.csv
+          total_bytes: 17654914
+          row_count: 99441
+          sha256: 8df58ef3d2d7e9944010f7beecd9b75367f5588ec6e3c91cec19ae3345ef9ecf
+          columns: [order_id, customer_id, order_status, order_purchase_timestamp, order_approved_at, order_delivered_carrier_date, order_delivered_customer_date, order_estimated_delivery_date]
+        - name: olist_products_dataset.csv
+          total_bytes: 2379446
+          row_count: 32951
+          sha256: 3e6569628a17fbc75fd206ee357b59e20364b9afa90f5b6cd5b4d624c58aa9cc
+          columns: [product_id, product_category_name, product_name_lenght, product_description_lenght, product_photos_qty, product_weight_g, product_length_cm, product_height_cm, product_width_cm]
+          notes: "Source spelling uses lenght; the analysis-layer rename is defined in the transform task."
+        - name: olist_sellers_dataset.csv
+          total_bytes: 174703
+          row_count: 3095
+          sha256: 1f643d2b950373b85735e7794b20986f528d7a000432e7c6f9bcbb44d0846a0e
+          columns: [seller_id, seller_zip_code_prefix, seller_city, seller_state]
+        - name: product_category_name_translation.csv
+          total_bytes: 2613
+          row_count: 70
+          sha256: a81f0d1f27b27e7293f761bc79e3ce8f348ee39c4b3ed3e49bde38f478586278
+          columns: [product_category_name, product_category_name_english]
+    download_record:
+      download_date: "2026-08-03"
+      archive_sha256: 967e41e04fc306fe604e2a693f488995a8b41e5047418f8a5c8e4abd6deca784
+      per_file_sha256: recorded_under_source_metadata_files
+      required_before_load: false
+      storage_location: /disk2/gengnan/data-analysis-agent-data/olist-v2-2026-08-03
     selected_source_tables:
       - olist_orders_dataset
       - olist_order_items_dataset
@@ -32,7 +94,9 @@ datasets:
       - olist_sellers_dataset
       - olist_customers_dataset
       - product_category_name_translation
-    notes: Primary multi-table commerce case. Raw CSVs stay outside Git.
+    notes: >-
+      Primary multi-table commerce case. Raw CSVs were downloaded and hashed outside Git;
+      load transforms must use the recorded source version and checksums. Raw CSVs stay outside Git.
 
   - id: taobao_maternal_infant
     name: Taobao Maternal and Infant Shopping Dataset

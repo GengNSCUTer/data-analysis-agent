@@ -344,3 +344,4 @@ v1 不引入 Redis。
 | 2026-08-02 | 嵌入式产品路线 | 确认 Vanna Web Component 可嵌入任意网页并支持最小化/最大化；停止独立 Next.js/TailAdmin 方向，后续以宿主页和 Vanna 原生组件为唯一前端基座。 |
 | 2026-08-02 | 嵌入式基线审计 | 新增 `/embedded-demo` 无框架经营宿主页和 Playwright E2E；已验证窗口状态、真实 SSE 表格、移动端无横向溢出及 CSV 不落仓库根目录。图表、真实认证、SQL 策略和审计仍未实现。 |
 | 2026-08-03 | Markdown 表格兼容性修复 | 修复 Vanna RichText 原解析器不支持 Markdown 表格而原样显示符号的问题；根页面和宿主页改用本地构建 bundle，E2E 已验证语义化表格渲染。 |
+| 2026-08-03 | Olist 来源与文件版本核验 | 通过 Kaggle 公开元数据与文件列表 API 核验 version 2、CC BY-NC-SA 4.0、9 个 CSV 清单；原始数据仅下载到仓库外目录，已记录 ZIP 与逐文件 SHA-256、行数和源列，未提交 Git。 |

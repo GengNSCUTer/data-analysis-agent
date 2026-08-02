@@ -109,7 +109,8 @@ SQLite 合成数据和 SiliconFlow；不再计划创建独立 `frontend/`、Next
 当前交付：`data/manifest/datasets.yaml`、`docs/data-dictionary.md`、
 `docs/metric-catalog.md`、`docs/architecture/data-model.md`、
 `data/fixtures/sales_daily.csv` 和 `evals/cases/draft.yaml`。这些是版本化草案，
-尚未代表原始数据已下载或生产口径已冻结。
+尚未代表生产口径已冻结。Olist 的 Kaggle version 2、许可证、9 个 CSV 清单、原始列名、
+行数和 SHA-256 已于 2026-08-03 记录到 manifest；原始 ZIP/CSV 仅保存在仓库外目录，未提交 Git。
 
 退出条件：每个指标都能由人工依据字典写出明确 SQL；数据可从空环境重建；没有把
 “让模型自行猜口径”当作设计；至少完成一次原始数据许可、质量和 golden 结果复核。

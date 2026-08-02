@@ -52,7 +52,7 @@ auditability, and evaluation.
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-005 | Review and record the current Olist source license, download date, file checksums, and source columns in `data/manifest/datasets.yaml`; do not commit raw CSV files. |  |  |
+| TASK-005 | Review and record the current Olist source license, download date, file checksums, and source columns in `data/manifest/datasets.yaml`; do not commit raw CSV files. | ✅ | 2026-08-03 |
 | TASK-006 | Create `data/ddl/analytics.sql` and `data/transforms/` loaders for the tables in `docs/architecture/data-model.md`; preserve source-to-analysis column mappings. |  |  |
 | TASK-007 | Create `data/fixtures/olist_minimal/` with synthetic relational rows and `tests/data/test_metrics.py` for GMV, order count, delivery, and review golden values. |  |  |
 | TASK-008 | Update `docs/data-dictionary.md` and `docs/metric-catalog.md` from draft to v1 only after TASK-005 through TASK-007 have passed. |  |  |
