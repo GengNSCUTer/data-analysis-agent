@@ -1,6 +1,6 @@
 # Data Analysis Agent｜开发计划
 
-> 状态：Phase 1 原生 Vanna 垂直原型已跑通，Phase 2 数据与领域合同正在进行。
+> 状态：Phase 1 嵌入式 Vanna 基线审计已完成；数据与领域合同保留为下一项主线工作。
 > 最近更新：2026-08-02
 
 ## 1. 开发原则
@@ -61,7 +61,7 @@ SQLite 合成数据和 SiliconFlow；不再计划创建独立 `frontend/`、Next
 退出条件：不再存在“自建 wrapper 仓库”和“Vanna 独立开发目录”两个事实来源；`.env`
 和第三方原始数据均不进入 Git。
 
-### Phase 1｜Vanna 原生垂直原型（当前，已验证）
+### Phase 1｜Vanna 原生垂直原型与嵌入审计（已完成）
 
 目标：验证 Vanna 2.0.2 的最小真实闭环，不修改 Vanna 核心。
 
@@ -82,6 +82,9 @@ SQLite 合成数据和 SiliconFlow；不再计划创建独立 `frontend/`、Next
 - 浏览器可看到结果表和中文解释，测试值为华东 `113130`、华南 `94500`；
 - 页面唯一控制台提示是原生页面缺少 favicon 的 404，不影响聊天链路；
 - 当前服务端口为 `127.0.0.1:32009`，后台 screen 名为 `data-analysis-agent`。
+- `/embedded-demo` 用无框架经营宿主页嵌入 `<vanna-chat>`，初始最小化，提供中文文案并记录窗口状态事件；
+- Playwright 已验证桌面端最小化、恢复、最大化、真实 SSE 表格结果以及移动端无横向溢出；
+- `RunSqlTool` 的 CSV 结果写入 `/tmp/data-analysis-agent-vanna-query-results/`（可由 `VANNA_QUERY_RESULTS_DIR` 覆盖），不会写入仓库根目录。
 
 退出条件：上述闭环可重复运行；API Key、SQLite 文件和测试产物不提交；记录 Vanna
 当前缺口（原生认证演示、图表触发、SQL 写操作默认行为等）。
@@ -168,11 +171,11 @@ Conventional Commit 提交并推送 `origin`。
 | SQL 安全 | AST、越权、写操作、多语句、无界查询和超时 |
 | 数据质量 | 主外键、空值、指标 golden 结果和转换校验 |
 | Agent 评测 | 标准问题、歧义问题、失败行为、模型/Prompt 对比 |
-| E2E | 登录、提问、流式结果、证据和历史 |
+| E2E | 宿主页嵌入、窗口状态、提问、流式结果、证据和历史 |
 
 ## 6. 近期下一步
 
-1. 补齐 Vanna 组件的最小化、最大化、嵌入宿主页和图表端到端测试；
-2. 使用 `docs/VANNA_CAPABILITY_AUDIT.md` 区分已验证能力与源码支持能力；
-3. 对 Olist 数据源、许可、字段质量和指标草案进行人工核验，形成 v1 数据合同；
-4. 在数据合同冻结后创建 PostgreSQL/自有后端，不提前引入 Redis、队列或独立前端框架。
+1. 对 Olist 数据源、许可、字段质量和指标草案进行人工核验，形成 v1 数据合同；
+2. 基于数据合同建立可重复的分析表、合成关联 fixture 和指标 golden tests；
+3. 在数据合同冻结后创建 PostgreSQL/自有 SQL 策略边界，不提前引入 Redis、队列或独立前端框架；
+4. 到图表工具和证据对象实际接入后，再补图表和角色化 SQL 可见性的 E2E。

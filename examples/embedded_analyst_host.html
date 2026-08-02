@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>经营总览 | 数据分析智能体</title>
+    <script type="module" src="https://img.vanna.ai/vanna-components.js"></script>
+    <style>
+      :root {
+        color: #17212b;
+        background: #f5f7f8;
+        font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+
+      body { margin: 0; min-width: 320px; }
+
+      .topbar {
+        height: 56px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 32px;
+        color: #f8fbfd;
+        background: #173042;
+        border-bottom: 1px solid #0d202e;
+      }
+
+      .brand { font-size: 16px; font-weight: 700; }
+      .workspace { font-size: 14px; color: #c9d5dc; }
+
+      main {
+        max-width: 1440px;
+        margin: 0 auto;
+        padding: 32px;
+      }
+
+      .page-heading {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 24px;
+      }
+
+      h1 { margin: 0; font-size: 28px; font-weight: 700; }
+      .period { margin: 6px 0 0; color: #64727d; font-size: 14px; }
+      .updated { color: #64727d; font-size: 13px; white-space: nowrap; }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .metric {
+        min-height: 126px;
+        padding: 20px;
+        background: #ffffff;
+        border: 1px solid #dbe2e6;
+        border-radius: 6px;
+      }
+
+      .metric-label { color: #64727d; font-size: 14px; }
+      .metric-value { margin-top: 14px; font-size: 28px; font-weight: 700; }
+      .metric-change { margin-top: 8px; color: #177c65; font-size: 13px; }
+      .metric-change.caution { color: #b45309; }
+
+      .content-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.8fr);
+        gap: 16px;
+        margin-top: 16px;
+      }
+
+      .section {
+        min-height: 270px;
+        padding: 20px;
+        background: #ffffff;
+        border: 1px solid #dbe2e6;
+        border-radius: 6px;
+      }
+
+      h2 { margin: 0; font-size: 16px; }
+      .table { width: 100%; margin-top: 18px; border-collapse: collapse; font-size: 14px; }
+      th { color: #64727d; font-weight: 500; text-align: left; background: #f5f7f8; }
+      th, td { padding: 12px; border-bottom: 1px solid #e7ecef; }
+      td:last-child, th:last-child { text-align: right; }
+      .status-list { display: grid; gap: 14px; margin: 18px 0 0; padding: 0; list-style: none; }
+      .status-list li { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; }
+      .status-label { color: #64727d; }
+      .status-value { font-weight: 600; }
+      .status-value.alert { color: #b45309; }
+
+      vanna-chat {
+        position: fixed;
+        right: 24px;
+        bottom: 24px;
+        z-index: 10;
+        width: min(440px, calc(100vw - 48px));
+      }
+
+      @media (max-width: 860px) {
+        .topbar { padding: 0 20px; }
+        main { padding: 24px 20px; }
+        .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .content-grid { grid-template-columns: 1fr; }
+      }
+
+      @media (max-width: 520px) {
+        .topbar { padding: 0 16px; }
+        .workspace { display: none; }
+        main { padding: 20px 16px; }
+        .page-heading { align-items: start; flex-direction: column; gap: 8px; }
+        .metric-grid { grid-template-columns: 1fr; }
+        vanna-chat { right: 16px; bottom: 16px; width: calc(100vw - 32px); }
+      }
+    </style>
+  </head>
+  <body data-vanna-window-state="loading">
+    <header class="topbar">
+      <div class="brand">星云经营中心</div>
+      <div class="workspace">华东与华南业务组</div>
+    </header>
+    <main>
+      <div class="page-heading">
+        <div>
+          <h1>经营总览</h1>
+          <p class="period">2026 年 7 月 1 日至 7 月 2 日</p>
+        </div>
+        <div class="updated">数据更新于 10:30</div>
+      </div>
+
+      <section class="metric-grid" aria-label="核心经营指标">
+        <article class="metric"><div class="metric-label">成交额</div><div class="metric-value">207,630</div><div class="metric-change">较上一周期 +6.4%</div></article>
+        <article class="metric"><div class="metric-label">支付订单数</div><div class="metric-value">833</div><div class="metric-change">较上一周期 +4.1%</div></article>
+        <article class="metric"><div class="metric-label">平均履约时长</div><div class="metric-value">2.5 天</div><div class="metric-change caution">较上一周期 +0.2 天</div></article>
+        <article class="metric"><div class="metric-label">好评率</div><div class="metric-value">92.1%</div><div class="metric-change">较上一周期 +0.8%</div></article>
+      </section>
+
+      <section class="content-grid">
+        <article class="section">
+          <h2>区域经营表现</h2>
+          <table class="table">
+            <thead><tr><th>区域</th><th>成交额</th><th>支付订单数</th><th>好评率</th></tr></thead>
+            <tbody>
+              <tr><td>华东</td><td>113,130</td><td>449</td><td>93.0%</td></tr>
+              <tr><td>华南</td><td>94,500</td><td>384</td><td>90.8%</td></tr>
+            </tbody>
+          </table>
+        </article>
+        <article class="section">
+          <h2>运营关注项</h2>
+          <ul class="status-list">
+            <li><span class="status-label">华南数码履约</span><span class="status-value alert">3.3 天</span></li>
+            <li><span class="status-label">华东家居好评率</span><span class="status-value">94.5%</span></li>
+            <li><span class="status-label">异常待跟进</span><span class="status-value alert">2 项</span></li>
+          </ul>
+        </article>
+      </section>
+    </main>
+
+    <vanna-chat
+      title="经营分析副驾"
+      subtitle="基于当前页面的经营数据"
+      placeholder="例如：比较各区域的成交额"
+      sse-endpoint="/api/vanna/v2/chat_sse"
+      theme="light"
+    ></vanna-chat>
+
+    <script>
+      const chat = document.querySelector("vanna-chat");
+      customElements.whenDefined("vanna-chat").then(() => {
+        chat.startingState = "minimized";
+        chat.windowState = "minimized";
+        document.body.dataset.vannaWindowState = chat.windowState;
+      });
+      chat.addEventListener("window-state-changed", (event) => {
+        document.body.dataset.vannaWindowState = event.detail.state;
+      });
+    </script>
+  </body>
+</html>

@@ -40,10 +40,10 @@ auditability, and evaluation.
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-001 | Add `tests/e2e/test_native_component.py` using Playwright. Verify initial page render, demo login, minimize, restore, maximize, SSE table result, and absence of application console errors. Ignore only the known favicon 404 until a favicon is added. |  |  |
+| TASK-001 | Add `tests/e2e/test_native_component.py` using Playwright. Verify initial host-page render, minimize, restore, maximize, SSE table result, mobile layout, and absence of application console errors. The prototype uses a fixed demo identity and does not claim real login. | ✅ | 2026-08-02 |
 | TASK-002 | Add `docs/VANNA_CAPABILITY_AUDIT.md` and keep each row categorized as verified, source-confirmed, or not-enabled. | ✅ | 2026-08-02 |
-| TASK-003 | Add a host-page example at `examples/embedded_analyst_host.html` that loads `<vanna-chat>`, starts minimized, provides Chinese title/subtitle/placeholder, and records `window-state-changed` events without a framework dependency. |  |  |
-| TASK-004 | Configure result-file output outside the repository by injecting a project-owned `FileSystem` into `RunSqlTool`; add cleanup and a regression test proving `query_results_*.csv` never appears at repository root. |  |  |
+| TASK-003 | Add a host-page example at `examples/embedded_analyst_host.html` that loads `<vanna-chat>`, starts minimized, provides Chinese title/subtitle/placeholder, and records `window-state-changed` events without a framework dependency. | ✅ | 2026-08-02 |
+| TASK-004 | Configure result-file output outside the repository by injecting a project-owned `FileSystem` into `RunSqlTool`; add a regression test proving `query_results_*.csv` never appears at repository root. Define retention and cleanup when chart/file workflows are introduced. | ✅ | 2026-08-02 |
 
 ### Implementation Phase 2: Freeze the data contract and reproducible analytical store
 

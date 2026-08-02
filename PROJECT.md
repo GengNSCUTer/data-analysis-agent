@@ -99,6 +99,13 @@ Vanna 的 `Agent`、`ToolRegistry`、`SqliteRunner`、`OpenAILlmService` 和原�
 `SILICONFLOW_API_KEY` / `SILICONFLOW_BASE_URL` 调用
 `deepseek-ai/DeepSeek-V4-Flash`，服务监听 `127.0.0.1:32009`。
 
+同一 FastAPI 进程还提供 `/embedded-demo`：这是一个无框架的经营总览宿主页，加载 CDN
+版 `<vanna-chat>`，以中文标题、提示词和 `window-state-changed` 事件组合原生组件。组件
+初始为最小化入口；桌面端已验证最小化、恢复、最大化及真实 SSE 结果，390px 宽移动端已
+验证没有页面横向溢出。`RunSqlTool` 使用项目注入的 `LocalFileSystem`，默认将下游 CSV
+写到 `/tmp/data-analysis-agent-vanna-query-results/`，可通过 `VANNA_QUERY_RESULTS_DIR` 覆盖，
+不再写入仓库根目录。
+
 这一步的目标是确认“中文问题 → LLM 工具调用 → SQL → 结果表 → 中文总结 → SSE/UI”
 闭环，而不是冻结最终数据模型、SQL 安全策略或 Next.js 页面。SQLite fixture 只用于
 可重复的冒烟验证，不代表最终业务数据。
@@ -268,6 +275,7 @@ v1 发布门槛：
 - 使用 Conda 环境 `data-analysis-agent` 运行 Vanna 2.0.2；
 - 使用 SiliconFlow OpenAI-compatible API 和 `DeepSeek-V4-Flash`；
 - 使用 SQLite 合成 fixture 验证 SQL 工具调用、SSE 和原生 Web UI；
+- 以无框架宿主页嵌入 `<vanna-chat>`，验证窗口三态、移动端布局与 CSV 文件隔离；
 - 记录 Vanna 当前能力、缺口和上游 API 事实，不修改 Vanna 核心。
 
 退出条件：页面可访问，模型可实际调用 `run_sql`，结果表与中文结论在浏览器可见，且
@@ -328,3 +336,4 @@ v1 不引入 Redis。
 | 2026-08-02 | Phase 1 冒烟验证 | Conda 环境、SiliconFlow `DeepSeek-V4-Flash`、SQLite 合成 fixture、SSE API 和浏览器页面均已验证；服务端口为 `32009`。 |
 | 2026-08-02 | Phase 2 数据合同草案 | 确定 Olist 为主展示案例、Chinook 为回归候选、中文数据和天池 O2O 为后续候选；新增 manifest、字段字典、指标目录、分析模型草案、合成 fixture 和 20 条评测草案，暂不下载原始数据。 |
 | 2026-08-02 | 嵌入式产品路线 | 确认 Vanna Web Component 可嵌入任意网页并支持最小化/最大化；停止独立 Next.js/TailAdmin 方向，后续以宿主页和 Vanna 原生组件为唯一前端基座。 |
+| 2026-08-02 | 嵌入式基线审计 | 新增 `/embedded-demo` 无框架经营宿主页和 Playwright E2E；已验证窗口状态、真实 SSE 表格、移动端无横向溢出及 CSV 不落仓库根目录。图表、真实认证、SQL 策略和审计仍未实现。 |

@@ -5,15 +5,15 @@
 
 | 能力 | Vanna 原生支持 | 本项目状态 | 结论 |
 | --- | --- | --- | --- |
-| 任意页面嵌入 | `<vanna-chat>` 是 Lit Web Component，可配置 `sse-endpoint` | 已端到端验证原生页面；尚未嵌入独立业务宿主页 | 可作为项目唯一交互前端，无需 Next.js |
-| 最小化/最大化 | `allowMinimize` 默认开启；组件有 `normal`、`minimized`、`maximized` 三态 | 源码已确认；原生 UI 有控制按钮，尚未做自动化状态断言 | 最小化后固定在右下角 64px 浮动入口，不是完整侧栏模式 |
+| 任意页面嵌入 | `<vanna-chat>` 是 Lit Web Component，可配置 `sse-endpoint` | 已端到端验证 `/embedded-demo` 经营宿主页、中文属性和 SSE 查询 | 可作为项目唯一交互前端，无需 Next.js |
+| 最小化/最大化 | `allowMinimize` 默认开启；组件有 `normal`、`minimized`、`maximized` 三态 | 已在 Chrome Playwright 中验证最小化、恢复、最大化和移动端 64px 入口 | 最小化后固定在右下角 64px 浮动入口，不是完整侧栏模式 |
 | SSE 流式聊天 | `POST /api/vanna/v2/chat_sse` | 已验证 | 当前主通信方式 |
 | 轮询降级 | `POST /api/vanna/v2/chat_poll` | 路由存在，未单独验证 | 作为网络降级通道，后续补 API 测试 |
 | WebSocket | `/api/vanna/v2/chat_websocket` | 路由存在，未使用 | 不进入首批范围，SSE 足够 |
 | 进度和任务面板 | 状态栏、任务跟踪、输入状态组件 | 已随 SSE 在页面展示 | 保留，后续用业务化状态文本替代通用文本 |
 | 结果表 | `DataFrameComponent` | 已端到端验证 | 后续补列别名、格式化、下载和大结果截断策略 |
 | Plotly 图表 | `VisualizeDataTool` + `ChartComponent` + `plotly-chart` | 渲染器和工具存在；当前 Agent 未注册工具，未验证 | Phase 3 优先接入并测试，而不是自建图表框架 |
-| SQL 结果文件 | `RunSqlTool` 默认写 `query_results_*.csv` | 已观察到临时文件生成 | 必须改到受控临时目录并自动清理，不能写入仓库根目录 |
+| SQL 结果文件 | `RunSqlTool` 默认写 `query_results_*.csv` | 已注入 `LocalFileSystem`，默认写至 `/tmp/data-analysis-agent-vanna-query-results/`，可由 `VANNA_QUERY_RESULTS_DIR` 覆盖；E2E 已验证仓库根目录无结果文件 | 当前仅为原型文件隔离，后续图表工具复用该受控目录并定义保留/清理策略 |
 | 自定义工具 | `Tool` / `ToolRegistry.register_local_tool` | `RunSqlTool` 已注册 | 项目应以自定义安全 SQL 工具和指标上下文工具作为核心扩展点 |
 | 认证上下文 | `UserResolver` 可读 Cookie、Header、JWT | 当前 resolver 固定返回演示用户 | 必须实现本地演示身份和后续真实认证；原生登录页仅为前端 cookie 演示 |
 | 工具权限 | 注册工具时按 `access_groups` 限制 | 当前只有 `analyst` 演示组 | 只保护工具入口，不自动保证表/列/行级 SQL 安全 |
@@ -28,6 +28,7 @@ Vanna 已经解决了嵌入式聊天、流式富结果、表格、图表渲染�
 本项目不再建设独立管理后台或重新实现聊天界面。工程价值应集中在：业务语义约束、
 安全 SQL 执行、数据和指标版本、图表触发策略、审计、权限和可回归评测。
 
-当前原生组件提供的是右下角浮动最小化，而非网页左/右侧停靠抽屉。产品化时应在宿主页
-用 CSS 容器和 `window-state-changed` 事件把它约束为右侧分析面板；避免修改 Vanna
-组件核心源码，优先使用属性、CSS Custom Properties 和宿主层事件编排。
+当前原生组件提供的是右下角浮动最小化，而非网页左/右侧停靠抽屉。`/embedded-demo` 已用
+宿主页 CSS 和 `window-state-changed` 事件完成第一层组合验证；后续在接入真实数据和证据
+对象后，再把正常态收束为右侧分析面板。继续避免修改 Vanna 组件核心源码，优先使用属性、
+CSS Custom Properties 和宿主层事件编排。

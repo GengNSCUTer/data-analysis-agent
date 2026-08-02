@@ -15,6 +15,7 @@ from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.responses import FileResponse, Response
 
 from vanna import Agent
 from vanna.core.agent.config import AgentConfig
@@ -22,6 +23,7 @@ from vanna.core.registry import ToolRegistry
 from vanna.core.system_prompt import DefaultSystemPromptBuilder
 from vanna.core.user import RequestContext, User, UserResolver
 from vanna.integrations.local.agent_memory import DemoAgentMemory
+from vanna.integrations.local.file_system import LocalFileSystem
 from vanna.integrations.openai import OpenAILlmService
 from vanna.integrations.sqlite import SqliteRunner
 from vanna.servers.base import ChatHandler
@@ -31,6 +33,14 @@ from vanna.tools import RunSqlTool
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DATABASE_PATH = REPOSITORY_ROOT / "examples" / "data" / "vanna_demo.sqlite"
+HOST_PAGE_PATH = REPOSITORY_ROOT / "examples" / "embedded_analyst_host.html"
+QUERY_RESULTS_DIRECTORY = (
+    Path(
+        os.getenv(
+            "VANNA_QUERY_RESULTS_DIR", "/tmp/data-analysis-agent-vanna-query-results"
+        )
+    ).expanduser()
+)
 
 SYSTEM_PROMPT = """
 你是一个中文业务数据分析助手。回答涉及数据的问题时，必须先调用 run_sql 工具，不能编造数值。
@@ -115,7 +125,10 @@ def create_app() -> FastAPI:
     )
     registry = ToolRegistry()
     registry.register_local_tool(
-        RunSqlTool(sql_runner=SqliteRunner(str(DATABASE_PATH))),
+        RunSqlTool(
+            sql_runner=SqliteRunner(str(DATABASE_PATH)),
+            file_system=LocalFileSystem(str(QUERY_RESULTS_DIRECTORY)),
+        ),
         access_groups=["analyst"],
     )
     agent = Agent(
@@ -129,6 +142,17 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Vanna Original Web Demo")
     register_chat_routes(app, ChatHandler(agent))
+
+    @app.get("/embedded-demo", include_in_schema=False)
+    async def embedded_demo() -> FileResponse:
+        """Serve the framework-free business-page embedding reference."""
+        return FileResponse(HOST_PAGE_PATH, media_type="text/html")
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> Response:
+        """Avoid a noisy browser 404 during component smoke tests."""
+        return Response(status_code=204)
+
     return app
 
 
