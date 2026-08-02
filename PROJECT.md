@@ -104,13 +104,8 @@ Vanna 的 `Agent`、`ToolRegistry`、`SqliteRunner`、`OpenAILlmService` 和原�
 可重复的冒烟验证，不代表最终业务数据。
 
 ```text
-后续目标：Next.js 数据分析后台（TailAdmin）
-├─ 经营概览 / 指标卡
-├─ 智能分析页：嵌入 Vanna <vanna-chat>
-├─ 查询历史与审计详情
-├─ 指标口径管理
-├─ 数据集与版本管理
-└─ 评测中心
+既有业务网页 / 静态演示宿主页
+└─ 浮动或右侧面板：Vanna <vanna-chat>
               │ HTTPS + SSE
               ▼
 FastAPI 应用
@@ -130,7 +125,8 @@ PostgreSQL
 ```
 
 上图是通过原生 Vanna 基线后再逐步建设的目标架构，不是当前已完成的实现。当前没有
-`backend/`、`frontend/` 或 PostgreSQL 业务应用；这些目录只在对应阶段确有需求时创建。
+独立 `frontend/` 应用或 PostgreSQL 业务应用；后续代码以 `src/data_analysis_agent/` 为
+项目扩展层，宿主页只负责嵌入和样式，不引入新的前端框架。
 
 ### 5.1 后端模块职责
 
@@ -209,10 +205,10 @@ recommended_chart / owner / effective_from
 | ORM / 迁移 | SQLAlchemy 2.x + Alembic | 管理应用元数据与 Schema 演进。 |
 | SQL 解析 | `sqlglot` | AST 级规则校验，避免脆弱的字符串过滤。 |
 | 模型提供方 | OpenAI-compatible 配置接口 | 可按配置使用 OpenAI、DeepSeek、Qwen 等；审计模型和参数。 |
-| 前端 | Next.js + React + TypeScript + Tailwind | 适合分析后台、类型约束与后续部署。 |
-| 前端基座 | TailAdmin | MIT；已有 Dashboard、图表、表格、导航、响应式布局。 |
-| 聊天/富结果组件 | Vanna `<vanna-chat>` | 复用 SQL、表格、Plotly 图、SSE 等已有成熟交互，不重复造轮子。 |
-| 图表 | Vanna Plotly 结果为主；看板沿用 ApexCharts | 问答结果与固定经营看板各使用最合适的表现层。 |
+| 前端 | Vanna `<vanna-chat>` + 宿主页 HTML/CSS | Web Component 可嵌入任意已有网页，不建立独立前端工程。 |
+| 宿主层 | 原生 HTML/CSS/浏览器事件 | 控制浮动入口、右侧面板、中文文案和业务页面上下文，降低上游组件修改成本。 |
+| 聊天/富结果组件 | Vanna `<vanna-chat>` | 复用 SQL、表格、Plotly 图、SSE、最小化和最大化交互。 |
+| 图表 | Vanna Plotly 结果 | 通过受控 `VisualizeDataTool` 生成图表，不另引入图表前端框架。 |
 | 测试 | pytest + API 集成测试；后续前端 E2E | 从 SQL 策略和评测集开始保证核心质量。 |
 | 状态与队列 | v1 仅 PostgreSQL | 持久化状态是核心；Redis 只在确有缓存、限流或异步任务需求时引入。 |
 
@@ -220,9 +216,12 @@ recommended_chart / owner / effective_from
 
 Vanna 不内置 Redis，Redis 也不是 Python 项目的必选组件。v1 使用 PostgreSQL 存储会话、审计、指标、数据集版本和评测结果；SSE 直接由 FastAPI 处理。只有在需要分布式限流、短期缓存、长报表异步导出或多实例任务进度时，再引入 `redis-py + arq`。Redis 不得作为审计或评测结果的唯一事实来源。
 
-### 6.2 前端复用决策记录
+### 6.2 嵌入式前端决策记录
 
-Vanna 自带 Lit Web Component，能够直接嵌入 React/Next.js，但它只解决智能问答区，不替代完整分析后台。项目采用 TailAdmin 作为页面骨架，并在“智能分析”页面封装/嵌入 `<vanna-chat>`；查询历史、指标管理、数据集管理和评测中心由 Next.js 页面承担。
+Vanna 自带 Lit Web Component，能够嵌入任意网页，并原生提供 SSE、表格、Plotly 图、
+最小化和最大化交互。项目不再建设 TailAdmin 或独立 Next.js 页面；宿主页用于模拟真实
+经营系统并承载浮动/右侧分析面板，查询历史、指标和评测优先由后端 API、审计数据和
+静态证据页面呈现。只有当宿主层无法完成已验证需求时，才单独立项引入前端框架。
 
 ## 7. 数据集策略
 
@@ -292,11 +291,11 @@ v1 发布门槛：
 - 接入 Vanna Agent 与受控工具；
 - 实现 `sqlglot` SQL Policy、超时/行数限制、审计与证据对象。
 
-### Phase 4：数据分析前端
+### Phase 4：嵌入式交互与证据呈现
 
-- 基于 TailAdmin 建立智能分析、历史审计、指标口径和数据集页面；
-- 嵌入 Vanna Web Component 并打通 SSE；
-- 展示表格、SQL、图表和证据链。
+- 提供可嵌入既有网页的宿主页示例，控制 Vanna Web Component 的浮动/右侧面板状态；
+- 打通 SSE、表格、SQL、图表、指标证据和角色化展示；
+- 不创建独立 Next.js/TailAdmin 应用。
 
 ### Phase 5：评测、加固与作品集
 
@@ -311,8 +310,8 @@ v1 发布门槛：
 v1 不引入 Redis。
 
 待在 Phase 2 合同冻结后确认：数据加载方式、PostgreSQL 角色、认证方案、组织/行级
-权限的演示粒度、首批指标的人工 golden 结果、评测题标准答案，以及是否需要独立
-Next.js/TailAdmin 外壳。
+权限的演示粒度、首批指标的人工 golden 结果和评测题标准答案。独立 Next.js/TailAdmin
+外壳不再作为候选默认方案。
 
 ## 11. 变更记录
 
@@ -328,3 +327,4 @@ Next.js/TailAdmin 外壳。
 | 2026-08-02 | 单仓库 Vanna-first | 将 Vanna 源码合并到本仓库并保留 `upstream` 远端；先用原生 FastAPI + `<vanna-chat>` 垂直验证，再建设数据合同和自有平台。 |
 | 2026-08-02 | Phase 1 冒烟验证 | Conda 环境、SiliconFlow `DeepSeek-V4-Flash`、SQLite 合成 fixture、SSE API 和浏览器页面均已验证；服务端口为 `32009`。 |
 | 2026-08-02 | Phase 2 数据合同草案 | 确定 Olist 为主展示案例、Chinook 为回归候选、中文数据和天池 O2O 为后续候选；新增 manifest、字段字典、指标目录、分析模型草案、合成 fixture 和 20 条评测草案，暂不下载原始数据。 |
+| 2026-08-02 | 嵌入式产品路线 | 确认 Vanna Web Component 可嵌入任意网页并支持最小化/最大化；停止独立 Next.js/TailAdmin 方向，后续以宿主页和 Vanna 原生组件为唯一前端基座。 |

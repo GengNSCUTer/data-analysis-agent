@@ -38,7 +38,7 @@ Git 远端约定：`origin` 是 `GengNSCUTer/data-analysis-agent`，`upstream` �
 ## 3. 目标架构（原型之后）
 
 ```text
-浏览器：Next.js/TailAdmin + Vanna <vanna-chat>
+既有业务网页 / 静态宿主页 + Vanna <vanna-chat>
                  │ HTTPS/SSE
                  ▼
 FastAPI：身份/角色、指标上下文、Vanna Agent、SQL Policy、证据和审计
@@ -48,8 +48,8 @@ PostgreSQL：analytics（业务数据）+ app（会话/审计/指标/评测）
 ```
 
 当前原型不实现这套完整架构。当前只使用 Vanna 原生 FastAPI 路由、原生 Web Component、
-SQLite 合成数据和 SiliconFlow；`backend/`、`frontend/`、PostgreSQL 与 TailAdmin
-只有在退出原型阶段后才创建。
+SQLite 合成数据和 SiliconFlow；不再计划创建独立 `frontend/`、Next.js 或 TailAdmin。
+后续项目代码放入 `src/data_analysis_agent/`，PostgreSQL 只在受控查询阶段引入。
 
 ## 4. 阶段计划
 
@@ -123,17 +123,17 @@ SQLite 合成数据和 SiliconFlow；`backend/`、`frontend/`、PostgreSQL 与 T
 退出条件：任何 Agent SQL 都经过策略层和数据库只读权限；失败不编造结论；关键事件
 可由 request ID 回放。
 
-### Phase 4｜前端和作品集包装
+### Phase 4｜嵌入式交互和作品集包装
 
 目标：在 Vanna 原生 UI 已验证的基础上，增加适合简历展示的产品外壳。
 
 任务：
 
-1. 以 TailAdmin 为参考创建 Next.js/React 分析后台，并保留 MIT 署名；
-2. 将 `<vanna-chat>` 封装到智能分析页，展示流式状态、表格、SQL、图表和证据；
-3. 增加查询历史、指标口径、数据集版本和最小评测页面；
+1. 创建无框架宿主页，把 `<vanna-chat>` 作为浮动或右侧分析面板嵌入；
+2. 展示流式状态、表格、SQL、图表和指标证据，并验证最小化/最大化状态；
+3. 用后端审计 API 和静态证据页呈现查询历史、指标口径、数据集版本和评测报告；
 4. 补齐登录态、角色状态、错误/空结果/加载态和响应式布局；
-5. 通过浏览器 E2E 验证“登录 → 提问 → 查看证据 → 查看历史”。
+5. 通过浏览器 E2E 验证“业务页 → 提问 → 查看证据 → 查看历史”。
 
 退出条件：前端不绕过后端策略；一次回答可以追溯到口径、SQL、数据来源和版本；页面
 展示的是可验证能力而非静态 mock。
@@ -172,7 +172,7 @@ Conventional Commit 提交并推送 `origin`。
 
 ## 6. 近期下一步
 
-1. 保持 `data-analysis-agent` screen 服务可复现运行，提供 SSH 端口转发给本地浏览器；
-2. 观察 Vanna 原生 UI 的 SQL、图表、认证和结果契约，整理 ADR；
+1. 补齐 Vanna 组件的最小化、最大化、嵌入宿主页和图表端到端测试；
+2. 使用 `docs/VANNA_CAPABILITY_AUDIT.md` 区分已验证能力与源码支持能力；
 3. 对 Olist 数据源、许可、字段质量和指标草案进行人工核验，形成 v1 数据合同；
-4. 在数据合同冻结后再创建 PostgreSQL/自有后端，不提前引入 Redis、队列或大规模前端。
+4. 在数据合同冻结后创建 PostgreSQL/自有后端，不提前引入 Redis、队列或独立前端框架。
