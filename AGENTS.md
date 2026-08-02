@@ -52,5 +52,5 @@
 - 文档、API、数据模型和代码使用清晰的中英文术语；对外展示使用中文业务语言，并保留原始数据字段映射；
 - 长期设计变更可以在 `docs/adr/` 中新增 `NNNN-title.md`；
 - 数据集相关内容位于 `data/` 下，但仅提交 manifest、schema、transforms 与 fixtures，不提交原始数据；
-- 后端与前端目录命名在 Phase 1 创建后写入 `PROJECT.md`，避免在上游目录内直接开发；
+- 自有目录约定为 `backend/`、`frontend/`、`data/`、`evals/`、`infra/`、`docs/`，并仅在相应阶段创建；上游 Vanna/TailAdmin 位于 `/disk2/gengnan/_upstream/`，只作参考，严禁在其中实现本项目业务代码；
 - 文档更新应陈述已验证事实与未决假设，不能把计划描述成已实现能力。

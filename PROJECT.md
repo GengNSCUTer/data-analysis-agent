@@ -246,6 +246,8 @@ v1 发布门槛：
 - 建立 GitHub 仓库、`PROJECT.md`、`AGENTS.md` 与飞书项目文档；
 - 不开始业务代码和数据下载。
 
+完整的阶段门、仓库边界、交付物、退出条件、接口轮廓、测试策略与风险控制见 [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md)。
+
 ### Phase 1：数据与领域建模
 
 - 确定 Olist 主案例的表范围；
@@ -286,3 +288,4 @@ v1 发布门槛：
 | 2026-08-02 | 基础设施 | v1 使用 PostgreSQL；Redis 延后到出现异步任务/缓存/限流需求时。 |
 | 2026-08-02 | 数据策略 | Chinook 用于回归，Olist 用于主展示，中文电商数据用于后续扩展。 |
 | 2026-08-02 | 项目基线同步 | 已创建飞书项目文档；GitHub SSH 认证已恢复，首个项目基线提交已推送至 `main`。 |
+| 2026-08-02 | 开发计划与目录边界 | 冻结完整阶段计划；自有项目仅在本仓库开发，上游 Vanna/TailAdmin 收纳为 `/disk2/gengnan/_upstream/` 参考缓存。 |
