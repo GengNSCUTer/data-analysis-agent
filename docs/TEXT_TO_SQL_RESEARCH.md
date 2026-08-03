@@ -352,3 +352,71 @@ golden、是否应拒答和人工判定。报告必须分开统计执行正确�
 - GitHub CLI 当前未登录，仓库元数据使用公开 API/README；没有把未读源码的项目写成代码级结论；
 - 公开 benchmark 的数据库、模型、提示和评估口径与 Olist/SiliconFlow 不同，只用于方向判断；
 - 本文是设计与调研，不代表 T1--T5 已经实现。
+
+## 11. 2026-08-03 第二轮核验与当前实现状态
+
+### 11.1 最新论文核验
+
+本轮直接查询 arXiv API（查询时间 2026-08-03，按提交时间倒序）并重新阅读摘要。下面的
+结论只用于确定工程优先级，不把预印本结果当成本项目的准确率：
+
+| 论文 | 核验到的贡献 | 对本项目的工程含义 |
+| --- | --- | --- |
+| [ABISS](https://arxiv.org/abs/2607.23340) | 将歧义/不可回答问题划分为 8 类，并测试模拟用户交互；即使给出正确的类别或澄清信息，最终 SQL 仍可能失败。 | Router 不能只返回一次追问；必须保存原问题、结构化缺失字段，并测试“澄清后重新生成”这一整条链路。 |
+| [Benchmarking Text-to-SQL under RBAC](https://arxiv.org/abs/2607.22115) | 将 SQL utility 与 access-control compliance 分开度量，指出无权限 benchmark 会高估真实系统表现。 | 保留 `sqlglot` allowlist、PostgreSQL reader role 和 analyst/admin Catalog 过滤；不能只报告 execution accuracy。 |
+| [Finding the Right Tables and Columns](https://arxiv.org/abs/2607.13311) | 把表/列选择单独定义为检索任务，并报告通用 embedding 在企业 Schema 上迁移不稳定；语料自适应训练可提高召回。 | 先用可解释的别名/关键词检索建立本地基线；只有在 Olist 基线证明不足时才评估 embedding，并记录 recall@k。 |
+| [Schema-First Retrieval](https://arxiv.org/abs/2606.28387) | 将表、列、指标、关系和历史查询作为 typed Catalog 对象，配合向量召回、关系扩展、重排和权限门。 | 当前 YAML Catalog 的对象划分是正确的方向；关系扩展和重排属于大 Schema 后续项，不是 v1 必需品。 |
+| [Database Context Compression](https://arxiv.org/abs/2606.28601) | 通过离线整理重复列、同构表和冗余文档，再做在线证据净化，显著压缩大数据库上下文。 | 当前 9 张 Olist 表先做 Catalog slice 和字符预算；不要为了追随论文提前引入复杂压缩中间件。 |
+| [How Far Do On-Prem Open LLMs Get](https://arxiv.org/abs/2606.29733) | 在 BIRD 上做 schema linking、self-correction、self-consistency 的消融；摘要报告 self-correction 更稳定，而 self-consistency 的 token 成本/收益很差。 | 先做一次执行错误修复和成本记录，暂不做 Best-of-N 或多模型投票；本结论仍需用 SiliconFlow/Olist 自己复测。 |
+| [Bootstrapping Semantic Layer from Execution](https://arxiv.org/abs/2606.05634) | GATE 用执行反馈验证多个 grounding 假设，并将验证过的 grounding 写入可复用记忆。 | 未来可把人工确认过的值映射/业务别名沉淀为审核记忆；当前先不把自动学习写入生产 Catalog。 |
+| [DataClawEval](https://arxiv.org/abs/2607.28033) | 使用隔离沙箱和确定性规则脚本评估端到端数据工程 Agent，而不是只用 LLM judge。 | 本项目的评测必须保留 PostgreSQL golden、策略断言和人工语义标签；不能用一个总分替代可解释证据。 |
+
+Spider 2.0 仍然是企业级复杂 Schema/多查询工作流的上界参考，但当前项目固定为单一
+PostgreSQL 方言、只读分析和 Olist 9 表，不把 Spider 2.0 的工作流规模误包装为现有能力。
+BIRD-INTERACT 的动态交互协议适合作为多轮评测设计参考，生产系统不引入它的用户模拟器。
+
+### 11.2 最新开源实现核验
+
+GitHub Public API 在本轮返回的可复核元数据如下（star 会变化；许可证为 API 字段值，不替代
+逐仓库许可证审查）：
+
+| 仓库 | Stars | License/API 状态 | 代码/产品事实 | 本项目取舍 |
+| --- | ---: | --- | --- | --- |
+| [vanna-ai/vanna](https://github.com/vanna-ai/vanna) | 23,822 | MIT；`archived=true` | Agent、Tool Registry、ConversationStore、Context Enhancer、SSE、Web Component。 | 继续使用仓库内锁定源码；适配器放在 `src/data_analysis_agent/`，不把上游归档误认为本项目不可维护。 |
+| [Canner/WrenAI](https://github.com/Canner/WrenAI) | 16,793 | `NOASSERTION` | MDL/Context Layer、关系/业务规则、查询记忆、dry-plan 和治理能力。 | 只借鉴语义层和上下文版本化，不整体迁移其多服务/GenBI 平台。 |
+| [sinaptik-ai/pandas-ai](https://github.com/sinaptik-ai/pandas-ai) | 23,682 | `NOASSERTION` | DataFrame/文件分析为主，也有 `SQLDatasetLoader`、SemanticLayerSchema 和 SQL connector。 | 证明它不是 CSV/Excel-only；任意 Python 执行仍不进入当前 SQL 信任边界。 |
+| [zhongyu09/openchatbi](https://github.com/zhongyu09/openchatbi) | 613 | MIT | SQL graph 将 Schema linking、执行重试、结果限制、confidence 和图表拆成状态节点，并有人工澄清入口。 | 借鉴状态图、一次修复、结果 gate；不复制其正则安全检查。 |
+| [premAI-io/premsql](https://github.com/premAI-io/premsql) | 461 | API 未给 SPDX | 提供多数据库/本地模型接口和 execution-guided correction。 | 借鉴 Ollama/vLLM 接口和修复契约；先测实际上下文是否剪枝。 |
+| [bird-bench/BIRD-Interact](https://github.com/bird-bench/BIRD-Interact) | 1,010 | MIT | `ask`、`execute`、`get_schema`、`submit` 等交互动作和工具/耐心预算。 | 借鉴 action trace 与多轮预算，生产系统不引入模拟用户。 |
+| [taoyds/test-suite-sql-eval](https://github.com/taoyds/test-suite-sql-eval) | 321 | Apache-2.0 | 以 denotation 比较结果，处理行列顺序、重复行、空结果和 literal 替换。 | 借鉴结果语义比较，先在固定 Olist golden 上实现轻量版本。 |
+
+### 11.3 Skill 发现结论
+
+`find-skills` 查询到 `oimiragieo/agent-studio@text-to-sql`（约 140 installs、源仓库约 36
+stars、未声明 SPDX 许可证）。它提供数据库连接、Schema 导出、SQL 文件和结果落盘模板，
+适合从零搭一个简单脚本，但没有当前项目所需的 Vanna Context Enhancer、角色隔离、AST
+Policy、审计或结果级语义校验，因此本轮不安装、不作为运行时依赖。已安装的
+`lingzhi227/agent-research-skills@github-research` 适合仓库调研；literature-review 类 skill
+适合持续追踪论文，但也不应替代版本化本地评测。
+
+### 11.4 当前代码事实与边界
+
+本轮检查后，当前工作树中的 Catalog/路由资产状态是：
+
+- `data/catalog/olist_catalog.yaml`、`semantic_catalog.py`、`question_router.py` 已写入但尚未
+  提交；将 YAML join 字段 `on` 显式加引号后，`CatalogLoader` 可加载 `olist-catalog-v1`、9 张表、
+  4 个指标和 7 条 Join。
+- `CatalogRetriever` 已能对 GMV、州订单数、品类 GMV 做稳定、角色过滤的选择；分析员看不到
+  `dataset_versions`，管理员可以看到。零命中返回 no-match，而不是随机挑表。
+- `QuestionRouter` 目前只是纯函数；它能返回上述 6 种状态，但没有接入 SSE 主链路，澄清后
+  的 working memory 尚未持久化。因此不能把“已经实现澄清多轮”写进项目介绍。
+- `examples/trusted_olist_web_demo.py` 仍使用完整的 `metric_context.SYSTEM_PROMPT`，
+  `CatalogContextEnhancer` 尚未装配，Catalog trace 也尚未进入 `BudgetUsage`/`agent_runs`。
+- SQL 修复、结果级校验、在线 SiliconFlow 语义基线尚未实现。本轮没有调整 `max_tool_iterations=4`，
+  因为它只是 Vanna 内层循环上限，不等于语义正确性或项目级成本控制。
+
+对应的第二轮执行计划已经单独保存为
+[`plan/feature-text-to-sql-reliability-v2.md`](../plan/feature-text-to-sql-reliability-v2.md)。
+下一步顺序固定为：先补 Catalog/Router 契约测试和运行时装配，再实现结构化 working memory，
+然后做一次修复与结果校验，最后才跑同一批问题的线上前后对比。任何 embedding、judge、RL、
+多 Agent 或 Python 分析扩展都必须等这条基线有数据后重新评审。

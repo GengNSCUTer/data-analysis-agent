@@ -44,7 +44,7 @@
 - `DemoAgentMemory` 仍是进程内辅助记忆，结构化长期业务记忆和旧轮次摘要尚未实现；
 - `max_tool_iterations=4` 仍是模型-工具循环上限，项目新增了总工具、SQL、图表、输入、上下文和输出预算，但用户配额/费用台账尚未实现；
 - 上下文目前按完整轮次和字符/消息预算裁剪，尚未生成结构化的旧轮次摘要；
-- 当前没有稳定的 Catalog 检索、澄清状态机、SQL 自动修复上限、结果级校验、置信度/拒答原因和在线模型语义准确率报告。
+- 当前 Catalog YAML、确定性检索器和问题路由已有未提交的基础实现，但尚未接入 Trusted Demo 的 SSE 主链路；SQL 自动修复、结果级校验、置信度/拒答原因和在线模型语义准确率报告仍未完成。
 
 ### P0 第一版实现状态
 
@@ -126,8 +126,9 @@ Redis、队列、多 Agent、MCP 或任意 Python 执行。
 
 ## 4. P1：Text-to-SQL 可靠性增强
 
-详细依据见 [TEXT_TO_SQL_RESEARCH.md](TEXT_TO_SQL_RESEARCH.md)，可执行任务见
-[feature-text-to-sql-reliability-v1.md](../plan/feature-text-to-sql-reliability-v1.md)。顺序如下：
+详细依据见 [TEXT_TO_SQL_RESEARCH.md](TEXT_TO_SQL_RESEARCH.md)，第一版冻结计划见
+[feature-text-to-sql-reliability-v1.md](../plan/feature-text-to-sql-reliability-v1.md)，本轮执行计划见
+[feature-text-to-sql-reliability-v2.md](../plan/feature-text-to-sql-reliability-v2.md)。顺序如下：
 
 1. 结构化 Schema/指标 Catalog 和简单的按问题检索；
 2. 可回答性/歧义分类，先澄清缺失的时间、指标、对比基线或维度；
