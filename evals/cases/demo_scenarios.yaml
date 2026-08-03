@@ -1,0 +1,74 @@
+version: "1.0"
+dataset: olist_brazilian_ecommerce
+dataset_version: olist-kaggle-v2-2026-08-03
+metric_version: "0.1-draft"
+scope_note: "These contracts verify fixed demo-question semantics and golden data results. They do not measure online LLM semantic accuracy."
+scenarios:
+  - id: demo_state_top5_chart
+    label: "州前五"
+    question: "按客户州统计有效订单数前五名，并生成柱状图"
+    allowed_roles: [analyst, admin]
+    metrics: [paid_order_count]
+    required_tables: [fact_orders, dim_customers]
+    expected_shape: ranked_table
+    expected_chart: bar
+    expected_row_limit: 5
+    ordering: "paid_order_count DESC, customer_state ASC"
+    result_columns: [customer_state, paid_order_count]
+    expected_rows:
+      - [SP, 41127]
+      - [RJ, 12698]
+      - [MG, 11496]
+      - [RS, 5417]
+      - [PR, 4983]
+    evidence: [metric_version, dataset_version, final_sql, result_table, chart]
+    semantics:
+      - "排除 canceled 与 unavailable 订单。"
+      - "按客户州聚合，订单按 DISTINCT order_id 计数。"
+      - "图表仅基于本查询返回的五行结果生成。"
+
+  - id: demo_category_top10
+    label: "品类前十"
+    question: "统计有效订单数最多的前十个商品品类"
+    allowed_roles: [analyst, admin]
+    metrics: [paid_order_count]
+    required_tables: [fact_orders, fact_order_items, dim_products, dim_category_translation]
+    expected_shape: ranked_table
+    expected_chart: none
+    expected_row_limit: 10
+    ordering: "paid_order_count DESC, category ASC"
+    result_columns: [category, paid_order_count]
+    expected_rows:
+      - [bed_bath_table, 9399]
+      - [health_beauty, 8800]
+      - [sports_leisure, 7673]
+      - [computers_accessories, 6654]
+      - [furniture_decor, 6425]
+      - [housewares, 5847]
+      - [watches_gifts, 5604]
+      - [telephony, 4183]
+      - [auto, 3872]
+      - [toys, 3855]
+    evidence: [metric_version, dataset_version, final_sql, result_table]
+    semantics:
+      - "排除 canceled 与 unavailable 订单。"
+      - "商品行与订单关联后按 DISTINCT order_id 统计，避免同一订单多商品重复计数。"
+      - "优先展示英文品类映射；缺失映射时保留原始品类或 uncategorized。"
+
+  - id: demo_metric_overview
+    label: "指标概览"
+    question: "概览 GMV、有效订单数、平均履约天数和好评率，并说明统计口径"
+    allowed_roles: [analyst, admin]
+    metrics: [gmv, paid_order_count, average_delivery_days, positive_review_rate]
+    required_tables: [fact_orders, fact_order_items, fact_reviews]
+    expected_shape: scalar_summary
+    expected_chart: none
+    expected_row_limit: 1
+    result_columns: [gmv, paid_order_count, average_delivery_days, positive_review_rate]
+    expected_row: [13494400.74, 98207, 12.558702, 0.770680]
+    evidence: [metric_version, dataset_version, final_sql, result_table, metric_definition]
+    semantics:
+      - "GMV 是有效订单商品 price 之和，不含 freight_value 或 payment_value。"
+      - "有效订单数排除 canceled 与 unavailable。"
+      - "平均履约天数只统计已填实际送达时间的订单，采用实际送达减下单时间。"
+      - "好评率是评价行中 review_score >= 4 的比例，不能与订单项连接后再聚合。"

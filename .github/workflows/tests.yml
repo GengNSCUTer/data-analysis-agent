@@ -39,9 +39,12 @@ jobs:
           tests/test_project_evaluation.py \
           tests/test_visualization_policy.py \
           tests/test_trusted_workflow.py \
-          tests/test_demo_session.py
+          tests/test_demo_session.py \
+          tests/test_demo_scenarios.py
     - name: Run deterministic evaluation inventory
-      run: python scripts/run_project_evaluation.py --output /tmp/project-evaluation.yaml
+      run: |
+        python scripts/run_project_evaluation.py --output /tmp/project-evaluation.yaml
+        python scripts/run_demo_scenario_evaluation.py --output /tmp/demo-scenarios.yaml
     - name: Compile project demo entry points
       run: python -m compileall -q \
         examples/siliconflow_sqlite_web_demo.py \
