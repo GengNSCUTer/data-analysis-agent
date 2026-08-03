@@ -1,0 +1,295 @@
+# Text-to-SQL 专项调研与优化建议
+
+> 调研日期：2026-08-03
+> 范围：当前项目、Vanna/Dataherald/WrenAI 等开源方案、公开论文和后续落地路线。
+> 说明：2026 年论文多数是 arXiv 预印本，本文标注论文提出的结果，不把预印本结果当作
+> 已验证的工程事实。
+
+## 1. 结论先行
+
+Text-to-SQL 的核心不是让模型“写出一条能执行的 SQL”，而是让它在正确的业务语义、允许的
+数据范围和可接受的成本内，生成可以被验证、解释和复现的查询。当前项目在安全边界和业务
+语义起点上是扎实的，但生成链路仍是“固定上下文 + 单候选生成 + 策略校验 + 执行”，缺少
+动态 Schema 选择、澄清、执行修复、结果级验证和在线语义评测。
+
+最适合本项目的改进顺序是：
+
+```text
+结构化语义 Catalog
+  -> 按问题选择上下文
+  -> 判断可回答/需要澄清
+  -> 生成一条 SQL
+  -> Policy + 只读执行
+  -> 一次受限修复或可信拒答
+  -> 结果/证据校验和可回放记录
+```
+
+暂不建议把研究方向直接变成复杂工程：多 Agent、Best-of-N 大采样、训练专用模型、向量
+数据库、任意 Python 执行和多方言支持都不是当前 Olist 8 表项目的瓶颈。
+
+## 2. 当前项目到底怎么做
+
+当前 trusted Vanna 链路是：
+
+1. `TrustedWorkflowHandler` 提供中文 starter UI 和项目专属说明；
+2. `metric_context.SYSTEM_PROMPT` 固定注入数据集版本、指标口径、已知表/列、Join 注意事项、
+   有效订单过滤和图表触发规则；
+3. Vanna `Agent` 调用 `run_sql`，当前 `AgentConfig.max_tool_iterations=4`；
+4. `SecurePostgresRunner` 用 `sqlglot` AST 进行单语句、只读、对象白名单、敏感投影、角色
+   LIMIT 等校验；
+5. PostgreSQL 只读账号执行 SQL，应用写账号写 `app.query_audits`；
+6. 结果以 DataFrame/CSV 进入表格和受控 Plotly 图表，Agent 生成中文结论；
+7. 宿主页展示数据/指标版本、最终 SQL、耗时、行数和审计状态。
+
+### 已有优势
+
+- 业务指标不是让模型自由猜，而是有版本化指标上下文；
+- SQL 生成后还有 AST Policy 和数据库角色两层防线；
+- `analytics` 和 `app` 分离，查询不能直接写库或读审计表；
+- 结果带 SQL、版本和审计证据，便于复现；
+- 有 60 条确定性策略/数据用例和 3 条固定场景 golden。
+
+### 主要缺口
+
+- 固定注入全部 8 张表的上下文，尚未形成可扩展的 Schema/指标检索；
+- 没有独立的“可回答、歧义、越权、不支持”分类状态机；
+- SQL 执行出错时没有项目级的一次受限修复契约；
+- 没有对空结果、Join 放大、指标列缺失和异常数值做结果级校验；
+- 没有置信度、拒答或人工确认机制；
+- 多轮会话和记忆尚未持久化，无法稳定评测多轮 Text-to-SQL；
+- 确定性 SQL/golden 评测不等于 SiliconFlow 在线模型语义准确率。
+
+## 3. 开源平台对比
+
+### Vanna 2.0.2
+
+Vanna 提供 Agent、Tool Registry、用户上下文、ConversationStore、Context Enhancer、过滤器、
+生命周期钩子、观测接口、SSE 和 `<vanna-chat>`。这使它适合作为本项目的交互和 Agent 底座。
+本地源码也明确提供 `max_tool_iterations` 和 `max_tokens` 配置，但持久化、预算检查、上下文
+压缩和业务语义仍由应用实现。当前项目已经正确地把价值放在自有指标、SQL Policy、数据库
+角色和审计层，而不是重写 Vanna Agent 核心。
+
+### Dataherald
+
+Dataherald 将 NL-to-SQL engine、Enterprise API、认证/组织逻辑、Admin Console 和 Slackbot
+拆成多个服务，适合研究“引擎”和“治理平台”的边界。其公开仓库最近活跃度较低，完整部署依赖
+Docker、多服务和较重的管理台；对当前个人项目，借鉴分层思想即可，不应整体移植。
+
+### WrenAI
+
+WrenAI 把业务定义、模型关系、指标、示例查询、公司说明和记忆作为可审阅、可版本化的
+Context Layer，并配合 Schema Retrieval、MDL、dry-plan、结构化错误、RLAC/CLAC 和评测。
+这与本项目下一步的“指标/Schema Catalog + Context Builder”高度契合。它还覆盖 20+ 数据源、
+GenBI dashboard 和 Agent SDK，范围远大于当前项目；应借鉴语义层和证据化上下文，不引入整套
+引擎或 dashboard。
+
+### PandasAI 类方案
+
+PandasAI 更偏 DataFrame/CSV 的探索式分析和 Python/图表生成，适合另一类“让 Agent 分析表格”
+产品。当前项目的核心约束是 PostgreSQL 只读 Text-to-SQL 和企业式治理；引入任意 Python 执行
+会破坏当前安全边界。因此它可以作为未来离线数据分析适配器的参考，不能替换当前 SQL 主链路。
+
+## 4. 论文与研究方向
+
+### 4.1 基准正在从单轮 SQL 走向真实交互
+
+- [Spider 2.0-AIFunc (arXiv:2607.06229)](https://arxiv.org/abs/2607.06229)：覆盖云数据平台中的
+  AI-native SQL 函数，说明传统 NL2SQL 不等于完整分析工作流；当前项目暂不做 Snowflake AI 函数，
+  但应保持工具和方言边界清晰。
+- [ABISS (arXiv:2607.23340)](https://arxiv.org/abs/2607.23340)：将歧义、不可回答问题和多轮
+  用户交互纳入评测；论文报告即使给出正确澄清信息，最终 SQL 仍可能失败。它直接支持本项目
+  建立“先澄清再查”的状态机和多轮评测。
+- [BIRD-INTERACT (arXiv:2510.05318)](https://arxiv.org/abs/2510.05318)：把 Text-to-SQL 从单轮
+  题目改成动态交互；对本项目而言，后续评测应包含“沿用上轮时间/指标/筛选”而不是只测独立问题。
+- [Falcon Chinese Benchmark (arXiv:2510.24762)](https://arxiv.org/abs/2510.24762)：面向中文企业级
+  Text-to-SQL，适合作为中文问题分类、口径歧义和业务表达的外部参考，但不能直接替代 Olist
+  的本地 golden 数据。
+
+### 4.2 Schema 检索和上下文压缩成为瓶颈
+
+- [Finding the Right Tables and Columns (arXiv:2607.13311)](https://arxiv.org/abs/2607.13311)：把表/列
+  选择单独定义为检索任务，并报告通用 embedding 在企业 Schema 上迁移不理想；先做可解释的
+  词法/别名/指标映射基线，再决定是否训练或引入 embedding。
+- [Database Context Compression (arXiv:2606.28601)](https://arxiv.org/abs/2606.28601)：提出离线
+  压缩重复列、同构表和冗余文档，报告在大 Schema 上显著减少上下文；当前 8 张表不需要复杂
+  压缩算法，但其“数据库侧先整理，再按问题净化证据”的思想适合我们的 Catalog。
+- [Schema-First Retrieval (arXiv:2606.28387)](https://arxiv.org/abs/2606.28387)：强调先从 Catalog
+  找相关对象，再生成 SQL；与当前固定 `SYSTEM_PROMPT` 相比，是最自然的扩展方向。
+
+### 4.3 执行反馈、验证和停止策略
+
+- [How Far Do On-Prem Open LLMs Get (arXiv:2606.29733)](https://arxiv.org/abs/2606.29733)：报告在 BIRD
+  上 self-correction 是稳定收益，而 self-consistency 在高 token 成本下收益很小；支持本项目
+  先实现一次执行错误修复，不做多次候选投票。
+- [Test-Time Verification via Outcome Reward Models (arXiv:2606.30851)](https://arxiv.org/abs/2606.30851)：
+  用结果奖励模型选择候选 SQL，报告优于仅按执行成功/多数投票；这是后续研究方向，不是当前
+  小规模项目应立即训练的组件。
+- [What Predicts Correctness (arXiv:2607.06799)](https://arxiv.org/abs/2607.06799)：单纯可执行性、
+  字符/结构一致性和 log-probability 的正确性预测能力有限，验证型 judge 更有价值；因此项目
+  不能把“SQL 跑通”写成“语义正确”，需要人工核验和选择性拒答。
+- [Knowing When to Stop (arXiv:2607.03991)](https://arxiv.org/abs/2607.03991)：研究何时停止
+  重复执行验证；对我们当前只有一次修复的预算设计有启发，但不值得现在引入学习型停止器。
+
+### 4.4 权限和安全应进入 Text-to-SQL 评测
+
+- [Benchmarking Text-to-SQL under RBAC (arXiv:2607.22115)](https://arxiv.org/abs/2607.22115)：指出
+  无权限 benchmark 会高估真实系统，需同时评估 SQL utility 和 access compliance。当前项目的
+  AST Policy、PostgreSQL 双角色和 26/26 安全预期正是这一方向的工程化版本。
+- [Policy-Conditioned Constrained Decoding (arXiv:2607.12341)](https://arxiv.org/abs/2607.12341)：
+  将列在输出/过滤/聚合中的使用策略加入解码约束；这是比生成后拦截更深的研究方向，但当前
+  项目应继续以生成后 AST + 数据库角色为主，避免把模型解码器和权限逻辑耦合。
+
+### 4.5 多轮记忆和企业业务知识
+
+- [Memory Architectures for Multi-Turn Text-to-SQL (arXiv:2605.26394)](https://arxiv.org/abs/2605.26394)：
+  用多轮 benchmark 分离 working memory、episodic retrieval 和 semantic augmentation，报告
+  无状态多轮会在后续轮次快速崩溃，也指出记忆复杂度不与准确率单调增加。它支持先做可靠的
+  working memory，再谨慎增加检索记忆。
+- [Learning to Retrieve: Dual-Level Long-Term Memory (arXiv:2606.00547)](https://arxiv.org/abs/2606.00547)：
+  将 episode 级策略记忆和 turn 级局部记忆分开；当前项目可以借鉴分层概念，但不应直接复制
+  需要强化学习训练的检索器。
+- [EntSQL (arXiv:2606.03363)](https://arxiv.org/abs/2606.03363)：面向企业长上下文知识的中英
+  Text-to-SQL benchmark，显示仅有 Schema 和问题仍不足以处理企业定义；这强化了指标目录、
+  业务说明和可追溯版本的必要性。
+- [Beyond Text-to-SQL: Governed Enterprise Analytics APIs (arXiv:2605.21027)](https://arxiv.org/abs/2605.21027)：
+  将受治理的 Analytics API 作为模型调用边界，提醒我们未来可以把稳定指标封装成受控工具，
+  但不应因此放弃 SQL 证据链。
+
+### 4.6 SQL 与 Python 的组合
+
+- [ProSPy (arXiv:2606.05836)](https://arxiv.org/abs/2606.05836)：先做 profiling 和 Schema 剪枝，再
+  用 SQL 获取中间视图，最后用 Python 做灵活分析。它适合大型企业复杂问题，但对当前项目
+  的任意 Python 执行风险较高；后续如需扩展，只能设计受限、沙箱化、结果文件白名单工具。
+- [SQuaD-SQL (arXiv:2607.08161)](https://arxiv.org/abs/2607.08161)：通过合成数据、蒸馏和参数高效
+  微调降低小模型成本；这属于模型训练路线，暂时不如请求预算和一次修复直接。
+
+## 5. 针对本项目的技术路线
+
+### T0：先建立在线基线
+
+在不改 Agent 的前提下，选取 20--30 个代表性问题，记录模型、Prompt、Schema/指标版本、
+SQL、执行结果、是否需要修复、耗时和人工判定。指标至少包括：
+
+- SQL 可执行率；
+- 业务语义正确率；
+- 指标口径正确率；
+- 安全合规率；
+- 澄清正确率；
+- P50/P95 时延和每问工具/token 成本。
+
+这一步是后续判断任何优化是否有效的基线，不能用公开 benchmark 分数替代。
+
+### T1：语义 Catalog 和上下文选择
+
+把当前长字符串 `SYSTEM_PROMPT` 拆成结构化 Catalog：
+
+- 表、列、类型、业务别名、敏感级别；
+- 指标公式、粒度、默认过滤、时间字段、可用维度；
+- 合法 Join 路径和禁止的粒度组合；
+- 已核验的少量问题-SQL 示例；
+- 数据集、指标和策略版本。
+
+第一版使用确定性的别名/关键词/指标匹配和 Join 图，不先上向量库。对当前 8 张表，优先
+证明“减少无关上下文后是否降低错误”，再评估 embedding retrieval。
+
+### T2：问题分类和澄清
+
+在 SQL Agent 前增加轻量分类：
+
+```text
+可直接回答 | 缺时间范围 | 缺指标定义 | 缺对比基线 | 无权限 | 不支持
+```
+
+只有可回答请求进入 SQL 生成；歧义请求返回结构化澄清问题，并把用户选择保存为本轮上下文。
+分类器可以先用规则 + 结构化 Catalog，避免再引入一个不可审计的 LLM 闸门。
+
+### T3：执行引导的单次修复
+
+流程固定为：
+
+```text
+候选 SQL -> Policy -> 只读执行 ->
+成功：结果校验/回答
+失败：仅把安全的错误类别和必要上下文交给一次修复 -> 重新 Policy -> 执行
+再次失败：可信拒答
+```
+
+不得把原始数据库异常、敏感值或其他用户信息直接交给模型；每次修复都重新走 AST、白名单、
+只读角色、LIMIT 和超时。保存候选 SQL、最终 SQL、修复原因和终止原因。
+
+### T4：结果级验证与选择性拒答
+
+先实现确定性检查：列是否符合问题/指标、结果是否超过行数、聚合是否有明显 Join 放大、
+时间范围是否存在、空结果是否需要澄清。检查失败时展示原因或进入澄清，不生成貌似确定的
+数字。后续才考虑 judge/ORM/多候选验证。
+
+### T5：多轮记忆评测
+
+把问题组织成会话而非散题：
+
+```text
+“看 2026 年各州订单”
+  -> “只看前五”
+  -> “按品类拆开”
+  -> “和上一个结果比较好评率”
+```
+
+每轮记录它依赖的时间、指标、筛选和上轮结果摘要，验证刷新恢复、上下文裁剪和用户隔离。
+
+## 6. 不同优化的优先级
+
+| 能力 | 当前价值 | 实施建议 |
+| --- | --- | --- |
+| 指标/Schema Catalog | 很高 | P0/P1，先结构化和确定性检索 |
+| 一次执行修复 | 很高 | P1，限制 1 次并记录原因 |
+| 澄清和不可回答检测 | 很高 | P1，先规则化 |
+| 多轮 working memory | 很高 | P0，会话持久化 + 摘要 |
+| 结果级校验/拒答 | 很高 | P1，先确定性检查 |
+| Schema embedding 检索 | 中 | 大 Schema 或基线证明不足时再做 |
+| Best-of-N/多模型投票 | 低到中 | 成本高，当前暂缓 |
+| Outcome Reward Model/Judge | 中 | 有足够在线样本后再评估 |
+| RL/蒸馏/专用微调 | 低 | 需要数据、GPU 和稳定评测，不是当前瓶颈 |
+| 任意 Python 分析 | 低 | 与当前安全目标冲突，明确暂缓 |
+
+## 7. 建议追加的评测集
+
+在现有 60 条确定性用例之外，新增版本化多轮/线上模型小集：
+
+- 10 条指标口径明确的单轮问题；
+- 10 条多表 Join 和粒度陷阱问题；
+- 10 条缺时间、缺比较基线或“最好/异常”歧义问题；
+- 10 条连续追问会话；
+- 10 条执行错误/空结果/需要修复问题；
+- 10 条 RBAC、敏感列、越权和不可回答问题。
+
+每条记录问题、用户角色、数据/指标版本、期望分类、期望 SQL 语义、允许的澄清问题、结果
+golden、是否应拒答和人工判定。报告必须分开统计执行正确、语义正确、安全合规、澄清正确和
+成本，不能只给一个总准确率。
+
+## 8. 参考项目、论文和工具
+
+### 开源项目
+
+- [Vanna](https://github.com/vanna-ai/vanna)：本项目当前 Agent/Web Component 底座；GitHub API
+  当前标记该仓库已归档，后续以仓库内锁定版本和差异审查为准。
+- [Dataherald](https://github.com/Dataherald/dataherald)：引擎、企业 API、管理台拆分参考。
+- [WrenAI](https://github.com/Canner/WrenAI)：语义 Context Layer、MDL、受治理 GenBI 参考。
+- [Spider 2-AIFunc](https://github.com/Leolty/Spider2-AIFunc)：AI-native SQL benchmark 参考。
+
+### 已找到的 Agent Skill
+
+- `oimiragieo/agent-studio@text-to-sql`：138 次安装，偏 Text-to-SQL 工作流实践；
+  <https://skills.sh/oimiragieo/agent-studio/text-to-sql>
+- `collaborative-deep-research/agent-papers-cli@literature-review`：696 次安装，偏论文检索/综述；
+  <https://skills.sh/collaborative-deep-research/agent-papers-cli/literature-review>
+
+本轮没有安装它们：当前任务需要的是对项目做一次可审阅的专项研究，外部 skill 本身不应成为
+运行时依赖。后续如果经常做论文追踪，可单独安装 literature-review；如果需要重复生成
+Text-to-SQL 实践模板，再考虑安装 text-to-sql skill。
+
+## 9. 研究限制
+
+- arXiv API 查询结果包含 2026 年预印本，论文结论需要后续核对版本、代码和同行评审状态；
+- GitHub CLI 当前未登录，仓库元数据使用公开 API/README；没有把未读源码的项目写成代码级结论；
+- 公开 benchmark 的数据库、模型、提示和评估口径与 Olist/SiliconFlow 不同，只用于方向判断；
+- 本文是设计与调研，不代表 T1--T5 已经实现。

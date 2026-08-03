@@ -365,6 +365,11 @@ v1 不引入 Redis。
 
 ## 11. 变更记录
 
+下一阶段平台计划与 Text-to-SQL 专项调研分别见：
+
+- [`docs/AGENT_PLATFORM_NEXT_PLAN.md`](docs/AGENT_PLATFORM_NEXT_PLAN.md)
+- [`docs/TEXT_TO_SQL_RESEARCH.md`](docs/TEXT_TO_SQL_RESEARCH.md)
+
 | 日期 | 事项 | 结论 |
 | --- | --- | --- |
 | 2026-08-02 | 项目立项 | 确定为 Python 可信数据分析 Agent，不继续以 Java 本地生活平台作为主项目。 |
@@ -399,3 +404,4 @@ v1 不引入 Redis。
 | 2026-08-03 | 演示级角色会话与权限可见性 | 用标准库 HMAC-SHA256 签名的短期 cookie 取代 `X-Demo-Role` / `X-Demo-User` 请求头。角色仅能为固定映射的 `demo-analyst` 或 `demo-admin`，且同一解析器被 SSE、审计 API 和 SQL 策略使用；未签名、篡改或过期的 cookie 默认回退分析员。宿主页新增分段角色选择和“演示会话，非密码登录或生产认证”说明。单元测试覆盖签名、篡改、过期与请求头提权拒绝；Playwright 覆盖伪造 header 仍为 analyst、页面切换 admin 后签名会话刷新。该能力证明角色化策略与审计范围，不代表真实身份认证或组织权限。 |
 | 2026-08-03 | 固定演示场景与 Golden 验证 | 将“州前五”“品类前十”“指标概览”从工作流按钮提升为 `evals/cases/demo_scenarios.yaml` 中的版本化场景契约，固定问题、允许角色、指标口径、来源表、排序/行数、图表要求、展示证据和预期结果。新增 PostgreSQL 断言脚本验证州 Top 5、品类 Top 10 和四项指标概览不发生数据或口径漂移；本地真实库执行成功。CI 在无数据库环境校验契约结构与 starter action 一致性，数据库 golden 只在 `RUN_PROJECT_DB=1` 显式执行。该资产不测量在线 LLM 语义准确率。 |
 | 2026-08-03 | 项目级验证审查 | 对嵌入图表、演示会话、固定场景、对外文档和发布回归进行逐项审查：浏览器 E2E 5/5、策略/场景相关确定性测试 30 passed 1 skipped、项目 PostgreSQL 测试 6/6、60 条安全预期 26/26、3 条场景 golden 均通过；最近 GitHub Actions 通过。审查记录明确未覆盖真实认证、组织级 RLS、批量在线 LLM 准确率和生产部署。 |
+| 2026-08-03 | Agent 平台与 Text-to-SQL 专项调研 | 明确下一阶段优先做 PostgreSQL 持久会话、分层上下文、请求级工具/token 预算、歧义澄清、一次受限执行修复和结果级校验；对照 Vanna、Dataherald、WrenAI 及 2025--2026 Text-to-SQL 论文，暂缓多 Agent、Best-of-N、RL/专用训练、向量库和任意 Python 执行。详见两份专项文档。 |
