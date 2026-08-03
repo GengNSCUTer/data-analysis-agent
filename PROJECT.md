@@ -355,3 +355,4 @@ v1 不引入 Redis。
 | 2026-08-03 | Markdown 表格兼容性修复 | 修复 Vanna RichText 原解析器不支持 Markdown 表格而原样显示符号的问题；根页面和宿主页改用本地构建 bundle，E2E 已验证语义化表格渲染。 |
 | 2026-08-03 | Olist 来源与文件版本核验 | 通过 Kaggle 公开元数据与文件列表 API 核验 version 2、CC BY-NC-SA 4.0、9 个 CSV 清单；原始数据仅下载到仓库外目录，已记录 ZIP 与逐文件 SHA-256、行数和源列，未提交 Git。 |
 | 2026-08-03 | CI 质量门收敛 | 将上游遗留的全量 `tox` 外部集成矩阵替换为 Python 3.12 核心单元测试、示例编译和 Web Component 构建；本地验证 56 个测试通过，真实模型 E2E 仍只在本机显式运行。 |
+| 2026-08-03 | Olist analytics 转换基线 | 新增 PostgreSQL analytics DDL、8 表确定性 CSV 转换器和合成关联测试 fixture；全量源文件 checksum 核验后转换成功。评价使用 `(review_id, order_id)` 复合键，原始评价文件物理行数不等于逻辑记录数。PostgreSQL 尚未启动或加载。 |

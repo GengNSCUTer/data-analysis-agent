@@ -76,7 +76,7 @@ datasets:
           columns: [seller_id, seller_zip_code_prefix, seller_city, seller_state]
         - name: product_category_name_translation.csv
           total_bytes: 2613
-          row_count: 70
+          row_count: 71
           sha256: a81f0d1f27b27e7293f761bc79e3ce8f348ee39c4b3ed3e49bde38f478586278
           columns: [product_category_name, product_category_name_english]
     download_record:

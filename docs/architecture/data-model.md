@@ -31,7 +31,7 @@ dim_products * ─── 1 dim_category_translation
 - `fact_orders(order_id, customer_id, order_status, order_purchase_timestamp, order_approved_at, order_delivered_customer_date, order_estimated_delivery_date)`
 - `fact_order_items(order_id, order_item_id, product_id, seller_id, shipping_limit_date, price, freight_value)`
 - `fact_payments(order_id, payment_sequential, payment_type, payment_installments, payment_value)`
-- `fact_reviews(review_id, order_id, review_score, review_creation_date)`
+- `fact_reviews(review_id, order_id, review_score, review_creation_date)`，复合主键为 `(review_id, order_id)`
 
 ### `app`（后续 Phase 3）
 
