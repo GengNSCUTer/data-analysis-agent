@@ -401,22 +401,31 @@ Policy、审计或结果级语义校验，因此本轮不安装、不作为运�
 
 ### 11.4 当前代码事实与边界
 
-本轮检查后，当前工作树中的 Catalog/路由资产状态是：
+第二轮开发已经把研究结论落到 `src/data_analysis_agent/`：
 
-- `data/catalog/olist_catalog.yaml`、`semantic_catalog.py`、`question_router.py` 已写入但尚未
-  提交；将 YAML join 字段 `on` 显式加引号后，`CatalogLoader` 可加载 `olist-catalog-v1`、9 张表、
-  4 个指标和 7 条 Join。
-- `CatalogRetriever` 已能对 GMV、州订单数、品类 GMV 做稳定、角色过滤的选择；分析员看不到
-  `dataset_versions`，管理员可以看到。零命中返回 no-match，而不是随机挑表。
-- `QuestionRouter` 目前只是纯函数；它能返回上述 6 种状态，但没有接入 SSE 主链路，澄清后
-  的 working memory 尚未持久化。因此不能把“已经实现澄清多轮”写进项目介绍。
-- `examples/trusted_olist_web_demo.py` 仍使用完整的 `metric_context.SYSTEM_PROMPT`，
-  `CatalogContextEnhancer` 尚未装配，Catalog trace 也尚未进入 `BudgetUsage`/`agent_runs`。
-- SQL 修复、结果级校验、在线 SiliconFlow 语义基线尚未实现。本轮没有调整 `max_tool_iterations=4`，
-  因为它只是 Vanna 内层循环上限，不等于语义正确性或项目级成本控制。
+- `data/catalog/olist_catalog.yaml`、`semantic_catalog.py`、`question_router.py` 和
+  `working_memory.py` 提供可版本化、角色隔离、有限长度的 Catalog、路由和多轮状态；
+  `CatalogLoader` 仍可加载 9 张表、4 个指标和 7 条 Join。
+- `CatalogRetriever` 对 GMV、州订单数、品类 GMV 做稳定选择；小表/列/Join/字符上限不会
+  丢掉指标必需对象或生成无 Join 的孤立表，超限明确 fail closed。
+- Trusted Demo 已装配 `CatalogContextEnhancer`，固定系统提示缩短为安全边界；trace 进入
+  `BudgetUsage` 和 `app.agent_runs.catalog_trace`，不包含原始问题或结果行。
+- `QuestionRouter` 已接入 `BudgetedChatHandler`：缺时间、指标或比较基线时直接返回一条澄清，
+  不调用 Agent/SQL；`app.conversations.working_memory` 保存结构化指标、时间和缺失字段，补充信息
+  后可恢复原问题口径。服务层已测试，浏览器多轮回归尚待补齐。
+- `sql_repair.py` 提供一次候选修复与完整 `SqlPolicy` 二次校验，`postgres_runner.py` 对数据库
+  错误做安全分类；`result_validator.py` 对空结果、缺列、非有限值、时间越界、截断和 Join 放大
+  返回 `valid`/`needs_clarification`/`refuse`。当前结果校验所需的指标/时间/Join 元数据还没有
+  完整传入实际 Vanna ToolContext，版本字段也需要在 Prompt 和 Run evidence 中统一；Vanna 工具
+  循环尚未保存原/修复候选的完整状态，这是下一轮的重点集成。
+
+本轮 Conda 确定性专项测试 65 项通过，项目 PostgreSQL 会话/Runner/Run recorder 集成测试 8 项
+通过。没有运行批量 SiliconFlow 线上评测，因此不报告 Text-to-SQL 在线准确率、token 成本或 P95
+延迟；全量 Vanna 上游可选驱动测试缺少外部依赖，也不作为本项目质量门。
 
 对应的第二轮执行计划已经单独保存为
-[`plan/feature-text-to-sql-reliability-v2.md`](../plan/feature-text-to-sql-reliability-v2.md)。
-下一步顺序固定为：先补 Catalog/Router 契约测试和运行时装配，再实现结构化 working memory，
-然后做一次修复与结果校验，最后才跑同一批问题的线上前后对比。任何 embedding、judge、RL、
-多 Agent 或 Python 分析扩展都必须等这条基线有数据后重新评审。
+[`plan/feature-text-to-sql-reliability-v2.md`](../plan/feature-text-to-sql-reliability-v2.md)，验证
+记录见 [`docs/verification-text-to-sql-v2.md`](../docs/verification-text-to-sql-v2.md)。后续顺序固定为：
+先把一次修复/结果校验状态接入 Vanna 生命周期，再补多轮浏览器回归和 60 条 v2 评测，最后才用同一
+批问题做 SiliconFlow 前后对比。任何 embedding、judge、RL、多 Agent 或 Python 分析扩展都必须等
+这条基线有数据后重新评审。

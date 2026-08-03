@@ -96,6 +96,9 @@ class BudgetUsage:
     context_truncated: bool = False
     termination_reason: str = "running"
     error_type: str | None = None
+    catalog_trace: dict[str, Any] | None = None
+    catalog_question: str | None = None
+    working_memory: dict[str, Any] | None = None
     last_response_had_tool_calls: bool = False
     _tool_counts: dict[str, int] = field(default_factory=dict)
 
@@ -139,6 +142,19 @@ class BudgetUsage:
         if truncated:
             self.context_truncated = True
 
+    def record_catalog(self, trace: dict[str, Any]) -> None:
+        """Record only the server-generated, non-content retrieval evidence."""
+        if not isinstance(trace, dict):
+            raise TypeError("catalog trace must be a mapping")
+        self.catalog_trace = dict(trace)
+
+    def set_catalog_context(
+        self, retrieval_question: str, working_memory: dict[str, Any] | None = None
+    ) -> None:
+        """Set per-request retrieval context without adding it to run evidence."""
+        self.catalog_question = retrieval_question[: self.budget.max_input_chars]
+        self.working_memory = dict(working_memory) if working_memory else None
+
     def record_usage(self, usage: dict[str, Any] | None) -> None:
         if not usage:
             return
@@ -174,6 +190,7 @@ class BudgetUsage:
             "context_truncated": self.context_truncated,
             "termination_reason": self.termination_reason,
             "error_type": self.error_type,
+            "catalog_trace": self.catalog_trace,
         }
 
     @staticmethod

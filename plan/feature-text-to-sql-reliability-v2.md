@@ -4,13 +4,13 @@ version: "2.0"
 date_created: "2026-08-03"
 last_updated: "2026-08-03"
 owner: "GengNSCUTer/data-analysis-agent"
-status: "Planned"
+status: "In progress"
 tags: ["feature", "text-to-sql", "semantic-layer", "evaluation", "security", "research"]
 ---
 
 # Introduction
 
-![Status: Planned](https://img.shields.io/badge/status-Planned-blue)
+![Status: In progress](https://img.shields.io/badge/status-In%20progress-yellow)
 
 This is the second-round execution plan for the trusted Olist Text-to-SQL path. The current
 runtime already has Vanna 2.0.2, FastAPI/SSE, PostgreSQL, a `sqlglot` policy gate, a PostgreSQL
@@ -33,6 +33,16 @@ question + server-resolved user
 
 The plan records what is already present in the working tree, what is only a design artifact, and
 what must be proven before the capability can be described as a resume-quality result.
+
+## Current implementation status (2026-08-03)
+
+The Catalog slice, role filtering, deterministic route, structured working memory, clarification
+boundary, one-shot policy-checked repair contract, sanitized database errors, and deterministic
+result validator are now implemented under `src/data_analysis_agent/`. The trusted demo uses the
+Catalog and stores `catalog_trace`/working memory in PostgreSQL. The remaining gap is orchestration:
+the Vanna model still performs the candidate/repair loop itself, so a future task must connect the
+`OneShotSqlRepair` outcome and validator evidence to the tool lifecycle and add the browser
+multi-turn regression. No online accuracy claim is made yet.
 
 ## 1. Requirements & Constraints
 
@@ -82,9 +92,9 @@ what must be proven before the capability can be described as a resume-quality r
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-001 | Run the current trusted path inventory against `examples/trusted_olist_web_demo.py`, `metric_context.py`, `sql_policy.py`, `budget.py`, `chat_runtime.py`, and `run_recorder.py`; record model, versions, limits, and evidence fields in `docs/verification-text-to-sql-v2.md`. |  |  |
+| TASK-001 | Run the current trusted path inventory against `examples/trusted_olist_web_demo.py`, `metric_context.py`, `sql_policy.py`, `budget.py`, `chat_runtime.py`, and `run_recorder.py`; record model, versions, limits, and evidence fields in `docs/verification-text-to-sql-v2.md`. | ✅ | 2026-08-03 |
 | TASK-002 | Keep `data/catalog/olist_catalog.yaml` server-owned and validate its tables/columns against `SqlPolicy`, its metrics against source columns, and its joins against known tables. Quote YAML keys such as `on` so `yaml.safe_load` cannot coerce them to booleans. | ✅ | 2026-08-03 |
-| TASK-003 | Add `tests/test_text_to_sql_contracts.py` for Catalog versions, route-state enums, redaction invariants, stable case IDs, and no-secret/no-raw-data evaluation output. |  |  |
+| TASK-003 | Add `tests/test_text_to_sql_contracts.py` for Catalog versions, route-state enums, redaction invariants, stable case IDs, and no-secret/no-raw-data evaluation output. | ✅ | 2026-08-03 |
 
 ### Implementation Phase 2
 
@@ -93,10 +103,10 @@ what must be proven before the capability can be described as a resume-quality r
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-004 | Complete `CatalogLoader`, `CatalogRetriever`, and `CatalogContextEnhancer` in `src/data_analysis_agent/semantic_catalog.py`; enforce hard limits on tables, columns, metrics, joins, and prompt characters. | ◐ | 2026-08-03 |
-| TASK-005 | Add `tests/test_semantic_catalog.py` for GMV, order-count-by-state, GMV-by-category, stable ordering, zero-match behavior, Unicode normalization, prompt-injection text, duplicate/unknown Catalog entries, and analyst/admin visibility. |  |  |
-| TASK-006 | Wire one shared `DemoAgentMemory`, `CatalogRetriever`, and `CatalogContextEnhancer` into `examples/trusted_olist_web_demo.py` while retaining a short safety prompt in `metric_context.py`; do not modify Vanna core. |  |  |
-| TASK-007 | Persist the selected Catalog version and retrieval trace in run evidence without storing raw user text, raw result rows, credentials, or cross-user context. |  |  |
+| TASK-004 | Complete `CatalogLoader`, `CatalogRetriever`, and `CatalogContextEnhancer` in `src/data_analysis_agent/semantic_catalog.py`; enforce hard limits on tables, columns, metrics, joins, and prompt characters. | ✅ | 2026-08-03 |
+| TASK-005 | Add `tests/test_semantic_catalog.py` for GMV, order-count-by-state, GMV-by-category, stable ordering, zero-match behavior, Unicode normalization, prompt-injection text, duplicate/unknown Catalog entries, and analyst/admin visibility. | ✅ | 2026-08-03 |
+| TASK-006 | Wire one shared `DemoAgentMemory`, `CatalogRetriever`, and `CatalogContextEnhancer` into `examples/trusted_olist_web_demo.py` while retaining a short safety prompt in `metric_context.py`; do not modify Vanna core. | ✅ | 2026-08-03 |
+| TASK-007 | Persist the selected Catalog version and retrieval trace in run evidence without storing raw user text, raw result rows, credentials, or cross-user context. | ✅ | 2026-08-03 |
 
 ### Implementation Phase 3
 
@@ -105,10 +115,10 @@ what must be proven before the capability can be described as a resume-quality r
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-008 | Keep `QuestionRouter` as a pure, deterministic function first; cover time, metric, comparison, unauthorized, unsupported, remembered-state, and `should_generate_sql` behavior. | ◐ | 2026-08-03 |
-| TASK-009 | Define a structured working-memory object for `metric_ids`, `time_range`, dimensions, filters, comparison baseline, and previous-result summary. Store it with the conversation/run, never by scraping arbitrary assistant prose. |  |  |
-| TASK-010 | Add a clarification boundary to `BudgetedChatHandler`: one actionable question, no SQL budget consumption, `termination_reason=clarification_required`, and safe persistence of the original question plus the missing field. |  |  |
-| TASK-011 | Add `tests/test_question_router.py`, trusted route tests, and a browser regression for “本月销售额” followed by an explicit date range and a subsequent metric follow-up. |  |  |
+| TASK-008 | Keep `QuestionRouter` as a pure, deterministic function first; cover time, metric, comparison, unauthorized, unsupported, remembered-state, and `should_generate_sql` behavior. | ✅ | 2026-08-03 |
+| TASK-009 | Define a structured working-memory object for `metric_ids`, `time_range`, dimensions, filters, comparison baseline, and previous-result summary. Store it with the conversation/run, never by scraping arbitrary assistant prose. | ✅ | 2026-08-03 |
+| TASK-010 | Add a clarification boundary to `BudgetedChatHandler`: one actionable question, no SQL budget consumption, `termination_reason=clarification_required`, and safe persistence of the original question plus the missing field. | ✅ | 2026-08-03 |
+| TASK-011 | Add `tests/test_question_router.py`, trusted route tests, and a browser regression for “本月销售额” followed by an explicit date range and a subsequent metric follow-up. | ◐ | 2026-08-03 |
 
 ### Implementation Phase 4
 
@@ -117,10 +127,10 @@ what must be proven before the capability can be described as a resume-quality r
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-012 | Implement `src/data_analysis_agent/sql_repair.py` with sanitized error categories, one repair attempt, original/repaired SQL retention, and a stable repair reason. |  |  |
-| TASK-013 | Re-run `SqlPolicy`, PostgreSQL reader-role execution, statement timeout, and row limits for both the original and repaired candidate; never pass raw database errors to the model. |  |  |
-| TASK-014 | Implement `src/data_analysis_agent/result_validator.py` for required metric columns, empty-result semantics, time coverage, row-limit truncation, and simple join-amplification checks. Return `valid`, `needs_clarification`, or `refuse`. |  |  |
-| TASK-015 | Add focused repair/validator tests and expose only concise validation evidence to the existing embedded host. A failed check must not become a confident number. |  |  |
+| TASK-012 | Implement `src/data_analysis_agent/sql_repair.py` with sanitized error categories, one repair attempt, original/repaired SQL retention, and a stable repair reason. | ✅ | 2026-08-03 |
+| TASK-013 | Re-run `SqlPolicy`, PostgreSQL reader-role execution, statement timeout, and row limits for both the original and repaired candidate; never pass raw database errors to the model. | ◐ | 2026-08-03 |
+| TASK-014 | Implement `src/data_analysis_agent/result_validator.py` for required metric columns, empty-result semantics, time coverage, row-limit truncation, and simple join-amplification checks. Return `valid`, `needs_clarification`, or `refuse`. | ✅ | 2026-08-03 |
+| TASK-015 | Add focused repair/validator tests and expose only concise validation evidence to the existing embedded host. A failed check must not become a confident number. | ◐ | 2026-08-03 |
 
 ### Implementation Phase 5
 
@@ -162,16 +172,17 @@ what must be proven before the capability can be described as a resume-quality r
 ## 5. Files
 
 - **FILE-001**: `data/catalog/olist_catalog.yaml` — versioned, role-scoped semantic Catalog.
-- **FILE-002**: `src/data_analysis_agent/semantic_catalog.py` — loader, validation, retrieval, and
-  context enhancer; current implementation is present but not yet wired into the trusted Agent.
-- **FILE-003**: `src/data_analysis_agent/question_router.py` — pure answerability classifier; current
-  implementation is present but not yet part of the SSE boundary.
+- **FILE-002**: `src/data_analysis_agent/semantic_catalog.py` — loader, validation, bounded retrieval,
+  trace recording, and request-specific context enhancer wired into the Trusted Demo.
+- **FILE-003**: `src/data_analysis_agent/question_router.py` and `working_memory.py` — deterministic
+  answerability classifier plus validated multi-turn state used at the SSE boundary.
 - **FILE-004**: `examples/trusted_olist_web_demo.py` and `src/data_analysis_agent/metric_context.py`
   — runtime prompt/context integration points.
 - **FILE-005**: `src/data_analysis_agent/chat_runtime.py`, `budget.py`, `run_recorder.py`, and the
   existing app migrations — route, budget, and evidence integration.
-- **FILE-006**: `src/data_analysis_agent/sql_repair.py` and `result_validator.py` — bounded repair
-  and result semantics checks to be added.
+- **FILE-006**: `src/data_analysis_agent/sql_repair.py`, `result_validator.py`, and
+  `postgres_runner.py` — bounded repair contract, sanitized execution errors, and result semantics
+  checks; model-driven repair orchestration remains a follow-up integration.
 - **FILE-007**: `evals/cases/text_to_sql_v2.yaml`, `scripts/run_text_to_sql_evaluation.py`, and
   `tests/test_text_to_sql_contracts.py` — versioned contract and evaluator.
 - **FILE-008**: `docs/TEXT_TO_SQL_RESEARCH.md`, `docs/AGENT_PLATFORM_NEXT_PLAN.md`,

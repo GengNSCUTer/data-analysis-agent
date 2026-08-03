@@ -437,15 +437,23 @@ class CatalogRetriever:
         max_columns_per_table: int = 10,
         max_metrics: int = 4,
         max_joins: int = 6,
+        max_prompt_chars: int = 12_000,
         min_score: float = 1.25,
     ):
-        if min(max_tables, max_columns_per_table, max_metrics, max_joins) <= 0:
+        if min(
+            max_tables,
+            max_columns_per_table,
+            max_metrics,
+            max_joins,
+            max_prompt_chars,
+        ) <= 0:
             raise ValueError("Catalog retrieval limits must be positive")
         self.catalog = catalog
         self.max_tables = max_tables
         self.max_columns_per_table = max_columns_per_table
         self.max_metrics = max_metrics
         self.max_joins = max_joins
+        self.max_prompt_chars = max_prompt_chars
         self.min_score = min_score
 
     def retrieve(self, question: str, user: User | None = None) -> CatalogSelection:
@@ -456,31 +464,71 @@ class CatalogRetriever:
         visible_tables = [table for table in self.catalog.tables if role in table.role_visibility]
         visible_metrics = [metric for metric in self.catalog.metrics if role in metric.role_visibility]
         metric_ranked = self._rank_metrics(normalized, visible_metrics)
-        selected_metrics = tuple(
-            metric for metric, score, _ in metric_ranked if score >= self.min_score
-        )[: self.max_metrics]
-        required_table_ids = {
-            table_id for metric in selected_metrics for table_id in metric.source_tables
-        }
+        # Add metrics greedily only when their source objects still fit the
+        # configured limits. A metric whose required tables or joins would be
+        # truncated is omitted, rather than giving the model an incomplete
+        # definition that could produce a plausible but wrong query.
+        selected_metrics_list: list[MetricDefinition] = []
+        required_table_ids: set[str] = set()
+        for metric, score, _ in metric_ranked:
+            if score < self.min_score or len(selected_metrics_list) >= self.max_metrics:
+                continue
+            candidate_table_ids = required_table_ids | set(metric.source_tables)
+            candidate_joins = self._joins_for(candidate_table_ids)
+            if len(candidate_table_ids) > self.max_tables or len(candidate_joins) > self.max_joins:
+                continue
+            candidate_metrics = (*selected_metrics_list, metric)
+            if any(
+                len(self._required_metric_columns(table, candidate_metrics))
+                > self.max_columns_per_table
+                for table in visible_tables
+                if table.table_id in candidate_table_ids
+            ):
+                continue
+            selected_metrics_list.append(metric)
+            required_table_ids = candidate_table_ids
+        selected_metrics = tuple(selected_metrics_list)
         table_ranked = self._rank_tables(normalized, visible_tables)
         selected_table_ids = set(required_table_ids)
-        for table, score, _ in table_ranked:
-            if score < self.min_score:
-                continue
-            if len(selected_table_ids) >= self.max_tables:
-                break
-            selected_table_ids.add(table.table_id)
+        # A requested dimension may need a lower-scoring bridge table (for
+        # example, translation -> products -> order items). Iterate to a fixed
+        # point so ranking does not leave a disconnected high-scoring table
+        # out merely because its bridge was considered later.
+        changed = True
+        while changed and len(selected_table_ids) < self.max_tables:
+            changed = False
+            for table, score, _ in table_ranked:
+                if score < self.min_score or table.table_id in selected_table_ids:
+                    continue
+                if len(selected_table_ids) >= self.max_tables:
+                    break
+                if selected_table_ids and not any(
+                    (
+                        join.from_table == table.table_id
+                        and join.to_table in selected_table_ids
+                    )
+                    or (
+                        join.to_table == table.table_id
+                        and join.from_table in selected_table_ids
+                    )
+                    for join in self.catalog.joins
+                ):
+                    # Do not put an unconnected table into the prompt. It
+                    # would look available while no legal Join path was
+                    # supplied for it.
+                    continue
+                candidate_table_ids = selected_table_ids | {table.table_id}
+                if len(self._joins_for(candidate_table_ids)) > self.max_joins:
+                    continue
+                selected_table_ids = candidate_table_ids
+                changed = True
         selected_tables = tuple(
             table for table in visible_tables if table.table_id in selected_table_ids
         )
         selected_tables = tuple(
             sorted(selected_tables, key=lambda table: table.table_id)
         )
-        selected_joins = tuple(
-            join
-            for join in self.catalog.joins
-            if join.from_table in selected_table_ids and join.to_table in selected_table_ids
-        )[: self.max_joins]
+        selected_joins = self._joins_for(selected_table_ids)
         selected_columns = tuple(
             (table.table_id, self._select_columns(table, normalized, selected_metrics))
             for table in selected_tables
@@ -490,8 +538,20 @@ class CatalogRetriever:
             [(f"metric:{metric.metric_id}", round(score, 4)) for metric, score, _ in metric_ranked[: self.max_metrics]]
             + [(f"table:{table.table_id}", round(score, 4)) for table, score, _ in table_ranked[: self.max_tables]]
         )
-        prompt = self._render_prompt(selected_tables, selected_columns, selected_metrics, selected_joins)
+        prompt = self._render_prompt(
+            selected_tables, selected_columns, selected_metrics, selected_joins
+        )
         reason = self._reason(selected_metrics, selected_tables, matched_terms)
+        if len(prompt) > self.max_prompt_chars:
+            # Never cut a Catalog line in the middle. Returning an explicit
+            # no-context selection is safer than silently omitting a column or
+            # rule and then allowing SQL generation from partial evidence.
+            selected_tables = ()
+            selected_metrics = ()
+            selected_joins = ()
+            selected_columns = ()
+            prompt = self._render_limit_exceeded_prompt(self.max_prompt_chars)
+            reason = "catalog_context_limit_exceeded"
         trace = RetrievalTrace(
             catalog_version=self.catalog.catalog_version,
             role=role,
@@ -511,6 +571,13 @@ class CatalogRetriever:
             joins=selected_joins,
             trace=trace,
             prompt=prompt,
+        )
+
+    def _joins_for(self, table_ids: set[str]) -> tuple[JoinPath, ...]:
+        return tuple(
+            join
+            for join in self.catalog.joins
+            if join.from_table in table_ids and join.to_table in table_ids
         )
 
     def _rank_metrics(
@@ -566,20 +633,35 @@ class CatalogRetriever:
     ) -> tuple[str, ...]:
         columns_by_name = table.columns_by_name
         required = set(table.context_columns)
-        for metric in metrics:
-            for qualified in metric.source_columns:
-                table_id, column_name = qualified.split(".")
-                if table_id == table.table_id:
-                    required.add(column_name)
+        required_metric = self._required_metric_columns(table, metrics)
         scored = []
         for column in table.columns:
             score, _ = self._score(question, (*column.aliases, column.name))
             if score:
                 scored.append((score, column.name))
         ordered = [name for _, name in sorted(scored, key=lambda item: (-item[0], item[1]))]
-        ordered.extend(sorted(required))
+        # Metric and time columns are mandatory. Keep them ahead of the
+        # optional context columns so a small cap cannot drop the semantics
+        # needed to generate the selected metric.
+        ordered = [name for name in sorted(required_metric) if name in columns_by_name] + ordered
+        ordered.extend(sorted(required - required_metric))
         selected = tuple(dict.fromkeys(name for name in ordered if name in columns_by_name))
         return selected[: self.max_columns_per_table]
+
+    @staticmethod
+    def _required_metric_columns(
+        table: CatalogTable, metrics: Sequence[MetricDefinition]
+    ) -> set[str]:
+        required: set[str] = set()
+        for metric in metrics:
+            for qualified in metric.source_columns:
+                table_id, column_name = qualified.split(".")
+                if table_id == table.table_id:
+                    required.add(column_name)
+            time_table, time_column = metric.time_field.split(".")
+            if time_table == table.table_id:
+                required.add(time_column)
+        return required
 
     @staticmethod
     def _matched_terms(
@@ -656,6 +738,19 @@ class CatalogRetriever:
         )
         return "\n".join(lines)
 
+    @staticmethod
+    def _render_limit_exceeded_prompt(max_chars: int) -> str:
+        message = (
+            "## 本次请求的受限语义 Catalog\n"
+            "服务器无法在当前上下文预算内完整提供回答所需的 Catalog。"
+            "不要猜测表、指标或数字；请缩小问题范围或先澄清指标。"
+        )
+        if len(message) <= max_chars:
+            return message
+        # A very small test/configuration cap still gets an explicit refusal;
+        # do not slice a multi-line instruction into misleading fragments.
+        return "Catalog 不可用，请缩小问题范围。"[:max_chars]
+
 
 class CatalogContextEnhancer(LlmContextEnhancer):
     """Append a bounded Catalog slice to Vanna's request-specific system prompt."""
@@ -669,8 +764,19 @@ class CatalogContextEnhancer(LlmContextEnhancer):
             system_prompt = await self.base_enhancer.enhance_system_prompt(
                 system_prompt, user_message, user
             )
-        selection = self.retriever.retrieve(user_message, user)
         usage = CURRENT_BUDGET.get()
+        retrieval_question = (
+            getattr(usage, "catalog_question", None) or user_message
+            if usage is not None
+            else user_message
+        )
+        selection = self.retriever.retrieve(retrieval_question, user)
         if usage is not None and hasattr(usage, "record_catalog"):
             usage.record_catalog(selection.trace.as_dict())
-        return f"{system_prompt}\n\n{selection.prompt}"
+        working_memory = getattr(usage, "working_memory", None) if usage else None
+        state_prompt = ""
+        if isinstance(working_memory, dict):
+            from .working_memory import WorkingMemory
+
+            state_prompt = WorkingMemory.from_mapping(working_memory).prompt_context()
+        return f"{system_prompt}\n\n{selection.prompt}{state_prompt}"

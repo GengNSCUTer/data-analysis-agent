@@ -334,7 +334,9 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
   页面可切换并展示其用途和非生产边界；旧请求头不能提升权限。
 - 已增加 PostgreSQL 会话/消息存储、Agent Run 台账、请求级预算和上下文裁剪基础；后端历史 API 已提供列表、详情和删除。
 - 宿主页已接入历史列表、点击恢复、刷新恢复、新建会话、删除失败提示和角色切换隔离；历史恢复只回放安全文字，不伪造原始 SQL、图表或 DataFrame 结果。
-- 仍待完成真实认证、角色行范围、结构化旧轮次摘要、Text-to-SQL Catalog/澄清/修复/结果校验及完整在线模型评测。
+- 已接入版本化、按角色裁剪的 `olist-catalog-v1`，Trusted Demo 的请求提示使用 Catalog slice，而不是无条件注入完整 Schema；Catalog trace 写入 `app.agent_runs.catalog_trace`。
+- 已接入 `QuestionRouter`、`WorkingMemory` 和澄清边界：缺少时间/指标/比较基线时不调用 SQL；补充信息后从会话结构化状态恢复原指标，并写入 `app.conversations.working_memory`。
+- 已实现一次受限 SQL 修复契约、数据库错误脱敏和结果语义校验（空结果、缺列、时间越界、截断和 Join 放大）；模型驱动修复的完整生命周期回链、真实认证、角色行范围和在线模型评测仍待完成。
 
 ### Phase 4：嵌入式交互与证据呈现（基础能力已完成）
 
@@ -347,7 +349,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 
 - 已完成 PostgreSQL 会话/消息存储、Agent Run 台账、请求级工具/SQL/图表/输入/上下文/输出预算；
 - 已完成 starter 空会话生命周期修复，避免页面刷新制造零消息历史记录；
-- 下一项进入 Text-to-SQL 可靠性计划，先做在线基线，再实现 Catalog、澄清、一次修复和结果校验。
+- Text-to-SQL 第二轮已进入开发：Catalog/路由/working memory/结果校验基础已落地；下一项是把一次修复状态完整接到 Vanna 工具循环，并建立多轮浏览器回归和 v2 评测集。
 
 ### Phase 5：评测、加固与作品集
 
@@ -380,6 +382,7 @@ v1 不引入 Redis。
 - [`docs/TEXT_TO_SQL_RESEARCH.md`](docs/TEXT_TO_SQL_RESEARCH.md)
 - [`plan/feature-text-to-sql-reliability-v1.md`](plan/feature-text-to-sql-reliability-v1.md)
 - [`plan/feature-text-to-sql-reliability-v2.md`](plan/feature-text-to-sql-reliability-v2.md)
+- [`docs/verification-text-to-sql-v2.md`](docs/verification-text-to-sql-v2.md)
 
 | 日期 | 事项 | 结论 |
 | --- | --- | --- |
@@ -416,8 +419,9 @@ v1 不引入 Redis。
 | 2026-08-03 | 固定演示场景与 Golden 验证 | 将“州前五”“品类前十”“指标概览”从工作流按钮提升为 `evals/cases/demo_scenarios.yaml` 中的版本化场景契约，固定问题、允许角色、指标口径、来源表、排序/行数、图表要求、展示证据和预期结果。新增 PostgreSQL 断言脚本验证州 Top 5、品类 Top 10 和四项指标概览不发生数据或口径漂移；本地真实库执行成功。CI 在无数据库环境校验契约结构与 starter action 一致性，数据库 golden 只在 `RUN_PROJECT_DB=1` 显式执行。该资产不测量在线 LLM 语义准确率。 |
 | 2026-08-03 | 项目级验证审查 | 对嵌入图表、演示会话、固定场景、对外文档和发布回归进行逐项审查：浏览器 E2E 5/5、策略/场景相关确定性测试 30 passed 1 skipped、项目 PostgreSQL 测试 6/6、60 条安全预期 26/26、3 条场景 golden 均通过；最近 GitHub Actions 通过。审查记录明确未覆盖真实认证、组织级 RLS、批量在线 LLM 准确率和生产部署。 |
 | 2026-08-03 | Agent 平台与 Text-to-SQL 专项调研 | 明确下一阶段优先做 PostgreSQL 持久会话、分层上下文、请求级工具/token 预算、歧义澄清、一次受限执行修复和结果级校验；对照 Vanna、Dataherald、WrenAI 及 2025--2026 Text-to-SQL 论文，暂缓多 Agent、Best-of-N、RL/专用训练、向量库和任意 Python 执行。详见两份专项文档。 |
-| 2026-08-03 | 第二轮 P0 基础设施骨架 | 新增 PostgreSQL `ConversationStore`、`conversations/messages/agent_runs` 表、`run_id` 审计关联、请求级工具/SQL/图表/输入/上下文/输出预算、上下文轮次裁剪和历史 API。11 项预算/上下文确定性测试、8 项 PostgreSQL/SQL runner/路由/run recorder 集成测试、run/audit 真实回链与应用装配检查通过；GitHub Actions run `30806496513`（commit `0a04c7d`）成功；宿主页历史控件和 P1 Text-to-SQL 可靠性增强尚未完成。详见 `plan/feature-agent-platform-v2.md` 与 `docs/verification-2026-08-03-v2.md`。 |
+| 2026-08-03 | 第二轮 P0 基础设施骨架 | 新增 PostgreSQL `ConversationStore`、`conversations/messages/agent_runs` 表、`run_id` 审计关联、请求级工具/SQL/图表/输入/上下文/输出预算、上下文轮次裁剪和历史 API。11 项预算/上下文确定性测试、8 项 PostgreSQL/SQL runner/路由/run recorder 集成测试、run/audit 真实回链与应用装配检查通过；GitHub Actions run `30806496513`（commit `0a04c7d`）成功。 |
 | 2026-08-03 | P0 会话交互与空会话修复 | 宿主页完成历史列表、点击恢复、刷新恢复、新建会话、删除失败状态和角色切换隔离；嵌入窗口 E2E 6 条通过。starter UI 不再提前持久化零消息会话，历史 API 过滤遗留空记录；历史恢复只回放安全文字，不伪造 SQL/图表/DataFrame。 |
-| 2026-08-03 | Text-to-SQL 可靠性计划冻结 | 新增 `plan/feature-text-to-sql-reliability-v1.md`，把调研落成 5 个可执行阶段：在线基线、结构化 Catalog、确定性澄清、一次受限修复/结果校验、回归评测。当前均为计划，尚未把 Catalog、澄清、修复或结果验证描述为已实现能力。 |
+| 2026-08-03 | Text-to-SQL 可靠性计划冻结 | 新增 `plan/feature-text-to-sql-reliability-v1.md`，把调研落成 5 个可执行阶段：在线基线、结构化 Catalog、确定性澄清、一次受限修复/结果校验、回归评测；后续实现严格按可验证的最小闭环推进。 |
 | 2026-08-03 | Text-to-SQL 二次源码调研 | 按 `github-research` 六阶段流程核验 OpenChatBI、PremSQL、BIRD-INTERACT、Lumen、PandasAI、Dash、test-suite-sql-eval、SQL-R1 和 MAC-SQL；确认下一步核心是 Catalog/Schema linking、可回答性澄清、一次执行修复、结果 denotation/校验和分维度评测。研究缓存位于本地 `github-research-output/` 且已忽略，不进入 Git。 |
-| 2026-08-03 | Text-to-SQL 第二轮论文与实现核验 | 直接复核 arXiv API 与 GitHub Public API：ABISS、RBAC Text-to-SQL、Schema retrieval、Context Compression、On-Prem self-correction、GATE 和 DataClawEval 支持“先检索/澄清/验证，再优化模型”的路线；新增 `plan/feature-text-to-sql-reliability-v2.md`。同时修复 YAML 裸 `on` 被 `safe_load` 转为布尔键的问题，Catalog smoke load 已通过（9 表/4 指标/7 Join），但 Catalog/Router 尚未接入 SSE。 |
+| 2026-08-03 | Text-to-SQL 第二轮论文与实现核验 | 直接复核 arXiv API 与 GitHub Public API：ABISS、RBAC Text-to-SQL、Schema retrieval、Context Compression、On-Prem self-correction、GATE 和 DataClawEval 支持“先检索/澄清/验证，再优化模型”的路线；新增 `plan/feature-text-to-sql-reliability-v2.md`。同时修复 YAML 裸 `on` 被 `safe_load` 转为布尔键的问题，Catalog smoke load 已通过（9 表/4 指标/7 Join）。 |
+| 2026-08-03 | Text-to-SQL 第二轮开发 | 按 v2 计划落地角色化 Catalog 检索与 trace、短安全系统提示、`QuestionRouter`、PostgreSQL working memory、零 SQL 澄清边界、一次 Policy 二次校验修复契约、数据库错误脱敏和 `ResultValidator`；Catalog/Router/working memory 已接入 Trusted Demo SSE。确定性专项测试 **65 项通过**，项目 PostgreSQL 会话/Runner/Run recorder 集成测试 8 项通过；语义结果元数据和版本合同正在补入运行链路，在线模型语义评测和浏览器多轮回归仍未完成。详见 `docs/verification-text-to-sql-v2.md`。 |

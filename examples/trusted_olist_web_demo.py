@@ -44,10 +44,18 @@ from data_analysis_agent.postgres_runner import (
     PostgresConnectionSettings,
     SecurePostgresRunner,
 )
+from data_analysis_agent.result_validator import ResultValidator
+from data_analysis_agent.semantic_catalog import (
+    CatalogContextEnhancer,
+    CatalogLoader,
+    CatalogRetriever,
+)
+from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.trusted_workflow import TrustedOlistWorkflowHandler
 from data_analysis_agent.visualization import TrustedVisualizeDataTool
 from vanna import Agent
 from vanna.core.agent.config import AgentConfig
+from vanna.core.enhancer import DefaultLlmContextEnhancer
 from vanna.core.system_prompt import DefaultSystemPromptBuilder
 from vanna.core.user import RequestContext
 from vanna.integrations.local.agent_memory import DemoAgentMemory
@@ -100,10 +108,21 @@ def create_app() -> FastAPI:
 
     model_name = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V4-Flash")
     settings = PostgresConnectionSettings.from_environment()
-    runner = SecurePostgresRunner(settings=settings, model_name=model_name)
+    runner = SecurePostgresRunner(
+        settings=settings,
+        model_name=model_name,
+        result_validator=ResultValidator(settings.max_rows),
+    )
     budget = RequestBudget.from_environment()
     conversation_store = PostgresConversationStore(settings)
     run_recorder = PostgresRunRecorder(settings, model_name=model_name)
+    agent_memory = DemoAgentMemory()
+    catalog_retriever = CatalogRetriever(CatalogLoader().load())
+    catalog_enhancer = CatalogContextEnhancer(
+        catalog_retriever,
+        base_enhancer=DefaultLlmContextEnhancer(agent_memory),
+    )
+    question_router = QuestionRouter(catalog_retriever)
     # A process-local fallback keeps this public demo usable without adding a
     # secret to source control. Restarts invalidate old cookies by design.
     signer = DemoSessionSigner(
@@ -131,7 +150,8 @@ def create_app() -> FastAPI:
         ),
         tool_registry=registry,
         user_resolver=role_resolver,
-        agent_memory=DemoAgentMemory(),
+        agent_memory=agent_memory,
+        llm_context_enhancer=catalog_enhancer,
         conversation_store=conversation_store,
         conversation_filters=[
             ContextBudgetFilter(
@@ -155,7 +175,7 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=WEB_COMPONENT_DIST), name="static")
     register_chat_routes(
         app,
-        BudgetedChatHandler(agent, budget, run_recorder),
+        BudgetedChatHandler(agent, budget, run_recorder, question_router),
         config={"cdn_url": "/static/vanna-components.js"},
     )
 

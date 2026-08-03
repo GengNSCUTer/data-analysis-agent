@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS app.conversations (
     title TEXT,
     dataset_version_id TEXT NOT NULL,
     metric_version TEXT NOT NULL,
+    working_memory JSONB NOT NULL DEFAULT '{}'::jsonb,
     status TEXT NOT NULL DEFAULT 'active',
     message_count INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -15,6 +16,9 @@ CREATE TABLE IF NOT EXISTS app.conversations (
     CHECK (status IN ('active', 'deleted')),
     CHECK (message_count >= 0)
 );
+
+ALTER TABLE app.conversations
+    ADD COLUMN IF NOT EXISTS working_memory JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS app.messages (
     message_id BIGSERIAL PRIMARY KEY,
@@ -60,6 +64,7 @@ CREATE TABLE IF NOT EXISTS app.agent_runs (
     output_tokens INTEGER,
     total_tokens INTEGER,
     context_truncated BOOLEAN NOT NULL DEFAULT FALSE,
+    catalog_trace JSONB NOT NULL DEFAULT '{}'::jsonb,
     termination_reason TEXT NOT NULL DEFAULT 'running',
     error_type TEXT,
     started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -83,6 +88,9 @@ CREATE TABLE IF NOT EXISTS app.agent_runs (
         'execution_error', 'unsupported_request', 'input_too_long'
     ))
 );
+
+ALTER TABLE app.agent_runs
+    ADD COLUMN IF NOT EXISTS catalog_trace JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS app.query_audits (
     audit_id BIGSERIAL PRIMARY KEY,

@@ -42,6 +42,13 @@ async def test_store_round_trip_preserves_tool_message_and_scopes_owner(
     conversation = Conversation(
         id=conversation_id,
         user=owner,
+        metadata={
+            "working_memory": {
+                "metric_ids": ["gmv"],
+                "time_range": {"start": "2017-01-01", "end": "2017-12-31"},
+                "pending_missing": [],
+            }
+        },
         messages=[
             Message(role="user", content="按州统计订单"),
             Message(
@@ -70,6 +77,7 @@ async def test_store_round_trip_preserves_tool_message_and_scopes_owner(
     assert loaded.messages[1].tool_calls[0].name == "run_sql"
     assert loaded.metadata["title"] == "按州统计订单"
     assert loaded.metadata["message_count"] == 4
+    assert loaded.metadata["working_memory"]["metric_ids"] == ["gmv"]
     assert await store.get_conversation(conversation_id, other) is None
     assert len(await store.list_conversations(owner, limit=500)) == 1
     assert await store.delete_conversation(conversation_id, other) is False

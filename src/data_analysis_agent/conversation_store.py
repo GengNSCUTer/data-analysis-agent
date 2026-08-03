@@ -118,6 +118,7 @@ class PostgresConversationStore(ConversationStore):
                     "message_count": conversation_row["message_count"],
                     "dataset_version_id": conversation_row["dataset_version_id"],
                     "metric_version": conversation_row["metric_version"],
+                    "working_memory": conversation_row.get("working_memory") or {},
                 },
             )
         finally:
@@ -138,9 +139,9 @@ class PostgresConversationStore(ConversationStore):
                         """
                         INSERT INTO app.conversations (
                             conversation_id, user_id, user_role, title,
-                            dataset_version_id, metric_version, message_count,
-                            created_at, updated_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            dataset_version_id, metric_version, working_memory,
+                            message_count, created_at, updated_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (conversation_id) DO NOTHING
                         """,
                         (
@@ -150,6 +151,9 @@ class PostgresConversationStore(ConversationStore):
                             title,
                             dataset_version,
                             metric_version,
+                            psycopg2.extras.Json(
+                                conversation.metadata.get("working_memory", {})
+                            ),
                             0,
                             self._utc(conversation.created_at),
                             self._utc(conversation.updated_at),
@@ -197,7 +201,8 @@ class PostgresConversationStore(ConversationStore):
                         """
                         UPDATE app.conversations
                         SET title = %s, message_count = %s, updated_at = %s,
-                            dataset_version_id = %s, metric_version = %s
+                            dataset_version_id = %s, metric_version = %s,
+                            working_memory = %s
                         WHERE conversation_id = %s
                         """,
                         (
@@ -206,6 +211,9 @@ class PostgresConversationStore(ConversationStore):
                             self._utc(conversation.updated_at),
                             dataset_version,
                             metric_version,
+                            psycopg2.extras.Json(
+                                conversation.metadata.get("working_memory", {})
+                            ),
                             conversation.id,
                         ),
                     )
@@ -251,6 +259,7 @@ class PostgresConversationStore(ConversationStore):
                             "title": row["title"],
                             "dataset_version_id": row["dataset_version_id"],
                             "metric_version": row["metric_version"],
+                            "working_memory": row.get("working_memory") or {},
                             "message_count": row["message_count"],
                         },
                     )

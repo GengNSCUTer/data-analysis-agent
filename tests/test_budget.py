@@ -93,3 +93,18 @@ def test_completed_cannot_overwrite_a_terminal_budget_reason() -> None:
     usage.terminate("completed")
 
     assert usage.termination_reason == "tool_budget_exhausted"
+
+
+def test_budget_usage_serializes_server_generated_catalog_trace_only() -> None:
+    usage = BudgetUsage(RequestBudget())
+    trace = {
+        "catalog_version": "olist-catalog-v1",
+        "question_fingerprint": "abc123",
+        "selected_tables": ["fact_orders"],
+    }
+
+    usage.record_catalog(trace)
+
+    assert usage.as_dict()["catalog_trace"] == trace
+    with pytest.raises(TypeError, match="mapping"):
+        usage.record_catalog("raw question")  # type: ignore[arg-type]

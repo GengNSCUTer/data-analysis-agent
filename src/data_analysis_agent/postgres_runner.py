@@ -16,6 +16,8 @@ from vanna.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
 from vanna.core.tool import ToolContext
 
 from .sql_policy import PolicyViolation, SqlPolicy
+from .result_validator import ResultValidationError, ResultValidator
+from .sql_repair import SafeSqlExecutionError, sanitize_sql_error
 
 
 @dataclass(frozen=True)
@@ -133,10 +135,12 @@ class SecurePostgresRunner(SqlRunner):
         settings: PostgresConnectionSettings | None = None,
         policy: SqlPolicy | None = None,
         model_name: str = "deepseek-ai/DeepSeek-V4-Flash",
+        result_validator: ResultValidator | None = None,
     ):
         self.settings = settings or PostgresConnectionSettings.from_environment()
         self.policy = policy or SqlPolicy()
         self.audit = PostgresQueryAudit(self.settings, model_name)
+        self.result_validator = result_validator
 
     async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
         return await asyncio.to_thread(self._run_sql_sync, args, context)
@@ -172,12 +176,38 @@ class SecurePostgresRunner(SqlRunner):
             finally:
                 connection.close()
         except Exception as exc:
+            safe_error = sanitize_sql_error(exc)
             self.audit.record(
                 context, role, args.sql, status="execution_error", final_sql=decision.final_sql,
                 reason="PostgreSQL execution failed", elapsed_ms=int((perf_counter() - started_at) * 1000),
-                error_message=str(exc),
+                error_message=safe_error.public_reason,
             )
-            raise
+            raise SafeSqlExecutionError(safe_error) from exc
+
+        if self.result_validator is not None:
+            validation = self.result_validator.validate(
+                pd.DataFrame(rows),
+                required_columns=context.metadata.get("required_result_columns", ()),
+                metric_columns=context.metadata.get("metric_result_columns", ()),
+                time_column=context.metadata.get("result_time_column"),
+                requested_start=context.metadata.get("requested_start"),
+                requested_end=context.metadata.get("requested_end"),
+                limit_applied=len(rows) >= self.settings.max_rows,
+                join_multiplicity=context.metadata.get("join_multiplicity"),
+            )
+            context.metadata["result_validation"] = validation.as_dict()
+            if not validation.safe_to_answer:
+                self.audit.record(
+                    context,
+                    role,
+                    args.sql,
+                    status="execution_error",
+                    final_sql=decision.final_sql,
+                    reason=f"result_validation:{validation.reason}",
+                    elapsed_ms=int((perf_counter() - started_at) * 1000),
+                    row_count=len(rows),
+                )
+                raise ResultValidationError(validation)
 
         self.audit.record(
             context, role, args.sql, status="allowed", final_sql=decision.final_sql,
