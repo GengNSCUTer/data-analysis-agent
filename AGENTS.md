@@ -55,3 +55,16 @@
 - 数据集相关内容位于 `data/` 下，但仅提交 manifest、schema、transforms 与 fixtures，不提交原始数据；
 - 自有目录约定为 Vanna 源码根目录、`examples/`、`src/data_analysis_agent/`、`tests/`、`docs/`、`data/`、`evals/` 和 `infra/`；本仓库是唯一开发、提交和推送位置。若仍保留 `/disk2/gengnan/_upstream/tailadmin-nextjs-dashboard/`，它只作历史参考，严禁在其中实现本项目业务代码；
 - 文档更新应陈述已验证事实与未决假设，不能把计划描述成已实现能力。
+
+## 7. 最近一次同步记录
+
+### 2026-08-03：Text-to-SQL 第一阶段运行时合同
+
+- 目标：修正 Catalog/WorkingMemory 派生的结果语义合同没有进入实际 Vanna `ToolContext` 的硬缺口。
+- 实现：新增服务器拥有的 `ResultContract`，接入指标/时间别名/请求范围/Join 与版本证据；补充
+  `ResultValidator` 和 PostgreSQL Runner 的别名校验；统一 Prompt、Catalog trace、Agent Run 与 SQL
+  审计中的版本字段；预算 trace 改为合并写入。
+- 验证：Text-to-SQL 专项 `68 passed`；项目 PostgreSQL 集成 `9 passed, 1 warning`；编译检查和
+  `git diff --check` 通过。未将在线模型准确率、token 成本或完整自动修复生命周期写成已完成能力。
+- GitHub：`cc8b688 feat(text-to-sql): wire semantic result contract` 已推送到 `main`；后续同步文档提交
+  会继续记录在飞书项目文档。
