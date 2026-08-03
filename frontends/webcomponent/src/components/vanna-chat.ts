@@ -47,6 +47,23 @@ export class VannaChat extends LitElement {
         transform: translateY(-2px);
       }
 
+      /* A host page may provide a resizable desktop window around the component.
+       * Keep this opt-in so the standalone component retains its default sizing. */
+      :host([data-hosted-window="true"]:not(.minimized):not(.maximized)) {
+        width: 100%;
+        height: var(--vanna-chat-height, 600px);
+        max-width: none;
+        margin: 0;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+
+      :host([data-hosted-window="true"]:not(.minimized):not(.maximized):hover) {
+        box-shadow: none;
+        transform: none;
+      }
+
       :host([theme="dark"]) {
         --chat-primary: var(--vanna-accent-primary-default);
         --chat-primary-stronger: var(--vanna-accent-primary-stronger);
@@ -134,6 +151,11 @@ export class VannaChat extends LitElement {
         height: 600px;
         max-height: 80vh;
         background: var(--chat-muted);
+      }
+
+      :host([data-hosted-window="true"]:not(.minimized):not(.maximized)) .chat-layout {
+        height: 100%;
+        max-height: none;
       }
 
       :host(.maximized) .chat-layout {

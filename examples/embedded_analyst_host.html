@@ -102,12 +102,81 @@
       .badge { color: #0f766e; font-weight: 700; }
       .badge.rejected, .empty { color: #b45309; }
 
-      vanna-chat {
+      .agent-window {
         position: fixed;
         right: 24px;
         bottom: 24px;
-        z-index: 10;
+        z-index: 20;
+        display: grid;
+        grid-template-rows: 32px minmax(0, 1fr);
         width: min(440px, calc(100vw - 48px));
+        height: min(632px, calc(100vh - 48px));
+        min-width: 360px;
+        min-height: 420px;
+        overflow: hidden;
+        background: #ffffff;
+        border: 1px solid #cbd6dc;
+        border-radius: 7px;
+        box-shadow: 0 18px 46px rgba(23, 48, 66, 0.24);
+      }
+
+      .agent-window[data-window-state="minimized"],
+      .agent-window[data-window-state="maximized"] {
+        width: 0 !important;
+        height: 0 !important;
+        min-width: 0;
+        min-height: 0;
+        overflow: visible;
+        border: 0;
+        box-shadow: none;
+      }
+
+      .agent-drag-handle {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        padding: 0 12px;
+        color: #dce8ed;
+        background: #173042;
+        border-bottom: 1px solid #0d202e;
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+      }
+
+      .agent-window.is-dragging .agent-drag-handle,
+      .agent-window.is-resizing .agent-resize-handle { cursor: grabbing; }
+
+      .agent-window-title { overflow: hidden; font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+      .agent-drag-grip { display: grid; grid-template-columns: repeat(2, 3px); gap: 3px; width: 9px; }
+      .agent-drag-grip i { display: block; width: 3px; height: 3px; background: #a8bcc6; border-radius: 50%; }
+
+      .agent-window vanna-chat {
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .agent-resize-handle {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        z-index: 2;
+        width: 22px;
+        height: 22px;
+        cursor: nwse-resize;
+        touch-action: none;
+      }
+
+      .agent-resize-handle::after {
+        position: absolute;
+        right: 5px;
+        bottom: 5px;
+        width: 9px;
+        height: 9px;
+        content: "";
+        border-right: 2px solid #66808e;
+        border-bottom: 2px solid #66808e;
       }
 
       @media (max-width: 860px) {
@@ -123,11 +192,20 @@
         main { padding: 20px 16px; }
         .page-heading { align-items: start; flex-direction: column; gap: 8px; }
         .metric-grid { grid-template-columns: 1fr; }
-        vanna-chat { right: 16px; bottom: 16px; width: calc(100vw - 32px); }
+        .agent-window {
+          right: 16px !important;
+          bottom: 16px !important;
+          left: auto !important;
+          width: calc(100vw - 32px) !important;
+          height: min(78vh, 640px) !important;
+          min-width: 0;
+          min-height: 420px;
+        }
+        .agent-drag-handle, .agent-resize-handle { display: none; }
       }
     </style>
   </head>
-  <body data-vanna-window-state="loading">
+  <body data-vanna-window-state="minimized">
     <header class="topbar">
       <div class="brand">Olist 经营分析</div>
       <div class="workspace">公开数据集演示环境</div>
@@ -187,23 +265,125 @@
       </section>
     </main>
 
-    <vanna-chat
-      title="经营分析副驾"
-      subtitle="基于 Olist 公开电商数据集"
-      placeholder="例如：按州统计有效订单数前五名"
-      sse-endpoint="/api/vanna/v2/chat_sse"
-      theme="light"
-    ></vanna-chat>
+    <section id="agent-window" class="agent-window" data-window-state="minimized" aria-label="经营分析副驾窗口">
+      <div id="agent-drag-handle" class="agent-drag-handle" aria-label="拖动经营分析窗口">
+        <span class="agent-drag-grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="agent-window-title">经营分析副驾</span>
+      </div>
+      <vanna-chat
+        data-hosted-window="true"
+        title="经营分析副驾"
+        subtitle="基于 Olist 公开电商数据集"
+        placeholder="例如：按州统计有效订单数前五名"
+        sse-endpoint="/api/vanna/v2/chat_sse"
+        theme="light"
+      ></vanna-chat>
+      <div id="agent-resize-handle" class="agent-resize-handle" role="separator" aria-label="调整经营分析窗口大小" aria-orientation="both"></div>
+    </section>
 
     <script>
       const chat = document.querySelector("vanna-chat");
+      const agentWindow = document.querySelector("#agent-window");
+      const dragHandle = document.querySelector("#agent-drag-handle");
+      const resizeHandle = document.querySelector("#agent-resize-handle");
+      const windowStorageKey = "data-analysis-agent-embedded-window-v1";
+      const desktopBreakpoint = 640;
+      const dragHandleHeight = 32;
+      const minimumWidth = 360;
+      const minimumHeight = 420;
+
+      const isDesktop = () => window.innerWidth > desktopBreakpoint;
+      const clamp = (value, lower, upper) => Math.min(Math.max(value, lower), upper);
+      const maximumWidth = () => Math.max(minimumWidth, Math.min(760, window.innerWidth - 32));
+      const maximumHeight = () => Math.max(minimumHeight, window.innerHeight - 32);
+      const persistWindow = () => {
+        if (!isDesktop()) return;
+        const bounds = agentWindow.getBoundingClientRect();
+        localStorage.setItem(windowStorageKey, JSON.stringify({
+          left: Math.round(bounds.left), top: Math.round(bounds.top),
+          width: Math.round(bounds.width), height: Math.round(bounds.height)
+        }));
+      };
+      const syncChatHeight = () => {
+        const height = Math.max(1, agentWindow.getBoundingClientRect().height - dragHandleHeight);
+        chat.style.setProperty("--vanna-chat-height", `${height}px`);
+      };
+      const setDesktopBounds = ({ left, top, width, height }, save = false) => {
+        const nextWidth = clamp(Number(width) || 440, minimumWidth, maximumWidth());
+        const nextHeight = clamp(Number(height) || 560, minimumHeight, maximumHeight());
+        const nextLeft = clamp(Number(left), 16, Math.max(16, window.innerWidth - nextWidth - 16));
+        const nextTop = clamp(Number(top), 16, Math.max(16, window.innerHeight - nextHeight - 16));
+        Object.assign(agentWindow.style, {
+          left: `${nextLeft}px`, top: `${nextTop}px`, right: "auto", bottom: "auto",
+          width: `${nextWidth}px`, height: `${nextHeight}px`
+        });
+        syncChatHeight();
+        if (save) persistWindow();
+      };
+      const restoreSavedWindow = () => {
+        if (!isDesktop()) return;
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(windowStorageKey)); } catch (_) { saved = null; }
+        const defaultWidth = 440;
+        const defaultHeight = Math.min(560, maximumHeight());
+        setDesktopBounds(saved || {
+          width: defaultWidth, height: defaultHeight,
+          left: window.innerWidth - defaultWidth - 24, top: window.innerHeight - defaultHeight - 24
+        });
+      };
+      const setWindowState = (state) => {
+        document.body.dataset.vannaWindowState = state;
+        agentWindow.dataset.windowState = state;
+        if (state === "normal") {
+          restoreSavedWindow();
+        }
+      };
+
       customElements.whenDefined("vanna-chat").then(() => {
         chat.startingState = "minimized";
         chat.windowState = "minimized";
-        document.body.dataset.vannaWindowState = chat.windowState;
+        setWindowState(chat.windowState);
       });
       chat.addEventListener("window-state-changed", (event) => {
-        document.body.dataset.vannaWindowState = event.detail.state;
+        setWindowState(event.detail.state);
+      });
+
+      const beginPointerAction = (event, action) => {
+        if (!isDesktop() || chat.windowState !== "normal" || event.button !== 0) return;
+        const target = event.currentTarget;
+        const bounds = agentWindow.getBoundingClientRect();
+        const start = { x: event.clientX, y: event.clientY, left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height };
+        agentWindow.classList.add(action === "drag" ? "is-dragging" : "is-resizing");
+        target.setPointerCapture(event.pointerId);
+        const move = (moveEvent) => {
+          const dx = moveEvent.clientX - start.x;
+          const dy = moveEvent.clientY - start.y;
+          if (action === "drag") {
+            setDesktopBounds({ ...start, left: start.left + dx, top: start.top + dy });
+          } else {
+            setDesktopBounds({ ...start, width: start.width + dx, height: start.height + dy });
+          }
+        };
+        const end = () => {
+          agentWindow.classList.remove("is-dragging", "is-resizing");
+          persistWindow();
+          target.removeEventListener("pointermove", move);
+          target.removeEventListener("pointerup", end);
+          target.removeEventListener("pointercancel", end);
+        };
+        target.addEventListener("pointermove", move);
+        target.addEventListener("pointerup", end);
+        target.addEventListener("pointercancel", end);
+      };
+      dragHandle.addEventListener("pointerdown", (event) => beginPointerAction(event, "drag"));
+      resizeHandle.addEventListener("pointerdown", (event) => beginPointerAction(event, "resize"));
+      window.addEventListener("resize", () => {
+        if (isDesktop() && chat.windowState === "normal") {
+          const bounds = agentWindow.getBoundingClientRect();
+          setDesktopBounds(bounds, true);
+        } else {
+          chat.style.setProperty("--vanna-chat-height", `${Math.max(1, Math.min(window.innerHeight * 0.78, 640) - dragHandleHeight)}px`);
+        }
       });
 
       const escapeHtml = (value) => String(value ?? "").replace(/[&<>"]/g, (character) => ({
