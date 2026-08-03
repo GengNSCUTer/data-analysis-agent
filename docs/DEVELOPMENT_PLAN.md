@@ -133,6 +133,8 @@ analytics 8 表已真实加载并以 golden SQL 复核核心指标。
 持久 `app.query_audits` 与 `examples/trusted_olist_web_demo.py`。真实 SSE 已验证“按客户州
 统计有效订单数前五名”返回 5 行表格与中文结论，审计保存请求 ID、问题、原始/最终 SQL、版本、
 耗时和行数。受信服务为 `127.0.0.1:32010`，screen 名为 `data-analysis-agent-trusted`。
+`tests/test_postgres_runner.py` 以 `RUN_PROJECT_DB=1` 显式运行，覆盖真实查询、允许/拒绝审计
+和双角色跨 Schema 拒绝；CI 不运行该测试，避免依赖开发机数据库。
 
 退出条件：任何 Agent SQL 都经过策略层和数据库只读权限；失败不编造结论；关键事件
 可由 request ID 回放。

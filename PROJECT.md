@@ -371,3 +371,4 @@ v1 不引入 Redis。
 | 2026-08-03 | SQL 安全内核与数据库角色 | 新增 `sqlglot` AST 策略与 PostgreSQL 双角色：Agent 查询角色仅可读取 `analytics`，应用写角色仅可写审计表。策略已覆盖单语句、只读 AST、Schema/表/列白名单、敏感投影限制、函数拒绝与角色化 LIMIT；尚未接入 Vanna 运行入口。 |
 | 2026-08-03 | 可信 Olist 查询闭环 | 新增 `trusted_olist_web_demo.py`、受控 PostgreSQL Runner、指标上下文和持久审计；真实 SSE 已验证中文州订单问题、策略归一化 SQL、结果表、中文结论及数据/指标版本记录。`analyst` 无法访问 `app`，查询账号与审计写账号已分离；身份仍为演示请求头。 |
 | 2026-08-03 | 嵌入式窄浮窗修复 | 将 Vanna Web Component 的窄布局从视口媒体查询改为组件容器查询，修复宽屏宿主页中 440px 浮窗被进度栏挤压的问题。宿主页改为展示 Olist 真实 golden 指标和州排名，不再展示合成华东/华南数据。 |
+| 2026-08-03 | PostgreSQL 信任边界集成测试 | 新增显式 `RUN_PROJECT_DB=1` 集成测试，验证受控查询、允许/拒绝审计以及 reader/writer 跨 Schema 权限拒绝；默认测试环境安全跳过，不依赖本地数据库。 |
