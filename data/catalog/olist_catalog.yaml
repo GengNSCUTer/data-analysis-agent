@@ -1,0 +1,218 @@
+catalog_version: "olist-catalog-v1"
+dataset_version: "olist-kaggle-v2-2026-08-03"
+metric_version: "0.1-draft"
+policy_version: "sql-policy-v1"
+description: "Server-owned semantic catalog for the trusted Olist PostgreSQL analytics schema."
+
+tables:
+  - table_id: fact_orders
+    physical_name: fact_orders
+    description: "订单级事实；每行代表一个订单。"
+    grain: order
+    aliases: [订单, 订单表, 订单事实, orders, order]
+    semantic_tags: [交易, 订单, 经营, 时间, 履约]
+    role_visibility: [analyst, admin]
+    context_columns: [order_id, customer_id, order_status, order_purchase_timestamp, order_delivered_customer_date, order_estimated_delivery_date]
+    columns:
+      - {name: order_id, type: text, description: 订单标识，仅用于关联或聚合, aliases: [订单ID, 订单编号], sensitive: true}
+      - {name: customer_id, type: text, description: 客户标识，仅用于关联或聚合, aliases: [客户ID, 买家ID], sensitive: true}
+      - {name: order_status, type: text, description: 订单状态, aliases: [订单状态, 状态], sensitive: false}
+      - {name: order_purchase_timestamp, type: timestamp, description: 订单购买时间, aliases: [下单时间, 购买时间, 订单日期], sensitive: false}
+      - {name: order_approved_at, type: timestamp, description: 订单确认时间, aliases: [确认时间], sensitive: false}
+      - {name: order_delivered_carrier_date, type: timestamp, description: 交给承运商时间, aliases: [发货时间, 承运商时间], sensitive: false}
+      - {name: order_delivered_customer_date, type: timestamp, description: 客户实际收货时间, aliases: [送达时间, 收货时间], sensitive: false}
+      - {name: order_estimated_delivery_date, type: timestamp, description: 预计送达时间, aliases: [预计送达, 预计收货时间], sensitive: false}
+      - {name: dataset_version_id, type: text, description: 数据版本标识, aliases: [数据版本], sensitive: true}
+
+  - table_id: fact_order_items
+    physical_name: fact_order_items
+    description: "订单商品行事实；一行代表一个订单中的一件商品行。"
+    grain: order_item
+    aliases: [订单商品, 商品明细, 订单项, order items, items]
+    semantic_tags: [商品, 明细, 价格, GMV, 成交额, 运费]
+    role_visibility: [analyst, admin]
+    context_columns: [order_id, order_item_id, product_id, seller_id, price, freight_value]
+    columns:
+      - {name: order_id, type: text, description: 订单标识, aliases: [订单ID], sensitive: true}
+      - {name: order_item_id, type: integer, description: 订单内商品行序号, aliases: [商品行号, 明细序号], sensitive: false}
+      - {name: product_id, type: text, description: 商品标识，仅用于关联或聚合, aliases: [商品ID, 产品ID], sensitive: true}
+      - {name: seller_id, type: text, description: 卖家标识，仅用于关联或聚合, aliases: [卖家ID, 商家ID], sensitive: true}
+      - {name: shipping_limit_date, type: timestamp, description: 发货时限, aliases: [发货时限], sensitive: false}
+      - {name: price, type: numeric, description: 商品成交价，不含运费, aliases: [商品价格, 商品金额, 成交价], sensitive: false}
+      - {name: freight_value, type: numeric, description: 运费, aliases: [运费, 配送费], sensitive: false}
+      - {name: dataset_version_id, type: text, description: 数据版本标识, aliases: [数据版本], sensitive: true}
+
+  - table_id: fact_payments
+    physical_name: fact_payments
+    description: "支付序列事实；一行代表一个订单的一次支付记录。"
+    grain: payment
+    aliases: [支付, 支付明细, 付款, payment]
+    semantic_tags: [支付, 付款, 支付方式, 分期]
+    role_visibility: [analyst, admin]
+    context_columns: [order_id, payment_sequential, payment_type, payment_installments, payment_value]
+    columns:
+      - {name: order_id, type: text, description: 订单标识, aliases: [订单ID], sensitive: true}
+      - {name: payment_sequential, type: integer, description: 订单内支付序号, aliases: [支付序号], sensitive: false}
+      - {name: payment_type, type: text, description: 支付方式, aliases: [支付方式, 付款方式, payment type], sensitive: false}
+      - {name: payment_installments, type: integer, description: 支付分期数, aliases: [分期数], sensitive: false}
+      - {name: payment_value, type: numeric, description: 支付金额，不能直接替代商品成交额, aliases: [支付金额, 付款金额], sensitive: false}
+      - {name: dataset_version_id, type: text, description: 数据版本标识, aliases: [数据版本], sensitive: true}
+
+  - table_id: fact_reviews
+    physical_name: fact_reviews
+    description: "评价事实；一行代表一条评价记录，评价指标按评价行粒度计算。"
+    grain: review
+    aliases: [评价, 评价表, 评分, reviews, review]
+    semantic_tags: [评价, 评分, 口碑, 好评]
+    role_visibility: [analyst, admin]
+    context_columns: [order_id, review_score, review_creation_date]
+    columns:
+      - {name: review_id, type: text, description: 评价标识，仅用于关联或聚合, aliases: [评价ID], sensitive: true}
+      - {name: order_id, type: text, description: 订单标识, aliases: [订单ID], sensitive: true}
+      - {name: review_score, type: integer, description: 1 到 5 分评价, aliases: [评价分, 评分, 星级], sensitive: false}
+      - {name: review_creation_date, type: timestamp, description: 评价创建时间, aliases: [评价时间, 评分时间], sensitive: false}
+      - {name: dataset_version_id, type: text, description: 数据版本标识, aliases: [数据版本], sensitive: true}
+
+  - table_id: dim_customers
+    physical_name: dim_customers
+    description: "客户维度；提供客户州和城市聚合维度。"
+    grain: customer
+    aliases: [客户, 买家, 客户维度, customers]
+    semantic_tags: [客户, 买家, 地区, 州, 城市, 地域]
+    role_visibility: [analyst, admin]
+    context_columns: [customer_id, customer_city, customer_state]
+    columns:
+      - {name: customer_id, type: text, description: 客户标识，仅用于关联或聚合, aliases: [客户ID, 买家ID], sensitive: true}
+      - {name: customer_unique_id, type: text, description: 去重客户标识，仅用于聚合, aliases: [去重客户ID], sensitive: true}
+      - {name: customer_zip_code_prefix, type: text, description: 邮编前缀，不作为默认展示列, aliases: [邮编前缀], sensitive: true}
+      - {name: customer_city, type: text, description: 客户城市, aliases: [城市, 客户城市], sensitive: false}
+      - {name: customer_state, type: text, description: 客户州, aliases: [州, 省份, 客户州, 地区, 区域], sensitive: false}
+      - {name: dataset_version_id, type: text, description: 数据版本标识, aliases: [数据版本], sensitive: true}
+
+  - table_id: dim_sellers
+    physical_name: dim_sellers
+    description: "卖家维度；提供卖家城市、州和卖家聚合维度。"
+    grain: seller
+    aliases: [卖家, 商家, 店铺, sellers, seller]
+    semantic_tags: [卖家, 商家, 店铺, 供应商]
+    role_visibility: [analyst, admin]
+    context_columns: [seller_id, seller_city, seller_state]
+    columns:
+      - {name: seller_id, type: text, description: 卖家标识，仅用于关联或聚合, aliases: [卖家ID, 商家ID], sensitive: true}
+      - {name: seller_zip_code_prefix, type: text, description: 卖家邮编前缀，不作为默认展示列, aliases: [卖家邮编], sensitive: true}
+      - {name: seller_city, type: text, description: 卖家城市, aliases: [卖家城市], sensitive: false}
+      - {name: seller_state, type: text, description: 卖家州, aliases: [卖家州, 商家地区], sensitive: false}
+      - {name: dataset_version_id, type: text, description: 数据版本标识, aliases: [数据版本], sensitive: true}
+
+  - table_id: dim_products
+    physical_name: dim_products
+    description: "商品维度；提供商品品类和商品属性。"
+    grain: product
+    aliases: [商品, 产品, 商品维度, 品类, products, product]
+    semantic_tags: [商品, 产品, 品类, 类目]
+    role_visibility: [analyst, admin]
+    context_columns: [product_id, product_category_name]
+    columns:
+      - {name: product_id, type: text, description: 商品标识，仅用于关联或聚合, aliases: [商品ID, 产品ID], sensitive: true}
+      - {name: product_category_name, type: text, description: 葡萄牙语商品品类, aliases: [商品品类, 产品品类, 类目], sensitive: false}
+      - {name: product_name_length, type: integer, description: 商品名称长度, aliases: [商品名称长度], sensitive: false}
+      - {name: product_description_length, type: integer, description: 商品描述长度, aliases: [商品描述长度], sensitive: false}
+      - {name: product_photos_qty, type: integer, description: 商品图片数量, aliases: [图片数量], sensitive: false}
+      - {name: product_weight_g, type: integer, description: 商品重量克数, aliases: [重量], sensitive: false}
+      - {name: product_length_cm, type: integer, description: 商品长度, aliases: [长度], sensitive: false}
+      - {name: product_height_cm, type: integer, description: 商品高度, aliases: [高度], sensitive: false}
+      - {name: product_width_cm, type: integer, description: 商品宽度, aliases: [宽度], sensitive: false}
+      - {name: dataset_version_id, type: text, description: 数据版本标识, aliases: [数据版本], sensitive: true}
+
+  - table_id: dim_category_translation
+    physical_name: dim_category_translation
+    description: "品类翻译维度；将葡萄牙语品类映射为英文展示名。"
+    grain: category
+    aliases: [品类翻译, 品类映射, 英文品类, category translation]
+    semantic_tags: [品类, 类目, 翻译, 映射]
+    role_visibility: [analyst, admin]
+    context_columns: [product_category_name, product_category_name_english]
+    columns:
+      - {name: product_category_name, type: text, description: 葡萄牙语品类名, aliases: [原始品类, 葡萄牙语品类], sensitive: false}
+      - {name: product_category_name_english, type: text, description: 英文品类名, aliases: [英文品类, 展示品类, 品类名称], sensitive: false}
+      - {name: dataset_version_id, type: text, description: 数据版本标识, aliases: [数据版本], sensitive: true}
+
+  - table_id: dataset_versions
+    physical_name: dataset_versions
+    description: "数据集版本元数据；仅管理员可用于治理检查，不参与普通业务查询。"
+    grain: dataset_version
+    aliases: [数据集版本, 版本元数据, dataset version]
+    semantic_tags: [版本, 数据治理, 元数据]
+    role_visibility: [admin]
+    context_columns: [dataset_version_id, dataset_id, source_version, transform_version]
+    columns:
+      - {name: dataset_version_id, type: text, description: 数据版本标识, aliases: [数据版本ID], sensitive: true}
+      - {name: dataset_id, type: text, description: 数据集标识, aliases: [数据集ID], sensitive: false}
+      - {name: source_url, type: text, description: 数据来源地址，仅管理员可见, aliases: [来源地址], sensitive: true}
+      - {name: source_license, type: text, description: 数据许可证, aliases: [许可证], sensitive: false}
+      - {name: source_version, type: text, description: 来源版本, aliases: [来源版本], sensitive: false}
+      - {name: archive_sha256, type: text, description: 原始归档校验值，仅管理员可见, aliases: [校验值], sensitive: true}
+      - {name: transform_version, type: text, description: 转换版本, aliases: [转换版本], sensitive: false}
+      - {name: loaded_at, type: timestamp, description: 加载时间, aliases: [加载时间], sensitive: false}
+
+metrics:
+  - metric_id: gmv
+    name: 商品成交额
+    description: "有效订单商品价格之和，不含运费。"
+    aliases: [GMV, 商品成交额, 成交额, 销售额, 商品销售额]
+    grain: order_item
+    time_field: fact_orders.order_purchase_timestamp
+    source_tables: [fact_orders, fact_order_items]
+    source_columns: [fact_orders.order_status, fact_order_items.price]
+    default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
+    allowed_dimensions: [date, customer_state, customer_city, product_category_name, seller_id, payment_type]
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+
+  - metric_id: paid_order_count
+    name: 有效订单数
+    description: "排除 canceled 和 unavailable 后的订单去重计数。"
+    aliases: [有效订单数, 有效订单量, 订单数, 订单量, paid orders]
+    grain: order
+    time_field: fact_orders.order_purchase_timestamp
+    source_tables: [fact_orders]
+    source_columns: [fact_orders.order_id, fact_orders.order_status]
+    default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
+    allowed_dimensions: [date, customer_state, customer_city, seller_id, product_category_name, payment_type]
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+
+  - metric_id: average_delivery_days
+    name: 平均履约天数
+    description: "实际送达时间减购买时间的平均值，仅纳入两端时间齐全的订单。"
+    aliases: [平均履约天数, 履约时长, 配送时长, 送达速度, 发货速度]
+    grain: order
+    time_field: fact_orders.order_purchase_timestamp
+    source_tables: [fact_orders]
+    source_columns: [fact_orders.order_purchase_timestamp, fact_orders.order_delivered_customer_date]
+    default_filters: ["fact_orders.order_delivered_customer_date IS NOT NULL"]
+    allowed_dimensions: [date, customer_state, customer_city, seller_id, product_category_name]
+    recommended_chart: line
+    role_visibility: [analyst, admin]
+
+  - metric_id: positive_review_rate
+    name: 好评率
+    description: "review_score >= 4 的评价数除以有效评分评价数，按评价行粒度计算。"
+    aliases: [好评率, 好评比例, 正向评价率, 评分率, 口碑]
+    grain: review
+    time_field: fact_reviews.review_creation_date
+    source_tables: [fact_reviews]
+    source_columns: [fact_reviews.review_score]
+    default_filters: ["fact_reviews.review_score BETWEEN 1 AND 5"]
+    allowed_dimensions: [date, customer_state, customer_city, seller_id, product_category_name]
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+
+joins:
+  - {join_id: orders_customers, from_table: fact_orders, to_table: dim_customers, cardinality: many_to_one, "on": "fact_orders.customer_id = dim_customers.customer_id", reason: 订单关联客户州/城市}
+  - {join_id: orders_items, from_table: fact_orders, to_table: fact_order_items, cardinality: one_to_many, "on": "fact_orders.order_id = fact_order_items.order_id", reason: 订单关联商品行；跨事实表前先聚合}
+  - {join_id: orders_payments, from_table: fact_orders, to_table: fact_payments, cardinality: one_to_many, "on": "fact_orders.order_id = fact_payments.order_id", reason: 订单关联支付序列；不能裸连商品行求和}
+  - {join_id: orders_reviews, from_table: fact_orders, to_table: fact_reviews, cardinality: one_to_many, "on": "fact_orders.order_id = fact_reviews.order_id", reason: 订单关联评价；好评率按评价行粒度}
+  - {join_id: items_products, from_table: fact_order_items, to_table: dim_products, cardinality: many_to_one, "on": "fact_order_items.product_id = dim_products.product_id", reason: 商品行关联商品品类}
+  - {join_id: items_sellers, from_table: fact_order_items, to_table: dim_sellers, cardinality: many_to_one, "on": "fact_order_items.seller_id = dim_sellers.seller_id", reason: 商品行关联卖家}
+  - {join_id: products_translation, from_table: dim_products, to_table: dim_category_translation, cardinality: many_to_one, "on": "dim_products.product_category_name = dim_category_translation.product_category_name", reason: 商品品类关联英文展示名}
