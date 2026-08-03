@@ -137,6 +137,8 @@ analytics 8 表已真实加载并以 golden SQL 复核核心指标。
 和双角色跨 Schema 拒绝；CI 不运行该测试，避免依赖开发机数据库。
 宿主页已通过 `/api/project/evidence`、`/api/project/session` 和角色过滤的 `/api/project/audits`
 展示版本、演示身份与最近查询证据；页面只使用专门的审计 DTO，不输出原始 SQL 或异常详情。
+`TrustedVisualizeDataTool` 已限制图表只能读取当前用户 SQL 工具产生的 `query_results_<id>.csv`，
+且仅接受不超过 200 行、3 列的紧凑结果。真实 SSE 已验证 5 州订单表格、Plotly 柱状图和中文结论。
 
 退出条件：任何 Agent SQL 都经过策略层和数据库只读权限；失败不编造结论；关键事件
 可由 request ID 回放。

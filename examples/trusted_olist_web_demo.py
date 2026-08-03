@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from data_analysis_agent.metric_context import METRIC_EVIDENCE, SYSTEM_PROMPT
 from data_analysis_agent.postgres_runner import SecurePostgresRunner
+from data_analysis_agent.visualization import TrustedVisualizeDataTool
 from vanna import Agent
 from vanna.core.agent.config import AgentConfig
 from vanna.core.registry import ToolRegistry
@@ -75,14 +76,16 @@ def create_app() -> FastAPI:
     model_name = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V4-Flash")
     runner = SecurePostgresRunner(model_name=model_name)
     registry = ToolRegistry()
+    query_file_system = LocalFileSystem(str(QUERY_RESULTS_DIRECTORY))
     registry.register_local_tool(
         RunSqlTool(
             sql_runner=runner,
-            file_system=LocalFileSystem(str(QUERY_RESULTS_DIRECTORY)),
+            file_system=query_file_system,
             custom_tool_description="Run a policy-checked, read-only PostgreSQL analytics query.",
         ),
         access_groups=["analyst", "admin"],
     )
+    registry.register_local_tool(TrustedVisualizeDataTool(query_file_system), access_groups=["analyst", "admin"])
     agent = Agent(
         llm_service=OpenAILlmService(
             api_key=api_key,
