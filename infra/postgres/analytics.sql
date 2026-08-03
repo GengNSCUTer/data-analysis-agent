@@ -111,9 +111,9 @@ CREATE TABLE analytics.fact_reviews (
     CHECK (review_score BETWEEN 1 AND 5)
 );
 
-CREATE INDEX fact_orders_purchase_timestamp_idx ON analytics.fact_orders (order_purchase_timestamp);
-CREATE INDEX fact_orders_customer_id_idx ON analytics.fact_orders (customer_id);
-CREATE INDEX fact_order_items_product_id_idx ON analytics.fact_order_items (product_id);
-CREATE INDEX fact_order_items_seller_id_idx ON analytics.fact_order_items (seller_id);
-CREATE INDEX fact_payments_type_idx ON analytics.fact_payments (payment_type);
-CREATE INDEX fact_reviews_creation_date_idx ON analytics.fact_reviews (review_creation_date);
+CREATE INDEX IF NOT EXISTS fact_orders_purchase_timestamp_idx ON analytics.fact_orders (order_purchase_timestamp);
+CREATE INDEX IF NOT EXISTS fact_orders_customer_id_idx ON analytics.fact_orders (customer_id);
+CREATE INDEX IF NOT EXISTS fact_order_items_product_id_idx ON analytics.fact_order_items (product_id);
+CREATE INDEX IF NOT EXISTS fact_order_items_seller_id_idx ON analytics.fact_order_items (seller_id);
+CREATE INDEX IF NOT EXISTS fact_payments_type_idx ON analytics.fact_payments (payment_type);
+CREATE INDEX IF NOT EXISTS fact_reviews_creation_date_idx ON analytics.fact_reviews (review_creation_date);

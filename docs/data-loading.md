@@ -18,6 +18,17 @@ python scripts/transform_olist.py \
 32,951、品类映射 71、订单 99,441、订单项 112,650、支付 103,886、评价 99,224；孤立
 评价为 0。评价原始文件含可跨行的评论文本，不能以物理行数当作逻辑记录数。
 
-`infra/postgres/analytics.sql` 定义目标表、约束和索引，但本阶段尚未启动 PostgreSQL 或
-加载这些文件。进入 Phase 3 后，加载作业必须先插入 `analytics.dataset_versions`，再按
-维表、订单、订单项/支付/评价的顺序使用显式列清单执行 `COPY`。
+本地 PostgreSQL 编排位于 `infra/postgres/compose.yaml`。从 `.env.example` 创建一个不进入
+Git 的 `infra/postgres/.env` 后，可启动并加载：
+
+```bash
+docker compose --env-file infra/postgres/.env -f infra/postgres/compose.yaml up -d
+docker compose --env-file infra/postgres/.env -f infra/postgres/compose.yaml exec db pg_isready
+./infra/postgres/load_olist.sh
+```
+
+容器只监听 `127.0.0.1:5433`，转换数据只读挂载为 `/data/analytics`。加载脚本先建表，
+在单个事务内清空旧的开发数据、插入 `analytics.dataset_versions`，再按维表、订单、订单项/
+支付/评价顺序执行客户端 `COPY`。`evals/sql/golden_metrics.sql` 保存首次加载后需要固化的
+核心指标查询。当前服务器用户没有 Docker daemon 权限，所以编排和加载脚本只完成静态
+校验，尚未启动 PostgreSQL 或执行真实导入。
