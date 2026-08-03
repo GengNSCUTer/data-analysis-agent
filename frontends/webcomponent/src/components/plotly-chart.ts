@@ -38,12 +38,14 @@ export class PlotlyChart extends LitElement {
         display: block;
         font-family: var(--vanna-font-family-default);
         width: 100%;
-        height: 100%;
+        max-width: 100%;
+        min-width: 0;
       }
 
       .plotly-div {
         width: 100%;
-        min-height: 400px;
+        min-width: 0;
+        height: 400px;
       }
 
       /* Plotly layering fix for Shadow DOM */
@@ -108,12 +110,17 @@ export class PlotlyChart extends LitElement {
 
     this.resizeObserver = new ResizeObserver(() => {
       if (this.plotlyDiv && this.data.length > 0) {
-        const width = this.plotlyDiv.offsetWidth;
-        Plotly.relayout(this.plotlyDiv, { width });
+        const width = this._containerWidth();
+        if (width > 0) {
+          Plotly.relayout(this.plotlyDiv, { width });
+        }
       }
     });
 
-    this.resizeObserver.observe(this.plotlyDiv);
+    // Observe the component host rather than Plotly's own mutable inner div.
+    // Plotly writes pixel dimensions into that div, so observing it can retain a
+    // stale default width after the surrounding embedded window is resized.
+    this.resizeObserver.observe(this);
   }
 
   updated(changedProperties: Map<string | number | symbol, unknown>) {
@@ -140,10 +147,11 @@ export class PlotlyChart extends LitElement {
         activecolor: isDark ? 'rgb(242, 244, 247)' : 'rgb(17, 24, 39)',
         orientation: 'h'
       },
-      // Set explicit dimensions for Shadow DOM compatibility
+      // Plotly otherwise falls back to a 700px-wide canvas. The host is the
+      // authoritative width in an embeddable and user-resizable chat window.
       autosize: false,
-      width: this.layout.width || undefined,
-      height: this.layout.height || 400,
+      width: this._containerWidth() || undefined,
+      height: this._chartHeight(),
     };
 
     // If backend didn't set background colors, use transparent
@@ -179,6 +187,18 @@ export class PlotlyChart extends LitElement {
       this.error = err instanceof Error ? err.message : 'Failed to render chart';
       console.error('Plotly chart error:', err);
     }
+  }
+
+  private _containerWidth(): number {
+    return Math.floor(this.getBoundingClientRect().width);
+  }
+
+  private _chartHeight(): number {
+    const requestedHeight = Number(this.layout.height);
+    if (Number.isFinite(requestedHeight) && requestedHeight > 0) {
+      return Math.min(Math.max(Math.round(requestedHeight), 260), 460);
+    }
+    return 400;
   }
 
   render() {

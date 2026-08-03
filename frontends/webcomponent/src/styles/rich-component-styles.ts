@@ -730,6 +730,8 @@ export const richComponentStyles = css`
   /* Chart */
   .rich-chart {
     padding: var(--vanna-space-4);
+    min-width: 0;
+    overflow: hidden;
   }
 
   .chart-header {
@@ -745,6 +747,7 @@ export const richComponentStyles = css`
 
   .chart-content {
     min-height: 300px;
+    min-width: 0;
   }
 
   .chart-error {

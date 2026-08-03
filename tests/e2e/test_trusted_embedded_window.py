@@ -55,6 +55,50 @@ def _open_normal_window(browser_page):
     return chat
 
 
+def _inject_chart_fixture(chat) -> None:
+    """Render a deterministic chart without depending on an online LLM response."""
+    chat.evaluate(
+        """element => {
+          const layout = element.shadowRoot.querySelector('.chat-layout');
+          const wrapper = document.createElement('div');
+          wrapper.className = 'rich-component rich-chart';
+          const chart = document.createElement('plotly-chart');
+          chart.data = [{
+            x: ['SP', 'RJ', 'MG', 'RS', 'PR'],
+            y: [41127, 12698, 11496, 5417, 4983],
+            type: 'bar',
+            marker: { color: '#0f9ba6' }
+          }];
+          chart.layout = {
+            title: { text: '有效订单数前五州' },
+            xaxis: { title: { text: '州代码' } },
+            yaxis: { title: { text: '有效订单数' } },
+            margin: { l: 56, r: 20, t: 60, b: 56 }
+          };
+          chart.config = { displayModeBar: false };
+          wrapper.appendChild(chart);
+          layout.appendChild(wrapper);
+        }"""
+    )
+
+
+def _chart_dimensions(chart) -> dict:
+    return chart.evaluate(
+        """element => {
+          const svg = element.shadowRoot.querySelector('svg.main-svg');
+          const host = element.getBoundingClientRect();
+          const canvas = svg?.getBoundingClientRect();
+          return {
+            hostWidth: host.width,
+            hostRight: host.right,
+            canvasWidth: canvas?.width ?? 0,
+            canvasRight: canvas?.right ?? 0,
+            labels: element.shadowRoot.querySelectorAll('text').length
+          };
+        }"""
+    )
+
+
 def test_desktop_window_drag_resize_and_content_sizing(page) -> None:
     browser_page, console_errors = page
     chat = _open_normal_window(browser_page)
@@ -134,4 +178,60 @@ def test_mobile_window_is_adaptive_without_horizontal_overflow(page) -> None:
     assert dimensions["outerWidth"] == pytest.approx(358, abs=1)
     assert dimensions["hostWidth"] == pytest.approx(dimensions["outerWidth"], abs=2)
     assert dimensions["layoutWidth"] == pytest.approx(dimensions["hostWidth"], abs=2)
+    assert not console_errors
+
+
+def test_chart_tracks_embedded_window_width_without_overflow(page) -> None:
+    browser_page, console_errors = page
+    chat = _open_normal_window(browser_page)
+    _inject_chart_fixture(chat)
+    chart = chat.locator("plotly-chart")
+    chart.wait_for()
+    browser_page.wait_for_timeout(500)
+
+    initial = _chart_dimensions(chart)
+    chat_width = chat.bounding_box()["width"]
+    assert initial["labels"] > 0
+    assert initial["hostWidth"] < chat_width
+    assert initial["canvasWidth"] == pytest.approx(initial["hostWidth"], abs=2)
+    assert initial["canvasRight"] <= initial["hostRight"] + 1
+
+    window = browser_page.locator("#agent-window")
+    window.evaluate("element => { element.style.width = '610px'; element.style.height = '680px'; }")
+    browser_page.wait_for_timeout(500)
+    resized = _chart_dimensions(chart)
+    assert resized["hostWidth"] >= initial["hostWidth"] + 160
+    assert resized["canvasWidth"] == pytest.approx(resized["hostWidth"], abs=2)
+    assert resized["canvasRight"] <= resized["hostRight"] + 1
+
+    chat.locator("button.maximize").click()
+    browser_page.wait_for_selector("vanna-chat.maximized")
+    browser_page.wait_for_timeout(500)
+    maximized = _chart_dimensions(chart)
+    assert maximized["hostWidth"] > resized["hostWidth"]
+    assert maximized["canvasWidth"] == pytest.approx(maximized["hostWidth"], abs=2)
+    assert maximized["canvasRight"] <= maximized["hostRight"] + 1
+    assert not console_errors
+
+
+def test_chart_stays_within_the_mobile_embedded_window(page) -> None:
+    browser_page, console_errors = page
+    browser_page.set_viewport_size({"width": 390, "height": 844})
+    chat = _open_normal_window(browser_page)
+    _inject_chart_fixture(chat)
+    chart = chat.locator("plotly-chart")
+    chart.wait_for()
+    browser_page.wait_for_timeout(500)
+
+    dimensions = _chart_dimensions(chart)
+    document_widths = browser_page.evaluate(
+        """() => ({
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: document.documentElement.scrollWidth
+        })"""
+    )
+    assert dimensions["labels"] > 0
+    assert dimensions["canvasWidth"] == pytest.approx(dimensions["hostWidth"], abs=2)
+    assert dimensions["canvasRight"] <= dimensions["hostRight"] + 1
+    assert document_widths["scrollWidth"] == document_widths["clientWidth"]
     assert not console_errors
