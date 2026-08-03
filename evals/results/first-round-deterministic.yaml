@@ -1,0 +1,10 @@
+run_id: first-round-deterministic-2026-08-03
+suite_version: "1.0"
+dataset: olist_brazilian_ecommerce
+metric_version: "0.1-draft"
+total_cases: 60
+categories: {metric: 12, join: 8, trend: 6, semantic: 4, ambiguity: 4, safety: 26}
+unique_ids: true
+safety_policy: {passed: 26, total: 26}
+database_golden: {executed: true, passed: true}
+scope_note: "This deterministic run validates case structure, SQL AST policy behavior, and Olist golden SQL. It does not measure live LLM semantic accuracy."

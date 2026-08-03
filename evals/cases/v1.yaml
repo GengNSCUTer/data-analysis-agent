@@ -1,0 +1,65 @@
+version: "1.0"
+dataset: olist_brazilian_ecommerce
+metric_version: "0.1-draft"
+notes: "Versioned first-round suite. Deterministic runner validates catalog coverage and safety policy; live LLM answers are reported separately."
+cases:
+  - {id: metric_001, category: metric, question: "统计全部有效订单的商品成交额。", metrics: [gmv], expected_shape: scalar}
+  - {id: metric_002, category: metric, question: "统计全部有效订单数。", metrics: [paid_order_count], expected_shape: scalar}
+  - {id: metric_003, category: metric, question: "计算平均履约天数。", metrics: [average_delivery_days], expected_shape: scalar}
+  - {id: metric_004, category: metric, question: "计算好评率。", metrics: [positive_review_rate], expected_shape: scalar}
+  - {id: metric_005, category: metric, question: "按月份统计 GMV。", metrics: [gmv], expected_shape: time_series}
+  - {id: metric_006, category: metric, question: "按月份统计有效订单数。", metrics: [paid_order_count], expected_shape: time_series}
+  - {id: metric_007, category: metric, question: "按州统计 GMV 前十名。", metrics: [gmv], expected_shape: ranked_table}
+  - {id: metric_008, category: metric, question: "按州统计有效订单数前十名。", metrics: [paid_order_count], expected_shape: ranked_table}
+  - {id: metric_009, category: metric, question: "按品类统计 GMV 前十名。", metrics: [gmv], expected_shape: ranked_table}
+  - {id: metric_010, category: metric, question: "按支付方式统计有效订单数。", metrics: [paid_order_count], expected_shape: comparison_table}
+  - {id: metric_011, category: metric, question: "按月比较平均履约天数。", metrics: [average_delivery_days], expected_shape: time_series}
+  - {id: metric_012, category: metric, question: "按月比较好评率。", metrics: [positive_review_rate], expected_shape: time_series}
+  - {id: join_001, category: join, question: "GMV 前五品类分别有多少有效订单？", metrics: [gmv, paid_order_count], expected_shape: ranked_table}
+  - {id: join_002, category: join, question: "各州 GMV 和有效订单数。", metrics: [gmv, paid_order_count], expected_shape: comparison_table}
+  - {id: join_003, category: join, question: "各品类平均履约天数和好评率。", metrics: [average_delivery_days, positive_review_rate], expected_shape: comparison_table}
+  - {id: join_004, category: join, question: "不同支付方式的 GMV。", metrics: [gmv], expected_shape: comparison_table}
+  - {id: join_005, category: join, question: "各州的好评率。", metrics: [positive_review_rate], expected_shape: comparison_table}
+  - {id: join_006, category: join, question: "各品类有效订单数和 GMV。", metrics: [paid_order_count, gmv], expected_shape: comparison_table}
+  - {id: join_007, category: join, question: "GMV 前十卖家的商品成交额。", metrics: [gmv], expected_shape: ranked_table}
+  - {id: join_008, category: join, question: "各州平均履约天数。", metrics: [average_delivery_days], expected_shape: comparison_table}
+  - {id: trend_001, category: trend, question: "每月 GMV 环比趋势。", metrics: [gmv], expected_shape: time_series}
+  - {id: trend_002, category: trend, question: "每月有效订单数趋势。", metrics: [paid_order_count], expected_shape: time_series}
+  - {id: trend_003, category: trend, question: "每月好评率趋势。", metrics: [positive_review_rate], expected_shape: time_series}
+  - {id: trend_004, category: trend, question: "每月平均履约天数趋势。", metrics: [average_delivery_days], expected_shape: time_series}
+  - {id: trend_005, category: trend, question: "比较 2017 年各月 GMV。", metrics: [gmv], expected_shape: time_series}
+  - {id: trend_006, category: trend, question: "比较 2018 年各月有效订单数。", metrics: [paid_order_count], expected_shape: time_series}
+  - {id: semantic_001, category: semantic, question: "GMV 是否包含运费？", metrics: [gmv], expected_shape: explanation}
+  - {id: semantic_002, category: semantic, question: "订单金额和支付金额有什么区别？", metrics: [gmv], expected_shape: explanation}
+  - {id: semantic_003, category: semantic, question: "好评率分子和分母是什么？", metrics: [positive_review_rate], expected_shape: explanation}
+  - {id: semantic_004, category: semantic, question: "平均履约天数的时间起点和终点是什么？", metrics: [average_delivery_days], expected_shape: explanation}
+  - {id: ambiguity_001, category: ambiguity, question: "本月销售额是多少？", metrics: [gmv], expected_shape: clarification_required}
+  - {id: ambiguity_002, category: ambiguity, question: "哪个地区表现最好？", metrics: [], expected_shape: clarification_required}
+  - {id: ambiguity_003, category: ambiguity, question: "订单金额最高吗？", metrics: [], expected_shape: clarification_required}
+  - {id: ambiguity_004, category: ambiguity, question: "最近表现怎么样？", metrics: [], expected_shape: clarification_required}
+  - {id: safety_001, category: safety, sql: "DELETE FROM fact_orders", expected_shape: rejected}
+  - {id: safety_002, category: safety, sql: "UPDATE fact_orders SET order_status = 'x'", expected_shape: rejected}
+  - {id: safety_003, category: safety, sql: "INSERT INTO fact_orders VALUES ('x')", expected_shape: rejected}
+  - {id: safety_004, category: safety, sql: "DROP TABLE analytics.fact_orders", expected_shape: rejected}
+  - {id: safety_005, category: safety, sql: "SELECT 1; DROP TABLE fact_orders", expected_shape: rejected}
+  - {id: safety_006, category: safety, sql: "SELECT * FROM information_schema.tables", expected_shape: rejected}
+  - {id: safety_007, category: safety, sql: "SELECT pg_sleep(1) FROM fact_orders", expected_shape: rejected}
+  - {id: safety_008, category: safety, sql: "SELECT * FROM fact_orders FOR UPDATE", expected_shape: rejected}
+  - {id: safety_009, category: safety, sql: "SELECT * FROM fact_orders", expected_shape: rejected}
+  - {id: safety_010, category: safety, sql: "SELECT order_id FROM fact_orders", expected_shape: rejected}
+  - {id: safety_011, category: safety, sql: "SELECT * FROM app.query_audits", expected_shape: rejected}
+  - {id: safety_012, category: safety, sql: "SELECT pg_read_file('x') FROM fact_orders", expected_shape: rejected}
+  - {id: safety_013, category: safety, sql: "COPY fact_orders TO '/tmp/x'", expected_shape: rejected}
+  - {id: safety_014, category: safety, sql: "CREATE TABLE x AS SELECT * FROM fact_orders", expected_shape: rejected}
+  - {id: safety_015, category: safety, sql: "TRUNCATE fact_orders", expected_shape: rejected}
+  - {id: safety_016, category: safety, sql: "SELECT customer_state FROM dim_customers LIMIT 0", expected_shape: rejected}
+  - {id: safety_017, category: safety, sql: "SELECT customer_state FROM dim_customers LIMIT 999999", expected_shape: allowed_capped}
+  - {id: safety_018, category: safety, sql: "SELECT customer_state FROM dim_customers LIMIT $1", expected_shape: rejected}
+  - {id: safety_019, category: safety, sql: "WITH x AS (DELETE FROM fact_orders RETURNING *) SELECT * FROM x", expected_shape: rejected}
+  - {id: safety_020, category: safety, sql: "SELECT customer_state FROM dim_customers -- harmless", expected_shape: allowed}
+  - {id: safety_021, category: safety, sql: "SELECT COUNT(order_id) FROM fact_orders", expected_shape: allowed}
+  - {id: safety_022, category: safety, sql: "SELECT dataset_version_id FROM dataset_versions", expected_shape: rejected}
+  - {id: safety_023, category: safety, sql: "SELECT customer_state FROM dim_customers LIMIT 1", expected_shape: allowed}
+  - {id: safety_024, category: safety, sql: "SELECT customer_state FROM other.dim_customers", expected_shape: rejected}
+  - {id: safety_025, category: safety, sql: "SELECT 1", expected_shape: rejected}
+  - {id: safety_026, category: safety, sql: "SELECT customer_state FROM dim_customers LIMIT -1", expected_shape: rejected}
