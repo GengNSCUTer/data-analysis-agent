@@ -395,7 +395,7 @@ class Agent:
         if conversation_id is None:
             conversation_id = str(uuid.uuid4())
 
-        request_id = str(uuid.uuid4())
+        request_id = request_context.metadata.get("request_id") or str(uuid.uuid4())
 
         # Update status to working
         yield UiComponent(  # type: ignore
@@ -531,13 +531,22 @@ class Agent:
                 ui_features_available.append(feature_name)
 
         # Create context with observability provider and UI features
+        context_metadata = dict(request_context.metadata)
+        context_metadata.update(
+            {
+                "ui_features_available": ui_features_available,
+                # Tool implementations can persist the user question without relying
+                # on an LLM-generated argument or a second application-side store.
+                "question": message,
+            }
+        )
         context = ToolContext(
             user=user,
             conversation_id=conversation_id,
             request_id=request_id,
             agent_memory=self.agent_memory,
             observability_provider=self.observability_provider,
-            metadata={"ui_features_available": ui_features_available},
+            metadata=context_metadata,
         )
 
         # Enrich context with additional data with observability

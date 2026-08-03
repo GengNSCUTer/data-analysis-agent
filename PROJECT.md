@@ -90,16 +90,16 @@
 
 ## 5. 总体设计
 
-### 5.0 当前运行基线（Phase 1）
+### 5.0 当前运行基线（Phase 1 与可信查询原型）
 
-当前先验证 Vanna 本身的真实能力，不提前实现自建平台。唯一运行入口是
+基础冒烟入口仍是
 `examples/siliconflow_sqlite_web_demo.py`：它创建本地合成 SQLite fixture，使用
 Vanna 的 `Agent`、`ToolRegistry`、`SqliteRunner`、`OpenAILlmService` 和原生 FastAPI
 路由，页面由 Vanna 原生 `<vanna-chat>` 提供。模型通过 `.env` 中的
 `SILICONFLOW_API_KEY` / `SILICONFLOW_BASE_URL` 调用
 `deepseek-ai/DeepSeek-V4-Flash`，服务监听 `127.0.0.1:32009`。
 
-同一 FastAPI 进程还提供 `/embedded-demo`：这是一个无框架的经营总览宿主页，加载 CDN
+同一 FastAPI 进程还提供 `/embedded-demo`：这是一个无框架的经营总览宿主页，加载本地构建
 版 `<vanna-chat>`，以中文标题、提示词和 `window-state-changed` 事件组合原生组件。组件
 初始为最小化入口；桌面端已验证最小化、恢复、最大化及真实 SSE 结果，390px 宽移动端已
 验证没有页面横向溢出。`RunSqlTool` 使用项目注入的 `LocalFileSystem`，默认将下游 CSV
@@ -112,9 +112,16 @@ Vanna 2.0.2 自带的 RichText Markdown 解析器没有实现表格语法，导�
 在 `/static/vanna-components.js` 提供，根页面与宿主页共用该 bundle。该改动是为修复已验证
 的原生组件缺陷，不是另建前端框架；`node_modules/` 和 `dist/` 均为忽略的本地构建产物。
 
-这一步的目标是确认“中文问题 → LLM 工具调用 → SQL → 结果表 → 中文总结 → SSE/UI”
-闭环，而不是冻结最终数据模型、SQL 安全策略或 Next.js 页面。SQLite fixture 只用于
-可重复的冒烟验证，不代表最终业务数据。
+可信查询原型入口为 `examples/trusted_olist_web_demo.py`，监听 `127.0.0.1:32010`。它以
+`SecurePostgresRunner` 将 Vanna 的唯一 SQL 工具固定到 PostgreSQL `analytics` Schema：每条
+SQL 先通过 `sqlglot` AST 策略，再由 `daa_analytics_reader` 只读角色执行，并通过
+`daa_app_writer` 写入 `app.query_audits`。Demo 以 `X-Demo-Role: analyst|admin` 和
+`X-Demo-User` 模拟身份，不能视为真实认证。`/api/project/evidence` 提供数据/指标版本，
+`/api/project/audits` 按角色返回审计历史；真实浏览器与 SSE 已验证中文问题、结果表、中文
+结论、最终 SQL 和审计记录闭环。
+
+SQLite fixture 只用于可重复的上游冒烟验证，不代表最终业务数据；可信原型使用已加载的
+Olist 分析表。图表和真实认证尚未实现，仍属于后续阶段。
 
 ```text
 既有业务网页 / 静态演示宿主页
@@ -287,12 +294,13 @@ v1 发布门槛：
 退出条件：页面可访问，模型可实际调用 `run_sql`，结果表与中文结论在浏览器可见，且
 不提交 `.env` 或生成的 SQLite 文件。以上条件已通过。
 
-### Phase 2：数据与领域建模（当前）
+### Phase 2：数据与领域建模（已完成）
 
 - 确定 Olist 主案例的表范围；
 - 编写数据集清单、许可证/署名约束、分析 Schema、数据字典；
 - 起草第一批指标定义、最小合成测试 fixture 和 20 条评测问题；
-- 暂不下载原始数据，不创建 PostgreSQL，不将草案口径描述为已冻结生产能力。
+- 原始数据在仓库外完成 checksum 核验、确定性转换和 PostgreSQL 真实加载；固化核心指标
+  golden 基线，仍不将草案口径描述为生产口径。
 
 本阶段文档入口：[`data/manifest/datasets.yaml`](data/manifest/datasets.yaml)、
 [`docs/data-dictionary.md`](docs/data-dictionary.md)、[`docs/metric-catalog.md`](docs/metric-catalog.md)、
@@ -308,11 +316,12 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 完整 `tox` 环境，也不执行需要真实 SiliconFlow 调用和浏览器的 E2E；后者必须在本机用
 `RUN_VANNA_E2E=1` 显式触发，不能把开发密钥写入 GitHub Actions。
 
-### Phase 3：可信查询后端
+### Phase 3：可信查询后端（进行中）
 
 - 创建 FastAPI 应用、认证/角色占位、PostgreSQL 双角色配置；
-- 接入 Vanna Agent 与受控工具；
-- 实现 `sqlglot` SQL Policy、超时/行数限制、审计与证据对象。
+- 已接入 Vanna Agent 与受控工具，真实查询只能通过策略和 `daa_analytics_reader`；
+- 已实现 `sqlglot` SQL Policy、超时/行数限制、持久审计、指标与数据版本证据；
+- 待完成真实认证、角色行范围、受控图表及完整 API/数据库集成测试。
 
 ### Phase 4：嵌入式交互与证据呈现
 
@@ -332,9 +341,9 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 开发模型、SQLite 合成冒烟 fixture、Olist 主展示案例草案、后续再引入 PostgreSQL 和
 v1 不引入 Redis。
 
-待在 Phase 2 合同冻结后确认：数据加载方式、PostgreSQL 角色、认证方案、组织/行级
-权限的演示粒度、首批指标的人工 golden 结果和评测题标准答案。独立 Next.js/TailAdmin
-外壳不再作为候选默认方案。
+已确认数据加载方式、PostgreSQL 双角色和首批核心指标 golden 结果。待确认真实认证方式、
+组织/行级权限的演示粒度、评测题标准答案与图表受控生成方案。独立 Next.js/TailAdmin 外壳
+不再作为候选默认方案。
 
 ## 11. 变更记录
 
@@ -360,3 +369,5 @@ v1 不引入 Redis。
 | 2026-08-03 | 本地 PostgreSQL 实例 | 确认其他项目分别占用 35432/35433，随后以用户态 PostgreSQL 12.20 在本项目专属仓库外目录启动 `data_analysis_agent`，仅监听 `127.0.0.1:35434`。本轮未加载 Olist 数据。 |
 | 2026-08-03 | Olist 真实入库与 golden 基线 | analytics 8 表已真实加载到项目专属 PostgreSQL，行数与转换报告一致、关联质量违规为 0；固化 GMV 13,494,400.74、有效订单 98,207、平均履约 12.558702 天、好评率 0.770680 的技术回归基线。业务口径仍标记为草案。 |
 | 2026-08-03 | SQL 安全内核与数据库角色 | 新增 `sqlglot` AST 策略与 PostgreSQL 双角色：Agent 查询角色仅可读取 `analytics`，应用写角色仅可写审计表。策略已覆盖单语句、只读 AST、Schema/表/列白名单、敏感投影限制、函数拒绝与角色化 LIMIT；尚未接入 Vanna 运行入口。 |
+| 2026-08-03 | 可信 Olist 查询闭环 | 新增 `trusted_olist_web_demo.py`、受控 PostgreSQL Runner、指标上下文和持久审计；真实 SSE 已验证中文州订单问题、策略归一化 SQL、结果表、中文结论及数据/指标版本记录。`analyst` 无法访问 `app`，查询账号与审计写账号已分离；身份仍为演示请求头。 |
+| 2026-08-03 | 嵌入式窄浮窗修复 | 将 Vanna Web Component 的窄布局从视口媒体查询改为组件容器查询，修复宽屏宿主页中 440px 浮窗被进度栏挤压的问题。宿主页改为展示 Olist 真实 golden 指标和州排名，不再展示合成华东/华南数据。 |

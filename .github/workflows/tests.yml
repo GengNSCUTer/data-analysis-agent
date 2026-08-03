@@ -33,9 +33,13 @@ jobs:
           tests/test_llm_context_enhancer.py \
           tests/test_workflow.py \
           tests/test_memory_tools.py \
-          tests/test_olist_transform.py
+          tests/test_olist_transform.py \
+          tests/test_sql_policy.py \
+          tests/test_run_sql_tool.py
     - name: Compile project demo entry points
-      run: python -m compileall -q examples/siliconflow_sqlite_web_demo.py
+      run: python -m compileall -q \
+        examples/siliconflow_sqlite_web_demo.py \
+        examples/trusted_olist_web_demo.py
     - name: Build embedded chat component
       working-directory: frontends/webcomponent
       run: |

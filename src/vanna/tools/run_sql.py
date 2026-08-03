@@ -62,7 +62,7 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
             # Determine query type
             query_type = args.sql.strip().upper().split()[0]
 
-            if query_type == "SELECT":
+            if query_type in {"SELECT", "WITH"}:
                 # Handle SELECT queries with results
                 if df.empty:
                     result = "Query executed successfully. No rows returned."

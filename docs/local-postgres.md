@@ -23,4 +23,6 @@ loopback；TCP 使用 SCRAM 认证，当前用户可通过本机 Unix Socket 进
 ```
 
 服务由用户态 `pg_ctl` 启动，不依赖 Docker 或 systemd。Olist analytics 数据已通过
-`load_olist_local.sh` 真实加载；应用角色配置仍作为后续独立迭代执行。
+`load_olist_local.sh` 真实加载；脚本在数据事务提交后会幂等执行 `security.sql`，重建
+`daa_analytics_reader` 与 `daa_app_writer` 的最小权限。前者只可读 `analytics`，后者只可写
+`app.query_audits`，应用不得使用超级用户或混用两种角色。

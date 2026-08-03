@@ -37,6 +37,12 @@ class ChatHandler:
         conversation_id = request.conversation_id or self._generate_conversation_id()
         # Use request_id from client for tracking, or use the one generated internally
         request_id = request.request_id or str(uuid.uuid4())
+        # Preserve the server-side trace identifier for tool-level audit records.
+        # The Agent owns ToolContext creation, so pass this through RequestContext metadata.
+        request.request_context.metadata = {
+            **request.request_context.metadata,
+            "request_id": request_id,
+        }
 
         async for component in self.agent.send_message(
             request_context=request.request_context,

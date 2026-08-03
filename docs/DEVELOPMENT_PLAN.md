@@ -1,7 +1,7 @@
 # Data Analysis Agent｜开发计划
 
-> 状态：Phase 1 嵌入式 Vanna 基线审计已完成；数据与领域合同保留为下一项主线工作。
-> 最近更新：2026-08-02
+> 状态：Phase 1 和 Phase 2 已完成；Phase 3 可信查询后端已跑通首个真实 Olist 闭环。
+> 最近更新：2026-08-03
 
 ## 1. 开发原则
 
@@ -47,9 +47,9 @@ FastAPI：身份/角色、指标上下文、Vanna Agent、SQL Policy、证据和
 PostgreSQL：analytics（业务数据）+ app（会话/审计/指标/评测）
 ```
 
-当前原型不实现这套完整架构。当前只使用 Vanna 原生 FastAPI 路由、原生 Web Component、
-SQLite 合成数据和 SiliconFlow；不再计划创建独立 `frontend/`、Next.js 或 TailAdmin。
-后续项目代码放入 `src/data_analysis_agent/`，PostgreSQL 只在受控查询阶段引入。
+当前保留 SQLite 合成原型作为上游回归入口，并新增真实 Olist 可信原型：FastAPI、原生
+Web Component、PostgreSQL、Vanna 受控 SQL 工具与 SiliconFlow。项目不再计划创建独立
+`frontend/`、Next.js 或 TailAdmin；自有查询内核放在 `src/data_analysis_agent/`。
 
 ## 4. 阶段计划
 
@@ -93,7 +93,7 @@ SQLite 合成数据和 SiliconFlow；不再计划创建独立 `frontend/`、Next
 退出条件：上述闭环可重复运行；API Key、SQLite 文件和测试产物不提交；记录 Vanna
 当前缺口（原生认证演示、图表触发、SQL 写操作默认行为等）。
 
-### Phase 2｜数据和领域合同（当前，第一批草案已完成）
+### Phase 2｜数据和领域合同（已完成）
 
 目标：把合成表替换为可解释、可复现的数据资产，并冻结第一版业务口径。
 
@@ -111,11 +111,12 @@ SQLite 合成数据和 SiliconFlow；不再计划创建独立 `frontend/`、Next
 `data/fixtures/sales_daily.csv` 和 `evals/cases/draft.yaml`。这些是版本化草案，
 尚未代表生产口径已冻结。Olist 的 Kaggle version 2、许可证、9 个 CSV 清单、原始列名、
 行数和 SHA-256 已于 2026-08-03 记录到 manifest；原始 ZIP/CSV 仅保存在仓库外目录，未提交 Git。
+analytics 8 表已真实加载并以 golden SQL 复核核心指标。
 
 退出条件：每个指标都能由人工依据字典写出明确 SQL；数据可从空环境重建；没有把
 “让模型自行猜口径”当作设计；至少完成一次原始数据许可、质量和 golden 结果复核。
 
-### Phase 3｜受控查询后端
+### Phase 3｜受控查询后端（进行中）
 
 目标：在真实数据上建立安全、可审计的自有查询内核。
 
@@ -127,6 +128,11 @@ SQLite 合成数据和 SiliconFlow；不再计划创建独立 `frontend/`、Next
 4. 按角色提供受控 Schema/指标上下文；
 5. 记录候选 SQL、最终 SQL、策略决策、模型配置、指标/数据版本、耗时和结果摘要；
 6. 编写正常、歧义、无权限、越权和恶意 SQL 集成测试。
+
+当前已完成：`SqlPolicy`、双 PostgreSQL 角色、受控 `SecurePostgresRunner`、版本化指标上下文、
+持久 `app.query_audits` 与 `examples/trusted_olist_web_demo.py`。真实 SSE 已验证“按客户州
+统计有效订单数前五名”返回 5 行表格与中文结论，审计保存请求 ID、问题、原始/最终 SQL、版本、
+耗时和行数。受信服务为 `127.0.0.1:32010`，screen 名为 `data-analysis-agent-trusted`。
 
 退出条件：任何 Agent SQL 都经过策略层和数据库只读权限；失败不编造结论；关键事件
 可由 request ID 回放。
@@ -180,7 +186,7 @@ Conventional Commit 提交并推送 `origin`。
 
 ## 6. 近期下一步
 
-1. 对 Olist 数据源、许可、字段质量和指标草案进行人工核验，形成 v1 数据合同；
-2. 基于数据合同建立可重复的分析表、合成关联 fixture 和指标 golden tests；
-3. 在数据合同冻结后创建 PostgreSQL/自有 SQL 策略边界，不提前引入 Redis、队列或独立前端框架；
-4. 到图表工具和证据对象实际接入后，再补图表和角色化 SQL 可见性的 E2E。
+1. 为可信服务补 PostgreSQL 集成测试、真实认证替换接口与角色行范围策略；
+2. 在宿主页中展示受角色保护的最终 SQL、审计历史和指标证据；
+3. 设计受控 Plotly 图表工具并补图表/证据 E2E；
+4. 将评测扩展到至少 60 个用例，并运行可复现的安全与语义回归报告。

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>经营总览 | 数据分析智能体</title>
+    <title>Olist 经营分析 | 数据分析智能体</title>
     <script type="module" src="/static/vanna-components.js"></script>
     <style>
       :root {
@@ -120,42 +120,45 @@
   </head>
   <body data-vanna-window-state="loading">
     <header class="topbar">
-      <div class="brand">星云经营中心</div>
-      <div class="workspace">华东与华南业务组</div>
+      <div class="brand">Olist 经营分析</div>
+      <div class="workspace">公开数据集演示环境</div>
     </header>
     <main>
       <div class="page-heading">
         <div>
-          <h1>经营总览</h1>
-          <p class="period">2026 年 7 月 1 日至 7 月 2 日</p>
+          <h1>电商经营总览</h1>
+          <p class="period">数据覆盖 2016 年 9 月至 2018 年 10 月</p>
         </div>
-        <div class="updated">数据更新于 10:30</div>
+        <div class="updated">Olist Brazilian E-Commerce · v2</div>
       </div>
 
       <section class="metric-grid" aria-label="核心经营指标">
-        <article class="metric"><div class="metric-label">成交额</div><div class="metric-value">207,630</div><div class="metric-change">较上一周期 +6.4%</div></article>
-        <article class="metric"><div class="metric-label">支付订单数</div><div class="metric-value">833</div><div class="metric-change">较上一周期 +4.1%</div></article>
-        <article class="metric"><div class="metric-label">平均履约时长</div><div class="metric-value">2.5 天</div><div class="metric-change caution">较上一周期 +0.2 天</div></article>
-        <article class="metric"><div class="metric-label">好评率</div><div class="metric-value">92.1%</div><div class="metric-change">较上一周期 +0.8%</div></article>
+        <article class="metric"><div class="metric-label">GMV</div><div class="metric-value">13,494,400.74</div><div class="metric-change">BRL · 不含运费</div></article>
+        <article class="metric"><div class="metric-label">有效订单数</div><div class="metric-value">98,207</div><div class="metric-change">排除取消与不可用订单</div></article>
+        <article class="metric"><div class="metric-label">平均履约时长</div><div class="metric-value">12.56 天</div><div class="metric-change caution">已送达订单 · 实际送达减下单</div></article>
+        <article class="metric"><div class="metric-label">好评率</div><div class="metric-value">77.07%</div><div class="metric-change">评分大于等于 4 的评价占比</div></article>
       </section>
 
       <section class="content-grid">
         <article class="section">
-          <h2>区域经营表现</h2>
+          <h2>有效订单数前五州</h2>
           <table class="table">
-            <thead><tr><th>区域</th><th>成交额</th><th>支付订单数</th><th>好评率</th></tr></thead>
+            <thead><tr><th>州代码</th><th>有效订单数</th><th>排序</th><th>数据版本</th></tr></thead>
             <tbody>
-              <tr><td>华东</td><td>113,130</td><td>449</td><td>93.0%</td></tr>
-              <tr><td>华南</td><td>94,500</td><td>384</td><td>90.8%</td></tr>
+              <tr><td>SP</td><td>41,127</td><td>1</td><td>olist-kaggle-v2</td></tr>
+              <tr><td>RJ</td><td>12,698</td><td>2</td><td>olist-kaggle-v2</td></tr>
+              <tr><td>MG</td><td>11,496</td><td>3</td><td>olist-kaggle-v2</td></tr>
+              <tr><td>RS</td><td>5,417</td><td>4</td><td>olist-kaggle-v2</td></tr>
+              <tr><td>PR</td><td>4,983</td><td>5</td><td>olist-kaggle-v2</td></tr>
             </tbody>
           </table>
         </article>
         <article class="section">
-          <h2>运营关注项</h2>
+          <h2>数据与查询边界</h2>
           <ul class="status-list">
-            <li><span class="status-label">华南数码履约</span><span class="status-value alert">3.3 天</span></li>
-            <li><span class="status-label">华东家居好评率</span><span class="status-value">94.5%</span></li>
-            <li><span class="status-label">异常待跟进</span><span class="status-value alert">2 项</span></li>
+            <li><span class="status-label">数据集</span><span class="status-value">Olist v2</span></li>
+            <li><span class="status-label">查询范围</span><span class="status-value">analytics Schema</span></li>
+            <li><span class="status-label">执行权限</span><span class="status-value alert">只读 SQL</span></li>
           </ul>
         </article>
       </section>
@@ -163,8 +166,8 @@
 
     <vanna-chat
       title="经营分析副驾"
-      subtitle="基于当前页面的经营数据"
-      placeholder="例如：比较各区域的成交额"
+      subtitle="基于 Olist 公开电商数据集"
+      placeholder="例如：按州统计有效订单数前五名"
       sse-endpoint="/api/vanna/v2/chat_sse"
       theme="light"
     ></vanna-chat>

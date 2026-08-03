@@ -13,4 +13,7 @@
 第二层是 `infra/postgres/security.sql`。`daa_analytics_reader` 只有 `analytics` 的
 `SELECT` 权限，默认只读事务和 5 秒语句超时；`daa_app_writer` 只能写 `app.query_audits`。
 当前用户态开发集群通过 Unix Socket 的本地信任认证运行，生产部署必须改为独立密码/密钥
-和受控网络认证。策略层和数据库权限层会在下一步共同接入 Vanna 的实际查询路径。
+和受控网络认证。`SecurePostgresRunner` 已是可信 Olist Demo 中 `RunSqlTool` 的唯一执行器：
+策略拒绝、允许执行和 PostgreSQL 失败均以 `daa_app_writer` 写入 `app.query_audits`；实际
+查询以 `daa_analytics_reader` 的只读事务和 5 秒超时执行。Demo 身份来自受控请求头，只用于
+演示角色策略，不能替代真实认证。

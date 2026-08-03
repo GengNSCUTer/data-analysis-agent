@@ -20,6 +20,7 @@ export class VannaChat extends LitElement {
       }
 
       :host {
+        container-type: inline-size;
         display: block;
         font-family: var(--vanna-font-family-default);
         --chat-primary: var(--vanna-accent-primary-default);
@@ -649,7 +650,8 @@ export class VannaChat extends LitElement {
         font-weight: 400;
       }
 
-      @media (max-width: 880px) {
+      /* The component can be embedded in a narrow desktop-side panel. */
+      @container (max-width: 880px) {
         .chat-layout {
           grid-template-columns: 1fr;
           height: min(600px, 85vh);
@@ -665,7 +667,7 @@ export class VannaChat extends LitElement {
         }
       }
 
-      @media (max-width: 600px) {
+      @container (max-width: 600px) {
         :host {
           border-radius: var(--vanna-border-radius-xl);
         }
