@@ -359,3 +359,4 @@ v1 不引入 Redis。
 | 2026-08-03 | PostgreSQL 本地加载工具 | 新增仅绑定 loopback 的 PostgreSQL Compose 编排、事务化加载脚本与核心指标 golden SQL。当前账户无 Docker daemon 权限，故只完成静态校验，未启动容器或执行真实加载。 |
 | 2026-08-03 | 本地 PostgreSQL 实例 | 确认其他项目分别占用 35432/35433，随后以用户态 PostgreSQL 12.20 在本项目专属仓库外目录启动 `data_analysis_agent`，仅监听 `127.0.0.1:35434`。本轮未加载 Olist 数据。 |
 | 2026-08-03 | Olist 真实入库与 golden 基线 | analytics 8 表已真实加载到项目专属 PostgreSQL，行数与转换报告一致、关联质量违规为 0；固化 GMV 13,494,400.74、有效订单 98,207、平均履约 12.558702 天、好评率 0.770680 的技术回归基线。业务口径仍标记为草案。 |
+| 2026-08-03 | SQL 安全内核与数据库角色 | 新增 `sqlglot` AST 策略与 PostgreSQL 双角色：Agent 查询角色仅可读取 `analytics`，应用写角色仅可写审计表。策略已覆盖单语句、只读 AST、Schema/表/列白名单、敏感投影限制、函数拒绝与角色化 LIMIT；尚未接入 Vanna 运行入口。 |
