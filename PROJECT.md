@@ -335,6 +335,8 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 完成部署说明、演示脚本、架构图、数据署名和项目 README；
 - 形成可量化且可诚实写入简历的项目成果。
 
+第一轮验收矩阵见 [`docs/first-round-acceptance.md`](docs/first-round-acceptance.md)。
+
 ## 10. 当前决策与待确认项
 
 已确认：单仓库 Vanna-first、Python/Conda、Vanna 原生 Web Component、SiliconFlow
