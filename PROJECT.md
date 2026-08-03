@@ -333,13 +333,21 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 已提供演示级签名会话：固定 `analyst` / `admin` 身份映射同时约束 SSE、SQL 策略与审计 API，
   页面可切换并展示其用途和非生产边界；旧请求头不能提升权限。
 - 已增加 PostgreSQL 会话/消息存储、Agent Run 台账、请求级预算和上下文裁剪基础；后端历史 API 已提供列表、详情和删除。
-- 待完成宿主页历史切换/新建会话控件、真实认证、角色行范围及完整浏览器/API 集成测试。
+- 宿主页已接入历史列表、点击恢复、刷新恢复、新建会话、删除失败提示和角色切换隔离；历史恢复只回放安全文字，不伪造原始 SQL、图表或 DataFrame 结果。
+- 仍待完成真实认证、角色行范围、结构化旧轮次摘要、Text-to-SQL Catalog/澄清/修复/结果校验及完整在线模型评测。
 
-### Phase 4：嵌入式交互与证据呈现
+### Phase 4：嵌入式交互与证据呈现（基础能力已完成）
 
 - 提供可嵌入既有网页的宿主页示例，控制 Vanna Web Component 的浮动/右侧面板状态；
 - 打通 SSE、表格、SQL、图表、指标证据和角色化展示；
+- 已完成历史会话列表、恢复、刷新恢复、新建会话和受控删除交互；6 条浏览器回归通过；
 - 不创建独立 Next.js/TailAdmin 应用。
+
+### Phase 4.5：平台基础收敛（进行中）
+
+- 已完成 PostgreSQL 会话/消息存储、Agent Run 台账、请求级工具/SQL/图表/输入/上下文/输出预算；
+- 已完成 starter 空会话生命周期修复，避免页面刷新制造零消息历史记录；
+- 下一项进入 Text-to-SQL 可靠性计划，先做在线基线，再实现 Catalog、澄清、一次修复和结果校验。
 
 ### Phase 5：评测、加固与作品集
 
@@ -370,6 +378,7 @@ v1 不引入 Redis。
 
 - [`docs/AGENT_PLATFORM_NEXT_PLAN.md`](docs/AGENT_PLATFORM_NEXT_PLAN.md)
 - [`docs/TEXT_TO_SQL_RESEARCH.md`](docs/TEXT_TO_SQL_RESEARCH.md)
+- [`plan/feature-text-to-sql-reliability-v1.md`](plan/feature-text-to-sql-reliability-v1.md)
 
 | 日期 | 事项 | 结论 |
 | --- | --- | --- |
@@ -407,3 +416,5 @@ v1 不引入 Redis。
 | 2026-08-03 | 项目级验证审查 | 对嵌入图表、演示会话、固定场景、对外文档和发布回归进行逐项审查：浏览器 E2E 5/5、策略/场景相关确定性测试 30 passed 1 skipped、项目 PostgreSQL 测试 6/6、60 条安全预期 26/26、3 条场景 golden 均通过；最近 GitHub Actions 通过。审查记录明确未覆盖真实认证、组织级 RLS、批量在线 LLM 准确率和生产部署。 |
 | 2026-08-03 | Agent 平台与 Text-to-SQL 专项调研 | 明确下一阶段优先做 PostgreSQL 持久会话、分层上下文、请求级工具/token 预算、歧义澄清、一次受限执行修复和结果级校验；对照 Vanna、Dataherald、WrenAI 及 2025--2026 Text-to-SQL 论文，暂缓多 Agent、Best-of-N、RL/专用训练、向量库和任意 Python 执行。详见两份专项文档。 |
 | 2026-08-03 | 第二轮 P0 基础设施骨架 | 新增 PostgreSQL `ConversationStore`、`conversations/messages/agent_runs` 表、`run_id` 审计关联、请求级工具/SQL/图表/输入/上下文/输出预算、上下文轮次裁剪和历史 API。11 项预算/上下文确定性测试、8 项 PostgreSQL/SQL runner/路由/run recorder 集成测试、run/audit 真实回链与应用装配检查通过；GitHub Actions run `30806496513`（commit `0a04c7d`）成功；宿主页历史控件和 P1 Text-to-SQL 可靠性增强尚未完成。详见 `plan/feature-agent-platform-v2.md` 与 `docs/verification-2026-08-03-v2.md`。 |
+| 2026-08-03 | P0 会话交互与空会话修复 | 宿主页完成历史列表、点击恢复、刷新恢复、新建会话、删除失败状态和角色切换隔离；嵌入窗口 E2E 6 条通过。starter UI 不再提前持久化零消息会话，历史 API 过滤遗留空记录；历史恢复只回放安全文字，不伪造 SQL/图表/DataFrame。 |
+| 2026-08-03 | Text-to-SQL 可靠性计划冻结 | 新增 `plan/feature-text-to-sql-reliability-v1.md`，把调研落成 5 个可执行阶段：在线基线、结构化 Catalog、确定性澄清、一次受限修复/结果校验、回归评测。当前均为计划，尚未把 Catalog、澄清、修复或结果验证描述为已实现能力。 |

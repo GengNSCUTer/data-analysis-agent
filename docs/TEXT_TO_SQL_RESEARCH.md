@@ -56,8 +56,23 @@ Text-to-SQL 的核心不是让模型“写出一条能执行的 SQL”，而是�
 - SQL 执行出错时没有项目级的一次受限修复契约；
 - 没有对空结果、Join 放大、指标列缺失和异常数值做结果级校验；
 - 没有置信度、拒答或人工确认机制；
-- 多轮会话和记忆尚未持久化，无法稳定评测多轮 Text-to-SQL；
+- 会话与消息已经持久化，宿主页已支持历史恢复和新建会话；但旧轮次仍以受预算约束的完整消息为主，
+  尚未形成结构化的指标/时间/筛选摘要，因而还不能稳定表达多轮 Text-to-SQL 的业务状态；
 - 确定性 SQL/golden 评测不等于 SiliconFlow 在线模型语义准确率。
+
+### 当前实现的代码证据
+
+- `src/data_analysis_agent/metric_context.py`：当前固定数据集/指标上下文和 Join 注意事项；尚未是
+  结构化 Catalog。
+- `src/data_analysis_agent/sql_policy.py` 与 `postgres_runner.py`：候选 SQL 的 AST、对象白名单、
+  敏感投影、LIMIT、超时和 PostgreSQL reader role 约束。
+- `src/data_analysis_agent/budget.py`、`context_builder.py`、`chat_runtime.py`：请求级工具/SQL/图表/输入/
+  上下文/输出预算、完整轮次裁剪和终止状态；上下文摘要和按问题 Schema 选择仍待实现。
+- `src/data_analysis_agent/conversation_store.py`、`run_recorder.py`：用户隔离的会话/消息和 Agent Run
+  记录；`examples/embedded_analyst_host.html` 与 `vanna-chat.ts` 已完成列表、恢复、刷新恢复和新建会话，
+  但历史详情只回放安全文字，不伪造历史 SQL、图表或 DataFrame。
+- `tests/e2e/test_trusted_embedded_window.py`：当前 6 条嵌入窗口回归通过；它证明交互和布局，不代表
+  在线模型 Text-to-SQL 语义准确率。
 
 ## 3. 开源平台对比
 
@@ -234,7 +249,8 @@ SQL、执行结果、是否需要修复、耗时和人工判定。指标至少�
   -> “和上一个结果比较好评率”
 ```
 
-每轮记录它依赖的时间、指标、筛选和上轮结果摘要，验证刷新恢复、上下文裁剪和用户隔离。
+刷新恢复、上下文裁剪和用户隔离已经有浏览器/API 覆盖；下一阶段还要为每轮记录它依赖的时间、指标、
+筛选和上轮结果摘要，才能评测“沿用上轮口径”是否正确。
 
 ## 6. 不同优化的优先级
 
@@ -243,7 +259,7 @@ SQL、执行结果、是否需要修复、耗时和人工判定。指标至少�
 | 指标/Schema Catalog | 很高 | P0/P1，先结构化和确定性检索 |
 | 一次执行修复 | 很高 | P1，限制 1 次并记录原因 |
 | 澄清和不可回答检测 | 很高 | P1，先规则化 |
-| 多轮 working memory | 很高 | P0，会话持久化 + 摘要 |
+| 多轮 working memory | 很高 | P0 持久会话已完成；P1 增加结构化指标/时间/筛选摘要 |
 | 结果级校验/拒答 | 很高 | P1，先确定性检查 |
 | Schema embedding 检索 | 中 | 大 Schema 或基线证明不足时再做 |
 | Best-of-N/多模型投票 | 低到中 | 成本高，当前暂缓 |
@@ -284,8 +300,8 @@ golden、是否应拒答和人工判定。报告必须分开统计执行正确�
   <https://skills.sh/collaborative-deep-research/agent-papers-cli/literature-review>
 
 本轮没有安装它们：当前任务需要的是对项目做一次可审阅的专项研究，外部 skill 本身不应成为
-运行时依赖。后续如果经常做论文追踪，可单独安装 literature-review；如果需要重复生成
-Text-to-SQL 实践模板，再考虑安装 text-to-sql skill。
+运行时依赖。`github-research` 和 `find-skills` 只用于仓库/技能发现；如果经常做论文追踪，可
+单独安装 literature-review；如果需要重复生成 Text-to-SQL 实践模板，再考虑安装 text-to-sql skill。
 
 ## 9. 研究限制
 

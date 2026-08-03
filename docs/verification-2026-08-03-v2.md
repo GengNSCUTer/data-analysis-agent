@@ -7,7 +7,7 @@
 
 本轮没有改写 Vanna Agent 核心，也没有引入新的前端框架、Redis、队列、多 Agent、MCP 或任意
 Python 执行。项目在现有 Vanna 原生 `<vanna-chat>` 和 PostgreSQL 双角色边界上增加了持久会话、
-运行台账、上下文裁剪和请求级预算的第一版适配器。
+运行台账、上下文裁剪和请求级预算的第一版适配器，并完成嵌入宿主页的历史恢复/新建会话交互。
 
 ## 已验证内容
 
@@ -23,6 +23,8 @@ Python 执行。项目在现有 Vanna 原生 `<vanna-chat>` 和 PostgreSQL 双�
 | 评测清单 | `scripts/run_project_evaluation.py`、`scripts/run_demo_scenario_evaluation.py` | 60 条用例唯一，26/26 安全预期通过；3 条 Demo 场景契约完整 |
 | 真实 run/audit 关联 | 创建临时 conversation/run，执行只读 SQL 后查询 `app.agent_runs` 与 `app.query_audits` | `termination_reason=completed`，`tool_calls_used=1`，audit 的 `run_id` 正确回链 |
 | 应用装配 | `from examples.trusted_olist_web_demo import create_app; create_app()` | 18 routes 注册成功，conversation 列表/详情/删除路由存在 |
+| 嵌入窗口会话回归 | `RUN_VANNA_E2E=1 RUN_PROJECT_DB=1 pytest -q -m integration tests/e2e/test_trusted_embedded_window.py` | 6 passed；覆盖拖拽、缩放、移动端、图表尺寸、签名角色会话、历史恢复/刷新恢复/新建会话 |
+| starter 空会话生命周期 | `RUN_PROJECT_DB=1 pytest -q tests/test_postgres_conversation_store.py` | 空 starter 请求不创建可见会话；历史列表过滤零消息遗留记录 |
 
 真实 run/audit 验证使用唯一临时用户和会话，验证后已删除临时会话及其级联消息/运行记录；没有
 把 API Key、数据库密码、原始 Olist 数据或查询结果写入仓库。
@@ -30,14 +32,16 @@ Python 执行。项目在现有 Vanna 原生 `<vanna-chat>` 和 PostgreSQL 双�
 ## 当前实现边界
 
 - PostgreSQL `ConversationStore` 已执行用户归属校验、分页上限、malformed ID 拒绝和 owner-only 删除；
-  路由 DTO 会隐藏 tool content/arguments。宿主页尚未接入历史列表、会话切换和新建会话控件。
+  路由 DTO 会隐藏 tool content/arguments。宿主页已接入历史列表、点击恢复、新建会话、刷新恢复和
+  删除失败状态；历史文字恢复不会伪造原始 SQL、图表或 DataFrame 结果。
 - `ContextBudgetFilter` 已按完整轮次、消息数和字符数裁剪并记录 `context_truncated`，尚未生成
   结构化旧轮次摘要或按问题检索 Schema/指标。
 - 总工具、`run_sql`、`visualize_data`、输入长度、上下文长度和输出 token 上限已接入 trusted Demo；
   provider 不返回 usage 时 token 成本保持未知。用户配额、费用台账和时延预算尚未实现。
 - `agent_runs` 当前保存模型名、数据/指标版本和预算配置；Prompt/Policy 独立版本列尚未加入，不能把
   当前记录描述成完整的 Prompt 级回放。
-- P1 的可回答性分类、澄清、一次受限 SQL 修复、结果级校验、选择性拒答和线上模型评测尚未实现。
+- P1 的 Catalog 检索、可回答性分类、澄清、一次受限 SQL 修复、结果级校验、选择性拒答和线上模型
+  语义评测尚未实现；它们的可执行计划见 `plan/feature-text-to-sql-reliability-v1.md`。
 - Ruff 已安装到项目专用 Conda 环境并通过本轮涉及文件的 lint/format；远端 GitHub Actions 已通过。
 
 完整 `pytest -q` 没有作为本项目发布门：它会主动收集 Vanna 上游的可选集成测试，本环境缺少
@@ -47,6 +51,6 @@ Ollama、ChromaDB、Snowflake 等可选依赖/服务，并包含一个未提供 
 
 ## 下一步
 
-先完成宿主页的 current/new/history 状态与 `conversation_id` 传递，再进入 Text-to-SQL P1：结构化
-Schema/指标 Catalog、确定性澄清、一次执行错误修复和结果级安全校验。每一项都必须单独记录
-执行正确性、业务语义正确性、安全合规、澄清质量、时延和 token 成本，不能用一次在线回答替代评测。
+进入 Text-to-SQL P1：先建立 60 条用例和 SiliconFlow 在线基线，再做结构化 Schema/指标 Catalog、
+确定性澄清、一次执行错误修复和结果级安全校验。每一项都必须单独记录执行正确性、业务语义正确性、
+安全合规、澄清质量、时延和 token 成本，不能用一次在线回答替代评测。

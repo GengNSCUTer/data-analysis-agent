@@ -18,6 +18,10 @@ replace Vanna's frontend or introduce a second repository. The first delivery sl
 conversation state, request budgets, and run evidence explicit. Later slices add Text-to-SQL
 clarification, execution repair, and result validation only after the foundation is measured.
 
+The P0 persistence/budget slice and the embedded host history slice are now implemented. The
+remaining Text-to-SQL work is tracked in [`plan/feature-text-to-sql-reliability-v1.md`](feature-text-to-sql-reliability-v1.md)
+so this document remains the foundation plan rather than a second competing roadmap.
+
 ## 1. Requirements & Constraints
 
 - **REQ-001**: Persist user-scoped conversation metadata and messages in the project PostgreSQL `app` schema through a Vanna `ConversationStore` implementation.
@@ -61,7 +65,7 @@ clarification, execution repair, and result validation only after the foundation
 | TASK-006 | Configure `examples/trusted_olist_web_demo.py` to inject the PostgreSQL store; deterministic unit tests use isolated adapters and the trusted demo has no implicit in-memory production fallback. | ✅ | 2026-08-03 |
 | TASK-007 | Add `/api/project/conversations`, `/api/project/conversations/{id}`, and delete endpoints with server-side session resolution, bounded pagination, and safe DTOs that omit tool arguments and sensitive content. | ✅ | 2026-08-03 |
 | TASK-008 | Add a project run recorder that links request, conversation, user, model/data/metric versions, budget usage, and terminal state; extend `query_audits` with `run_id` without breaking old rows. | ✅ | 2026-08-03 |
-| TASK-009 | Add frontend-host state for current/new conversation and safe history loading while retaining native `<vanna-chat>` as the chat surface. | | |
+| TASK-009 | Add frontend-host state for current/new conversation and safe history loading while retaining native `<vanna-chat>` as the chat surface. | ✅ | 2026-08-03 |
 
 ### Implementation Phase 3
 
@@ -93,9 +97,9 @@ clarification, execution repair, and result validation only after the foundation
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-020 | Run deterministic unit tests, PostgreSQL integration tests, security role tests, and browser E2E for refresh/new/history/budget states. | ◐ unit/DB/role/run linkage verified; browser history/budget E2E remains | 2026-08-03 |
+| TASK-020 | Run deterministic unit tests, PostgreSQL integration tests, security role tests, and browser E2E for refresh/new/history/budget states. | ◐ 6 browser E2E and DB/run linkage verified; budget terminal UI remains | 2026-08-03 |
 | TASK-021 | Run project evaluation and new multi-turn/clarification contracts; preserve exact command output in a dated verification document. | ◐ verification document added; P1 contracts remain | 2026-08-03 |
-| TASK-022 | Update `PROJECT.md`, `docs/AGENT_PLATFORM_NEXT_PLAN.md`, `docs/TEXT_TO_SQL_RESEARCH.md`, README/demo script, and the Feishu project record with verified facts and limitations. | ◐ local/Feishu records updated; README/demo follow-up remains | 2026-08-03 |
+| TASK-022 | Update `PROJECT.md`, `docs/AGENT_PLATFORM_NEXT_PLAN.md`, `docs/TEXT_TO_SQL_RESEARCH.md`, README/demo script, and the Feishu project record with verified facts and limitations. | ◐ local records updated; Feishu/README follow-up remains | 2026-08-03 |
 | TASK-023 | Review staged files for secrets, raw data, generated artifacts, and unsafe SQL before a Conventional Commit and `origin/main` push; verify GitHub Actions. | | |
 
 ## 3. Alternatives
