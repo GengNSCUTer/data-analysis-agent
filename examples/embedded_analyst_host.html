@@ -101,6 +101,15 @@
       .audit-sql { margin: 8px 0 0; max-height: 72px; overflow: auto; white-space: pre-wrap; color: #34424d; font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
       .badge { color: #0f766e; font-weight: 700; }
       .badge.rejected, .empty { color: #b45309; }
+      .demo-session { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e7ecef; }
+      .demo-session-title { margin: 0; color: #34424d; font-size: 14px; font-weight: 700; }
+      .demo-session-detail { margin: 7px 0 0; color: #64727d; font-size: 12px; line-height: 1.55; }
+      .role-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 12px; padding: 4px; background: #edf2f4; border-radius: 6px; }
+      .role-switch button { min-height: 32px; border: 0; border-radius: 4px; background: transparent; color: #52636f; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; }
+      .role-switch button[aria-pressed="true"] { background: #ffffff; color: #0f766e; box-shadow: 0 1px 2px rgba(23, 48, 66, .16); }
+      .role-switch button:focus-visible { outline: 2px solid #0f9ba6; outline-offset: 2px; }
+      .role-switch button:disabled { cursor: wait; opacity: .6; }
+      .session-error { min-height: 18px; margin: 8px 0 0; color: #b45309; font-size: 12px; }
 
       .agent-window {
         position: fixed;
@@ -237,6 +246,15 @@
             <li><span class="status-label">指标版本</span><span class="status-value">加载中</span></li>
             <li><span class="status-label">访问角色</span><span class="status-value">加载中</span></li>
           </ul>
+          <div class="demo-session" aria-label="演示角色会话">
+            <p class="demo-session-title">演示角色</p>
+            <p class="demo-session-detail">用于核验策略和审计范围差异，不是密码登录或生产认证。</p>
+            <div class="role-switch" role="group" aria-label="切换演示角色">
+              <button type="button" data-demo-role="analyst" aria-pressed="true">分析员</button>
+              <button type="button" data-demo-role="admin" aria-pressed="false">管理员</button>
+            </div>
+            <p id="session-error" class="session-error" aria-live="polite"></p>
+          </div>
         </article>
       </section>
 
@@ -395,6 +413,11 @@
       const escapeHtml = (value) => String(value ?? "").replace(/[&<>"]/g, (character) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"
       })[character]);
+      const roleButtons = [...document.querySelectorAll("[data-demo-role]")];
+      const sessionError = document.querySelector("#session-error");
+      const updateRoleButtons = (activeRole) => roleButtons.forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.demoRole === activeRole));
+      });
       async function refreshEvidence() {
         const [evidence, session, audits] = await Promise.all([
           fetch("/api/project/evidence").then((response) => response.json()),
@@ -404,8 +427,9 @@
         document.querySelector("#evidence-list").innerHTML = [
           ["数据版本", evidence.dataset_version],
           ["指标版本", evidence.metric_version],
-          ["访问角色", session.role + " · 演示身份"]
+          ["访问角色", session.role + " · 签名演示会话"]
         ].map(([label, value]) => `<li><span class="status-label">${escapeHtml(label)}</span><span class="status-value">${escapeHtml(value)}</span></li>`).join("");
+        updateRoleButtons(session.role);
         const auditList = document.querySelector("#audit-list");
         auditList.innerHTML = audits.length ? audits.slice(0, 5).map((audit) => `<article class="audit-item">
           <div class="audit-top"><span class="badge ${escapeHtml(audit.status)}">${escapeHtml(audit.status)}</span><span>${escapeHtml(audit.created_at)}</span></div>
@@ -414,6 +438,24 @@
           ${audit.final_sql ? `<pre class="audit-sql">${escapeHtml(audit.final_sql)}</pre>` : `<div class="audit-meta">${escapeHtml(audit.reason)}</div>`}
         </article>`).join("") : '<p class="empty">当前演示身份还没有查询历史。</p>';
       }
+      roleButtons.forEach((button) => button.addEventListener("click", async () => {
+        const role = button.dataset.demoRole;
+        if (!role || button.getAttribute("aria-pressed") === "true") return;
+        roleButtons.forEach((item) => { item.disabled = true; });
+        sessionError.textContent = "";
+        try {
+          const response = await fetch("/api/project/demo-session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role })
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          window.location.reload();
+        } catch (_) {
+          sessionError.textContent = "演示角色切换失败，请稍后重试。";
+          roleButtons.forEach((item) => { item.disabled = false; });
+        }
+      }));
       refreshEvidence().catch(() => {
         document.querySelector("#audit-list").innerHTML = '<p class="empty">查询历史暂时不可用。</p>';
       });

@@ -235,3 +235,29 @@ def test_chart_stays_within_the_mobile_embedded_window(page) -> None:
     assert dimensions["canvasRight"] <= dimensions["hostRight"] + 1
     assert document_widths["scrollWidth"] == document_widths["clientWidth"]
     assert not console_errors
+
+
+def test_demo_role_switch_uses_a_signed_session_not_request_headers(page) -> None:
+    browser_page, console_errors = page
+    browser_page.goto(f"{BASE_URL}/embedded-demo", wait_until="domcontentloaded")
+
+    unsigned_header_role = browser_page.evaluate(
+        """async () => (await fetch('/api/project/session', {
+          headers: { 'X-Demo-Role': 'admin', 'X-Demo-User': 'demo-admin' }
+        })).json()"""
+    )
+    assert unsigned_header_role["role"] == "analyst"
+    assert unsigned_header_role["auth_mode"] == "demo_signed_session"
+
+    with browser_page.expect_navigation(wait_until="domcontentloaded"):
+        browser_page.locator("[data-demo-role='admin']").click()
+
+    signed_session = browser_page.evaluate(
+        """async () => (await fetch('/api/project/session')).json()"""
+    )
+    assert signed_session["role"] == "admin"
+    assert signed_session["user_id"] == "demo-admin"
+    assert signed_session["is_demo"] is True
+    assert browser_page.locator("[data-demo-role='admin']").get_attribute("aria-pressed") == "true"
+    assert "不是密码登录或生产认证" in browser_page.locator(".demo-session").inner_text()
+    assert not console_errors

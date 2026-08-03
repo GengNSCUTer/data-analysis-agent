@@ -36,7 +36,10 @@ jobs:
           tests/test_olist_transform.py \
           tests/test_sql_policy.py \
           tests/test_run_sql_tool.py \
-          tests/test_project_evaluation.py
+          tests/test_project_evaluation.py \
+          tests/test_visualization_policy.py \
+          tests/test_trusted_workflow.py \
+          tests/test_demo_session.py
     - name: Run deterministic evaluation inventory
       run: python scripts/run_project_evaluation.py --output /tmp/project-evaluation.yaml
     - name: Compile project demo entry points
