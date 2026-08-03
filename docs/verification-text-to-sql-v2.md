@@ -14,7 +14,7 @@
 | SQL 方言 | PostgreSQL；`sqlglot` AST Policy；分析查询使用 `daa_analytics_reader` |
 | 语义目录 | `olist-catalog-v1`，9 张表（8 张分析表 + 1 张 admin-only 元数据表）、4 个指标、7 条 Join |
 | 请求预算 | 默认最多 4 次工具迭代、4 次工具调用、2 次 SQL、1 次图表调用、4000 输入字符、1200 输出 token |
-| 运行证据 | `app.agent_runs.catalog_trace` JSONB；会话 `app.conversations.working_memory` JSONB |
+| 运行证据 | `app.agent_runs.catalog_trace` JSONB；会话 `app.conversations.working_memory` JSONB；ToolContext 中的服务器 `ResultContract` 和版本字段 |
 
 ## 2. 已实现闭环
 
@@ -39,6 +39,9 @@ server user + question
   Agent、不消耗 SQL/tool budget，并把问题和缺失字段写入用户所属会话。
 - `WorkingMemory` 只接受结构化服务端字段（指标、时间、维度、筛选、比较基线、上一结果摘要），
   不从助手自然语言猜测；补充时间后能恢复原指标。
+- `ResultContract` 在 Catalog/WorkingMemory 之后由服务器构建，向 `ToolContext` 传递指标列、合法时间
+  别名、请求时间范围、选中的 Join 和 `catalog/dataset/metric/policy` 版本；客户端同名 metadata 会被
+  服务器派生值覆盖。Catalog Prompt 要求指标使用 `metric_id` 别名、时间分组使用 `time` 别名。
 - `OneShotSqlRepair` 对错误只传稳定类别和安全提示，候选 SQL 必须重新通过完整 `SqlPolicy`；
   `postgres_runner.py` 对数据库异常向 Agent 暴露安全分类，不泄漏驱动堆栈。
 - `ResultValidator` 将空结果、缺少指标列、非有限数值、时间越界、行数截断和 Join 放大表示为
@@ -68,6 +71,9 @@ server user + question
 - 错误分类、一次修复、候选 SQL Policy 二次校验、修复提示长度和无原始错误泄漏；
 - 结果缺列、空集、非有限数值、行数截断、时间覆盖和 Join 放大拒答。
 
+当前专项回归结果：`68 passed`。项目 PostgreSQL 会话/Runner/路由/run recorder 集成验证为
+`9 passed, 1 warning`；警告来自 Starlette/httpx 的弃用提示，不是项目失败。
+
 项目 PostgreSQL 连接可选验证：
 
 ```bash
@@ -94,12 +100,13 @@ Schema 权限和真实 Olist 查询审计。它不调用 SiliconFlow，不代表
 
 ## 5. 未完成与限制
 
-- 当前 `ResultValidator` 的指标列、时间列、请求时间范围和 Join 元数据已定义为运行时合同，仍需从
-  Catalog/WorkingMemory 传入 `ToolContext` 并在真实 PostgreSQL 查询中验证；Prompt 需要显式展示
-  Catalog、数据集、指标、策略和提示版本，才能形成完整可回放证据。
+- 当前 `ResultValidator` 的指标列、时间列、请求时间范围和 Join 元数据已经由服务器从
+  Catalog/WorkingMemory 构建为 `ResultContract` 并传入 `ToolContext`；版本合同也已进入 Catalog Prompt、
+  固定系统 Prompt、Agent Run trace 和 SQL 审计。Runner 的 PostgreSQL 集成验证了受控执行和审计回链，
+  结果合同的别名/元数据注入由路由与确定性专项测试覆盖；完整的模型驱动修复生命周期仍需后续接入。
 - 尚未用真实 SiliconFlow 批量运行 v2 评测集，因此没有在线准确率、token 成本或 P95 延迟数字。
-- Vanna 的工具循环仍由 Agent 驱动；需要下一轮把 `OneShotSqlRepair`、原/修复 SQL 和
-  `ResultValidation` 证据完整接到生命周期中，并保证第二次失败直接拒答。
+- Vanna 的工具循环仍由 Agent 驱动；需要下一轮把 `OneShotSqlRepair` 的原/修复 SQL、reader
+  重执行、二次 `ResultValidator` 和终止证据完整接到生命周期中，并保证第二次失败直接拒答。
 - 尚未完成“本月销售额 -> 补充日期 -> 后续指标追问”的浏览器 Playwright 回归；已有服务层测试。
 - 演示会话不是生产认证，尚未实现组织级行范围策略。
 - 上游可选数据库/LLM 集成的全量测试不属于本项目质量门；缺少可选依赖的失败不作为本轮回归结论。

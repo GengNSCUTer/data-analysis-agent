@@ -59,3 +59,18 @@ def test_validator_checks_time_coverage_and_join_amplification() -> None:
 
     assert outside.state == "refuse"
     assert amplified.state == "refuse"
+
+
+def test_validator_accepts_catalog_time_alias_for_temporal_result() -> None:
+    result = ResultValidator().validate(
+        pd.DataFrame({"month": ["2017-01-01"], "gmv": [123.4]}),
+        required_columns=("gmv", "time"),
+        required_column_aliases={"time": ("month",)},
+        metric_columns=("gmv",),
+        time_column="order_purchase_timestamp",
+        time_column_aliases=("time", "month"),
+        requested_start="2017-01-01",
+        requested_end="2017-12-31",
+    )
+
+    assert result.state == "valid"

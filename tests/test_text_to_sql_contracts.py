@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from data_analysis_agent.budget import BudgetUsage, RequestBudget
+from data_analysis_agent.metric_context import SYSTEM_PROMPT
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
 from data_analysis_agent.working_memory import WorkingMemory
@@ -38,3 +39,14 @@ def test_router_states_are_stable_and_explicit() -> None:
         "unauthorized",
         "unsupported",
     }
+
+
+def test_system_prompt_exposes_the_version_contract() -> None:
+    for value in (
+        "prompt_version=trusted-olist-prompt-v2",
+        "catalog_version=olist-catalog-v1",
+        "dataset_version=olist-kaggle-v2-2026-08-03",
+        "metric_version=0.1-draft",
+        "policy_version=sql-policy-v1",
+    ):
+        assert value in SYSTEM_PROMPT

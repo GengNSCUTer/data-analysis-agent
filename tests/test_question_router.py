@@ -156,3 +156,74 @@ async def test_budgeted_handler_clarification_does_not_call_agent_or_consume_sql
     assert agent.conversation_store.conversation.metadata["working_memory"][
         "pending_missing"
     ] == ["time_range"]
+
+
+@pytest.mark.asyncio
+async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
+    router: QuestionRouter,
+) -> None:
+    user = _user()
+
+    class Resolver:
+        async def resolve_user(self, context):
+            return user
+
+    class Store:
+        def __init__(self):
+            self.conversation = None
+
+        async def get_conversation(self, conversation_id, resolved_user):
+            return self.conversation
+
+        async def update_conversation(self, conversation):
+            self.conversation = conversation
+
+    @dataclass
+    class Recorder:
+        usage = None
+
+        async def start(self, **kwargs):
+            return AgentRun("run-2", kwargs["request_id"], kwargs["conversation_id"])
+
+        async def finish(self, run, usage):
+            self.usage = usage
+
+    class Agent:
+        def __init__(self):
+            self.user_resolver = Resolver()
+            self.conversation_store = Store()
+            self.metadata = None
+
+        async def send_message(self, request_context, message, conversation_id=None):
+            self.metadata = dict(request_context.metadata)
+            if False:
+                yield  # pragma: no cover
+
+    agent = Agent()
+    recorder = Recorder()
+    handler = BudgetedChatHandler(
+        agent, RequestBudget(), recorder, question_router=router
+    )
+    request = ChatRequest(
+        message="2017年按月统计 GMV",
+        conversation_id="conversation-2",
+        request_context=RequestContext(
+            metadata={"required_result_columns": ["client_supplied"]}
+        ),
+    )
+
+    _ = [chunk async for chunk in handler.handle_stream(request)]
+
+    assert agent.metadata is not None
+    assert agent.metadata["metric_result_columns"] == ["gmv"]
+    assert agent.metadata["required_result_columns"] == ["gmv", "time"]
+    assert agent.metadata["result_time_column"] == "order_purchase_timestamp"
+    assert "month" in agent.metadata["result_time_column_aliases"]
+    assert agent.metadata["requested_start"] == "2017-01-01"
+    assert agent.metadata["requested_end"] == "2017-12-31"
+    assert agent.metadata["catalog_version"] == "olist-catalog-v1"
+    assert agent.metadata["dataset_version_id"] == "olist-kaggle-v2-2026-08-03"
+    assert agent.metadata["metric_version"] == "0.1-draft"
+    assert agent.metadata["policy_version"] == "sql-policy-v1"
+    assert agent.metadata["prompt_version"] == "trusted-olist-prompt-v2"
+    assert recorder.usage.catalog_trace["result_contract"]["metric_ids"] == ["gmv"]

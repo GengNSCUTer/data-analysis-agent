@@ -146,7 +146,10 @@ class BudgetUsage:
         """Record only the server-generated, non-content retrieval evidence."""
         if not isinstance(trace, dict):
             raise TypeError("catalog trace must be a mapping")
-        self.catalog_trace = dict(trace)
+        # The request boundary records the prompt version and result contract
+        # before Vanna invokes the enhancer.  The enhancer records the final
+        # retrieval trace later; merge both so evidence is not silently lost.
+        self.catalog_trace = {**(self.catalog_trace or {}), **dict(trace)}
 
     def set_catalog_context(
         self, retrieval_question: str, working_memory: dict[str, Any] | None = None

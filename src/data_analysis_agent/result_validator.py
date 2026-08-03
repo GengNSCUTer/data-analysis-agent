@@ -65,8 +65,10 @@ class ResultValidator:
         frame: pd.DataFrame,
         *,
         required_columns: Sequence[str] = (),
+        required_column_aliases: Mapping[str, Sequence[str]] | None = None,
         metric_columns: Sequence[str] = (),
         time_column: str | None = None,
+        time_column_aliases: Sequence[str] = (),
         requested_start: str | date | datetime | None = None,
         requested_end: str | date | datetime | None = None,
         limit_applied: bool = False,
@@ -75,7 +77,15 @@ class ResultValidator:
         if not isinstance(frame, pd.DataFrame):
             return ResultValidation("refuse", "结果不是受支持的表格类型。", 0, ())
         columns = tuple(str(column) for column in frame.columns)
-        missing = tuple(column for column in required_columns if column not in frame.columns)
+        aliases = required_column_aliases or {}
+        missing = tuple(
+            column
+            for column in required_columns
+            if not any(
+                candidate in frame.columns
+                for candidate in dict.fromkeys((column, *aliases.get(column, ())))
+            )
+        )
         if missing:
             return ResultValidation(
                 "refuse",
@@ -131,14 +141,21 @@ class ResultValidator:
                 truncated=True,
             )
         if time_column and (requested_start is not None or requested_end is not None):
-            if time_column not in frame.columns:
+            candidate_time_columns = tuple(
+                dict.fromkeys((time_column, *time_column_aliases))
+            )
+            resolved_time_column = next(
+                (column for column in candidate_time_columns if column in frame.columns),
+                None,
+            )
+            if resolved_time_column is None:
                 return ResultValidation(
                     "needs_clarification",
                     "结果没有可核对的时间列，请补充明确的时间范围。",
                     len(frame),
                     columns,
                 )
-            parsed = pd.to_datetime(frame[time_column], errors="coerce").dropna()
+            parsed = pd.to_datetime(frame[resolved_time_column], errors="coerce").dropna()
             if parsed.empty:
                 return ResultValidation(
                     "needs_clarification",

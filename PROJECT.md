@@ -334,9 +334,9 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
   页面可切换并展示其用途和非生产边界；旧请求头不能提升权限。
 - 已增加 PostgreSQL 会话/消息存储、Agent Run 台账、请求级预算和上下文裁剪基础；后端历史 API 已提供列表、详情和删除。
 - 宿主页已接入历史列表、点击恢复、刷新恢复、新建会话、删除失败提示和角色切换隔离；历史恢复只回放安全文字，不伪造原始 SQL、图表或 DataFrame 结果。
-- 已接入版本化、按角色裁剪的 `olist-catalog-v1`，Trusted Demo 的请求提示使用 Catalog slice，而不是无条件注入完整 Schema；Catalog trace 写入 `app.agent_runs.catalog_trace`。
+- 已接入版本化、按角色裁剪的 `olist-catalog-v1`，Trusted Demo 的请求提示使用 Catalog slice，而不是无条件注入完整 Schema；Catalog trace 写入 `app.agent_runs.catalog_trace`，并将服务器拥有的 `ResultContract`（指标列、时间别名、请求范围和版本）传入运行时 `ToolContext`。
 - 已接入 `QuestionRouter`、`WorkingMemory` 和澄清边界：缺少时间/指标/比较基线时不调用 SQL；补充信息后从会话结构化状态恢复原指标，并写入 `app.conversations.working_memory`。
-- 已实现一次受限 SQL 修复契约、数据库错误脱敏和结果语义校验（空结果、缺列、时间越界、截断和 Join 放大）；模型驱动修复的完整生命周期回链、真实认证、角色行范围和在线模型评测仍待完成。
+- 已实现一次受限 SQL 修复契约、数据库错误脱敏和结果语义校验（空结果、缺列、时间越界、截断和 Join 放大）；结果校验现在接收 Catalog 派生的指标/时间合同，固定 Prompt、Catalog trace 和 SQL 审计携带数据/指标/策略/提示版本。模型驱动修复的完整生命周期回链、真实认证、角色行范围和在线模型评测仍待完成。
 
 ### Phase 4：嵌入式交互与证据呈现（基础能力已完成）
 
@@ -349,7 +349,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 
 - 已完成 PostgreSQL 会话/消息存储、Agent Run 台账、请求级工具/SQL/图表/输入/上下文/输出预算；
 - 已完成 starter 空会话生命周期修复，避免页面刷新制造零消息历史记录；
-- Text-to-SQL 第二轮已进入开发：Catalog/路由/working memory/结果校验基础已落地；下一项是把一次修复状态完整接到 Vanna 工具循环，并建立多轮浏览器回归和 v2 评测集。
+- Text-to-SQL 第二轮已进入开发：Catalog/路由/working memory/结果合同/结果校验基础已落地；当前下一项是把一次修复状态完整接到 Vanna 工具循环，并建立多轮浏览器回归和 v2 评测集。
 
 ### Phase 5：评测、加固与作品集
 
@@ -424,4 +424,4 @@ v1 不引入 Redis。
 | 2026-08-03 | Text-to-SQL 可靠性计划冻结 | 新增 `plan/feature-text-to-sql-reliability-v1.md`，把调研落成 5 个可执行阶段：在线基线、结构化 Catalog、确定性澄清、一次受限修复/结果校验、回归评测；后续实现严格按可验证的最小闭环推进。 |
 | 2026-08-03 | Text-to-SQL 二次源码调研 | 按 `github-research` 六阶段流程核验 OpenChatBI、PremSQL、BIRD-INTERACT、Lumen、PandasAI、Dash、test-suite-sql-eval、SQL-R1 和 MAC-SQL；确认下一步核心是 Catalog/Schema linking、可回答性澄清、一次执行修复、结果 denotation/校验和分维度评测。研究缓存位于本地 `github-research-output/` 且已忽略，不进入 Git。 |
 | 2026-08-03 | Text-to-SQL 第二轮论文与实现核验 | 直接复核 arXiv API 与 GitHub Public API：ABISS、RBAC Text-to-SQL、Schema retrieval、Context Compression、On-Prem self-correction、GATE 和 DataClawEval 支持“先检索/澄清/验证，再优化模型”的路线；新增 `plan/feature-text-to-sql-reliability-v2.md`。同时修复 YAML 裸 `on` 被 `safe_load` 转为布尔键的问题，Catalog smoke load 已通过（9 表/4 指标/7 Join）。 |
-| 2026-08-03 | Text-to-SQL 第二轮开发 | 按 v2 计划落地角色化 Catalog 检索与 trace、短安全系统提示、`QuestionRouter`、PostgreSQL working memory、零 SQL 澄清边界、一次 Policy 二次校验修复契约、数据库错误脱敏和 `ResultValidator`；Catalog/Router/working memory 已接入 Trusted Demo SSE。确定性专项测试 **65 项通过**，项目 PostgreSQL 会话/Runner/Run recorder 集成测试 8 项通过；语义结果元数据和版本合同正在补入运行链路，在线模型语义评测和浏览器多轮回归仍未完成。详见 `docs/verification-text-to-sql-v2.md`。 |
+| 2026-08-03 | Text-to-SQL 第二轮开发 | 按 v2 计划落地角色化 Catalog 检索与 trace、短安全系统提示、`QuestionRouter`、PostgreSQL working memory、零 SQL 澄清边界、一次 Policy 二次校验修复契约、数据库错误脱敏和 `ResultValidator`；Catalog/Router/working memory/ResultContract 已接入 Trusted Demo SSE，结果校验合同和 `prompt/catalog/dataset/metric/policy` 版本进入 ToolContext、run evidence 与 SQL 审计。确定性专项测试 **68 项通过**，项目 PostgreSQL 会话/Runner/路由/run recorder 集成测试 **9 项通过**；模型驱动修复的完整生命周期、在线模型语义评测和浏览器多轮回归仍未完成。详见 `docs/verification-text-to-sql-v2.md`。 |

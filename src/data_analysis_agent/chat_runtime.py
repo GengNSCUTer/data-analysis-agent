@@ -10,9 +10,10 @@ from vanna.servers.base import ChatHandler
 from vanna.servers.base.models import ChatRequest, ChatStreamChunk
 
 from .budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
-from .metric_context import DATASET_VERSION, METRIC_VERSION
+from .metric_context import DATASET_VERSION, METRIC_VERSION, PROMPT_VERSION
 from .question_router import QuestionRouter
 from .run_recorder import PostgresRunRecorder
+from .semantic_catalog import ResultContract
 from .working_memory import WorkingMemory
 
 
@@ -118,6 +119,25 @@ class BudgetedChatHandler(ChatHandler):
                     conversation_state=memory.as_dict(),
                 )
                 updated_memory = memory.apply(request.message, route)
+                result_contract = ResultContract.from_selection(
+                    selection,
+                    request.message,
+                    updated_memory.time_range,
+                    catalog=self.question_router.retriever.catalog,
+                )
+                # These fields are server-derived and overwrite any client
+                # metadata before the Agent constructs ToolContext.
+                request.request_context.metadata.update(
+                    result_contract.as_tool_metadata()
+                )
+                request.request_context.metadata["prompt_version"] = PROMPT_VERSION
+                usage.record_catalog(
+                    {
+                        **selection.trace.as_dict(),
+                        "prompt_version": PROMPT_VERSION,
+                        "result_contract": result_contract.as_evidence(),
+                    }
+                )
                 usage.set_catalog_context(
                     retrieval_question, updated_memory.as_dict()
                 )

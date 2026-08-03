@@ -18,6 +18,7 @@ from vanna.core.tool import ToolContext
 from .sql_policy import PolicyViolation, SqlPolicy
 from .result_validator import ResultValidationError, ResultValidator
 from .sql_repair import SafeSqlExecutionError, sanitize_sql_error
+from .metric_context import DATASET_VERSION, METRIC_VERSION
 
 
 @dataclass(frozen=True)
@@ -93,8 +94,8 @@ class PostgresQueryAudit:
                         status,
                         reason,
                         self.model_name,
-                        "olist-kaggle-v2-2026-08-03",
-                        "0.1-draft",
+                        context.metadata.get("dataset_version_id", DATASET_VERSION),
+                        context.metadata.get("metric_version", METRIC_VERSION),
                         elapsed_ms,
                         row_count,
                         error_message,
@@ -188,8 +189,12 @@ class SecurePostgresRunner(SqlRunner):
             validation = self.result_validator.validate(
                 pd.DataFrame(rows),
                 required_columns=context.metadata.get("required_result_columns", ()),
+                required_column_aliases=context.metadata.get(
+                    "required_result_column_aliases", {}
+                ),
                 metric_columns=context.metadata.get("metric_result_columns", ()),
                 time_column=context.metadata.get("result_time_column"),
+                time_column_aliases=context.metadata.get("result_time_column_aliases", ()),
                 requested_start=context.metadata.get("requested_start"),
                 requested_end=context.metadata.get("requested_end"),
                 limit_applied=len(rows) >= self.settings.max_rows,

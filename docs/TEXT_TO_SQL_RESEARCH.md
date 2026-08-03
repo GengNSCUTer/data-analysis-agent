@@ -415,11 +415,12 @@ Policy、审计或结果级语义校验，因此本轮不安装、不作为运�
   后可恢复原问题口径。服务层已测试，浏览器多轮回归尚待补齐。
 - `sql_repair.py` 提供一次候选修复与完整 `SqlPolicy` 二次校验，`postgres_runner.py` 对数据库
   错误做安全分类；`result_validator.py` 对空结果、缺列、非有限值、时间越界、截断和 Join 放大
-  返回 `valid`/`needs_clarification`/`refuse`。当前结果校验所需的指标/时间/Join 元数据还没有
-  完整传入实际 Vanna ToolContext，版本字段也需要在 Prompt 和 Run evidence 中统一；Vanna 工具
-  循环尚未保存原/修复候选的完整状态，这是下一轮的重点集成。
+  返回 `valid`/`needs_clarification`/`refuse`。服务器现在会在 Catalog/WorkingMemory 之后构建
+  `ResultContract`，把指标/时间别名/请求范围/Join 和 `catalog/dataset/metric/policy` 版本写入实际
+  Vanna `ToolContext`；固定 Prompt、Catalog trace、Agent Run 和 SQL 审计也携带版本合同。Vanna
+  工具循环尚未保存原/修复候选、reader 重执行和第二次失败的完整状态，这是下一轮的重点集成。
 
-本轮 Conda 确定性专项测试 65 项通过，项目 PostgreSQL 会话/Runner/Run recorder 集成测试 8 项
+本轮 Conda 确定性专项测试 68 项通过，项目 PostgreSQL 会话/Runner/路由/Run recorder 集成测试 9 项
 通过。没有运行批量 SiliconFlow 线上评测，因此不报告 Text-to-SQL 在线准确率、token 成本或 P95
 延迟；全量 Vanna 上游可选驱动测试缺少外部依赖，也不作为本项目质量门。
 

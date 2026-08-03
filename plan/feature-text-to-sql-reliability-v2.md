@@ -37,9 +37,10 @@ what must be proven before the capability can be described as a resume-quality r
 ## Current implementation status (2026-08-03)
 
 The Catalog slice, role filtering, deterministic route, structured working memory, clarification
-boundary, one-shot policy-checked repair contract, sanitized database errors, and deterministic
-result validator are now implemented under `src/data_analysis_agent/`. The trusted demo uses the
-Catalog and stores `catalog_trace`/working memory in PostgreSQL. The remaining gap is orchestration:
+boundary, one-shot policy-checked repair contract, sanitized database errors, deterministic result
+validator, and server-owned `ResultContract` are now implemented under `src/data_analysis_agent/`.
+The trusted demo uses the Catalog, passes the contract into Vanna `ToolContext`, and stores
+`catalog_trace`/working memory in PostgreSQL. The remaining gap is orchestration:
 the Vanna model still performs the candidate/repair loop itself, so a future task must connect the
 `OneShotSqlRepair` outcome and validator evidence to the tool lifecycle and add the browser
 multi-turn regression. No online accuracy claim is made yet.
@@ -130,7 +131,7 @@ multi-turn regression. No online accuracy claim is made yet.
 | TASK-012 | Implement `src/data_analysis_agent/sql_repair.py` with sanitized error categories, one repair attempt, original/repaired SQL retention, and a stable repair reason. | ✅ | 2026-08-03 |
 | TASK-013 | Re-run `SqlPolicy`, PostgreSQL reader-role execution, statement timeout, and row limits for both the original and repaired candidate; never pass raw database errors to the model. | ◐ | 2026-08-03 |
 | TASK-014 | Implement `src/data_analysis_agent/result_validator.py` for required metric columns, empty-result semantics, time coverage, row-limit truncation, and simple join-amplification checks. Return `valid`, `needs_clarification`, or `refuse`. | ✅ | 2026-08-03 |
-| TASK-015 | Add focused repair/validator tests and expose only concise validation evidence to the existing embedded host. A failed check must not become a confident number. | ◐ | 2026-08-03 |
+| TASK-015 | Add focused repair/validator tests, wire the server-owned result contract into `ToolContext`, and expose only concise validation evidence to the existing embedded host. A failed check must not become a confident number. | ✅ (runtime contract; full lifecycle pending) | 2026-08-03 |
 
 ### Implementation Phase 5
 

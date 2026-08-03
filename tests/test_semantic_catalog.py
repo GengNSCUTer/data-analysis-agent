@@ -59,6 +59,9 @@ def test_catalog_retrieval_selects_metric_tables_columns_and_join(catalog) -> No
     )
 
     assert selection.trace.selected_metrics == ("gmv",)
+    assert selection.trace.dataset_version == "olist-kaggle-v2-2026-08-03"
+    assert selection.trace.metric_version == "0.1-draft"
+    assert selection.trace.policy_version == "sql-policy-v1"
     assert selection.trace.selected_tables == (
         "dim_category_translation",
         "dim_products",
@@ -71,6 +74,11 @@ def test_catalog_retrieval_selects_metric_tables_columns_and_join(catalog) -> No
         "products_translation",
     )
     assert "不要猜测业务口径" not in selection.prompt
+    assert "catalog_version=olist-catalog-v1" in selection.prompt
+    assert "dataset_version=olist-kaggle-v2-2026-08-03" in selection.prompt
+    assert "metric_version=0.1-draft" in selection.prompt
+    assert "policy_version=sql-policy-v1" in selection.prompt
+    assert "metric_id 作为 SQL 别名" in selection.prompt
     assert "`analytics.fact_order_items`" in selection.prompt
     assert "`price` (numeric)" in selection.prompt
 
@@ -145,6 +153,10 @@ async def test_catalog_enhancer_records_trace_without_raw_question(catalog) -> N
     assert usage.catalog_trace is not None
     assert question not in repr(usage.catalog_trace)
     assert usage.catalog_trace["catalog_version"] == "olist-catalog-v1"
+    assert usage.catalog_trace["dataset_version"] == "olist-kaggle-v2-2026-08-03"
+    assert usage.catalog_trace["metric_version"] == "0.1-draft"
+    assert usage.catalog_trace["policy_version"] == "sql-policy-v1"
+    assert usage.catalog_trace["prompt_version"] == "trusted-olist-prompt-v2"
 
 
 def test_catalog_role_visibility_cannot_be_escalated_by_question_text(catalog) -> None:
