@@ -3,7 +3,7 @@
 
 CREATE SCHEMA IF NOT EXISTS analytics;
 
-CREATE TABLE analytics.dataset_versions (
+CREATE TABLE IF NOT EXISTS analytics.dataset_versions (
     dataset_version_id TEXT PRIMARY KEY,
     dataset_id TEXT NOT NULL,
     source_url TEXT NOT NULL,
@@ -17,7 +17,7 @@ CREATE TABLE analytics.dataset_versions (
     CHECK (transform_version <> '')
 );
 
-CREATE TABLE analytics.dim_customers (
+CREATE TABLE IF NOT EXISTS analytics.dim_customers (
     customer_id TEXT PRIMARY KEY,
     customer_unique_id TEXT NOT NULL,
     customer_zip_code_prefix TEXT NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE analytics.dim_customers (
     dataset_version_id TEXT NOT NULL REFERENCES analytics.dataset_versions(dataset_version_id)
 );
 
-CREATE TABLE analytics.dim_sellers (
+CREATE TABLE IF NOT EXISTS analytics.dim_sellers (
     seller_id TEXT PRIMARY KEY,
     seller_zip_code_prefix TEXT NOT NULL,
     seller_city TEXT NOT NULL,
@@ -34,13 +34,13 @@ CREATE TABLE analytics.dim_sellers (
     dataset_version_id TEXT NOT NULL REFERENCES analytics.dataset_versions(dataset_version_id)
 );
 
-CREATE TABLE analytics.dim_category_translation (
+CREATE TABLE IF NOT EXISTS analytics.dim_category_translation (
     product_category_name TEXT PRIMARY KEY,
     product_category_name_english TEXT NOT NULL,
     dataset_version_id TEXT NOT NULL REFERENCES analytics.dataset_versions(dataset_version_id)
 );
 
-CREATE TABLE analytics.dim_products (
+CREATE TABLE IF NOT EXISTS analytics.dim_products (
     product_id TEXT PRIMARY KEY,
     product_category_name TEXT,
     product_name_length INTEGER,
@@ -57,7 +57,7 @@ CREATE TABLE analytics.dim_products (
     CHECK (product_weight_g IS NULL OR product_weight_g >= 0)
 );
 
-CREATE TABLE analytics.fact_orders (
+CREATE TABLE IF NOT EXISTS analytics.fact_orders (
     order_id TEXT PRIMARY KEY,
     customer_id TEXT NOT NULL REFERENCES analytics.dim_customers(customer_id),
     order_status TEXT NOT NULL,
@@ -69,11 +69,14 @@ CREATE TABLE analytics.fact_orders (
     dataset_version_id TEXT NOT NULL REFERENCES analytics.dataset_versions(dataset_version_id),
     CHECK (order_status IN ('created', 'approved', 'invoiced', 'processing', 'shipped', 'delivered', 'canceled', 'unavailable')),
     CHECK (order_approved_at IS NULL OR order_approved_at >= order_purchase_timestamp),
-    CHECK (order_delivered_carrier_date IS NULL OR order_delivered_carrier_date >= order_purchase_timestamp),
     CHECK (order_delivered_customer_date IS NULL OR order_delivered_customer_date >= order_purchase_timestamp)
 );
 
-CREATE TABLE analytics.fact_order_items (
+-- Olist contains carrier handoff timestamps slightly earlier than purchase time.
+-- Remove the over-strict constraint from databases initialized by the first draft.
+ALTER TABLE analytics.fact_orders DROP CONSTRAINT IF EXISTS fact_orders_check1;
+
+CREATE TABLE IF NOT EXISTS analytics.fact_order_items (
     order_id TEXT NOT NULL REFERENCES analytics.fact_orders(order_id),
     order_item_id INTEGER NOT NULL,
     product_id TEXT NOT NULL REFERENCES analytics.dim_products(product_id),
@@ -88,7 +91,7 @@ CREATE TABLE analytics.fact_order_items (
     CHECK (freight_value >= 0)
 );
 
-CREATE TABLE analytics.fact_payments (
+CREATE TABLE IF NOT EXISTS analytics.fact_payments (
     order_id TEXT NOT NULL REFERENCES analytics.fact_orders(order_id),
     payment_sequential INTEGER NOT NULL,
     payment_type TEXT NOT NULL,
@@ -101,7 +104,7 @@ CREATE TABLE analytics.fact_payments (
     CHECK (payment_value >= 0)
 );
 
-CREATE TABLE analytics.fact_reviews (
+CREATE TABLE IF NOT EXISTS analytics.fact_reviews (
     review_id TEXT NOT NULL,
     order_id TEXT NOT NULL REFERENCES analytics.fact_orders(order_id),
     review_score SMALLINT NOT NULL,

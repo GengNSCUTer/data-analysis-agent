@@ -30,5 +30,15 @@ docker compose --env-file infra/postgres/.env -f infra/postgres/compose.yaml exe
 容器只监听 `127.0.0.1:5433`，转换数据只读挂载为 `/data/analytics`。加载脚本先建表，
 在单个事务内清空旧的开发数据、插入 `analytics.dataset_versions`，再按维表、订单、订单项/
 支付/评价顺序执行客户端 `COPY`。`evals/sql/golden_metrics.sql` 保存首次加载后需要固化的
-核心指标查询。当前服务器用户没有 Docker daemon 权限，所以编排和加载脚本只完成静态
-校验，尚未启动 PostgreSQL 或执行真实导入。
+核心指标查询。当前服务器实际使用独立的用户态 PostgreSQL 实例，而不是 Docker：
+
+```bash
+./infra/postgres/load_olist_local.sh
+/disk2/gengnan/conda_envs/pg_runtime/bin/psql \
+  -p 35434 -U postgres -d data_analysis_agent \
+  -v ON_ERROR_STOP=1 -f evals/sql/verify_olist_golden.sql
+```
+
+2026-08-03 已完成真实导入，8 张表行数与转换报告一致，订单项、商品、卖家、支付和评价
+外键违规均为 0。首次导入发现 Olist 有一条承运商交接时间略早于购买时间，因此删除了
+不在数据合同中的过严约束；客户实际送达不得早于购买时间的约束继续保留。

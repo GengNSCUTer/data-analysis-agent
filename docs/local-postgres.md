@@ -22,5 +22,5 @@ loopback；TCP 使用 SCRAM 认证，当前用户可通过本机 Unix Socket 进
   -D /disk2/gengnan/data-analysis-agent-runtime/postgres stop
 ```
 
-服务由用户态 `pg_ctl` 启动，不依赖 Docker 或 systemd。数据加载和应用角色配置将作为
-后续独立迭代执行。
+服务由用户态 `pg_ctl` 启动，不依赖 Docker 或 systemd。Olist analytics 数据已通过
+`load_olist_local.sh` 真实加载；应用角色配置仍作为后续独立迭代执行。

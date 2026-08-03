@@ -1,0 +1,34 @@
+result_version: "0.1"
+generated_at: "2026-08-03"
+dataset_version_id: olist-kaggle-v2-2026-08-03
+transform_version: olist-analytics-v1
+schema: analytics
+metric_catalog_version: "0.1-draft"
+database:
+  engine: PostgreSQL
+  version: "12.20"
+results:
+  gmv:
+    value: "13494400.74"
+    type: decimal
+  paid_order_count:
+    value: 98207
+    type: integer
+  average_delivery_days:
+    value: "12.558702"
+    type: decimal_rounded_6
+  positive_review_rate:
+    value: "0.770680"
+    type: decimal_rounded_6
+quality_checks:
+  orphan_order_items_orders: 0
+  orphan_order_items_products: 0
+  orphan_order_items_sellers: 0
+  orphan_payments_orders: 0
+  orphan_reviews_orders: 0
+  invalid_delivered_timestamp: 0
+notes:
+  - GMV excludes canceled and unavailable orders and excludes freight_value.
+  - Delivery duration uses orders with a non-null delivered-customer timestamp.
+  - Review rate is calculated at the review row grain, not the order grain.
+  - Values are a reproducible technical baseline; metric definitions remain draft until business review.

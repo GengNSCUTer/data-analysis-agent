@@ -358,3 +358,4 @@ v1 不引入 Redis。
 | 2026-08-03 | Olist analytics 转换基线 | 新增 PostgreSQL analytics DDL、8 表确定性 CSV 转换器和合成关联测试 fixture；全量源文件 checksum 核验后转换成功。评价使用 `(review_id, order_id)` 复合键，原始评价文件物理行数不等于逻辑记录数。PostgreSQL 尚未启动或加载。 |
 | 2026-08-03 | PostgreSQL 本地加载工具 | 新增仅绑定 loopback 的 PostgreSQL Compose 编排、事务化加载脚本与核心指标 golden SQL。当前账户无 Docker daemon 权限，故只完成静态校验，未启动容器或执行真实加载。 |
 | 2026-08-03 | 本地 PostgreSQL 实例 | 确认其他项目分别占用 35432/35433，随后以用户态 PostgreSQL 12.20 在本项目专属仓库外目录启动 `data_analysis_agent`，仅监听 `127.0.0.1:35434`。本轮未加载 Olist 数据。 |
+| 2026-08-03 | Olist 真实入库与 golden 基线 | analytics 8 表已真实加载到项目专属 PostgreSQL，行数与转换报告一致、关联质量违规为 0；固化 GMV 13,494,400.74、有效订单 98,207、平均履约 12.558702 天、好评率 0.770680 的技术回归基线。业务口径仍标记为草案。 |

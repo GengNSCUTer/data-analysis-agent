@@ -32,7 +32,8 @@ jobs:
           tests/test_tool_permissions.py \
           tests/test_llm_context_enhancer.py \
           tests/test_workflow.py \
-          tests/test_memory_tools.py
+          tests/test_memory_tools.py \
+          tests/test_olist_transform.py
     - name: Compile project demo entry points
       run: python -m compileall -q examples/siliconflow_sqlite_web_demo.py
     - name: Build embedded chat component
