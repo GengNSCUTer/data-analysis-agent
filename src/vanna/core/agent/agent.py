@@ -332,8 +332,10 @@ class Agent:
                             "ms",
                         )
 
-                # Save the conversation if it was newly created
-                if self.config.auto_save_conversations:
+                # Starter UI is presentation state, not a user-authored turn.
+                # Persisting an empty conversation pollutes durable history on
+                # every page load; real turns are saved by the normal path.
+                if self.config.auto_save_conversations and conversation.messages:
                     await self.conversation_store.update_conversation(conversation)
 
                 return  # Exit without calling LLM

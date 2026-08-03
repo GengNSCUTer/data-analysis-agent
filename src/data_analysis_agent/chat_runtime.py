@@ -37,6 +37,16 @@ class BudgetedChatHandler(ChatHandler):
         run = None
         try:
             user = await self.agent.user_resolver.resolve_user(request.request_context)
+            is_starter_request = (
+                not request.message.strip()
+                or request.request_context.metadata.get("starter_ui_request", False)
+            )
+            if is_starter_request:
+                # Starter UI has no user-authored turn and must not create an
+                # empty conversation or an auditable Agent Run.
+                async for chunk in super().handle_stream(request):
+                    yield chunk
+                return
             # Agent Run has a foreign key to the conversation. Create an empty
             # owner-scoped row before recording the run; Agent appends messages
             # through ConversationStore after this boundary is established.

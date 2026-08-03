@@ -110,6 +110,25 @@
       .role-switch button:focus-visible { outline: 2px solid #0f9ba6; outline-offset: 2px; }
       .role-switch button:disabled { cursor: wait; opacity: .6; }
       .session-error { min-height: 18px; margin: 8px 0 0; color: #b45309; font-size: 12px; }
+      .conversation-section { margin-top: 16px; }
+      .conversation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+      .conversation-toolbar h2 { min-width: 0; }
+      .conversation-action { flex: 0 0 auto; min-height: 32px; padding: 0 12px; border: 1px solid #b8c8cf; border-radius: 4px; background: #ffffff; color: #145c63; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; }
+      .conversation-action:hover { background: #edf7f7; }
+      .conversation-action:focus-visible { outline: 2px solid #0f9ba6; outline-offset: 2px; }
+      .conversation-action:disabled { cursor: wait; opacity: .6; }
+      .conversation-list { display: grid; gap: 8px; margin-top: 14px; }
+      .conversation-item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 9px 10px; border: 1px solid #e1e7ea; border-radius: 5px; background: #ffffff; }
+      .conversation-item[data-active="true"] { border-color: #5caeb1; background: #f1fbfb; }
+      .conversation-select { min-width: 0; flex: 1; padding: 0; border: 0; background: transparent; color: #263943; cursor: pointer; text-align: left; font: inherit; }
+      .conversation-select:focus-visible { outline: 2px solid #0f9ba6; outline-offset: 2px; }
+      .conversation-title { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+      .conversation-meta { margin-top: 3px; color: #64727d; font-size: 11px; }
+      .conversation-delete { flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: 4px; background: transparent; color: #7a8a93; cursor: pointer; font-size: 16px; line-height: 1; }
+      .conversation-delete:hover { background: #fff3f0; color: #b45309; }
+      .conversation-delete:focus-visible { outline: 2px solid #0f9ba6; outline-offset: 2px; }
+      .conversation-empty { margin: 14px 0 0; color: #64727d; font-size: 13px; }
+      .conversation-error { min-height: 18px; margin: 8px 0 0; color: #b45309; font-size: 12px; }
 
       .agent-window {
         position: fixed;
@@ -234,6 +253,14 @@
         <article class="metric"><div class="metric-label">平均履约时长</div><div class="metric-value">12.56 天</div><div class="metric-change caution">已送达订单 · 实际送达减下单</div></article>
         <article class="metric"><div class="metric-label">好评率</div><div class="metric-value">77.07%</div><div class="metric-change">评分大于等于 4 的评价占比</div></article>
       </section>
+      <section class="section conversation-section" aria-label="分析会话历史">
+        <div class="conversation-toolbar">
+          <h2>分析会话</h2>
+          <button id="new-conversation" class="conversation-action" type="button">＋ 新建会话</button>
+        </div>
+        <div id="conversation-list" class="conversation-list" aria-live="polite"><p class="conversation-empty">正在读取会话历史…</p></div>
+        <p id="conversation-error" class="conversation-error" aria-live="polite"></p>
+      </section>
       <section class="evidence-grid" aria-label="查询证据与审计">
         <article class="section">
           <h2>最近查询</h2>
@@ -311,6 +338,7 @@
       const dragHandle = document.querySelector("#agent-drag-handle");
       const resizeHandle = document.querySelector("#agent-resize-handle");
       const windowStorageKey = "data-analysis-agent-embedded-window-v1";
+      const conversationStorageKey = "data-analysis-agent-current-conversation-v1";
       const desktopBreakpoint = 640;
       const dragHandleHeight = 32;
       const minimumWidth = 360;
@@ -364,6 +392,10 @@
       };
 
       customElements.whenDefined("vanna-chat").then(() => {
+        const savedConversationId = localStorage.getItem(conversationStorageKey);
+        if (savedConversationId && typeof chat.setConversationId === "function") {
+          chat.setConversationId(savedConversationId);
+        }
         chat.startingState = "minimized";
         chat.windowState = "minimized";
         setWindowState(chat.windowState);
@@ -413,6 +445,146 @@
       const escapeHtml = (value) => String(value ?? "").replace(/[&<>"]/g, (character) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"
       })[character]);
+      const conversationList = document.querySelector("#conversation-list");
+      const conversationError = document.querySelector("#conversation-error");
+      const newConversationButton = document.querySelector("#new-conversation");
+      let activeConversationId = localStorage.getItem(conversationStorageKey) || "";
+      let conversationItems = [];
+      let conversationRequestInFlight = false;
+
+      const setActiveConversation = (conversationId) => {
+        activeConversationId = String(conversationId || "");
+        if (activeConversationId) localStorage.setItem(conversationStorageKey, activeConversationId);
+        else localStorage.removeItem(conversationStorageKey);
+        document.querySelectorAll(".conversation-item").forEach((item) => {
+          item.dataset.active = String(item.dataset.conversationId === activeConversationId);
+        });
+      };
+
+      const setConversationControlsBusy = (busy) => {
+        conversationRequestInFlight = busy;
+        newConversationButton.disabled = busy;
+        conversationList.querySelectorAll("button").forEach((button) => { button.disabled = busy; });
+      };
+
+      const renderConversationList = (items) => {
+        conversationItems = Array.isArray(items) ? items : [];
+        if (!conversationItems.length) {
+          conversationList.innerHTML = '<p class="conversation-empty">还没有已保存的分析会话。</p>';
+          return;
+        }
+        conversationList.innerHTML = conversationItems.map((item) => {
+          const id = escapeHtml(item.conversation_id);
+          const title = escapeHtml(item.title || "未命名分析会话");
+          const updated = escapeHtml(String(item.updated_at || "").replace("T", " ").slice(0, 19));
+          const count = escapeHtml(item.message_count ?? 0);
+          return `<article class="conversation-item" data-conversation-id="${id}" data-active="${String(item.conversation_id === activeConversationId)}">
+            <button class="conversation-select" type="button" data-load-conversation="${id}">
+              <div class="conversation-title">${title}</div>
+              <div class="conversation-meta">${updated} · ${count} 条消息</div>
+            </button>
+            <button class="conversation-delete" type="button" data-delete-conversation="${id}" aria-label="删除会话">×</button>
+          </article>`;
+        }).join("");
+      };
+
+      const refreshConversations = async () => {
+        const response = await fetch("/api/project/conversations?limit=20");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const items = await response.json();
+        renderConversationList(items);
+        if (activeConversationId && !items.some((item) => item.conversation_id === activeConversationId)) {
+          setActiveConversation("");
+        }
+      };
+
+      const loadConversation = async (conversationId) => {
+        if (!conversationId || conversationRequestInFlight) return;
+        setConversationControlsBusy(true);
+        conversationError.textContent = "";
+        try {
+          const response = await fetch(`/api/project/conversations/${encodeURIComponent(conversationId)}`);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const detail = await response.json();
+          if (typeof chat.loadConversation !== "function") throw new Error("chat history API unavailable");
+          chat.loadConversation(detail.conversation_id, detail.messages || []);
+          setActiveConversation(detail.conversation_id);
+          if (chat.windowState !== "normal") {
+            chat.windowState = "normal";
+            setWindowState("normal");
+          }
+        } catch (_) {
+          conversationError.textContent = "历史会话恢复失败，请刷新后重试。";
+        } finally {
+          setConversationControlsBusy(false);
+        }
+      };
+
+      const startNewConversation = () => {
+        if (conversationRequestInFlight || typeof chat.startNewConversation !== "function") return;
+        const conversationId = chat.startNewConversation();
+        setActiveConversation(conversationId);
+        renderConversationList(conversationItems);
+        conversationError.textContent = "";
+        if (chat.windowState !== "normal") {
+          chat.windowState = "normal";
+          setWindowState("normal");
+        }
+        window.setTimeout(() => refreshConversations().catch(() => {}), 350);
+      };
+
+      conversationList.addEventListener("click", async (event) => {
+        const target = event.target.closest("button");
+        if (!target) return;
+        const loadId = target.dataset.loadConversation;
+        const deleteId = target.dataset.deleteConversation;
+        if (loadId) {
+          await loadConversation(loadId);
+          return;
+        }
+        if (deleteId) {
+          if (!window.confirm("删除这个分析会话及其历史记录？")) return;
+          setConversationControlsBusy(true);
+          try {
+            const response = await fetch(`/api/project/conversations/${encodeURIComponent(deleteId)}`, { method: "DELETE" });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const deletedActiveConversation = deleteId === activeConversationId;
+            if (deletedActiveConversation) setActiveConversation("");
+            await refreshConversations();
+            if (deletedActiveConversation && typeof chat.startNewConversation === "function") {
+              const conversationId = chat.startNewConversation();
+              setActiveConversation(conversationId);
+              if (chat.windowState !== "normal") {
+                chat.windowState = "normal";
+                setWindowState("normal");
+              }
+            }
+          } catch (_) {
+            conversationError.textContent = "会话删除失败，请稍后重试。";
+          } finally {
+            setConversationControlsBusy(false);
+          }
+        }
+      });
+      newConversationButton.addEventListener("click", startNewConversation);
+      chat.addEventListener("conversation-id-changed", (event) => {
+        const conversationId = event.detail?.conversationId;
+        if (conversationId) setActiveConversation(conversationId);
+      });
+
+      const initializeConversationHistory = async () => {
+        await customElements.whenDefined("vanna-chat");
+        const savedConversationId = localStorage.getItem(conversationStorageKey);
+        if (savedConversationId && typeof chat.setConversationId === "function") {
+          chat.setConversationId(savedConversationId);
+          activeConversationId = savedConversationId;
+        }
+        await refreshConversations();
+        if (savedConversationId && activeConversationId === savedConversationId) {
+          await loadConversation(savedConversationId);
+        }
+      };
+
       const roleButtons = [...document.querySelectorAll("[data-demo-role]")];
       const sessionError = document.querySelector("#session-error");
       const updateRoleButtons = (activeRole) => roleButtons.forEach((button) => {
@@ -450,6 +622,7 @@
             body: JSON.stringify({ role })
           });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          localStorage.removeItem(conversationStorageKey);
           window.location.reload();
         } catch (_) {
           sessionError.textContent = "演示角色切换失败，请稍后重试。";
@@ -458,6 +631,9 @@
       }));
       refreshEvidence().catch(() => {
         document.querySelector("#audit-list").innerHTML = '<p class="empty">查询历史暂时不可用。</p>';
+      });
+      initializeConversationHistory().catch(() => {
+        conversationList.innerHTML = '<p class="conversation-empty">会话历史暂时不可用。</p>';
       });
     </script>
   </body>

@@ -9,8 +9,12 @@ Run against the manually started trusted demo with:
 from __future__ import annotations
 
 import os
+import uuid
 
+import psycopg2
 import pytest
+
+from data_analysis_agent.postgres_runner import PostgresConnectionSettings
 
 
 pytestmark = pytest.mark.integration
@@ -53,6 +57,71 @@ def _open_normal_window(browser_page):
     chat.locator(".minimized-icon").click()
     browser_page.wait_for_selector("vanna-chat.normal")
     return chat
+
+
+@pytest.fixture()
+def seeded_history_conversation():
+    if os.getenv("RUN_PROJECT_DB") != "1":
+        pytest.skip("Set RUN_PROJECT_DB=1 to seed the conversation history fixture.")
+
+    suffix = uuid.uuid4().hex[:12]
+    conversation_id = f"e2e-history-{suffix}"
+    settings = PostgresConnectionSettings.from_environment()
+    connection = psycopg2.connect(
+        host=settings.host,
+        port=settings.port,
+        database=settings.database,
+        user=settings.writer_user,
+    )
+    try:
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO app.conversations (
+                        conversation_id, user_id, user_role, title,
+                        dataset_version_id, metric_version, message_count
+                    ) VALUES (%s, %s, 'analyst', %s, %s, %s, 2)
+                    """,
+                    (
+                        conversation_id,
+                        "demo-analyst",
+                        "历史会话里的问题",
+                        "olist-kaggle-v2-2026-08-03",
+                        "0.1-draft",
+                    ),
+                )
+                cursor.executemany(
+                    """
+                    INSERT INTO app.messages (
+                        conversation_id, message_index, user_id, user_role, role, content
+                    ) VALUES (%s, %s, %s, 'analyst', %s, %s)
+                    """,
+                    [
+                        (conversation_id, 0, "demo-analyst", "user", "历史会话里的问题"),
+                        (conversation_id, 1, "demo-analyst", "assistant", "历史会话里的结论"),
+                    ],
+                )
+    finally:
+        connection.close()
+    try:
+        yield conversation_id
+    finally:
+        connection = psycopg2.connect(
+            host=settings.host,
+            port=settings.port,
+            database=settings.database,
+            user=settings.writer_user,
+        )
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "DELETE FROM app.conversations WHERE conversation_id = %s",
+                        (conversation_id,),
+                    )
+        finally:
+            connection.close()
 
 
 def _inject_chart_fixture(chat) -> None:
@@ -260,4 +329,71 @@ def test_demo_role_switch_uses_a_signed_session_not_request_headers(page) -> Non
     assert signed_session["is_demo"] is True
     assert browser_page.locator("[data-demo-role='admin']").get_attribute("aria-pressed") == "true"
     assert "不是密码登录或生产认证" in browser_page.locator(".demo-session").inner_text()
+    assert not console_errors
+
+
+def test_conversation_history_restore_refresh_and_new_session(
+    page, seeded_history_conversation
+) -> None:
+    browser_page, console_errors = page
+    conversation_id = seeded_history_conversation
+    browser_page.goto(f"{BASE_URL}/embedded-demo", wait_until="domcontentloaded")
+
+    history_button = browser_page.locator(
+        f"button[data-load-conversation='{conversation_id}']"
+    )
+    history_button.wait_for()
+    history_button.click()
+    browser_page.wait_for_function(
+        """id => {
+          const chat = document.querySelector('vanna-chat');
+          const messages = Array.from(
+            chat?.shadowRoot?.querySelectorAll('vanna-message') || []
+          )
+            .map(message => message.shadowRoot?.textContent || '')
+          .join('\\n');
+          return messages.includes('历史会话里的结论')
+            && localStorage.getItem('data-analysis-agent-current-conversation-v1') === id;
+        }""",
+        arg=conversation_id,
+    )
+    rendered = browser_page.locator("vanna-chat").evaluate(
+        """element => Array.from(
+          element.shadowRoot?.querySelectorAll('vanna-message') || []
+        )
+          .map(message => message.shadowRoot?.textContent || '')
+          .join('\\n')"""
+    )
+    assert "历史会话里的问题" in rendered
+    assert "历史会话里的结论" in rendered
+
+    browser_page.reload(wait_until="domcontentloaded")
+    browser_page.wait_for_function(
+        """id => {
+          const chat = document.querySelector('vanna-chat');
+          const messages = Array.from(
+            chat?.shadowRoot?.querySelectorAll('vanna-message') || []
+          )
+            .map(message => message.shadowRoot?.textContent || '')
+          .join('\\n');
+          return messages.includes('历史会话里的结论')
+            && localStorage.getItem('data-analysis-agent-current-conversation-v1') === id;
+        }""",
+        arg=conversation_id,
+    )
+
+    browser_page.locator("#new-conversation").click()
+    browser_page.wait_for_function(
+        """id => {
+          const chat = document.querySelector('vanna-chat');
+          const messages = Array.from(
+            chat?.shadowRoot?.querySelectorAll('vanna-message') || []
+          )
+            .map(message => message.shadowRoot?.textContent || '')
+          .join('\\n');
+          return localStorage.getItem('data-analysis-agent-current-conversation-v1') !== id
+            && !messages.includes('历史会话里的结论');
+        }""",
+        arg=conversation_id,
+    )
     assert not console_errors

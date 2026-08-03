@@ -234,7 +234,7 @@ class PostgresConversationStore(ConversationStore):
                 cursor.execute(
                     """
                     SELECT * FROM app.conversations
-                    WHERE user_id = %s AND status = 'active'
+                    WHERE user_id = %s AND status = 'active' AND message_count > 0
                     ORDER BY updated_at DESC
                     LIMIT %s OFFSET %s
                     """,

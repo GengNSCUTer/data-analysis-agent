@@ -10,6 +10,12 @@ import './rich-task-list.js';
 import './rich-progress-bar.js';
 import './plotly-chart.js';
 
+export interface ConversationHistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: string;
+}
+
 @customElement('vanna-chat')
 export class VannaChat extends LitElement {
   static styles = [
@@ -770,7 +776,8 @@ export class VannaChat extends LitElement {
   }
 
   private apiClient!: VannaApiClient;
-  private conversationId: string;
+  /** The host page may provide this value when it embeds the component. */
+  @property({ attribute: 'conversation-id' }) conversationId = '';
   private componentManager: ComponentManager | null = null;
   private componentObserver: MutationObserver | null = null;
 
@@ -855,6 +862,49 @@ export class VannaChat extends LitElement {
       console.error('Error requesting starter UI:', error);
       // Fail silently - starter UI is optional
     }
+  }
+
+  /** Set the server-side conversation used by subsequent requests. */
+  setConversationId(conversationId: string): void {
+    const normalized = String(conversationId || '').trim();
+    if (!normalized || normalized === this.conversationId) return;
+    this.conversationId = normalized;
+    this.dispatchEvent(new CustomEvent('conversation-id-changed', {
+      detail: { conversationId: normalized },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+  /** Replace the visible message stream with a safe server-side replay. */
+  loadConversation(
+    conversationId: string,
+    messages: ConversationHistoryMessage[],
+  ): void {
+    this.setConversationId(conversationId);
+    this.clearMessages();
+    for (const message of messages) {
+      if (message.role !== 'user' && message.role !== 'assistant') continue;
+      if (!String(message.content || '').trim()) continue;
+      this.addMessage(message.content, message.role, message.timestamp);
+    }
+    this.setStatus('idle', '已恢复历史会话', '历史文字已加载，图表和数据表可按需重新查询');
+    this.requestUpdate();
+  }
+
+  /** Start a fresh server-side conversation and request the starter UI. */
+  startNewConversation(): string {
+    const conversationId = this.generateId();
+    this.conversationId = conversationId;
+    this.dispatchEvent(new CustomEvent('conversation-id-changed', {
+      detail: { conversationId },
+      bubbles: true,
+      composed: true,
+    }));
+    this.clearMessages();
+    this.setStatus('idle', '新会话已创建', '可以输入新的经营分析问题');
+    void this.requestStarterUI();
+    return conversationId;
   }
 
   disconnectedCallback() {
@@ -1059,10 +1109,10 @@ export class VannaChat extends LitElement {
   }
 
 
-  addMessage(content: string, type: 'user' | 'assistant') {
+  addMessage(content: string, type: 'user' | 'assistant', timestamp?: string) {
     // Create message as a rich component and send to ComponentManager
     const richComponent: RichComponent = {
-      id: `${type}-message-${Date.now()}`,
+      id: `${type}-message-${this.generateId()}`,
       type: `${type}-message`,
       lifecycle: 'create',
       data: {
@@ -1070,7 +1120,7 @@ export class VannaChat extends LitElement {
         sender: type
       },
       children: [],
-      timestamp: new Date().toISOString(),
+      timestamp: timestamp || new Date().toISOString(),
       visible: true,
       interactive: false
     };
@@ -1146,6 +1196,20 @@ export class VannaChat extends LitElement {
   }
 
   private async processChunk(chunk: ChatStreamChunk) {
+    // Ignore late chunks from a request that belongs to a conversation the
+    // host has already replaced.
+    if (chunk.conversation_id && chunk.conversation_id !== this.conversationId) {
+      return;
+    }
+
+    if (chunk.conversation_id) {
+      this.dispatchEvent(new CustomEvent('conversation-id-changed', {
+        detail: { conversationId: chunk.conversation_id },
+        bubbles: true,
+        composed: true,
+      }));
+    }
+
     // Dispatch chunk event for external listeners
     this.dispatchEvent(new CustomEvent('chunk-received', {
       detail: { chunk },

@@ -95,3 +95,30 @@ async def test_store_rejects_malformed_conversation_ids(
     for conversation_id in ("../secret", "", "a" * 129, "-starts-with-dash"):
         with pytest.raises(InvalidConversationId):
             await store.get_conversation(conversation_id, user)
+
+
+@pytest.mark.asyncio
+async def test_store_hides_empty_starter_conversations(
+    store: PostgresConversationStore,
+) -> None:
+    suffix = uuid.uuid4().hex[:12]
+    user = User(id=f"starter-owner-{suffix}", group_memberships=["analyst"])
+    empty_id = f"starter-empty-{suffix}"
+    populated_id = f"starter-populated-{suffix}"
+    try:
+        await store.update_conversation(Conversation(id=empty_id, user=user))
+        await store.update_conversation(
+            Conversation(
+                id=populated_id,
+                user=user,
+                messages=[Message(role="user", content="查看订单")],
+            )
+        )
+
+        conversations = await store.list_conversations(user)
+        ids = {conversation.id for conversation in conversations}
+        assert populated_id in ids
+        assert empty_id not in ids
+    finally:
+        await store.delete_conversation(empty_id, user)
+        await store.delete_conversation(populated_id, user)
