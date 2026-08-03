@@ -18,9 +18,10 @@
 ## 本轮命令结果
 
 ```text
-pytest deterministic: 78 passed, 3 skipped
-RUN_PROJECT_DB=1 pytest tests/test_postgres_runner.py: 3 passed
+pytest deterministic + demo scenario contracts: 88 passed
+RUN_PROJECT_DB=1 pytest tests/test_postgres_runner.py tests/test_demo_scenarios.py: 6 passed
 run_project_evaluation.py --database: 60 cases, 26/26 safety, golden passed
+run_demo_scenario_evaluation.py --database: 3 scenarios, golden passed
 ```
 
 真实在线 SSE 已验证两条代表性链路：州有效订单表格/中文结论，以及同一聚合结果的受控
@@ -28,7 +29,7 @@ Plotly 柱状图。浏览器验证宿主页可以显示角色、版本和最近�
 
 ## 已知限制
 
-- 身份来自 `X-Demo-Role`/`X-Demo-User`，是 demo 身份替换点，不是生产登录；
+- 身份来自签名的短期演示 cookie，可验证 analyst/admin 差异，但不是生产登录；
 - 行范围差异在 v1 体现为角色化返回行上限，尚未实现多租户/组织级 RLS；
 - 在线模型只运行了代表性真实用例，未对 60 条自然语言问题声称语义准确率；
 - 运行环境为本地 loopback PostgreSQL 和 screen 服务，尚未形成生产部署。

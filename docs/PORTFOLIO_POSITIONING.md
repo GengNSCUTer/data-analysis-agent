@@ -19,13 +19,18 @@
 
 ## 目前可以诚实表述的事实
 
-- 将 Vanna 2.0.2 合并进单一 Python 项目仓库，使用 FastAPI/SSE 和原生 Web Component。
-- 接入 SiliconFlow `DeepSeek-V4-Flash`，完成中文提问、工具调用、SQLite 查询、表格和
-  中文总结的端到端验证。
-- 建立 Olist 主案例的数据 manifest、字段字典、8 项指标草案和 20 条评测草案。
+- 将 Vanna 2.0.2 合并进单一 Python 项目仓库，使用 FastAPI/SSE 和原生 Web Component，
+  运行一个嵌入式经营分析副驾。
+- 接入 SiliconFlow `DeepSeek-V4-Flash`，完成中文问题、受控 SQL、表格、图表、最终 SQL 和
+  审计证据的代表性真实链路验证。
+- 建立 `sqlglot` AST SQL Policy、PostgreSQL 双角色（只读查询 / 应用写审计）和持久
+  `app.query_audits`。
+- 使用 Olist 公开数据完成真实 PostgreSQL 加载、golden 指标校验和 60 条确定性策略/数据
+  评测；同时为 3 条面试 Demo 场景建立版本化契约和数据库 golden 验证。
+- 演示级 analyst/admin 会话已可在宿主页切换，并真实影响 SQL 限制与审计范围；它明确不是
+  生产认证。
 
-不要在当前阶段声称已经实现 PostgreSQL 行级权限、SQL AST 拦截、持久审计、真实 Olist
-加载、图表自动生成或任何准确率/时延指标。
+不要声称已经实现真实身份系统、组织级行权限、在线 60 题语义准确率、生产部署 SLA 或商业化场景的权限治理。
 
 ## 完成后可使用的简历描述模板
 
@@ -33,7 +38,8 @@
 >
 > 面向经营分析场景构建可嵌入既有网页的分析副驾：通过 Web Component + SSE 流式呈现
 > 查询进度、表格、图表、SQL 与指标证据；在 Agent 工具层接入指标语义、AST SQL Policy、
-> 数据库只读角色和版本化审计，将自然语言分析限定在可解释的业务数据范围内；基于
-> Olist 构建回归与安全评测集，并以实际运行报告补充量化结果。
+> PostgreSQL 双角色和版本化审计，将自然语言分析限定在可解释的业务数据范围内；基于
+> Olist 构建 60 条确定性评测集和 3 条固定 Demo 场景，并以保存的 golden SQL、浏览器回归
+> 与 CI 结果支撑项目表述。
 
 上面文字必须在对应能力和评测报告落地后使用；最终简历的数字只从已保存的评测报告中提取。

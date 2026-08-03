@@ -115,10 +115,10 @@ Vanna 2.0.2 自带的 RichText Markdown 解析器没有实现表格语法，导�
 可信查询原型入口为 `examples/trusted_olist_web_demo.py`，监听 `127.0.0.1:32010`。它以
 `SecurePostgresRunner` 将 Vanna 的唯一 SQL 工具固定到 PostgreSQL `analytics` Schema：每条
 SQL 先通过 `sqlglot` AST 策略，再由 `daa_analytics_reader` 只读角色执行，并通过
-`daa_app_writer` 写入 `app.query_audits`。Demo 以 `X-Demo-Role: analyst|admin` 和
-`X-Demo-User` 模拟身份，不能视为真实认证。`/api/project/evidence` 提供数据/指标版本，
-`/api/project/audits` 按角色返回审计历史；真实浏览器与 SSE 已验证中文问题、结果表、中文
-结论、最终 SQL 和审计记录闭环。
+`daa_app_writer` 写入 `app.query_audits`。Demo 当前使用服务器签名、短期有效的 `analyst` /
+`admin` 演示会话 cookie；它能验证策略和审计范围差异，但不能视为真实认证。`/api/project/evidence`
+提供数据/指标版本，`/api/project/audits` 按角色返回审计历史；真实浏览器与 SSE 已验证中文问题、
+结果表、中文结论、最终 SQL 和审计记录闭环。
 
 SQLite fixture 只用于可重复的上游冒烟验证，不代表最终业务数据；可信原型使用已加载的
 Olist 分析表。受控 Plotly 图表已实现：它只能读取当前 `RunSqlTool` 生成的紧凑查询结果文件，
