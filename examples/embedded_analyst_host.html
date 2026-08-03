@@ -92,6 +92,15 @@
       .status-label { color: #64727d; }
       .status-value { font-weight: 600; }
       .status-value.alert { color: #b45309; }
+      .evidence-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 16px; margin-top: 16px; }
+      .evidence-list { display: grid; gap: 12px; margin-top: 16px; }
+      .audit-item { padding: 12px; border: 1px solid #e1e7ea; border-radius: 6px; }
+      .audit-top { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+      .audit-question { margin-top: 7px; font-weight: 600; font-size: 14px; }
+      .audit-meta { margin-top: 7px; color: #64727d; font-size: 12px; }
+      .audit-sql { margin: 8px 0 0; max-height: 72px; overflow: auto; white-space: pre-wrap; color: #34424d; font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .badge { color: #0f766e; font-weight: 700; }
+      .badge.rejected, .empty { color: #b45309; }
 
       vanna-chat {
         position: fixed;
@@ -138,6 +147,20 @@
         <article class="metric"><div class="metric-label">平均履约时长</div><div class="metric-value">12.56 天</div><div class="metric-change caution">已送达订单 · 实际送达减下单</div></article>
         <article class="metric"><div class="metric-label">好评率</div><div class="metric-value">77.07%</div><div class="metric-change">评分大于等于 4 的评价占比</div></article>
       </section>
+      <section class="evidence-grid" aria-label="查询证据与审计">
+        <article class="section">
+          <h2>最近查询</h2>
+          <div id="audit-list" class="evidence-list" aria-live="polite"><p class="empty">正在读取当前用户的查询历史…</p></div>
+        </article>
+        <article class="section">
+          <h2>分析证据</h2>
+          <ul class="status-list" id="evidence-list">
+            <li><span class="status-label">数据版本</span><span class="status-value">加载中</span></li>
+            <li><span class="status-label">指标版本</span><span class="status-value">加载中</span></li>
+            <li><span class="status-label">访问角色</span><span class="status-value">加载中</span></li>
+          </ul>
+        </article>
+      </section>
 
       <section class="content-grid">
         <article class="section">
@@ -181,6 +204,32 @@
       });
       chat.addEventListener("window-state-changed", (event) => {
         document.body.dataset.vannaWindowState = event.detail.state;
+      });
+
+      const escapeHtml = (value) => String(value ?? "").replace(/[&<>"]/g, (character) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"
+      })[character]);
+      async function refreshEvidence() {
+        const [evidence, session, audits] = await Promise.all([
+          fetch("/api/project/evidence").then((response) => response.json()),
+          fetch("/api/project/session").then((response) => response.json()),
+          fetch("/api/project/audits").then((response) => response.json())
+        ]);
+        document.querySelector("#evidence-list").innerHTML = [
+          ["数据版本", evidence.dataset_version],
+          ["指标版本", evidence.metric_version],
+          ["访问角色", session.role + " · 演示身份"]
+        ].map(([label, value]) => `<li><span class="status-label">${escapeHtml(label)}</span><span class="status-value">${escapeHtml(value)}</span></li>`).join("");
+        const auditList = document.querySelector("#audit-list");
+        auditList.innerHTML = audits.length ? audits.slice(0, 5).map((audit) => `<article class="audit-item">
+          <div class="audit-top"><span class="badge ${escapeHtml(audit.status)}">${escapeHtml(audit.status)}</span><span>${escapeHtml(audit.created_at)}</span></div>
+          <div class="audit-question">${escapeHtml(audit.question)}</div>
+          <div class="audit-meta">${escapeHtml(audit.dataset_version)} · ${escapeHtml(audit.metric_version)} · ${escapeHtml(audit.row_count ?? 0)} 行 · ${escapeHtml(audit.elapsed_ms ?? 0)} ms</div>
+          ${audit.final_sql ? `<pre class="audit-sql">${escapeHtml(audit.final_sql)}</pre>` : `<div class="audit-meta">${escapeHtml(audit.reason)}</div>`}
+        </article>`).join("") : '<p class="empty">当前演示身份还没有查询历史。</p>';
+      }
+      refreshEvidence().catch(() => {
+        document.querySelector("#audit-list").innerHTML = '<p class="empty">查询历史暂时不可用。</p>';
       });
     </script>
   </body>

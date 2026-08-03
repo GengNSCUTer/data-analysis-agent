@@ -34,6 +34,23 @@ QUERY_RESULTS_DIRECTORY = Path(os.getenv("VANNA_QUERY_RESULTS_DIR", "/tmp/data-a
 SAFE_USER_ID = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
+def audit_response(audit: dict) -> dict:
+    """Expose only analyst-safe audit evidence to the embedded host page."""
+    return {
+        "request_id": audit["request_id"],
+        "question": audit["question"] or "未记录问题（旧审计记录）",
+        "role": audit["user_role"],
+        "status": audit["policy_status"],
+        "reason": audit["policy_reason"],
+        "final_sql": audit["final_sql"],
+        "dataset_version": audit["dataset_version_id"],
+        "metric_version": audit["metric_version"],
+        "elapsed_ms": audit["elapsed_ms"],
+        "row_count": audit["row_count"],
+        "created_at": audit["created_at"],
+    }
+
+
 class DemoRoleResolver(UserResolver):
     """Demo-only resolver; a production deployment must replace this with real auth."""
 
@@ -92,7 +109,15 @@ def create_app() -> FastAPI:
             RequestContext(headers=dict(request.headers), query_params=dict(request.query_params))
         )
         role = "admin" if "admin" in user.group_memberships else "analyst"
-        return runner.audit.list_recent(user.id, role)
+        return [audit_response(audit) for audit in runner.audit.list_recent(user.id, role)]
+
+    @app.get("/api/project/session")
+    async def session(request: Request) -> dict:
+        user = await DemoRoleResolver().resolve_user(
+            RequestContext(headers=dict(request.headers), query_params=dict(request.query_params))
+        )
+        role = "admin" if "admin" in user.group_memberships else "analyst"
+        return {"user_id": user.id, "role": role, "auth_mode": "demo_header"}
 
     @app.get("/embedded-demo", include_in_schema=False)
     async def embedded_demo() -> FileResponse:

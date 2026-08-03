@@ -135,6 +135,8 @@ analytics 8 表已真实加载并以 golden SQL 复核核心指标。
 耗时和行数。受信服务为 `127.0.0.1:32010`，screen 名为 `data-analysis-agent-trusted`。
 `tests/test_postgres_runner.py` 以 `RUN_PROJECT_DB=1` 显式运行，覆盖真实查询、允许/拒绝审计
 和双角色跨 Schema 拒绝；CI 不运行该测试，避免依赖开发机数据库。
+宿主页已通过 `/api/project/evidence`、`/api/project/session` 和角色过滤的 `/api/project/audits`
+展示版本、演示身份与最近查询证据；页面只使用专门的审计 DTO，不输出原始 SQL 或异常详情。
 
 退出条件：任何 Agent SQL 都经过策略层和数据库只读权限；失败不编造结论；关键事件
 可由 request ID 回放。
