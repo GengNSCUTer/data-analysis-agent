@@ -40,7 +40,9 @@ jobs:
           tests/test_visualization_policy.py \
           tests/test_trusted_workflow.py \
           tests/test_demo_session.py \
-          tests/test_demo_scenarios.py
+          tests/test_demo_scenarios.py \
+          tests/test_budget.py \
+          tests/test_context_builder.py
     - name: Run deterministic evaluation inventory
       run: |
         python scripts/run_project_evaluation.py --output /tmp/project-evaluation.yaml

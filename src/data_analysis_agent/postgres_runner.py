@@ -74,12 +74,13 @@ class PostgresQueryAudit:
                 cursor.execute(
                     """
                     INSERT INTO app.query_audits (
-                        request_id, conversation_id, user_id, user_role, question,
+                        run_id, request_id, conversation_id, user_id, user_role, question,
                         original_sql, final_sql, policy_status, policy_reason, model_name,
                         dataset_version_id, metric_version, elapsed_ms, row_count, error_message
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
+                        context.metadata.get("run_id"),
                         context.request_id,
                         context.conversation_id,
                         context.user.id,

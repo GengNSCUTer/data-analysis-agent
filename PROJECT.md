@@ -332,7 +332,8 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
   图表不能读取任意文件。
 - 已提供演示级签名会话：固定 `analyst` / `admin` 身份映射同时约束 SSE、SQL 策略与审计 API，
   页面可切换并展示其用途和非生产边界；旧请求头不能提升权限。
-- 待完成真实认证、角色行范围及完整 API/数据库集成测试。
+- 已增加 PostgreSQL 会话/消息存储、Agent Run 台账、请求级预算和上下文裁剪基础；后端历史 API 已提供列表、详情和删除。
+- 待完成宿主页历史切换/新建会话控件、真实认证、角色行范围及完整浏览器/API 集成测试。
 
 ### Phase 4：嵌入式交互与证据呈现
 
@@ -405,3 +406,4 @@ v1 不引入 Redis。
 | 2026-08-03 | 固定演示场景与 Golden 验证 | 将“州前五”“品类前十”“指标概览”从工作流按钮提升为 `evals/cases/demo_scenarios.yaml` 中的版本化场景契约，固定问题、允许角色、指标口径、来源表、排序/行数、图表要求、展示证据和预期结果。新增 PostgreSQL 断言脚本验证州 Top 5、品类 Top 10 和四项指标概览不发生数据或口径漂移；本地真实库执行成功。CI 在无数据库环境校验契约结构与 starter action 一致性，数据库 golden 只在 `RUN_PROJECT_DB=1` 显式执行。该资产不测量在线 LLM 语义准确率。 |
 | 2026-08-03 | 项目级验证审查 | 对嵌入图表、演示会话、固定场景、对外文档和发布回归进行逐项审查：浏览器 E2E 5/5、策略/场景相关确定性测试 30 passed 1 skipped、项目 PostgreSQL 测试 6/6、60 条安全预期 26/26、3 条场景 golden 均通过；最近 GitHub Actions 通过。审查记录明确未覆盖真实认证、组织级 RLS、批量在线 LLM 准确率和生产部署。 |
 | 2026-08-03 | Agent 平台与 Text-to-SQL 专项调研 | 明确下一阶段优先做 PostgreSQL 持久会话、分层上下文、请求级工具/token 预算、歧义澄清、一次受限执行修复和结果级校验；对照 Vanna、Dataherald、WrenAI 及 2025--2026 Text-to-SQL 论文，暂缓多 Agent、Best-of-N、RL/专用训练、向量库和任意 Python 执行。详见两份专项文档。 |
+| 2026-08-03 | 第二轮 P0 基础设施骨架 | 新增 PostgreSQL `ConversationStore`、`conversations/messages/agent_runs` 表、`run_id` 审计关联、请求级工具/SQL/图表/输入/上下文/输出预算、上下文轮次裁剪和历史 API。11 项预算/上下文确定性测试、8 项 PostgreSQL/SQL runner/路由/run recorder 集成测试、run/audit 真实回链与应用装配检查通过；宿主页历史控件和 P1 Text-to-SQL 可靠性增强尚未完成。详见 `plan/feature-agent-platform-v2.md` 与 `docs/verification-2026-08-03-v2.md`。 |

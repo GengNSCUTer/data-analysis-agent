@@ -1,6 +1,6 @@
 # Agent 平台下一阶段计划
 
-> 文档状态：设计计划，尚未代表实现完成。
+> 文档状态：设计计划；P0 已完成第一版后端基础设施，前端历史交互和 P1 Text-to-SQL 可靠性仍未完成。
 > 更新日期：2026-08-03
 > 关联研究：[Text-to-SQL 专项调研](TEXT_TO_SQL_RESEARCH.md)
 
@@ -31,16 +31,27 @@
 - 单语句、只读、Schema/表/列白名单、敏感标识限制、LIMIT、超时和角色化 SQL Policy；
 - `daa_analytics_reader` 与 `daa_app_writer` 双角色；
 - `app.query_audits` 持久查询审计；
+- PostgreSQL `ConversationStore`、`agent_runs` 运行台账和请求级工具/上下文预算的第一版骨架；
+- 可信 Demo 已接入会话存储、预算工具注册表、上下文裁剪过滤器和安全 DTO 历史 API；
 - Vanna 原生 `<vanna-chat>` 嵌入窗口、表格/图表/SQL/证据展示；
 - 60 条确定性用例和 3 条固定演示场景的安全与数据库 golden 校验。
 
 ### 必须准确区分的未完成能力
 
-- 查询审计历史不等于聊天会话历史；
-- Vanna 当前默认 `MemoryConversationStore` 和 `DemoAgentMemory` 是进程内存储，重启会丢失；
-- `max_tool_iterations=4` 是模型-工具循环上限，不是总工具调用、token 或费用预算；
-- 当前没有持久消息摘要、上下文裁剪、每请求 token 用量、用户配额或成本台账；
+- 会话和消息已经持久化，但原生 `<vanna-chat>` 还没有接入“历史列表/点击恢复/新建会话”的宿主页控件；
+- `DemoAgentMemory` 仍是进程内辅助记忆，结构化长期业务记忆和消息摘要尚未实现；
+- `max_tool_iterations=4` 仍是模型-工具循环上限，项目新增了总工具、SQL、图表、输入、上下文和输出预算，但用户配额/费用台账尚未实现；
+- 上下文目前按完整轮次和字符/消息预算裁剪，尚未生成结构化的旧轮次摘要；
 - 当前没有稳定的澄清状态机、SQL 自动修复上限、置信度/拒答原因和在线模型语义准确率报告。
+
+### P0 第一版实现状态
+
+本轮已落地 `app.conversations`、`app.messages`、`app.agent_runs` 及 `query_audits.run_id`；
+`PostgresConversationStore` 对读取、更新、删除和分页执行用户归属校验，`PostgresRunRecorder`
+记录模型/数据版本、预算上限、工具用量、上下文裁剪和终止状态。`BudgetedToolRegistry` 会逐个
+计算同一模型响应中的工具调用，`BudgetSafetyMiddleware` 在预算耗尽后阻止未经验证的数值回答，
+`ContextBudgetFilter` 保留完整的最新轮次并记录裁剪标记。后端历史 API 已提供列表、详情和删除，
+但前端尚未消费这些 API；这是一块明确的下一项工作。
 
 ## 3. P0：会话、上下文和资源预算
 
@@ -62,6 +73,9 @@ Redis、队列、多 Agent、MCP 或任意 Python 执行。
 验收：刷新页面后能恢复当前会话；同一用户只能读取自己的会话；管理员可按权限查看审计；
 删除会话后不能通过历史 API 恢复；同一会话重新提问能获得明确的 `conversation_id`。
 
+当前已验证 PostgreSQL round-trip、跨用户隔离、分页上限、删除权限和 run/audit 外键关联；
+浏览器刷新恢复和宿主页历史控件仍待实现。
+
 ### 3.2 分层上下文
 
 每次模型调用都通过一个显式 Context Builder 组装上下文，不把整个历史和审计表直接回灌：
@@ -77,6 +91,9 @@ Redis、队列、多 Agent、MCP 或任意 Python 执行。
 
 验收：测试能证明上下文只包含当前用户可见历史；敏感列值、其他用户会话和异常堆栈不会被
 拼入后续 Prompt；超出预算时按优先级压缩并记录 `context_truncated`。
+
+当前第一版按完整轮次、最大消息数和最大字符数裁剪，未把异常堆栈或其他用户数据拼入上下文；
+结构化旧轮次摘要与按问题选择 Schema 将在 P1 实现。
 
 ### 3.3 请求级预算
 
@@ -94,10 +111,15 @@ Redis、队列、多 Agent、MCP 或任意 Python 执行。
 `context_truncated`、`sql_policy_rejected`、`query_timeout`、`execution_error`、
 `unsupported_request`。超过预算必须给用户可理解的下一步，不能悄然输出不完整结论。
 
+当前预算由 `RequestBudget.from_environment()` 读取，默认工具/SQL/图表/输入/上下文/输出上限
+已接入 trusted Demo，并持久化到 `app.agent_runs`；provider 未返回 usage 时保持 token 字段为
+未知，不把未知成本记为零。
+
 ### 3.4 前端展示
 
 继续使用 Vanna `<vanna-chat>`，宿主页只增加轻量入口和状态：最近会话、当前会话标题、
-“新建会话”、恢复失败提示、预算耗尽提示和证据入口。暂不建设独立 React/Next.js 页面。
+“新建会话”、恢复失败提示、预算耗尽提示和证据入口。当前已完成后端历史 API 与预算状态基础，
+尚未实现宿主页的历史列表、会话切换和新建会话控件；不建设独立 React/Next.js 页面。
 
 ## 4. P1：Text-to-SQL 可靠性增强
 
