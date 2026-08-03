@@ -192,7 +192,12 @@ Conventional Commit 提交并推送 `origin`。
 
 ## 6. 近期下一步
 
-1. 为可信服务补 PostgreSQL 集成测试、真实认证替换接口与角色行范围策略；
-2. 在宿主页中展示受角色保护的最终 SQL、审计历史和指标证据；
-3. 设计受控 Plotly 图表工具并补图表/证据 E2E；
-4. 将评测扩展到至少 60 个用例，并运行可复现的安全与语义回归报告。
+平台 P0 基础已经完成，Text-to-SQL 可靠性进入下一条独立实施计划：
+
+1. 先在不改变 Agent 生成链路的前提下完成 SiliconFlow 在线基线，区分可执行、语义、指标口径、安全、澄清、时延和成本；
+2. 将固定 `SYSTEM_PROMPT` 拆成带版本的 Olist Semantic Catalog，用确定性别名/指标/Join 检索替代无界全 Schema 注入；
+3. 增加 `answerable`、缺时间、缺指标、缺比较基线、无权限和不支持等状态，并把缺失信息变成可审计的澄清轮次；
+4. 仅允许一次经过脱敏的执行错误修复，再执行结果级校验和选择性拒答；
+5. 用多轮 working memory、60 条版本化用例和固定 PostgreSQL golden 证明改动有效，再决定是否引入 embedding、judge 或 Redis。
+
+可执行任务、文件、测试和退出条件见 [`plan/feature-text-to-sql-reliability-v1.md`](../plan/feature-text-to-sql-reliability-v1.md)；开源项目、论文和 skill 证据见 [`docs/TEXT_TO_SQL_RESEARCH.md`](TEXT_TO_SQL_RESEARCH.md)。

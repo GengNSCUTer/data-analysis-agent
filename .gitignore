@@ -27,3 +27,6 @@ frontends/**/static/
 frontends/**/.storybook-static/
 frontends/**/package-lock.json
 frontends/**/.mypy_cache/
+
+# Local research cache (cloned repositories and public API responses)
+github-research-output/

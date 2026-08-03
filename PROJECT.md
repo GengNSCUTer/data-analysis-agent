@@ -384,7 +384,7 @@ v1 不引入 Redis。
 | --- | --- | --- |
 | 2026-08-02 | 项目立项 | 确定为 Python 可信数据分析 Agent，不继续以 Java 本地生活平台作为主项目。 |
 | 2026-08-02 | Agent 选型 | 选择 Vanna，而非 PandasAI。 |
-| 2026-08-02 | 前后端基座 | 使用 Vanna + FastAPI；使用 TailAdmin + Vanna Web Component。 |
+| 2026-08-02 | 前后端基座 | 使用 Vanna + FastAPI；前端只保留可嵌入的 Vanna Web Component 与原生宿主页，不再建设 TailAdmin。 |
 | 2026-08-02 | 基础设施 | v1 使用 PostgreSQL；Redis 延后到出现异步任务/缓存/限流需求时。 |
 | 2026-08-02 | 数据策略 | Chinook 用于回归，Olist 用于主展示，中文电商数据用于后续扩展。 |
 | 2026-08-02 | 项目基线同步 | 已创建飞书项目文档；GitHub SSH 认证已恢复，首个项目基线提交已推送至 `main`。 |
@@ -418,3 +418,4 @@ v1 不引入 Redis。
 | 2026-08-03 | 第二轮 P0 基础设施骨架 | 新增 PostgreSQL `ConversationStore`、`conversations/messages/agent_runs` 表、`run_id` 审计关联、请求级工具/SQL/图表/输入/上下文/输出预算、上下文轮次裁剪和历史 API。11 项预算/上下文确定性测试、8 项 PostgreSQL/SQL runner/路由/run recorder 集成测试、run/audit 真实回链与应用装配检查通过；GitHub Actions run `30806496513`（commit `0a04c7d`）成功；宿主页历史控件和 P1 Text-to-SQL 可靠性增强尚未完成。详见 `plan/feature-agent-platform-v2.md` 与 `docs/verification-2026-08-03-v2.md`。 |
 | 2026-08-03 | P0 会话交互与空会话修复 | 宿主页完成历史列表、点击恢复、刷新恢复、新建会话、删除失败状态和角色切换隔离；嵌入窗口 E2E 6 条通过。starter UI 不再提前持久化零消息会话，历史 API 过滤遗留空记录；历史恢复只回放安全文字，不伪造 SQL/图表/DataFrame。 |
 | 2026-08-03 | Text-to-SQL 可靠性计划冻结 | 新增 `plan/feature-text-to-sql-reliability-v1.md`，把调研落成 5 个可执行阶段：在线基线、结构化 Catalog、确定性澄清、一次受限修复/结果校验、回归评测。当前均为计划，尚未把 Catalog、澄清、修复或结果验证描述为已实现能力。 |
+| 2026-08-03 | Text-to-SQL 二次源码调研 | 按 `github-research` 六阶段流程核验 OpenChatBI、PremSQL、BIRD-INTERACT、Lumen、PandasAI、Dash、test-suite-sql-eval、SQL-R1 和 MAC-SQL；确认下一步核心是 Catalog/Schema linking、可回答性澄清、一次执行修复、结果 denotation/校验和分维度评测。研究缓存位于本地 `github-research-output/` 且已忽略，不进入 Git。 |

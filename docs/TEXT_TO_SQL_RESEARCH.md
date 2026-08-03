@@ -1,7 +1,7 @@
 # Text-to-SQL 专项调研与优化建议
 
-> 调研日期：2026-08-03
-> 范围：当前项目、Vanna/Dataherald/WrenAI 等开源方案、公开论文和后续落地路线。
+> 调研日期：2026-08-03（含二次公开仓库/源码核验）
+> 范围：当前项目、Text-to-SQL/GenBI 开源方案、公开论文、Agent skill 和后续落地路线。
 > 说明：2026 年论文多数是 arXiv 预印本，本文标注论文提出的结果，不把预印本结果当作
 > 已验证的工程事实。
 
@@ -103,6 +103,27 @@ GenBI dashboard 和 Agent SDK，范围远大于当前项目；应借鉴语义层
 PandasAI 更偏 DataFrame/CSV 的探索式分析和 Python/图表生成，适合另一类“让 Agent 分析表格”
 产品。当前项目的核心约束是 PostgreSQL 只读 Text-to-SQL 和企业式治理；引入任意 Python 执行
 会破坏当前安全边界。因此它可以作为未来离线数据分析适配器的参考，不能替换当前 SQL 主链路。
+
+### 3.5 二次公开仓库与源码核验（2026-08-03）
+
+本轮按 `github-research` skill 的六阶段流程补充公开 GitHub API 搜索和浅克隆源码阅读。GitHub
+CLI 当前未登录，因此仓库 stars、许可证和 archived 状态来自 GitHub Public API，代码事实来自
+对应仓库在本地的浅克隆；这些缓存已加入 `.gitignore`，不作为项目运行时依赖。
+
+| 仓库 | 公开 API 观察 | 代码级观察 | 对本项目的取舍 |
+| --- | --- | --- | --- |
+| [OpenChatBI](https://github.com/zhongyu09/openchatbi) | 613 stars，MIT，活跃 | `text2sql/generate_sql.py`、`sql_graph.py`、`confidence.py` 将表/列/指标 Catalog、schema linking、执行错误重试、结果限制、置信度和可视化拆成节点；`AskHuman` 支持人工澄清 | 最接近“数据分析 Agent 平台”的参考。借鉴状态图、一次受限重试、结果校验和 confidence gate；保留本项目 `sqlglot` AST Policy，不复制其正则安全检查 |
+| [PremSQL](https://github.com/premAI-io/premsql) | 461 stars，未从 API 得到 SPDX 许可证 | `text2sql.py` 提供 SQLite/PostgreSQL/MySQL、本地模型接口和 execution-guided decoding；失败后把错误交给 correction prompt，结果限制 200 行 | 借鉴本地 Ollama/HuggingFace 接口和一次修复；先确认真正剪枝 Schema，避免只选择表但仍把全量 Schema 放进 prompt |
+| [BIRD-INTERACT](https://github.com/bird-bench/BIRD-Interact) | 1,010 stars，MIT，ICLR 2026 Oral 标识 | 数据库环境与用户模拟器分离，动作包含 `ask`、`execute`、`get_schema`、`get_column_meaning`、`submit`，并为工具调用、澄清和用户耐心设置预算 | 将 Text-to-SQL 评测改为中文多轮会话；生产系统只吸收澄清状态、action trace 和预算思想，不引入用户模拟器 |
+| [Lumen](https://github.com/holoviz/lumen) | 303 stars，BSD-3-Clause | SQL source、schema profiling、charts、dashboard、report/export 和 query limit 组合成完整 GenBI | 作为产品形态参考；不引入 Panel/Lumen，Vanna `<vanna-chat>` 已满足当前嵌入式入口 |
+| [PandasAI](https://github.com/sinaptik-ai/pandas-ai) | 23.7k stars，API 许可证字段为 `NOASSERTION` | `SemanticLayerSchema` 支持 alias、relations、expression 和 transformations；`SQLDatasetLoader` 支持 SQL connector，但安全检查仍混合 AST 与关键词黑名单 | 证明它不只支持 CSV/Excel；可作为未来 DataFrame 适配器参考，不能替换 PostgreSQL + AST + reader role 主链路 |
+| [Dash](https://github.com/agno-agi/dash) | 2.2k stars，Apache-2.0 | 以六层上下文、自学习和评测为卖点，目录包含 knowledge、memory、evals 和数据 Agent 运行层 | 借鉴上下文分层与反馈闭环；暂不引入其完整框架 |
+| [SQL-R1](https://github.com/DataArcTech/SQL-R1) / [MAC-SQL](https://github.com/wbbeyourself/MAC-SQL) | 分别 145/344 stars | 前者是强化学习训练 Text-to-SQL 推理模型，后者是多 Agent 协作框架 | 研究路线，不解决当前项目的 Catalog、澄清和证据链瓶颈，暂缓 |
+| [test-suite-sql-eval](https://github.com/taoyds/test-suite-sql-eval) | 321 stars，Apache-2.0 | 通过多个数据库实例比较 denotation，处理行/列顺序、重复行、空结果和 literal 替换 | 借鉴“结果语义而非 SQL 字符串”的评测契约；先在固定 Olist 上实现轻量 golden/人工语义标签 |
+
+源码阅读得到的共同事实是：成熟实现都把 SQL 生成前的上下文选择、生成后的执行反馈、结果
+验证和失败终止分开；单纯把 `max_tool_iterations` 调大不能替代这些语义状态。当前项目的
+独有边界（AST policy、PostgreSQL 双角色、版本化证据）应保留为不可下放给开源 Agent 的信任层。
 
 ## 4. 论文与研究方向
 
@@ -294,16 +315,38 @@ golden、是否应拒答和人工判定。报告必须分开统计执行正确�
 
 ### 已找到的 Agent Skill
 
-- `oimiragieo/agent-studio@text-to-sql`：138 次安装，偏 Text-to-SQL 工作流实践；
+- `oimiragieo/agent-studio@text-to-sql`：140 次安装，偏 Text-to-SQL 工作流实践；
   <https://skills.sh/oimiragieo/agent-studio/text-to-sql>
-- `collaborative-deep-research/agent-papers-cli@literature-review`：696 次安装，偏论文检索/综述；
+- `lingzhi227/agent-research-skills@literature-review`：约 3.3K 次安装，适合论文检索/综述；
+  <https://skills.sh/lingzhi227/agent-research-skills/literature-review>
+- `collaborative-deep-research/agent-papers-cli@literature-review`：696 次安装，另一个论文检索/综述选项；
   <https://skills.sh/collaborative-deep-research/agent-papers-cli/literature-review>
 
 本轮没有安装它们：当前任务需要的是对项目做一次可审阅的专项研究，外部 skill 本身不应成为
 运行时依赖。`github-research` 和 `find-skills` 只用于仓库/技能发现；如果经常做论文追踪，可
 单独安装 literature-review；如果需要重复生成 Text-to-SQL 实践模板，再考虑安装 text-to-sql skill。
 
-## 9. 研究限制
+## 9. 研究结论转译为工程合同
+
+为避免把“研究方向”变成无界开发，后续每次实现都必须遵守以下合同：
+
+1. **上下文合同**：模型只能看到服务器按角色筛选后的 Catalog slice、必要 working memory
+   和版本化规则；检索结果要记录命中的表/列/指标及原因。
+2. **状态合同**：请求先落入 `answerable`、`missing_time`、`missing_metric`、
+   `missing_comparison`、`unauthorized`、`unsupported` 之一；非 `answerable` 不得直接生成数字。
+3. **修复合同**：候选 SQL 最多执行一次安全修复；原始候选、错误类别、修复候选和最终终止原因
+   都写入 run evidence，修复 SQL 重新经过完整 AST/role/timeout/limit 检查。
+4. **结果合同**：成功回答必须通过列/指标、空结果、时间覆盖、Join 放大和 LIMIT 截断检查；失败
+   时输出澄清或拒答，不用“SQL 可执行”冒充业务正确。
+5. **成本合同**：独立记录 Vanna 工具迭代上限、项目总工具预算、SQL/图表预算、输入/上下文/输出
+   token 预算、实际 usage（没有 usage 时记为 `unknown`），并允许在预算耗尽时安全终止。
+6. **评测合同**：至少分开统计 executable、semantic、metric、security、clarification、latency、
+   tool_calls 和 token_cost；公开 benchmark 只能作为方向参考，不能替代本项目 Olist golden。
+
+这一合同把 OpenChatBI 的状态图、WrenAI 的语义层、BIRD-INTERACT 的交互预算和
+`test-suite-sql-eval` 的 denotation 思路收束为当前项目可解释的小步实现。
+
+## 10. 研究限制
 
 - arXiv API 查询结果包含 2026 年预印本，论文结论需要后续核对版本、代码和同行评审状态；
 - GitHub CLI 当前未登录，仓库元数据使用公开 API/README；没有把未读源码的项目写成代码级结论；

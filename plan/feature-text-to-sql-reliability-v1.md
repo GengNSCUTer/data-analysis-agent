@@ -1,6 +1,6 @@
 ---
 goal: "Make the trusted Vanna Text-to-SQL path semantic, self-checking, and measurable"
-version: "1.0"
+version: "1.1"
 date_created: "2026-08-03"
 last_updated: "2026-08-03"
 owner: "GengNSCUTer/data-analysis-agent"
@@ -32,6 +32,19 @@ question + conversation state
   -> evidence-backed answer, clarification, or refusal
 ```
 
+The research checkpoint adds five non-negotiable contracts to that flow:
+
+1. Catalog retrieval is server-scoped, bounded, explainable, and versioned; it is not an implicit
+   full-schema prompt or an untracked vector search.
+2. Answerability is an explicit state (`answerable`, `missing_time`, `missing_metric`,
+   `missing_comparison`, `unauthorized`, or `unsupported`) before a numeric answer is emitted.
+3. Repair is one attempt only. A repair candidate is a new untrusted SQL string and must pass the
+   same AST, allowlist, role, timeout, and row-limit checks as the original candidate.
+4. Result validation is separate from SQL execution. Empty results, missing metric columns, time
+   gaps, suspicious join multiplication, or limit truncation can end in clarification/refusal.
+5. Tool-loop, SQL, chart, input/context/output token budgets and actual model usage are recorded
+   independently; absent provider usage is `unknown`, never a fabricated zero.
+
 This document is a future implementation plan. Only the baseline inventory task is complete when
 this plan is created; all later tasks remain pending until their tests and evidence are recorded.
 
@@ -45,6 +58,8 @@ this plan is created; all later tasks remain pending until their tests and evide
 - **REQ-006**: Validate query results for empty results, missing expected metric columns, suspicious join multiplication, missing time coverage, and row-limit truncation before producing a confident answer.
 - **REQ-007**: Persist the selected Catalog version, prompt/policy versions, routing state, candidate SQL, repaired SQL, result validation state, and terminal reason in the run/audit evidence needed for replay.
 - **REQ-008**: Add a versioned single-turn and multi-turn evaluation set that separates SQL executability, business semantic correctness, metric-definition correctness, security compliance, clarification correctness, latency, and token/tool cost.
+- **REQ-009**: Persist an explainable Catalog retrieval trace, answerability state, repair state, result-validation state, and terminal reason for every run, including safe non-numeric terminals.
+- **REQ-010**: Treat Vanna's `max_tool_iterations` as an inner loop guard, not the complete cost contract; the project-level budget must count individual tool calls and token dimensions independently.
 - **SEC-001**: Catalog retrieval and conversation context must be scoped by the server-resolved user and role; client-provided role, user, or dataset fields are never authority.
 - **SEC-002**: Repair prompts may contain only sanitized error categories and necessary schema context; they must not expose credentials, raw database rows, stack traces, or another user's content.
 - **SEC-003**: A failed validation, exhausted budget, ambiguous request, or unsafe SQL must end in a safe non-numeric state unless a validated result is available.
@@ -154,6 +169,7 @@ this plan is created; all later tasks remain pending until their tests and evide
 - **TEST-004**: `RUN_VANNA_E2E=1 RUN_PROJECT_DB=1 pytest -q -m integration tests/e2e/test_trusted_embedded_window.py` covers clarified multi-turn chat, history restore, new conversation, chart/table rendering, and safe terminal states.
 - **TEST-005**: A manually reviewed SiliconFlow run report records SQL executability separately from semantic correctness, metric correctness, clarification correctness, latency, tool calls, and token usage; no unsupported accuracy percentage is inferred.
 - **TEST-006**: `git diff --check` and a tracked-file scan prove no `.env`, API key, raw dataset, query-result CSV, build output, or temporary database file is committed.
+- **TEST-007**: A Catalog/route/repair trace fixture proves selected objects, state transitions, tool calls, token usage (or `unknown`), and terminal reason are persisted without raw credentials, rows, stack traces, or cross-user content.
 
 ## 7. Risks & Assumptions
 
@@ -162,6 +178,7 @@ this plan is created; all later tasks remain pending until their tests and evide
 - **RISK-003**: Repair prompts can create a new unsafe candidate. Mitigation: one attempt only, sanitized error categories, full AST/role/timeout/limit re-check, and audit of both SQL strings.
 - **RISK-004**: Long multi-turn history can exceed the model context window. Mitigation: latest-turn preservation, structured summaries, hard character/message budgets, and a visible truncation state.
 - **RISK-005**: The vendored Vanna repository is archived upstream, so future API drift will not be supplied automatically. Mitigation: pin the local version, isolate project adapters, and run compatibility tests for every Vanna-core change.
+- **RISK-006**: Research repositories have different licenses, maturity, and security assumptions. Mitigation: reuse concepts and small interface ideas only after license review; do not copy runtime code or replace the project's AST/role boundary.
 - **ASSUMPTION-001**: The current Olist eight-table Schema and four draft metrics are sufficient to demonstrate Catalog retrieval, clarification, repair, and result validation before adding another dataset.
 - **ASSUMPTION-002**: The SiliconFlow endpoint returns an OpenAI-compatible response; token usage may be absent and must be recorded as unknown rather than zero.
 - **ASSUMPTION-003**: The current demo cookie identity is suitable for local evaluation only; real authentication and organization-level row security remain outside this plan.
@@ -176,3 +193,6 @@ this plan is created; all later tasks remain pending until their tests and evide
 - [Spider 2.0](https://arxiv.org/abs/2411.07763) — enterprise-scale Schema and workflow benchmark reference.
 - [Finding the Right Tables and Columns](https://arxiv.org/abs/2607.13311) — Schema selection as a retrieval problem.
 - [Benchmarking Text-to-SQL under RBAC](https://arxiv.org/abs/2607.22115) — utility and access compliance must be evaluated together.
+- [OpenChatBI](https://github.com/zhongyu09/openchatbi) — state graph, confidence, execution retry, and visualization separation reference.
+- [PremSQL](https://github.com/premAI-io/premsql) — local-first execution-guided Text-to-SQL reference.
+- [test-suite-sql-eval](https://github.com/taoyds/test-suite-sql-eval) — denotation-based evaluation reference.
