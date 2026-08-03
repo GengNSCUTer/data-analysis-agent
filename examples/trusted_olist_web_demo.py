@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from data_analysis_agent.metric_context import METRIC_EVIDENCE, SYSTEM_PROMPT
 from data_analysis_agent.postgres_runner import SecurePostgresRunner
+from data_analysis_agent.trusted_workflow import TrustedOlistWorkflowHandler
 from data_analysis_agent.visualization import TrustedVisualizeDataTool
 from vanna import Agent
 from vanna.core.agent.config import AgentConfig
@@ -95,8 +96,15 @@ def create_app() -> FastAPI:
         tool_registry=registry,
         user_resolver=DemoRoleResolver(),
         agent_memory=DemoAgentMemory(),
-        config=AgentConfig(max_tool_iterations=4, temperature=0.0),
+        config=AgentConfig(
+            max_tool_iterations=4,
+            temperature=0.0,
+            input_placeholder="输入经营分析问题",
+            idle_status_message="已就绪",
+            idle_status_detail="选择示例问题或直接输入",
+        ),
         system_prompt_builder=DefaultSystemPromptBuilder(base_prompt=SYSTEM_PROMPT),
+        workflow_handler=TrustedOlistWorkflowHandler(),
     )
     app = FastAPI(title="Trusted Olist Data Analysis Agent")
     app.mount("/static", StaticFiles(directory=WEB_COMPONENT_DIST), name="static")

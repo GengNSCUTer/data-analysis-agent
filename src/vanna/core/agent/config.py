@@ -119,5 +119,10 @@ class AgentConfig(BaseModel):
     include_thinking_indicators: bool = Field(default=True)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=None, gt=0)
+    input_placeholder: str = Field(default="Ask a question...", min_length=1)
+    idle_status_message: str = Field(default="Ready", min_length=1)
+    idle_status_detail: str = Field(
+        default="Choose an option or type a message", min_length=1
+    )
     ui_features: UiFeatures = Field(default_factory=UiFeatures)
     audit_config: AuditConfig = Field(default_factory=AuditConfig)

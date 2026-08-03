@@ -224,7 +224,7 @@ class Agent:
             # Re-enable chat input so user can try again
             yield UiComponent(  # type: ignore
                 rich_component=ChatInputUpdateComponent(
-                    placeholder="Try again...", disabled=False
+                    placeholder=self.config.input_placeholder, disabled=False
                 )
             )
 
@@ -313,13 +313,13 @@ class Agent:
                     yield UiComponent(  # type: ignore
                         rich_component=StatusBarUpdateComponent(
                             status="idle",
-                            message="Ready",
-                            detail="Choose an option or type a message",
+                            message=self.config.idle_status_message,
+                            detail=self.config.idle_status_detail,
                         )
                     )
                     yield UiComponent(  # type: ignore
                         rich_component=ChatInputUpdateComponent(
-                            placeholder="Ask a question...", disabled=False
+                            placeholder=self.config.input_placeholder, disabled=False
                         )
                     )
 
@@ -482,7 +482,7 @@ class Agent:
                     )
                     yield UiComponent(  # type: ignore
                         rich_component=ChatInputUpdateComponent(
-                            placeholder="Ask a question...", disabled=False
+                            placeholder=self.config.input_placeholder, disabled=False
                         )
                     )
 
@@ -1032,7 +1032,7 @@ class Agent:
                 # Update chat input placeholder
                 yield UiComponent(  # type: ignore
                     rich_component=ChatInputUpdateComponent(
-                        placeholder="Ask a follow-up question...", disabled=False
+                        placeholder=self.config.input_placeholder, disabled=False
                     )
                 )
 
@@ -1088,7 +1088,7 @@ You can:
             # Update chat input to suggest follow-up
             yield UiComponent(  # type: ignore
                 rich_component=ChatInputUpdateComponent(
-                    placeholder="Continue the task or ask me something else...",
+                    placeholder=self.config.input_placeholder,
                     disabled=False,
                 )
             )

@@ -742,6 +742,12 @@ export class VannaChat extends LitElement {
   @property({ attribute: 'ws-endpoint' }) wsEndpoint = '/api/vanna/v2/chat_websocket';
   @property({ attribute: 'poll-endpoint' }) pollEndpoint = '/api/vanna/v2/chat_poll';
   @property() subtitle = '';
+  @property({ attribute: 'empty-state-title' }) emptyStateTitle = 'Start a conversation';
+  @property({ attribute: 'empty-state-subtitle' }) emptyStateSubtitle = 'Type your message below to begin chatting';
+  @property({ attribute: 'minimize-title' }) minimizeTitle = 'Minimize';
+  @property({ attribute: 'maximize-title' }) maximizeTitle = 'Maximize';
+  @property({ attribute: 'restore-title' }) restoreTitle = 'Restore';
+  @property({ attribute: 'send-button-label' }) sendButtonLabel = 'Send message';
   @property() startingState: 'normal' | 'maximized' | 'minimized' = 'normal';
 
   @state() private currentMessage = '';
@@ -1363,7 +1369,7 @@ export class VannaChat extends LitElement {
                     <button
                       class="window-control-btn minimize"
                       @click=${this.minimizeWindow}
-                      title="Minimize">
+                      title=${this.minimizeTitle}>
                       <svg viewBox="0 0 24 24" fill="currentColor">
                         <path d="M5 12h14v2H5z"/>
                       </svg>
@@ -1373,7 +1379,7 @@ export class VannaChat extends LitElement {
                     <button
                       class="window-control-btn restore"
                       @click=${this.restoreWindow}
-                      title="Restore">
+                      title=${this.restoreTitle}>
                       <svg viewBox="0 0 24 24" fill="currentColor">
                         <path d="M8 8v2h2V8h6v6h-2v2h4V6H8zm-2 4v8h8v-2H8v-6H6z"/>
                       </svg>
@@ -1382,7 +1388,7 @@ export class VannaChat extends LitElement {
                     <button
                       class="window-control-btn maximize"
                       @click=${this.maximizeWindow}
-                      title="Maximize">
+                      title=${this.maximizeTitle}>
                       <svg viewBox="0 0 24 24" fill="currentColor">
                         <path d="M5 5v14h14V5H5zm2 2h10v10H7V7z"/>
                       </svg>
@@ -1401,8 +1407,8 @@ export class VannaChat extends LitElement {
                   <path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
                 </svg>
               </div>
-              <div class="empty-state-text">Start a conversation</div>
-              <div class="empty-state-subtitle">Type your message below to begin chatting</div>
+              <div class="empty-state-text">${this.emptyStateTitle}</div>
+              <div class="empty-state-subtitle">${this.emptyStateSubtitle}</div>
             </div>
 
             <!-- Rich Components Container - all content renders here via ComponentManager -->
@@ -1429,7 +1435,7 @@ export class VannaChat extends LitElement {
               <button
                 class="send-button"
                 type="button"
-                aria-label="Send message"
+                aria-label=${this.sendButtonLabel}
                 .disabled=${this.disabled || !this.currentMessage.trim()}
                 @click=${this.sendMessage}
               >

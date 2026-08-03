@@ -58,6 +58,13 @@ def _open_normal_window(browser_page):
 def test_desktop_window_drag_resize_and_content_sizing(page) -> None:
     browser_page, console_errors = page
     chat = _open_normal_window(browser_page)
+    starter_text = chat.evaluate("element => element.shadowRoot.textContent")
+    assert "经营分析副驾" in starter_text
+    assert "州前五" in starter_text
+    assert "品类前十" in starter_text
+    assert chat.locator("textarea.message-input").get_attribute("placeholder") == "输入经营分析问题"
+    assert chat.locator("vanna-status-bar").evaluate("element => element.message") == "已就绪"
+    assert chat.locator("vanna-status-bar").evaluate("element => element.detail") == "选择示例问题或直接输入"
     window = browser_page.locator("#agent-window")
     before = window.bounding_box()
     assert before is not None
