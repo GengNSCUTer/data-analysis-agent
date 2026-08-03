@@ -19,6 +19,7 @@ Python 执行。项目在现有 Vanna 原生 `<vanna-chat>` 和 PostgreSQL 双�
 | Git 空白检查 | `git diff --check` | 通过 |
 | Ruff lint/format | `python -m ruff check ...`；`python -m ruff format --check ...`（本轮涉及文件） | 全部通过 |
 | 项目 CI 确定性测试子集 | `.github/workflows/tests.yml` 中的 Python 测试命令，加入本轮预算/上下文测试 | 101 passed, 1 skipped |
+| GitHub Actions | `Project Quality Checks` run `30806496513`（commit `0a04c7d`） | success |
 | 评测清单 | `scripts/run_project_evaluation.py`、`scripts/run_demo_scenario_evaluation.py` | 60 条用例唯一，26/26 安全预期通过；3 条 Demo 场景契约完整 |
 | 真实 run/audit 关联 | 创建临时 conversation/run，执行只读 SQL 后查询 `app.agent_runs` 与 `app.query_audits` | `termination_reason=completed`，`tool_calls_used=1`，audit 的 `run_id` 正确回链 |
 | 应用装配 | `from examples.trusted_olist_web_demo import create_app; create_app()` | 18 routes 注册成功，conversation 列表/详情/删除路由存在 |
@@ -35,7 +36,7 @@ Python 执行。项目在现有 Vanna 原生 `<vanna-chat>` 和 PostgreSQL 双�
 - 总工具、`run_sql`、`visualize_data`、输入长度、上下文长度和输出 token 上限已接入 trusted Demo；
   provider 不返回 usage 时 token 成本保持未知。用户配额、费用台账和时延预算尚未实现。
 - P1 的可回答性分类、澄清、一次受限 SQL 修复、结果级校验、选择性拒答和线上模型评测尚未实现。
-- Ruff 已安装到项目专用 Conda 环境并通过本轮涉及文件的 lint/format；CI 仍需在提交后确认远端结果。
+- Ruff 已安装到项目专用 Conda 环境并通过本轮涉及文件的 lint/format；远端 GitHub Actions 已通过。
 
 完整 `pytest -q` 没有作为本项目发布门：它会主动收集 Vanna 上游的可选集成测试，本环境缺少
 Ollama、ChromaDB、Snowflake 等可选依赖/服务，并包含一个未提供 fixture 的上游测试，结果为
