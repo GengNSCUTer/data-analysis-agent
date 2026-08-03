@@ -64,7 +64,7 @@ Redis、队列、多 Agent、MCP 或任意 Python 执行。
 
 - `app.conversations`：会话 ID、用户、标题、创建/更新时间、数据集/指标版本、状态；
 - `app.messages`：用户问题、助手最终回答、工具调用摘要、消息序号、时间、可见性；
-- `app.agent_runs`：一次请求的模型/Prompt/策略版本、开始结束时间、终止原因、预算消耗；
+- `app.agent_runs`：一次请求的模型名、数据/指标版本、预算配置、开始结束时间和终止原因；独立 Prompt/Policy 版本列作为下一项可回放性增强；
 - `app.query_audits` 保持 SQL 级事实记录，并通过 `conversation_id` / `run_id` 关联。
 
 原始 SSE 碎片不作为长期事实保存。成功轮次至少保存问题、最终结论、最终 SQL、结果摘要、

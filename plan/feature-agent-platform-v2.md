@@ -24,7 +24,7 @@ clarification, execution repair, and result validation only after the foundation
 - **REQ-002**: Preserve Vanna's `conversation_id` and `request_id` across SSE, tool context, audit rows, and run records.
 - **REQ-003**: Enforce request budgets for LLM rounds, total tool calls, SQL calls, visualization calls, input length, and output tokens without silently returning an incomplete answer.
 - **REQ-004**: Build model context from current request, role, versioned semantic context, and bounded conversation history; do not replay another user's messages or raw audit errors.
-- **REQ-005**: Record a replayable Agent Run with model/config versions, budget usage, termination reason, and token usage when the provider returns usage data.
+- **REQ-005**: Record a replayable Agent Run with model name, dataset/metric versions, budget configuration, termination reason, and token usage when the provider returns usage data; independent Prompt/Policy version columns remain a follow-up.
 - **REQ-006**: Add deterministic Text-to-SQL clarification and result-safety checks only after P0 persistence and budget contracts are in place.
 - **SEC-001**: Every conversation, message, run, and API response must be scoped to the resolved server-side user; client headers and client-provided role fields are never authority.
 - **SEC-002**: Every SQL candidate and any repaired SQL must pass the existing `SqlPolicy` and PostgreSQL reader role before execution.
@@ -60,7 +60,7 @@ clarification, execution repair, and result validation only after the foundation
 | TASK-005 | Implement `PostgresConversationStore` under `src/data_analysis_agent/conversation_store.py`; adapt Vanna `Conversation`/`Message` models, append only new messages, scope every read/delete by `user.id`, and use async thread offloading for psycopg2. | ✅ | 2026-08-03 |
 | TASK-006 | Configure `examples/trusted_olist_web_demo.py` to inject the PostgreSQL store; deterministic unit tests use isolated adapters and the trusted demo has no implicit in-memory production fallback. | ✅ | 2026-08-03 |
 | TASK-007 | Add `/api/project/conversations`, `/api/project/conversations/{id}`, and delete endpoints with server-side session resolution, bounded pagination, and safe DTOs that omit tool arguments and sensitive content. | ✅ | 2026-08-03 |
-| TASK-008 | Add a project run recorder that links request, conversation, user, model, versions, budget usage, and terminal state; extend `query_audits` with `run_id` without breaking old rows. | ✅ | 2026-08-03 |
+| TASK-008 | Add a project run recorder that links request, conversation, user, model/data/metric versions, budget usage, and terminal state; extend `query_audits` with `run_id` without breaking old rows. | ✅ | 2026-08-03 |
 | TASK-009 | Add frontend-host state for current/new conversation and safe history loading while retaining native `<vanna-chat>` as the chat surface. | | |
 
 ### Implementation Phase 3

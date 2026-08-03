@@ -35,6 +35,8 @@ Python 执行。项目在现有 Vanna 原生 `<vanna-chat>` 和 PostgreSQL 双�
   结构化旧轮次摘要或按问题检索 Schema/指标。
 - 总工具、`run_sql`、`visualize_data`、输入长度、上下文长度和输出 token 上限已接入 trusted Demo；
   provider 不返回 usage 时 token 成本保持未知。用户配额、费用台账和时延预算尚未实现。
+- `agent_runs` 当前保存模型名、数据/指标版本和预算配置；Prompt/Policy 独立版本列尚未加入，不能把
+  当前记录描述成完整的 Prompt 级回放。
 - P1 的可回答性分类、澄清、一次受限 SQL 修复、结果级校验、选择性拒答和线上模型评测尚未实现。
 - Ruff 已安装到项目专用 Conda 环境并通过本轮涉及文件的 lint/format；远端 GitHub Actions 已通过。
 
