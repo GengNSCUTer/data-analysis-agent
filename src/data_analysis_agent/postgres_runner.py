@@ -16,7 +16,11 @@ from vanna.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
 from vanna.core.tool import ToolContext
 
 from .sql_policy import PolicyViolation, SqlPolicy
-from .result_validator import ResultValidationError, ResultValidator
+from .result_validator import (
+    ResultValidationError,
+    ResultValidator,
+    build_result_summary,
+)
 from .sql_repair import SafeSqlExecutionError, sanitize_sql_error
 from .metric_context import DATASET_VERSION, METRIC_VERSION, OLIST_WORKSPACE
 from .workspace import WorkspaceProfile
@@ -237,6 +241,21 @@ class SecurePostgresRunner(SqlRunner):
                     repair_evidence=context.metadata.get("repair_evidence"),
                 )
                 raise ResultValidationError(validation)
+            result_summary = build_result_summary(
+                pd.DataFrame(rows),
+                validation,
+                metric_ids=context.metadata.get("metric_result_columns", ()),
+                required_columns=context.metadata.get("required_result_columns", ()),
+                column_aliases=context.metadata.get(
+                    "required_result_column_aliases", {}
+                ),
+                max_rows=8,
+                max_chars=1_200,
+            )
+            context.metadata["validated_result_summary"] = result_summary
+            usage = context.metadata.get("budget_usage")
+            if usage is not None and hasattr(usage, "set_result_summary"):
+                usage.set_result_summary(result_summary)
 
         self.audit.record(
             context, role, args.sql, status="allowed", final_sql=decision.final_sql,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+import json
 import math
 from typing import Any, Literal, Mapping, Sequence
 
@@ -50,6 +51,92 @@ class ResultValidationError(RuntimeError):
     def __init__(self, validation: ResultValidation):
         self.validation = validation
         super().__init__(validation.reason)
+
+
+def build_result_summary(
+    frame: pd.DataFrame,
+    validation: ResultValidation,
+    *,
+    metric_ids: Sequence[str] = (),
+    required_columns: Sequence[str] = (),
+    column_aliases: Mapping[str, Sequence[str]] | None = None,
+    max_rows: int = 8,
+    max_chars: int = 1_200,
+) -> str:
+    """Build a bounded summary from a result that already passed validation.
+
+    The summary is intentionally derived from the DataFrame and the server
+    result contract, never from assistant prose.  It is used as working
+    memory for result follow-ups, so it contains only contract columns and a
+    small number of JSON-safe sample rows.  It must not become a second data
+    export channel.
+    """
+    if not validation.safe_to_answer:
+        raise ValueError("only validated results may be summarized")
+    if max_rows <= 0 or max_chars <= 0:
+        raise ValueError("summary limits must be positive")
+
+    aliases = column_aliases or {}
+    allowed: list[str] = []
+    for name in (*required_columns, *metric_ids):
+        text = str(name).strip()
+        if text and text not in allowed:
+            allowed.append(text)
+        for alias in aliases.get(text, ()):
+            alias_text = str(alias).strip()
+            if alias_text and alias_text not in allowed:
+                allowed.append(alias_text)
+    actual_columns = [str(column) for column in frame.columns]
+    selected_columns = [column for column in actual_columns if column in allowed]
+    # A legacy/custom runner may not provide a complete contract.  In that
+    # case use the first few returned columns, still bounded, rather than
+    # persisting an unbounded result preview.
+    if not selected_columns:
+        selected_columns = actual_columns[:8]
+
+    rows = [
+        {
+            column: _summary_scalar(value)
+            for column, value in row.items()
+        }
+        for row in frame.loc[:, selected_columns].head(max_rows).to_dict("records")
+    ]
+    payload: dict[str, Any] = {
+        "metric_ids": [str(value) for value in metric_ids][:16],
+        "columns": selected_columns[:16],
+        "row_count": int(validation.row_count),
+        "time_start": validation.time_start,
+        "time_end": validation.time_end,
+        "sample_rows": rows,
+    }
+    # Prefer complete sample rows, then progressively reduce the preview if a
+    # provider returns unexpectedly verbose values.
+    while True:
+        rendered = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        summary = "已通过结果合同的可信结果摘要：" + rendered
+        if len(summary) <= max_chars or not payload["sample_rows"]:
+            return summary[:max_chars]
+        payload["sample_rows"] = payload["sample_rows"][:-1]
+
+
+def _summary_scalar(value: Any) -> Any:
+    """Convert pandas/numpy scalars to small JSON-safe values."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    if isinstance(value, (pd.Timestamp, datetime, date)):
+        return value.isoformat()
+    if hasattr(value, "item"):
+        try:
+            value = value.item()
+        except (TypeError, ValueError):
+            pass
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return round(value, 6)
+    if isinstance(value, (int, bool, str)):
+        return value if not isinstance(value, str) else value[:160]
+    return str(value)[:160]
 
 
 class ResultValidator:

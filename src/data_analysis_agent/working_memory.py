@@ -80,10 +80,24 @@ class WorkingMemory:
         """Merge explicit facts from a turn; do not parse arbitrary answer prose."""
         time_range = _extract_time_range(question) or self.time_range
         comparison = _extract_comparison(question) or self.comparison_baseline
-        metrics = route.metric_ids or self.metric_ids
+        # A metric mentioned in generic advice or help text is not an
+        # explicit selection for the next SQL turn.  Do not let questions such
+        # as “如何提升 GMV” silently seed the next database retrieval.
+        if route.intent in {"general_business", "general_knowledge", "help"}:
+            metrics = self.metric_ids
+        else:
+            metrics = route.metric_ids or self.metric_ids
         pending_question = question.strip()[: self._MAX_TEXT]
         pending_missing = route.missing if route.state not in {"answerable"} else ()
-        if route.state in {"unauthorized", "unsupported", "catalog_answered"}:
+        if route.state in {
+            "unauthorized",
+            "unsupported",
+            "catalog_answered",
+            "help",
+            "general_business",
+            "general_knowledge",
+            "result_followup",
+        }:
             pending_question = None
             pending_missing = ()
         if route.state == "answerable":
@@ -97,6 +111,25 @@ class WorkingMemory:
             previous_result_summary=self.previous_result_summary,
             pending_question=pending_question,
             pending_missing=tuple(pending_missing),
+        )
+
+    def with_result_summary(self, summary: str | None) -> "WorkingMemory":
+        """Attach a bounded summary produced by the trusted result gate.
+
+        This is the only supported path for setting ``previous_result_summary``;
+        assistant prose and client metadata are never accepted as result
+        evidence.
+        """
+        value = summary.strip()[:1_200] if isinstance(summary, str) and summary.strip() else None
+        return WorkingMemory(
+            metric_ids=self.metric_ids,
+            time_range=self.time_range,
+            dimensions=self.dimensions,
+            filters=self.filters,
+            comparison_baseline=self.comparison_baseline,
+            previous_result_summary=value,
+            pending_question=self.pending_question,
+            pending_missing=self.pending_missing,
         )
 
     def retrieval_context(self, question: str) -> str:

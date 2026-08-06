@@ -58,9 +58,10 @@ Text-to-SQL 的核心不是让模型“写出一条能执行的 SQL”，而是�
 - 还没有用户级费用/配额台账、结构化旧轮次摘要和结构化结果历史回放；
 - SQL 执行修复已限制为一次并接入 Vanna 工具生命周期，但尚未用真实 SiliconFlow 批量评估修复成功率；
 - 结果级校验已覆盖空结果、Join 放大、指标列缺失、异常数值、时间越界和截断，仍需补线上人工标签；
-- 没有置信度、拒答或人工确认机制；
-- 会话与消息已经持久化，宿主页已支持历史恢复和新建会话；但旧轮次仍以受预算约束的完整消息为主，
-  尚未形成结构化的指标/时间/筛选摘要，因而还不能稳定表达多轮 Text-to-SQL 的业务状态；
+- 已有确定性的 `confidence/reason_code` 路由字段和无可信结果时的澄清/拒答；尚没有学习型置信度模型或人工确认工作流；
+- 会话与消息已经持久化，宿主页已支持历史恢复和新建会话；WorkingMemory 现在保存指标、时间、比较
+  基线和通过 ResultValidator 的有界结果摘要，结果追问没有可信摘要时先澄清；完整旧轮次结构化摘要和
+  SQL/图表证据回放仍待实现；
 - 确定性 SQL/golden 评测不等于 SiliconFlow 在线模型语义准确率。
 
 ### 当前实现的代码证据
@@ -77,6 +78,10 @@ Text-to-SQL 的核心不是让模型“写出一条能执行的 SQL”，而是�
   但历史详情只回放安全文字，不伪造历史 SQL、图表或 DataFrame。
 - `src/data_analysis_agent/trusted_sql_tool.py`：包装 Vanna `RunSqlTool`，统一执行失败脱敏、一次
   修复候选、Policy 二次校验、reader role 重执行、结果验证和终止证据。
+- `src/data_analysis_agent/question_router.py`、`query_plan.py`：在 SQL Agent 前区分证据来源和工具
+  边界；服务器生成多指标查询计划，明确指标事实粒度、维度、时间粒度、必需结果列和独立聚合策略。
+- `src/data_analysis_agent/result_validator.py`、`working_memory.py`：仅从通过结果合同的 DataFrame
+  生成最多 8 行/1200 字摘要，供同一会话的结果追问使用；摘要不接受助手文本或客户端字段。
 - `tests/e2e/test_trusted_embedded_window.py`：包含固定 SSE 的多轮澄清回归；它证明会话契约和浏览器
   交互，不代表在线模型 Text-to-SQL 语义准确率。
 
@@ -416,21 +421,29 @@ Policy、审计或结果级语义校验，因此本轮不安装、不作为运�
   丢掉指标必需对象或生成无 Join 的孤立表，超限明确 fail closed。
 - Trusted Demo 已装配 `CatalogContextEnhancer`，固定系统提示缩短为安全边界；trace 进入
   `BudgetUsage` 和 `app.agent_runs.catalog_trace`，不包含原始问题或结果行。
-  后可恢复原问题口径。服务层和固定 SSE 浏览器多轮回归均已测试。
+  WorkingMemory 保存显式指标/时间/比较基线，结果成功后再保存有界可信摘要；服务层和固定 SSE
+  浏览器多轮回归均已测试。
 - `trusted_sql_tool.py` 将 `sql_repair.py` 的一次候选修复接入 Vanna 原生 `RunSqlTool` 生命周期；
   `postgres_runner.py` 对数据库错误做安全分类，候选必须通过完整 `SqlPolicy` 并由 reader role 重执行。
   `result_validator.py` 对空结果、缺列、非有限值、时间越界、截断和 Join 放大返回
   `valid`/`needs_clarification`/`refuse`。服务器在 Catalog/WorkingMemory 之后构建 `ResultContract`，
   把指标/时间别名/请求范围/Join 和 `catalog/dataset/metric/policy` 版本写入实际 Vanna `ToolContext`；
   原始/修复候选、Policy 状态、执行状态和终止原因写入 `repair_evidence` 并持久化。
+- `query_plan.py` 为标量多指标概览和分组多指标查询输出事实粒度、时间字段、维度与必需列；
+  当前通过 Catalog Prompt、`ResultContract` 和结果列校验约束，完整的 SQL AST CTE/Join 形状检查仍待实现。
 
-本轮 Conda 指定确定性专项测试 `84 passed`，项目 PostgreSQL Runner/Run recorder 测试 `4 passed`，
+本轮 Conda 指定确定性专项测试 `88 passed`，项目 PostgreSQL Runner/Run recorder 测试 `4 passed`，
 固定 SSE 多轮浏览器测试 `1 passed, 6 deselected`。没有运行批量 SiliconFlow 线上评测，因此不报告
 Text-to-SQL 在线准确率、修复成功率、token 成本或 P95 延迟；全量 Vanna 上游可选驱动测试缺少外部
 依赖，也不作为本项目质量门。
 
+本轮在 84 项基线之上新增证据路由、工具隔离、QueryPlan、分组结果列合同、可信结果摘要和会话记忆
+回归；QueryPlan 当前是 Prompt/ResultContract 约束，尚未实现完整的 SQL CTE/Join AST 形状证明。
+结果追问仅可使用有限摘要，不是任意历史结果回放。
+
 对应的第二轮执行计划已经单独保存为
 [`plan/feature-text-to-sql-reliability-v2.md`](../plan/feature-text-to-sql-reliability-v2.md)，验证
 记录见 [`docs/verification-text-to-sql-v2.md`](../docs/verification-text-to-sql-v2.md)。下一步顺序固定为：
-先建立 60 条版本化 v2 评测及人工标签，再用同一批问题做 SiliconFlow 小规模核验和前后对比。任何
+先建立 60 条版本化 v2 评测及人工标签，再用同一批问题做 SiliconFlow 小规模核验和前后对比；评测
+必须单独报告路由正确性、澄清正确性、SQL 可执行性、指标语义、结果合同和权限合规。任何
 embedding、judge、RL、多 Agent 或 Python 分析扩展都必须等这条基线有数据后重新评审。

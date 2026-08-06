@@ -58,6 +58,15 @@
 
 ## 7. 最近一次同步记录
 
+### 2026-08-06：证据路由、QueryPlan 与可信结果记忆
+
+- 目标：按 Text-to-SQL 改造顺序拆开“是否命中指标”和“是否允许查库”，补齐多指标查询的服务器计划，并让结果追问只依赖可信结果证据。
+- 实现：`QuestionRouter` 新增 `intent`、`requires_database`、`evidence_mode`、`confidence` 和 `reason_code`，覆盖帮助、指标定义、通用业务/知识、数据查询、数据分析、混合请求、结果追问和澄清；通用回答使用 `_send_llm_request` 的 `tools=None` 边界，帮助/指标定义走确定性回答。新增 `QueryPlan`，把多指标标量概览约束为每指标独立聚合后 `CROSS JOIN`，把分组维度和时间列加入 `ResultContract` 与 ToolContext。`ResultValidator` 成功后生成有界摘要，`BudgetUsage`、Agent Run trace 和 `WorkingMemory.previous_result_summary` 均可记录；没有可信摘要的结果追问会先澄清。
+- 验证：QuestionRouter、QueryPlan、WorkingMemory、ResultValidator、预算、TrustedRunSqlTool、SQL Policy 和修复专项 **88 passed**；`ruff check`、`compileall`、`git diff --check` 通过。全量 Vanna 上游可选驱动测试仍受环境依赖影响，未作为本项目质量门；未运行在线 SiliconFlow 批量语义评测。
+- 设计决策：指标命中不等于查库；通用回答不得看到 SQL/图表工具；QueryPlan 当前是服务器拥有的 grounding/result contract 和 Prompt 约束，尚不是完整 SQL AST 形状证明；结果摘要只来自通过 ResultValidator 的 DataFrame，不接受助手文本或客户端 metadata。
+- 风险/限制：仍需真实模型路由/多指标批量评测，QueryPlan 的 CTE/Join 形状还要在后续 AST 检查中增强；结果追问目前只解释有限样例摘要，不是任意历史结果回放；Olist 仍是当前 adapter，演示 cookie 不是生产认证。
+- 下一步：建立版本化 v2 路由/语义 golden，先做固定问题集上的人工核验，再决定是否加入低置信度结构化分类器和更强的 QueryPlan 执行校验。
+
 ### 2026-08-06：通用工作区与一次 SQL 修复生命周期
 
 - 目标：完成本轮四项优化，明确 Olist 适配层与通用分析 Agent 核心的边界，并把一次 SQL 修复从独立契约接入 Vanna 工具生命周期。

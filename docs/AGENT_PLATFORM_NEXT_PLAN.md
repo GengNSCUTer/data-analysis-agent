@@ -38,14 +38,16 @@
 - 60 条第一轮确定性用例和 3 条固定演示场景的安全与数据库 golden 校验；Text-to-SQL/预算/Policy/结果/工作区专项回归当前 84 项通过；
 - 嵌入窗口浏览器回归覆盖拖拽、缩放、移动端、图表尺寸、会话恢复和固定 SSE 多轮澄清；新增多轮回归通过，starter UI 空会话不再写入历史。
 - 通用 `WorkspaceProfile` 已把数据集、版本、Schema、角色、白名单和 Catalog 路径从 Olist 适配器中分离；`TrustedRunSqlTool` 已把一次修复接入 Vanna `RunSqlTool` 生命周期。
+- `QuestionRouter` 已从指标命中判断扩展为证据感知路由：帮助、Catalog 定义、通用业务/知识、数据查询、数据分析、混合请求和结果追问分别带有 `intent`、`requires_database`、`evidence_mode`、`confidence` 和 `reason_code`。通用回答可复用模型但不提供 SQL/图表工具，帮助与指标定义不调用模型。
+- 多指标请求已由服务器生成 `QueryPlan`，明确标量概览、分组查询、事实粒度、时间字段、维度和必需结果列；计划进入 Catalog Prompt、Vanna `ToolContext`、结果合同和 Agent Run trace。通过 `ResultValidator` 的结果会生成有界摘要并写入 WorkingMemory，结果追问无摘要时先澄清。
 
 ### 必须准确区分的未完成能力
 
 - 会话和消息已经持久化，历史恢复目前只回放安全的文字消息；原始 SQL、图表和 DataFrame 结果不会伪造回放，结构化结果回放尚未实现；
-- `DemoAgentMemory` 仍是进程内辅助记忆，结构化长期业务记忆和旧轮次摘要尚未实现；
+- `DemoAgentMemory` 仍是进程内辅助记忆；当前只持久化最近可信结果的有界摘要，完整结构化旧轮次摘要、SQL/图表证据回放尚未实现；
 - `max_tool_iterations=4` 仍是模型-工具循环上限，项目新增了总工具、SQL、图表、输入、上下文和输出预算，但用户配额/费用台账尚未实现；
-- 上下文目前按完整轮次和字符/消息预算裁剪，尚未生成结构化的旧轮次摘要；
-- Catalog YAML、确定性检索器、问题路由、working memory、服务器拥有的 `ResultContract` 和 `TrustedRunSqlTool` 已接入 Trusted Demo 的 SSE 主链路；结果合同、修复证据和版本字段进入 Vanna `ToolContext`、Agent Run 与 SQL 审计。仍未完成结构化结果历史回放、旧轮次摘要、真实认证/组织级 RLS、第二个真实数据集，以及真实 SiliconFlow 批量语义/修复成功率报告。
+- 上下文目前按完整轮次和字符/消息预算裁剪，结果追问已有受限摘要，但尚未生成完整的旧轮次结构化摘要；
+- Catalog YAML、确定性检索器、证据路由、working memory、服务器拥有的 `QueryPlan`/`ResultContract` 和 `TrustedRunSqlTool` 已接入 Trusted Demo 的 SSE 主链路；结果合同、修复证据、路由计划、受限结果摘要和版本字段进入 Vanna `ToolContext`、Agent Run 与 SQL 审计。仍未完成完整结构化结果历史回放、旧轮次摘要、真实认证/组织级 RLS、第二个真实数据集，以及真实 SiliconFlow 批量语义/修复成功率报告。
 
 ### P0 第一版实现状态
 
@@ -136,7 +138,8 @@ Redis、队列、多 Agent、MCP 或任意 Python 执行。
 3. 一次受限的执行错误修复，保留原始 SQL、修复 SQL 和修复原因（已接入 Vanna 生命周期）；
 4. 空结果、异常 Join 放大、指标列缺失等结果级检查（已完成）；
 5. 低置信度时拒答或请求用户确认，而不是生成看似完整的结论（当前已覆盖确定性失败状态）；
-6. 将线上模型运行结果纳入小规模人工核验集和回归报告（下一项）。
+6. 多指标查询由服务器 `QueryPlan` 明确结果列和独立聚合策略；当前以 Prompt + ResultContract 约束，后续增强 AST 形状检查；
+7. 将线上模型运行结果纳入小规模人工核验集和回归报告（下一项）。
 
 P1 不做 Best-of-N 大规模采样、多模型投票或自动修改业务口径。先证明单候选 + 一次修复
 的收益，再根据成本和评测结果决定是否扩展。

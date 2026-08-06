@@ -68,3 +68,14 @@ def test_working_memory_retrieval_context_is_bounded() -> None:
     context = memory.retrieval_context("y" * 10000)
     assert len(context) <= 4000
     assert context.startswith("y")
+
+
+def test_working_memory_accepts_only_bounded_trusted_result_summary() -> None:
+    memory = WorkingMemory(metric_ids=("gmv",))
+
+    updated = memory.with_result_summary("可信结果摘要：" + "x" * 5000)
+
+    assert updated.metric_ids == ("gmv",)
+    assert updated.previous_result_summary is not None
+    assert len(updated.previous_result_summary) <= 1200
+    assert memory.previous_result_summary is None

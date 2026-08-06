@@ -199,6 +199,7 @@ class ResultContract:
         time_range: Mapping[str, str] | None = None,
         *,
         catalog: Catalog,
+        required_result_columns: Sequence[str] | None = None,
     ) -> "ResultContract":
         metric_ids = tuple(metric.metric_id for metric in selection.metrics)
         time_fields = tuple(
@@ -215,7 +216,9 @@ class ResultContract:
             if result_time_column
             else ()
         )
-        required = metric_ids + (("time",) if result_time_column else ())
+        required = tuple(required_result_columns or ()) or (
+            metric_ids + (("time",) if result_time_column else ())
+        )
         return cls(
             catalog_version=catalog.catalog_version,
             dataset_version=catalog.dataset_version,
@@ -923,4 +926,7 @@ class CatalogContextEnhancer(LlmContextEnhancer):
             from .working_memory import WorkingMemory
 
             state_prompt = WorkingMemory.from_mapping(working_memory).prompt_context()
-        return f"{system_prompt}\n\n{selection.prompt}{state_prompt}"
+        query_plan_prompt = ""
+        if usage is not None:
+            query_plan_prompt = str(getattr(usage, "query_plan_prompt", "") or "")
+        return f"{system_prompt}\n\n{selection.prompt}{state_prompt}{query_plan_prompt}"

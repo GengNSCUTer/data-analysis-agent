@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from data_analysis_agent.result_validator import ResultValidator
+from data_analysis_agent.result_validator import ResultValidator, build_result_summary
 
 
 def test_validator_accepts_finite_non_empty_metric_result() -> None:
@@ -74,3 +74,32 @@ def test_validator_accepts_catalog_time_alias_for_temporal_result() -> None:
     )
 
     assert result.state == "valid"
+
+
+def test_result_summary_is_bounded_and_uses_only_contract_columns() -> None:
+    frame = pd.DataFrame(
+        {
+            "customer_state": ["SP", "RJ"],
+            "gmv": [123.456789, 98.1],
+            "paid_order_count": [4, 3],
+            "uncontracted_column": ["do not persist", "still hidden"],
+        }
+    )
+    validation = ResultValidator().validate(
+        frame,
+        required_columns=("customer_state", "gmv", "paid_order_count"),
+        metric_columns=("gmv", "paid_order_count"),
+    )
+
+    summary = build_result_summary(
+        frame,
+        validation,
+        metric_ids=("gmv", "paid_order_count"),
+        required_columns=("customer_state", "gmv", "paid_order_count"),
+        max_chars=500,
+    )
+
+    assert len(summary) <= 500
+    assert "uncontracted_column" not in summary
+    assert "do not persist" not in summary
+    assert "gmv" in summary

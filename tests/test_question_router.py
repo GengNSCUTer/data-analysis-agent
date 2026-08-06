@@ -46,6 +46,68 @@ def test_router_classifies_explicit_states(router, question: str, state: str) ->
     assert route.should_generate_sql is (state == "answerable")
 
 
+@pytest.mark.parametrize(
+    ("question", "intent", "requires_database"),
+    [
+        ("你能做什么", "help", False),
+        ("GMV通常为什么下降", "general_business", False),
+        ("如何提升GMV", "general_business", False),
+        ("电商经营分析一般看哪些维度", "general_business", False),
+        ("GMV这个指标在电商里一般怎么理解", "general_business", False),
+        ("概览 GMV 并说明统计口径", "mixed_request", True),
+        ("结合当前数据，为什么GMV下降", "data_analysis", False),
+    ],
+)
+def test_router_separates_evidence_intent_from_metric_match(
+    router: QuestionRouter,
+    question: str,
+    intent: str,
+    requires_database: bool,
+) -> None:
+    route = router.classify(question, user=_user())
+
+    assert route.intent == intent
+    assert route.requires_database is requires_database
+    assert route.evidence_mode in {
+        "none",
+        "general_knowledge",
+        "mixed",
+        "clarification",
+        "database_result",
+    }
+    assert route.as_dict()["intent"] == intent
+
+
+def test_help_route_is_deterministic_and_has_no_metric_requirement(router) -> None:
+    route = router.classify("你能做什么", user=_user())
+
+    assert route.state == "help"
+    assert route.direct_answer
+    assert "只读 PostgreSQL" in route.direct_answer
+    assert route.should_generate_sql is False
+
+
+def test_result_followup_uses_previous_result_without_new_sql(router) -> None:
+    route = router.classify(
+        "这个结果为什么这么高？",
+        user=_user(),
+        conversation_state={"previous_result_summary": "GMV 为 100，统计范围为 2017 年。"},
+    )
+
+    assert route.state == "result_followup"
+    assert route.intent == "result_followup"
+    assert route.evidence_mode == "previous_result"
+    assert route.should_generate_sql is False
+
+
+def test_result_followup_without_evidence_requires_context(router) -> None:
+    route = router.classify("这个结果为什么这么高？", user=_user())
+
+    assert route.state == "clarification_required"
+    assert route.missing == ("previous_result",)
+    assert route.should_generate_sql is False
+
+
 def test_catalog_definition_answer_is_deterministic_and_does_not_need_sql(router) -> None:
     route = router.classify("GMV的统计口径是什么", user=_user())
 
@@ -267,6 +329,8 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
     assert agent.metadata is not None
     assert agent.metadata["metric_result_columns"] == ["gmv"]
     assert agent.metadata["required_result_columns"] == ["gmv", "time"]
+    assert agent.metadata["query_plan"]["plan_type"] == "single_metric"
+    assert agent.metadata["query_plan"]["required_result_columns"] == ["gmv", "time"]
     assert agent.metadata["result_time_column"] == "order_purchase_timestamp"
     assert "month" in agent.metadata["result_time_column_aliases"]
     assert agent.metadata["requested_start"] == "2017-01-01"
@@ -277,3 +341,141 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
     assert agent.metadata["policy_version"] == "sql-policy-v1"
     assert agent.metadata["prompt_version"] == "trusted-olist-prompt-v2"
     assert recorder.usage.catalog_trace["result_contract"]["metric_ids"] == ["gmv"]
+    assert recorder.usage.query_plan["plan_type"] == "single_metric"
+
+
+@pytest.mark.asyncio
+async def test_budgeted_handler_general_business_does_not_expose_sql_tools(
+    router: QuestionRouter,
+) -> None:
+    user = _user()
+
+    class Resolver:
+        async def resolve_user(self, context):
+            return user
+
+    class Store:
+        def __init__(self):
+            self.conversation = None
+
+        async def get_conversation(self, conversation_id, resolved_user):
+            return self.conversation
+
+        async def update_conversation(self, conversation):
+            self.conversation = conversation
+
+    @dataclass
+    class Recorder:
+        usage = None
+
+        async def start(self, **kwargs):
+            return AgentRun("run-general", kwargs["request_id"], kwargs["conversation_id"])
+
+        async def finish(self, run, usage):
+            self.usage = usage
+
+    class Agent:
+        def __init__(self):
+            self.user_resolver = Resolver()
+            self.conversation_store = Store()
+            self.llm_requests = []
+
+        async def _send_llm_request(self, request):
+            self.llm_requests.append(request)
+            from data_analysis_agent.budget import BudgetSafetyMiddleware
+            from vanna.core.llm import LlmResponse
+
+            middleware = BudgetSafetyMiddleware()
+            request = await middleware.before_llm_request(request)
+            response = LlmResponse(
+                content="这是通用经营建议，不代表当前数据库结果。",
+                usage={"total_tokens": 7},
+            )
+            return await middleware.after_llm_response(request, response)
+
+        async def send_message(self, **kwargs):
+            raise AssertionError("general business request must not enter the SQL Agent")
+            yield  # pragma: no cover
+
+    agent = Agent()
+    recorder = Recorder()
+    handler = BudgetedChatHandler(
+        agent, RequestBudget(), recorder, question_router=router
+    )
+    request = ChatRequest(
+        message="如何提升GMV",
+        conversation_id="conversation-general",
+        request_context=RequestContext(),
+    )
+
+    chunks = [chunk async for chunk in handler.handle_stream(request)]
+
+    assert chunks
+    assert len(agent.llm_requests) == 1
+    assert agent.llm_requests[0].tools is None
+    assert agent.llm_requests[0].metadata["purpose"] == "tool_free_response"
+    assert agent.llm_requests[0].metadata["intent"] == "general_business"
+    assert recorder.usage is not None
+    assert recorder.usage.sql_calls_used == 0
+    assert recorder.usage.tool_calls_used == 0
+    assert recorder.usage.llm_rounds_used == 1
+    assert recorder.usage.termination_reason == "completed"
+
+
+@pytest.mark.asyncio
+async def test_budgeted_handler_persists_only_trusted_result_summary(
+    router: QuestionRouter,
+) -> None:
+    user = _user()
+
+    class Resolver:
+        async def resolve_user(self, context):
+            return user
+
+    class Store:
+        def __init__(self):
+            self.conversation = None
+
+        async def get_conversation(self, conversation_id, resolved_user):
+            return self.conversation
+
+        async def update_conversation(self, conversation):
+            self.conversation = conversation
+
+    @dataclass
+    class Recorder:
+        usage = None
+
+        async def start(self, **kwargs):
+            return AgentRun("run-summary", kwargs["request_id"], kwargs["conversation_id"])
+
+        async def finish(self, run, usage):
+            self.usage = usage
+
+    class Agent:
+        def __init__(self):
+            self.user_resolver = Resolver()
+            self.conversation_store = Store()
+
+        async def send_message(self, request_context, message, conversation_id=None):
+            request_context.metadata["budget_usage"].set_result_summary(
+                '已通过结果合同的可信结果摘要：{"metric_ids":["gmv"],"row_count":1}'
+            )
+            if False:
+                yield  # pragma: no cover
+
+    agent = Agent()
+    recorder = Recorder()
+    handler = BudgetedChatHandler(
+        agent, RequestBudget(), recorder, question_router=router
+    )
+    request = ChatRequest(
+        message="统计 2017 年 GMV",
+        conversation_id="conversation-summary",
+        request_context=RequestContext(),
+    )
+
+    _ = [chunk async for chunk in handler.handle_stream(request)]
+
+    stored = agent.conversation_store.conversation.metadata["working_memory"]
+    assert "可信结果摘要" in stored["previous_result_summary"]

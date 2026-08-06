@@ -101,6 +101,9 @@ class BudgetUsage:
     catalog_trace: dict[str, Any] | None = None
     catalog_question: str | None = None
     working_memory: dict[str, Any] | None = None
+    query_plan: dict[str, Any] | None = None
+    query_plan_prompt: str | None = None
+    result_summary: str | None = None
     repair_evidence: dict[str, Any] | None = None
     phase_timings_ms: dict[str, list[int]] = field(default_factory=dict)
     last_response_had_tool_calls: bool = False
@@ -193,6 +196,20 @@ class BudgetUsage:
         self.catalog_question = retrieval_question[: self.budget.max_input_chars]
         self.working_memory = dict(working_memory) if working_memory else None
 
+    def set_query_plan(
+        self, query_plan: dict[str, Any], prompt_context: str | None = None
+    ) -> None:
+        """Store server-generated query shape and its bounded prompt form."""
+        self.query_plan = dict(query_plan)
+        self.query_plan_prompt = (prompt_context or "")[: self.budget.max_context_chars]
+
+    def set_result_summary(self, summary: str | None) -> None:
+        """Keep one bounded, server-derived summary for result follow-ups."""
+        if summary is None:
+            self.result_summary = None
+            return
+        self.result_summary = str(summary).strip()[:1_200] or None
+
     def record_repair(self, evidence: dict[str, Any]) -> None:
         """Persist bounded, server-generated SQL repair evidence with the run."""
         if not isinstance(evidence, dict):
@@ -235,6 +252,8 @@ class BudgetUsage:
             "termination_reason": self.termination_reason,
             "error_type": self.error_type,
             "catalog_trace": self.catalog_trace,
+            "query_plan": self.query_plan,
+            "result_summary": self.result_summary,
             "repair_evidence": self.repair_evidence,
             "performance": self.performance_evidence(),
         }

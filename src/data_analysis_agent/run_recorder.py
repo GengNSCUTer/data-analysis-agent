@@ -120,6 +120,8 @@ class PostgresRunRecorder:
             # Keep the existing schema stable while making latency breakdowns
             # queryable with the run's redacted Catalog evidence.
             catalog_trace["performance"] = performance
+        if values.get("result_summary"):
+            catalog_trace["result_summary"] = values["result_summary"]
         connection = self._connect()
         try:
             with connection:
