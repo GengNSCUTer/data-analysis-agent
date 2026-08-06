@@ -58,6 +58,14 @@
 
 ## 7. 最近一次同步记录
 
+### 2026-08-06：通用工作区与一次 SQL 修复生命周期
+
+- 目标：完成本轮四项优化，明确 Olist 适配层与通用分析 Agent 核心的边界，并把一次 SQL 修复从独立契约接入 Vanna 工具生命周期。
+- 实现：新增 `WorkspaceProfile`；`SqlPolicy`、`CatalogLoader`、`SecurePostgresRunner` 和预算处理器读取工作区配置。新增 `TrustedRunSqlTool`，失败 SQL 只经过一次脱敏修复；修复候选重新通过 AST Policy，由 PostgreSQL reader role 重执行，成功后再过 `ResultValidator`，二次失败直接可信拒答。`query_audits`、`agent_runs` 和预算记录保存 `repair_evidence`。
+- 测试：专项集合 `84 passed`；项目 PostgreSQL `test_postgres_run_recorder.py` 与 `test_postgres_runner.py` 为 `4 passed`；固定 SSE 的浏览器多轮澄清回归 `1 passed, 6 deselected`；ruff、compileall、`git diff --check` 通过。未将这些确定性结果写成在线 LLM 语义准确率。
+- 边界：Olist 仍是当前 adapter/展示案例，尚无第二真实数据集；演示 cookie 不是生产认证，未实现组织级 RLS；尚未做 SiliconFlow 批量修复成功率和 token/P95 评测。
+- 下一步：建立版本化 v2 评测集，先用固定 Olist golden 和人工标签核验真实模型，再决定是否引入更复杂的 schema retrieval、judge 或多候选策略。
+
 ### 2026-08-03：Text-to-SQL 第一阶段运行时合同
 
 - 目标：修正 Catalog/WorkingMemory 派生的结果语义合同没有进入实际 Vanna `ToolContext` 的硬缺口。

@@ -1,6 +1,6 @@
 # Text-to-SQL 专项调研与优化建议
 
-> 调研日期：2026-08-03（含二次公开仓库/源码核验）
+> 调研日期：2026-08-03（含二次公开仓库/源码核验）；实现状态更新：2026-08-06
 > 范围：当前项目、Text-to-SQL/GenBI 开源方案、公开论文、Agent skill 和后续落地路线。
 > 说明：2026 年论文多数是 arXiv 预印本，本文标注论文提出的结果，不把预印本结果当作
 > 已验证的工程事实。
@@ -9,8 +9,8 @@
 
 Text-to-SQL 的核心不是让模型“写出一条能执行的 SQL”，而是让它在正确的业务语义、允许的
 数据范围和可接受的成本内，生成可以被验证、解释和复现的查询。当前项目在安全边界和业务
-语义起点上是扎实的，但生成链路仍是“固定上下文 + 单候选生成 + 策略校验 + 执行”，缺少
-动态 Schema 选择、澄清、执行修复、结果级验证和在线语义评测。
+语义起点上是扎实的。当前生成链路已经加入角色化 Catalog、澄清、一次受限执行修复和结果级
+验证；仍缺少第二个真实工作区和在线模型语义评测。
 
 最适合本项目的改进顺序是：
 
@@ -32,14 +32,17 @@ Text-to-SQL 的核心不是让模型“写出一条能执行的 SQL”，而是�
 当前 trusted Vanna 链路是：
 
 1. `TrustedWorkflowHandler` 提供中文 starter UI 和项目专属说明；
-2. `metric_context.SYSTEM_PROMPT` 固定注入数据集版本、指标口径、已知表/列、Join 注意事项、
-   有效订单过滤和图表触发规则；
-3. Vanna `Agent` 调用 `run_sql`，当前 `AgentConfig.max_tool_iterations=4`；
-4. `SecurePostgresRunner` 用 `sqlglot` AST 进行单语句、只读、对象白名单、敏感投影、角色
-   LIMIT 等校验；
-5. PostgreSQL 只读账号执行 SQL，应用写账号写 `app.query_audits`；
-6. 结果以 DataFrame/CSV 进入表格和受控 Plotly 图表，Agent 生成中文结论；
-7. 宿主页展示数据/指标版本、最终 SQL、耗时、行数和审计状态。
+2. `QuestionRouter` 先按服务器身份、工作区 Catalog 和 `WorkingMemory` 判断可回答性；缺少
+   时间、指标或比较基线时先澄清，不调用 SQL；
+3. `CatalogContextEnhancer` 只把按角色筛选的 Catalog slice、结果合同和版本字段放入 Vanna
+   `ToolContext`，而不是无条件注入所有 Schema；
+4. Vanna `Agent` 调用项目包装的 `TrustedRunSqlTool`，仍受 `AgentConfig.max_tool_iterations=4`
+   和请求级预算约束；
+5. `SecurePostgresRunner` 用 `sqlglot` AST、工作区对象白名单和 PostgreSQL reader role 校验/执行；
+6. 执行失败时最多生成一次脱敏修复候选，候选重新经过 Policy 和 reader role；成功结果还要经过
+   `ResultValidator`，否则可信拒答；
+7. 结果以 DataFrame/CSV 进入表格和受控 Plotly 图表，Agent 生成中文结论；宿主页展示数据/指标
+   版本、最终 SQL、耗时、行数、审计和必要的修复证据。
 
 ### 已有优势
 
@@ -51,10 +54,10 @@ Text-to-SQL 的核心不是让模型“写出一条能执行的 SQL”，而是�
 
 ### 主要缺口
 
-- 固定注入全部 8 张表的上下文，尚未形成可扩展的 Schema/指标检索；
-- 没有独立的“可回答、歧义、越权、不支持”分类状态机；
-- SQL 执行出错时没有项目级的一次受限修复契约；
-- 没有对空结果、Join 放大、指标列缺失和异常数值做结果级校验；
+- 通用核心已经通过 `WorkspaceProfile` 与 Olist adapter 解耦；目前还没有第二个真实工作区验证可迁移性；
+- 还没有用户级费用/配额台账、结构化旧轮次摘要和结构化结果历史回放；
+- SQL 执行修复已限制为一次并接入 Vanna 工具生命周期，但尚未用真实 SiliconFlow 批量评估修复成功率；
+- 结果级校验已覆盖空结果、Join 放大、指标列缺失、异常数值、时间越界和截断，仍需补线上人工标签；
 - 没有置信度、拒答或人工确认机制；
 - 会话与消息已经持久化，宿主页已支持历史恢复和新建会话；但旧轮次仍以受预算约束的完整消息为主，
   尚未形成结构化的指标/时间/筛选摘要，因而还不能稳定表达多轮 Text-to-SQL 的业务状态；
@@ -62,8 +65,9 @@ Text-to-SQL 的核心不是让模型“写出一条能执行的 SQL”，而是�
 
 ### 当前实现的代码证据
 
-- `src/data_analysis_agent/metric_context.py`：当前固定数据集/指标上下文和 Join 注意事项；尚未是
-  结构化 Catalog。
+- `src/data_analysis_agent/workspace.py`：通用 `WorkspaceProfile`；`metric_context.py` 中的
+  `OLIST_WORKSPACE` 只负责当前 Olist 数据集适配。
+- `src/data_analysis_agent/semantic_catalog.py`：版本化、角色化 Catalog slice、Join 和 trace。
 - `src/data_analysis_agent/sql_policy.py` 与 `postgres_runner.py`：候选 SQL 的 AST、对象白名单、
   敏感投影、LIMIT、超时和 PostgreSQL reader role 约束。
 - `src/data_analysis_agent/budget.py`、`context_builder.py`、`chat_runtime.py`：请求级工具/SQL/图表/输入/
@@ -71,8 +75,10 @@ Text-to-SQL 的核心不是让模型“写出一条能执行的 SQL”，而是�
 - `src/data_analysis_agent/conversation_store.py`、`run_recorder.py`：用户隔离的会话/消息和 Agent Run
   记录；`examples/embedded_analyst_host.html` 与 `vanna-chat.ts` 已完成列表、恢复、刷新恢复和新建会话，
   但历史详情只回放安全文字，不伪造历史 SQL、图表或 DataFrame。
-- `tests/e2e/test_trusted_embedded_window.py`：当前 6 条嵌入窗口回归通过；它证明交互和布局，不代表
-  在线模型 Text-to-SQL 语义准确率。
+- `src/data_analysis_agent/trusted_sql_tool.py`：包装 Vanna `RunSqlTool`，统一执行失败脱敏、一次
+  修复候选、Policy 二次校验、reader role 重执行、结果验证和终止证据。
+- `tests/e2e/test_trusted_embedded_window.py`：包含固定 SSE 的多轮澄清回归；它证明会话契约和浏览器
+  交互，不代表在线模型 Text-to-SQL 语义准确率。
 
 ## 3. 开源平台对比
 
@@ -410,23 +416,21 @@ Policy、审计或结果级语义校验，因此本轮不安装、不作为运�
   丢掉指标必需对象或生成无 Join 的孤立表，超限明确 fail closed。
 - Trusted Demo 已装配 `CatalogContextEnhancer`，固定系统提示缩短为安全边界；trace 进入
   `BudgetUsage` 和 `app.agent_runs.catalog_trace`，不包含原始问题或结果行。
-- `QuestionRouter` 已接入 `BudgetedChatHandler`：缺时间、指标或比较基线时直接返回一条澄清，
-  不调用 Agent/SQL；`app.conversations.working_memory` 保存结构化指标、时间和缺失字段，补充信息
-  后可恢复原问题口径。服务层已测试，浏览器多轮回归尚待补齐。
-- `sql_repair.py` 提供一次候选修复与完整 `SqlPolicy` 二次校验，`postgres_runner.py` 对数据库
-  错误做安全分类；`result_validator.py` 对空结果、缺列、非有限值、时间越界、截断和 Join 放大
-  返回 `valid`/`needs_clarification`/`refuse`。服务器现在会在 Catalog/WorkingMemory 之后构建
-  `ResultContract`，把指标/时间别名/请求范围/Join 和 `catalog/dataset/metric/policy` 版本写入实际
-  Vanna `ToolContext`；固定 Prompt、Catalog trace、Agent Run 和 SQL 审计也携带版本合同。Vanna
-  工具循环尚未保存原/修复候选、reader 重执行和第二次失败的完整状态，这是下一轮的重点集成。
+  后可恢复原问题口径。服务层和固定 SSE 浏览器多轮回归均已测试。
+- `trusted_sql_tool.py` 将 `sql_repair.py` 的一次候选修复接入 Vanna 原生 `RunSqlTool` 生命周期；
+  `postgres_runner.py` 对数据库错误做安全分类，候选必须通过完整 `SqlPolicy` 并由 reader role 重执行。
+  `result_validator.py` 对空结果、缺列、非有限值、时间越界、截断和 Join 放大返回
+  `valid`/`needs_clarification`/`refuse`。服务器在 Catalog/WorkingMemory 之后构建 `ResultContract`，
+  把指标/时间别名/请求范围/Join 和 `catalog/dataset/metric/policy` 版本写入实际 Vanna `ToolContext`；
+  原始/修复候选、Policy 状态、执行状态和终止原因写入 `repair_evidence` 并持久化。
 
-本轮 Conda 确定性专项测试 68 项通过，项目 PostgreSQL 会话/Runner/路由/Run recorder 集成测试 9 项
-通过。没有运行批量 SiliconFlow 线上评测，因此不报告 Text-to-SQL 在线准确率、token 成本或 P95
-延迟；全量 Vanna 上游可选驱动测试缺少外部依赖，也不作为本项目质量门。
+本轮 Conda 指定确定性专项测试 `84 passed`，项目 PostgreSQL Runner/Run recorder 测试 `4 passed`，
+固定 SSE 多轮浏览器测试 `1 passed, 6 deselected`。没有运行批量 SiliconFlow 线上评测，因此不报告
+Text-to-SQL 在线准确率、修复成功率、token 成本或 P95 延迟；全量 Vanna 上游可选驱动测试缺少外部
+依赖，也不作为本项目质量门。
 
 对应的第二轮执行计划已经单独保存为
 [`plan/feature-text-to-sql-reliability-v2.md`](../plan/feature-text-to-sql-reliability-v2.md)，验证
-记录见 [`docs/verification-text-to-sql-v2.md`](../docs/verification-text-to-sql-v2.md)。后续顺序固定为：
-先把一次修复/结果校验状态接入 Vanna 生命周期，再补多轮浏览器回归和 60 条 v2 评测，最后才用同一
-批问题做 SiliconFlow 前后对比。任何 embedding、judge、RL、多 Agent 或 Python 分析扩展都必须等
-这条基线有数据后重新评审。
+记录见 [`docs/verification-text-to-sql-v2.md`](../docs/verification-text-to-sql-v2.md)。下一步顺序固定为：
+先建立 60 条版本化 v2 评测及人工标签，再用同一批问题做 SiliconFlow 小规模核验和前后对比。任何
+embedding、judge、RL、多 Agent 或 Python 分析扩展都必须等这条基线有数据后重新评审。

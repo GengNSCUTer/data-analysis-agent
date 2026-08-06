@@ -9,6 +9,7 @@ Run against the manually started trusted demo with:
 from __future__ import annotations
 
 import os
+import json
 import uuid
 
 import psycopg2
@@ -57,6 +58,100 @@ def _open_normal_window(browser_page):
     chat.locator(".minimized-icon").click()
     browser_page.wait_for_selector("vanna-chat.normal")
     return chat
+
+
+def _mock_text_sse(conversation_id: str, request_id: str, content: str) -> str:
+    chunk = {
+        "rich": {
+            "id": f"e2e-text-{request_id}",
+            "type": "text",
+            "lifecycle": "create",
+            "data": {"content": content, "markdown": True},
+            "children": [],
+            "timestamp": 0,
+            "visible": True,
+            "interactive": False,
+        },
+        "simple": {"type": "text", "data": {"text": content}},
+        "conversation_id": conversation_id,
+        "request_id": request_id,
+        "timestamp": 0,
+    }
+    return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\ndata: [DONE]\n\n"
+
+
+def test_browser_multiturn_clarification_preserves_conversation_contract(page) -> None:
+    """Exercise the embedded UI contract with deterministic SSE responses.
+
+    The backend QuestionRouter/WorkingMemory no-SQL and carry-forward behavior
+    is covered by deterministic Python tests; this browser test verifies that
+    the same conversation remains visible and addressable across all rounds.
+    """
+
+    browser_page, console_errors = page
+    requests: list[dict] = []
+
+    def mock_chat(route) -> None:
+        payload = json.loads(route.request.post_data or "{}")
+        requests.append(payload)
+        message = payload.get("message", "")
+        conversation_id = payload.get("conversation_id", "")
+        request_id = payload.get("request_id", "e2e-request")
+        if not message:
+            body = "data: [DONE]\n\n"
+        elif message == "本月销售额是多少？":
+            body = _mock_text_sse(
+                conversation_id,
+                request_id,
+                "需要补充时间范围，当前轮次未执行 SQL。",
+            )
+        elif message == "2017-01-01 至 2017-12-31":
+            body = _mock_text_sse(
+                conversation_id,
+                request_id,
+                "已沿用上一轮 GMV 指标，并使用 2017 年时间范围完成查询。",
+            )
+        else:
+            body = _mock_text_sse(
+                conversation_id,
+                request_id,
+                "已沿用上一轮 GMV 与时间范围，按州返回结果。",
+            )
+        route.fulfill(
+            status=200,
+            headers={"Content-Type": "text/event-stream"},
+            body=body,
+        )
+
+    browser_page.route("**/api/vanna/v2/chat_sse", mock_chat)
+    chat = _open_normal_window(browser_page)
+    input_box = chat.locator("textarea.message-input")
+
+    for message, expected in (
+        ("本月销售额是多少？", "需要补充时间范围"),
+        ("2017-01-01 至 2017-12-31", "已沿用上一轮 GMV 指标"),
+        ("按州统计", "按州返回结果"),
+    ):
+        input_box.fill(message)
+        chat.locator("button.send-button").click()
+        browser_page.wait_for_function(
+            "([needle]) => document.querySelector('vanna-chat')?.shadowRoot?.textContent.includes(needle)",
+            arg=[expected],
+        )
+
+    analysis_requests = [item for item in requests if item.get("message")]
+    assert [item["message"] for item in analysis_requests] == [
+        "本月销售额是多少？",
+        "2017-01-01 至 2017-12-31",
+        "按州统计",
+    ]
+    assert len({item["conversation_id"] for item in analysis_requests}) == 1
+    assert all("sql" not in item for item in analysis_requests)
+    rendered = chat.evaluate("element => element.shadowRoot.textContent")
+    assert "当前轮次未执行 SQL" in rendered
+    assert "2017 年时间范围" in rendered
+    assert "按州返回结果" in rendered
+    assert not console_errors
 
 
 @pytest.fixture()

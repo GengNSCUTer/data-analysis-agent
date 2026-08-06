@@ -99,6 +99,7 @@ class BudgetUsage:
     catalog_trace: dict[str, Any] | None = None
     catalog_question: str | None = None
     working_memory: dict[str, Any] | None = None
+    repair_evidence: dict[str, Any] | None = None
     last_response_had_tool_calls: bool = False
     _tool_counts: dict[str, int] = field(default_factory=dict)
 
@@ -158,6 +159,12 @@ class BudgetUsage:
         self.catalog_question = retrieval_question[: self.budget.max_input_chars]
         self.working_memory = dict(working_memory) if working_memory else None
 
+    def record_repair(self, evidence: dict[str, Any]) -> None:
+        """Persist bounded, server-generated SQL repair evidence with the run."""
+        if not isinstance(evidence, dict):
+            raise TypeError("repair evidence must be a mapping")
+        self.repair_evidence = dict(evidence)
+
     def record_usage(self, usage: dict[str, Any] | None) -> None:
         if not usage:
             return
@@ -194,6 +201,7 @@ class BudgetUsage:
             "termination_reason": self.termination_reason,
             "error_type": self.error_type,
             "catalog_trace": self.catalog_trace,
+            "repair_evidence": self.repair_evidence,
         }
 
     @staticmethod
@@ -255,5 +263,13 @@ class BudgetSafetyMiddleware(LlmMiddleware):
                     "请缩小问题范围或拆分成多个问题后重试。"
                 ),
                 finish_reason="budget_exhausted",
+            )
+        if usage.error_type in {"sql_repair_failed", "result_validation_failed"}:
+            return LlmResponse(
+                content=(
+                    "本次查询未通过可信执行或结果合同校验，未输出未经验证的数字结论。"
+                    "请缩小问题范围、补充时间范围或确认指标口径后重试。"
+                ),
+                finish_reason="trusted_query_failed",
             )
         return response

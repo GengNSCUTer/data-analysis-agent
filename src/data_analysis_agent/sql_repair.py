@@ -8,7 +8,7 @@ same AST policy before it can be executed.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Awaitable, Callable, Literal
 import re
 
 from .sql_policy import PolicyDecision, PolicyViolation, SqlPolicy
@@ -122,8 +122,12 @@ _CLASSIFIERS: tuple[tuple[SqlErrorCategory, tuple[str, ...], str, bool], ...] = 
 )
 
 
-def sanitize_sql_error(error: BaseException | str) -> SanitizedSqlError:
+def sanitize_sql_error(
+    error: BaseException | SanitizedSqlError | str,
+) -> SanitizedSqlError:
     """Map driver/parser text to a small stable category; never expose it."""
+    if isinstance(error, SanitizedSqlError):
+        return error
     text = str(error).casefold()
     for category, needles, reason, retryable in _CLASSIFIERS:
         if any(needle in text for needle in needles):
@@ -173,32 +177,50 @@ class OneShotSqlRepair:
     def repair(
         self,
         original_sql: str,
-        error: BaseException | str,
+        error: BaseException | SanitizedSqlError | str,
         candidate_factory: Callable[[str], str | None],
         catalog_context: str = "",
     ) -> SqlRepairOutcome:
         sanitized = sanitize_sql_error(error)
         if self.attempted:
-            return SqlRepairOutcome(
-                attempted=False,
-                accepted=False,
-                original_sql=original_sql,
-                repaired_sql=None,
-                reason="repair_budget_exhausted",
-                error=sanitized,
-            )
+            return self._budget_exhausted(original_sql, sanitized)
         self.attempted = True
         if not sanitized.retryable:
-            return SqlRepairOutcome(
-                attempted=False,
-                accepted=False,
-                original_sql=original_sql,
-                repaired_sql=None,
-                reason="error_not_repairable",
-                error=sanitized,
-            )
+            return self._not_repairable(original_sql, sanitized)
         prompt = build_repair_prompt(original_sql, sanitized, catalog_context)
         repaired_sql = candidate_factory(prompt)
+        return self._accept_candidate(original_sql, sanitized, repaired_sql)
+
+    async def repair_async(
+        self,
+        original_sql: str,
+        error: BaseException | SanitizedSqlError | str,
+        candidate_factory: Callable[[str], Awaitable[str | None]],
+        catalog_context: str = "",
+    ) -> SqlRepairOutcome:
+        """Run the same bounded contract with an asynchronous LLM provider."""
+
+        sanitized = sanitize_sql_error(error)
+        if self.attempted:
+            return self._budget_exhausted(original_sql, sanitized)
+        self.attempted = True
+        if not sanitized.retryable:
+            return self._not_repairable(original_sql, sanitized)
+        prompt = build_repair_prompt(original_sql, sanitized, catalog_context)
+        try:
+            repaired_sql = await candidate_factory(prompt)
+        except Exception:
+            # The repair path must fail closed if the secondary model is
+            # unavailable or returns an unexpected provider error.
+            repaired_sql = None
+        return self._accept_candidate(original_sql, sanitized, repaired_sql)
+
+    def _accept_candidate(
+        self,
+        original_sql: str,
+        sanitized: SanitizedSqlError,
+        repaired_sql: str | None,
+    ) -> SqlRepairOutcome:
         if not isinstance(repaired_sql, str) or not repaired_sql.strip():
             return SqlRepairOutcome(
                 attempted=True,
@@ -227,4 +249,30 @@ class OneShotSqlRepair:
             reason="repaired_sql_passed_policy",
             error=sanitized,
             policy_decision=decision,
+        )
+
+    @staticmethod
+    def _budget_exhausted(
+        original_sql: str, error: SanitizedSqlError
+    ) -> SqlRepairOutcome:
+        return SqlRepairOutcome(
+            attempted=False,
+            accepted=False,
+            original_sql=original_sql,
+            repaired_sql=None,
+            reason="repair_budget_exhausted",
+            error=error,
+        )
+
+    @staticmethod
+    def _not_repairable(
+        original_sql: str, error: SanitizedSqlError
+    ) -> SqlRepairOutcome:
+        return SqlRepairOutcome(
+            attempted=False,
+            accepted=False,
+            original_sql=original_sql,
+            repaired_sql=None,
+            reason="error_not_repairable",
+            error=error,
         )

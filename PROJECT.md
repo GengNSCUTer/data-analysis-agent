@@ -151,9 +151,10 @@ PostgreSQL
 └─ app schema：用户、会话、审计、指标、数据集、评测（应用写入角色）
 ```
 
-上图是通过原生 Vanna 基线后再逐步建设的目标架构，不是当前已完成的实现。当前没有
-独立 `frontend/` 应用或 PostgreSQL 业务应用；后续代码以 `src/data_analysis_agent/` 为
-项目扩展层，宿主页只负责嵌入和样式，不引入新的前端框架。
+上图是通过原生 Vanna 基线后逐步建设的架构。当前没有独立 `frontend/` 应用或 PostgreSQL
+业务应用；`src/data_analysis_agent/` 是通用扩展层，Olist 仅通过 `WorkspaceProfile` 和
+`metric_context.OLIST_WORKSPACE` 作为当前数据集适配器。宿主页只负责嵌入和样式，不引入新的
+前端框架。
 
 ### 5.1 后端模块职责
 
@@ -163,7 +164,7 @@ PostgreSQL
 | Agent 编排层 | 绑定 Vanna Agent，限制工具集合和最大工具循环次数，记录模型调用。 |
 | Context 层 | 按角色提供经过筛选的 Schema、指标定义、样例问题与业务约束。 |
 | SQL Policy 层 | 基于 `sqlglot` 解析 AST，执行语句类型、单语句、对象白名单、LIMIT、范围过滤和预算校验。 |
-| Query Runner | 使用 PostgreSQL 只读角色执行 SQL，设置 `statement_timeout`、最大行数和取消机制。 |
+| Query Runner | 使用 PostgreSQL 只读角色执行 SQL，设置 `statement_timeout`、最大行数和取消机制；失败时由 `TrustedRunSqlTool` 最多发起一次受控修复，并重新经过 Policy、reader role 和结果合同。 |
 | Evidence 层 | 将 SQL、指标版本、来源、结果摘要和图表统一为前端可展示的证据对象。 |
 | Audit/Eval 层 | 持久化可回放记录，运行带标准答案或人工判定的评测集。 |
 
@@ -178,7 +179,9 @@ PostgreSQL
       ├─ 拒绝：返回可解释的拒绝原因并审计
       └─ 放行：补充 LIMIT / 范围约束
   → PostgreSQL 只读账号执行（超时与行数上限）
-  → 表格 / 图表 / 结论 / 证据对象
+  → 执行失败：脱敏错误 → 一次修复候选 → 重新 Policy/reader role
+  → ResultValidator / ResultContract
+  → 表格 / 图表 / 结论 / 证据对象，或可信拒答
   → SSE 返回并写入审计记录
 ```
 
@@ -334,9 +337,9 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
   页面可切换并展示其用途和非生产边界；旧请求头不能提升权限。
 - 已增加 PostgreSQL 会话/消息存储、Agent Run 台账、请求级预算和上下文裁剪基础；后端历史 API 已提供列表、详情和删除。
 - 宿主页已接入历史列表、点击恢复、刷新恢复、新建会话、删除失败提示和角色切换隔离；历史恢复只回放安全文字，不伪造原始 SQL、图表或 DataFrame 结果。
-- 已接入版本化、按角色裁剪的 `olist-catalog-v1`，Trusted Demo 的请求提示使用 Catalog slice，而不是无条件注入完整 Schema；Catalog trace 写入 `app.agent_runs.catalog_trace`，并将服务器拥有的 `ResultContract`（指标列、时间别名、请求范围和版本）传入运行时 `ToolContext`。
+- 已接入通用 `WorkspaceProfile` 边界：Catalog、Policy、PostgreSQL Runner 和预算处理器从工作区配置读取数据集、版本、Schema、角色和白名单；Olist 通过 `OLIST_WORKSPACE` 作为当前适配器。版本化、按角色裁剪的 `olist-catalog-v1` 请求提示使用 Catalog slice，而不是无条件注入完整 Schema；Catalog trace 写入 `app.agent_runs.catalog_trace`，并将服务器拥有的 `ResultContract`（指标列、时间别名、请求范围和版本）传入运行时 `ToolContext`。
 - 已接入 `QuestionRouter`、`WorkingMemory` 和澄清边界：缺少时间/指标/比较基线时不调用 SQL；补充信息后从会话结构化状态恢复原指标，并写入 `app.conversations.working_memory`。
-- 已实现一次受限 SQL 修复契约、数据库错误脱敏和结果语义校验（空结果、缺列、时间越界、截断和 Join 放大）；结果校验现在接收 Catalog 派生的指标/时间合同，固定 Prompt、Catalog trace 和 SQL 审计携带数据/指标/策略/提示版本。模型驱动修复的完整生命周期回链、真实认证、角色行范围和在线模型评测仍待完成。
+- 已通过项目层 `TrustedRunSqlTool` 将一次受限 SQL 修复接入 Vanna 工具生命周期：原始 SQL 失败后只向修复模型提供脱敏错误和有界 Catalog，候选 SQL 必须再次通过 AST Policy，并由 reader role 重执行；成功结果还要经过 `ResultValidator`，第二次失败或合同失败直接可信拒答。原始/修复 SQL、错误类别、Policy 状态、执行状态、结果验证和终止原因写入 `repair_evidence`，同时进入 `app.query_audits`、`app.agent_runs` 和预算记录。结果校验继续覆盖空结果、缺列、时间越界、截断和 Join 放大。尚未完成真实认证、组织行范围、第二个真实数据集和 SiliconFlow 批量语义评测。
 
 ### Phase 4：嵌入式交互与证据呈现（基础能力已完成）
 
@@ -349,7 +352,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 
 - 已完成 PostgreSQL 会话/消息存储、Agent Run 台账、请求级工具/SQL/图表/输入/上下文/输出预算；
 - 已完成 starter 空会话生命周期修复，避免页面刷新制造零消息历史记录；
-- Text-to-SQL 第二轮已进入开发：Catalog/路由/working memory/结果合同/结果校验基础已落地；当前下一项是把一次修复状态完整接到 Vanna 工具循环，并建立多轮浏览器回归和 v2 评测集。
+- Text-to-SQL 第二轮运行时合同已完成：WorkspaceProfile、Catalog/路由/working memory/结果合同、TrustedRunSqlTool 一次修复、repair evidence 和可信拒答均已落地；浏览器多轮澄清回归已补齐。下一项是建立版本化 v2 评测集并在同一批问题上做真实 SiliconFlow 小规模人工核验。
 
 ### Phase 5：评测、加固与作品集
 
@@ -370,9 +373,9 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 开发模型、SQLite 合成冒烟 fixture、Olist 主展示案例草案、后续再引入 PostgreSQL 和
 v1 不引入 Redis。
 
-已确认数据加载方式、PostgreSQL 双角色和首批核心指标 golden 结果。待确认真实认证方式、
-组织/行级权限的演示粒度、评测题标准答案与图表受控生成方案。独立 Next.js/TailAdmin 外壳
-不再作为候选默认方案。
+已确认数据加载方式、PostgreSQL 双角色和首批核心指标 golden 结果。Olist 只是当前展示数据集，
+通用链路通过 `WorkspaceProfile` 组织，尚未用第二个真实数据集验证。待确认真实认证方式、组织/行级
+权限的演示粒度、评测题标准答案与图表受控生成方案。独立 Next.js/TailAdmin 外壳不再作为候选默认方案。
 
 ## 11. 变更记录
 
@@ -425,3 +428,4 @@ v1 不引入 Redis。
 | 2026-08-03 | Text-to-SQL 二次源码调研 | 按 `github-research` 六阶段流程核验 OpenChatBI、PremSQL、BIRD-INTERACT、Lumen、PandasAI、Dash、test-suite-sql-eval、SQL-R1 和 MAC-SQL；确认下一步核心是 Catalog/Schema linking、可回答性澄清、一次执行修复、结果 denotation/校验和分维度评测。研究缓存位于本地 `github-research-output/` 且已忽略，不进入 Git。 |
 | 2026-08-03 | Text-to-SQL 第二轮论文与实现核验 | 直接复核 arXiv API 与 GitHub Public API：ABISS、RBAC Text-to-SQL、Schema retrieval、Context Compression、On-Prem self-correction、GATE 和 DataClawEval 支持“先检索/澄清/验证，再优化模型”的路线；新增 `plan/feature-text-to-sql-reliability-v2.md`。同时修复 YAML 裸 `on` 被 `safe_load` 转为布尔键的问题，Catalog smoke load 已通过（9 表/4 指标/7 Join）。 |
 | 2026-08-03 | Text-to-SQL 第二轮开发 | 按 v2 计划落地角色化 Catalog 检索与 trace、短安全系统提示、`QuestionRouter`、PostgreSQL working memory、零 SQL 澄清边界、一次 Policy 二次校验修复契约、数据库错误脱敏和 `ResultValidator`；Catalog/Router/working memory/ResultContract 已接入 Trusted Demo SSE，结果校验合同和 `prompt/catalog/dataset/metric/policy` 版本进入 ToolContext、run evidence 与 SQL 审计。确定性专项测试 **68 项通过**，项目 PostgreSQL 会话/Runner/路由/run recorder 集成测试 **9 项通过**；模型驱动修复的完整生命周期、在线模型语义评测和浏览器多轮回归仍未完成。详见 `docs/verification-text-to-sql-v2.md`。 |
+| 2026-08-06 | 通用工作区与可信修复生命周期 | 新增 `WorkspaceProfile`，将数据集/指标/Catalog/Policy 版本、PostgreSQL Schema/角色、对象白名单和 Catalog 路径从通用核心中抽出；Olist 保留为当前 adapter 和展示案例。新增 `TrustedRunSqlTool`，在不修改 Vanna Agent 核心循环的前提下，将一次 SQL 修复接入原生工具生命周期：错误脱敏、候选二次 Policy、reader role 重执行、ResultValidator 二次校验和可信拒答均已闭环。`app.query_audits` 与 `app.agent_runs` 新增 `repair_evidence` JSONB，预算记录同步修复状态；新增四类生命周期测试、WorkspaceProfile 测试和浏览器多轮澄清回归。专项回归 **84 passed**，PostgreSQL runner/run recorder **4 passed**，多轮浏览器测试 **1 passed**；ruff、compileall 和 diff 检查通过。尚未做真实 SiliconFlow 批量修复成功率、第二数据集和生产认证。 |

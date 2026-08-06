@@ -10,11 +10,12 @@ from vanna.servers.base import ChatHandler
 from vanna.servers.base.models import ChatRequest, ChatStreamChunk
 
 from .budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
-from .metric_context import DATASET_VERSION, METRIC_VERSION, PROMPT_VERSION
+from .metric_context import OLIST_WORKSPACE, PROMPT_VERSION
 from .question_router import QuestionRouter
 from .run_recorder import PostgresRunRecorder
 from .semantic_catalog import ResultContract
 from .working_memory import WorkingMemory
+from .workspace import WorkspaceProfile
 
 
 class BudgetedChatHandler(ChatHandler):
@@ -26,11 +27,13 @@ class BudgetedChatHandler(ChatHandler):
         budget: RequestBudget,
         run_recorder: PostgresRunRecorder,
         question_router: QuestionRouter | None = None,
+        workspace: WorkspaceProfile | None = None,
     ):
         super().__init__(agent)
         self.budget = budget
         self.run_recorder = run_recorder
         self.question_router = question_router
+        self.workspace = workspace or OLIST_WORKSPACE
 
     async def handle_stream(self, request: ChatRequest):
         conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:8]}"
@@ -68,8 +71,9 @@ class BudgetedChatHandler(ChatHandler):
                     id=conversation_id,
                     user=user,
                     metadata={
-                        "dataset_version_id": DATASET_VERSION,
-                        "metric_version": METRIC_VERSION,
+                        "workspace_id": self.workspace.workspace_id,
+                        "dataset_version_id": self.workspace.dataset_version_id,
+                        "metric_version": self.workspace.metric_version,
                         "working_memory": {},
                     },
                 )
@@ -82,8 +86,8 @@ class BudgetedChatHandler(ChatHandler):
                 user=user,
                 question=request.message,
                 budget=self.budget,
-                dataset_version_id=DATASET_VERSION,
-                metric_version=METRIC_VERSION,
+                dataset_version_id=self.workspace.dataset_version_id,
+                metric_version=self.workspace.metric_version,
             )
             request.request_context.metadata["run_id"] = run.run_id
 
@@ -130,6 +134,7 @@ class BudgetedChatHandler(ChatHandler):
                 request.request_context.metadata.update(
                     result_contract.as_tool_metadata()
                 )
+                request.request_context.metadata["catalog_context"] = selection.prompt[: self.budget.max_context_chars]
                 request.request_context.metadata["prompt_version"] = PROMPT_VERSION
                 usage.record_catalog(
                     {
@@ -142,8 +147,9 @@ class BudgetedChatHandler(ChatHandler):
                     retrieval_question, updated_memory.as_dict()
                 )
                 conversation.metadata["working_memory"] = updated_memory.as_dict()
-                conversation.metadata["dataset_version_id"] = DATASET_VERSION
-                conversation.metadata["metric_version"] = METRIC_VERSION
+                conversation.metadata["workspace_id"] = self.workspace.workspace_id
+                conversation.metadata["dataset_version_id"] = self.workspace.dataset_version_id
+                conversation.metadata["metric_version"] = self.workspace.metric_version
                 await self.agent.conversation_store.update_conversation(conversation)
 
                 if not route.should_generate_sql:

@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS app.agent_runs (
     total_tokens INTEGER,
     context_truncated BOOLEAN NOT NULL DEFAULT FALSE,
     catalog_trace JSONB NOT NULL DEFAULT '{}'::jsonb,
+    repair_evidence JSONB NOT NULL DEFAULT '{}'::jsonb,
     termination_reason TEXT NOT NULL DEFAULT 'running',
     error_type TEXT,
     started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -91,6 +92,8 @@ CREATE TABLE IF NOT EXISTS app.agent_runs (
 
 ALTER TABLE app.agent_runs
     ADD COLUMN IF NOT EXISTS catalog_trace JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE app.agent_runs
+    ADD COLUMN IF NOT EXISTS repair_evidence JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS app.query_audits (
     audit_id BIGSERIAL PRIMARY KEY,
@@ -110,6 +113,7 @@ CREATE TABLE IF NOT EXISTS app.query_audits (
     elapsed_ms INTEGER,
     row_count INTEGER,
     error_message TEXT,
+    repair_evidence JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (user_role IN ('analyst', 'admin')),
     CHECK (policy_status IN ('allowed', 'rejected', 'execution_error')),
@@ -118,6 +122,7 @@ CREATE TABLE IF NOT EXISTS app.query_audits (
 );
 
 ALTER TABLE app.query_audits ADD COLUMN IF NOT EXISTS run_id TEXT;
+ALTER TABLE app.query_audits ADD COLUMN IF NOT EXISTS repair_evidence JSONB;
 
 CREATE INDEX IF NOT EXISTS conversations_user_updated_idx
     ON app.conversations (user_id, updated_at DESC);

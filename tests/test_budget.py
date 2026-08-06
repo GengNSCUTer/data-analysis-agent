@@ -69,6 +69,25 @@ async def test_budget_middleware_replaces_model_answer_after_exhaustion() -> Non
     assert "未输出未经完整验证的数值结论" in (response.content or "")
 
 
+@pytest.mark.asyncio
+async def test_budget_middleware_replaces_model_answer_after_sql_repair_failure() -> None:
+    usage = BudgetUsage(RequestBudget())
+    usage.terminate("execution_error", "sql_repair_failed")
+    from data_analysis_agent.budget import CURRENT_BUDGET
+
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        response = await BudgetSafetyMiddleware().after_llm_response(
+            LlmRequest(messages=[], user=User(id="u")),
+            LlmResponse(content="GMV 是 999"),
+        )
+    finally:
+        CURRENT_BUDGET.reset(token)
+
+    assert response.tool_calls is None
+    assert "可信执行或结果合同校验" in (response.content or "")
+
+
 def test_unknown_termination_reason_is_rejected() -> None:
     usage = BudgetUsage(RequestBudget())
     with pytest.raises(ValueError, match="unknown termination reason"):

@@ -1,6 +1,6 @@
 # Text-to-SQL v2 验证记录
 
-> 验证日期：2026-08-03
+> 验证日期：2026-08-06
 > 运行环境：`/disk2/gengnan/conda_envs/data-analysis-agent`，Python 3.12
 > 目标：验证第二轮可靠性改造的确定性边界；不把 SQL 可执行率当成在线模型语义准确率。
 
@@ -24,7 +24,8 @@ server user + question
   -> route: answerable / clarification / refusal
   -> structured working memory
   -> one SQL candidate through AST + reader role
-  -> sanitized execution failure / bounded repair contract
+  -> sanitized execution failure / one bounded repair candidate
+  -> repair candidate through AST + reader role again
   -> deterministic result validation
   -> evidence-backed answer or safe refusal
 ```
@@ -42,8 +43,9 @@ server user + question
 - `ResultContract` 在 Catalog/WorkingMemory 之后由服务器构建，向 `ToolContext` 传递指标列、合法时间
   别名、请求时间范围、选中的 Join 和 `catalog/dataset/metric/policy` 版本；客户端同名 metadata 会被
   服务器派生值覆盖。Catalog Prompt 要求指标使用 `metric_id` 别名、时间分组使用 `time` 别名。
-- `OneShotSqlRepair` 对错误只传稳定类别和安全提示，候选 SQL 必须重新通过完整 `SqlPolicy`；
-  `postgres_runner.py` 对数据库异常向 Agent 暴露安全分类，不泄漏驱动堆栈。
+- `TrustedRunSqlTool` 在不修改 Vanna Agent 核心循环的前提下包装原生 `RunSqlTool`：错误只传稳定类别
+  和安全提示，候选 SQL 必须重新通过完整 `SqlPolicy`，并由 reader role 重执行；`postgres_runner.py`
+  对数据库异常向 Agent 暴露安全分类，不泄漏驱动堆栈。
 - `ResultValidator` 将空结果、缺少指标列、非有限数值、时间越界、行数截断和 Join 放大表示为
   `valid`、`needs_clarification` 或 `refuse`；失败不得变成确定性数字。
 
@@ -71,8 +73,9 @@ server user + question
 - 错误分类、一次修复、候选 SQL Policy 二次校验、修复提示长度和无原始错误泄漏；
 - 结果缺列、空集、非有限数值、行数截断、时间覆盖和 Join 放大拒答。
 
-当前专项回归结果：`68 passed`。项目 PostgreSQL 会话/Runner/路由/run recorder 集成验证为
-`9 passed, 1 warning`；警告来自 Starlette/httpx 的弃用提示，不是项目失败。
+当前专项回归结果：本轮指定集合 `84 passed`。项目 PostgreSQL `test_postgres_run_recorder.py`
+与 `test_postgres_runner.py` 为 `4 passed`；固定 SSE 浏览器多轮澄清回归为 `1 passed, 6 deselected`。
+ruff、compileall 和 `git diff --check` 均通过。没有把这些确定性结果写成在线模型语义准确率。
 
 项目 PostgreSQL 连接可选验证：
 
@@ -92,9 +95,9 @@ Schema 权限和真实 Olist 查询审计。它不调用 SiliconFlow，不代表
 | 问题文本伪造 `role=admin` | 角色只来自服务器解析的 `User` | 已测试 |
 | Prompt injection 要求读取 `app.query_audits`/文件 | Catalog 白名单 + AST Policy + reader role | 已测试 |
 | 检索上限丢失指标列/Join | 必需对象优先，连接路径固定点，超限拒答 | 已测试 |
-| 澄清后只剩补充句 | 会话 `working_memory` 记录结构化指标/时间 | 已测试（服务层）；浏览器多轮待补 |
+| 澄清后只剩补充句 | 会话 `working_memory` 记录结构化指标/时间 | 已测试（服务层 + 固定 SSE 浏览器回归） |
 | 执行异常泄漏驱动信息 | `sanitize_sql_error`/`SafeSqlExecutionError` | 已测试 |
-| 修复 SQL 绕过安全层 | `OneShotSqlRepair` 重新 `SqlPolicy.evaluate` | 已测试；reader 执行回链待接入 |
+| 修复 SQL 绕过安全层 | `TrustedRunSqlTool` 重新 `SqlPolicy.evaluate` 并由 reader role 重执行 | 已测试 |
 | 空结果/截断结果被写成数字 | `ResultValidator` 状态门 | 已测试 |
 | 并发用户共享 trace | `BudgetUsage`/会话状态按请求和 user 隔离；无进程级 last-result | 设计与单测覆盖 |
 
@@ -102,11 +105,14 @@ Schema 权限和真实 Olist 查询审计。它不调用 SiliconFlow，不代表
 
 - 当前 `ResultValidator` 的指标列、时间列、请求时间范围和 Join 元数据已经由服务器从
   Catalog/WorkingMemory 构建为 `ResultContract` 并传入 `ToolContext`；版本合同也已进入 Catalog Prompt、
-  固定系统 Prompt、Agent Run trace 和 SQL 审计。Runner 的 PostgreSQL 集成验证了受控执行和审计回链，
-  结果合同的别名/元数据注入由路由与确定性专项测试覆盖；完整的模型驱动修复生命周期仍需后续接入。
+  固定系统 Prompt、Agent Run trace 和 SQL 审计。`TrustedRunSqlTool` 已把原始 SQL、修复候选、错误类别、
+  Policy 状态、reader 重执行、结果校验和终止原因收敛为 `repair_evidence`，并持久化到 Agent Run/query audit。
 - 尚未用真实 SiliconFlow 批量运行 v2 评测集，因此没有在线准确率、token 成本或 P95 延迟数字。
-- Vanna 的工具循环仍由 Agent 驱动；需要下一轮把 `OneShotSqlRepair` 的原/修复 SQL、reader
-  重执行、二次 `ResultValidator` 和终止证据完整接到生命周期中，并保证第二次失败直接拒答。
-- 尚未完成“本月销售额 -> 补充日期 -> 后续指标追问”的浏览器 Playwright 回归；已有服务层测试。
+- Vanna 的工具循环仍由 Agent 驱动；项目层只包装 `RunSqlTool`，不修改 Vanna 核心循环。修复候选最多一次，
+  仍未用真实 SiliconFlow 批量运行来测量修复成功率、语义准确率、token 成本或 P95 延迟。
+- 浏览器已用固定 SSE mock 完成“本月销售额 -> 补充日期 -> 后续指标追问”多轮回归；该测试避免在线模型波动，
+  不能替代真实模型评测。
+- Olist 仍是当前 adapter/展示案例，`WorkspaceProfile` 尚未通过第二个真实数据集验证；演示会话不是生产认证，
+  尚未实现组织级 RLS。
 - 演示会话不是生产认证，尚未实现组织级行范围策略。
 - 上游可选数据库/LLM 集成的全量测试不属于本项目质量门；缺少可选依赖的失败不作为本轮回归结论。

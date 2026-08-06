@@ -8,6 +8,8 @@ from typing import Final
 from sqlglot import exp, parse
 from sqlglot.errors import ParseError
 
+from .workspace import WorkspaceProfile
+
 
 ANALYTICS_COLUMNS: Final[dict[str, frozenset[str]]] = {
     "dataset_versions": frozenset(
@@ -98,11 +100,28 @@ class PolicyDecision:
 
 
 class SqlPolicy:
-    """Validate and normalize a single read-only PostgreSQL query."""
+    """Validate and normalize a single read-only query for a workspace."""
 
-    def __init__(self, analyst_limit: int = 200, admin_limit: int = 1000):
+    def __init__(
+        self,
+        analyst_limit: int = 200,
+        admin_limit: int = 1000,
+        workspace: WorkspaceProfile | None = None,
+    ):
         self.limits = {"analyst": analyst_limit, "admin": admin_limit}
-        self.all_columns = frozenset().union(*ANALYTICS_COLUMNS.values())
+        self.workspace = workspace
+        self.analytics_columns = (
+            dict(workspace.allowed_columns) if workspace else ANALYTICS_COLUMNS
+        )
+        self.analyst_tables = workspace.analyst_tables if workspace else ANALYST_TABLES
+        self.sensitive_projection_columns = (
+            workspace.sensitive_projection_columns
+            if workspace
+            else SENSITIVE_PROJECTION_COLUMNS
+        )
+        self.analytics_schema = workspace.analytics_schema if workspace else "analytics"
+        self.sql_dialect = workspace.sql_dialect if workspace else "postgres"
+        self.all_columns = frozenset().union(*self.analytics_columns.values())
 
     def evaluate(self, sql: str, role: str = "analyst") -> PolicyDecision:
         if role not in self.limits:
@@ -123,19 +142,23 @@ class SqlPolicy:
             raise PolicyViolation(f"forbidden SQL operation: {forbidden.key}")
 
         cte_names = {cte.alias_or_name.lower() for cte in statement.find_all(exp.CTE)}
-        allowed_tables = frozenset(ANALYTICS_COLUMNS) if role == "admin" else ANALYST_TABLES
+        allowed_tables = (
+            frozenset(self.analytics_columns)
+            if role == "admin"
+            else self.analyst_tables
+        )
         tables: set[str] = set()
         for table in statement.find_all(exp.Table):
             table_name = table.name.lower()
             if table_name in cte_names and not table.db:
                 continue
-            schema = table.db.lower() if table.db else "analytics"
-            if schema != "analytics" or table.catalog:
+            schema = table.db.lower() if table.db else self.analytics_schema
+            if schema != self.analytics_schema or table.catalog:
                 raise PolicyViolation(f"schema is not allowed: {schema}")
             if table_name not in allowed_tables:
                 raise PolicyViolation(f"table is not allowed for {role}: {table_name}")
             if not table.db:
-                table.set("db", exp.to_identifier("analytics"))
+                table.set("db", exp.to_identifier(self.analytics_schema))
             tables.add(table_name)
         if not tables:
             raise PolicyViolation("query must read at least one allowed analytics table")
@@ -160,7 +183,7 @@ class SqlPolicy:
                     blocked = {
                         column.name.lower()
                         for column in projection.find_all(exp.Column)
-                        if column.name.lower() in SENSITIVE_PROJECTION_COLUMNS
+                        if column.name.lower() in self.sensitive_projection_columns
                         and column.find_ancestor(exp.Count) is None
                     }
                     if blocked:
@@ -191,7 +214,7 @@ class SqlPolicy:
 
         return PolicyDecision(
             original_sql=sql,
-            final_sql=statement.sql(dialect="postgres"),
+            final_sql=statement.sql(dialect=self.sql_dialect),
             role=role,
             tables=tuple(sorted(tables)),
             columns=tuple(sorted(columns)),

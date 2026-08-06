@@ -126,7 +126,8 @@ class PostgresRunRecorder:
                             input_chars = %s, context_chars = %s,
                             input_tokens = %s, output_tokens = %s, total_tokens = %s,
                             context_truncated = %s, termination_reason = %s,
-                            error_type = %s, catalog_trace = %s, finished_at = %s
+                            error_type = %s, catalog_trace = %s,
+                            repair_evidence = %s, finished_at = %s
                         WHERE run_id = %s
                         """,
                         (
@@ -143,6 +144,7 @@ class PostgresRunRecorder:
                             values["termination_reason"],
                             values["error_type"],
                             psycopg2.extras.Json(values["catalog_trace"] or {}),
+                            psycopg2.extras.Json(values["repair_evidence"] or {}),
                             datetime.now(timezone.utc),
                             run.run_id,
                         ),

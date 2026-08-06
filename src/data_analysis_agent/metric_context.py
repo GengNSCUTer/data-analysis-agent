@@ -1,10 +1,42 @@
 """Versioned Olist semantic context supplied to the trusted Vanna agent."""
 
-from .semantic_catalog import CATALOG_VERSION, POLICY_VERSION
+from pathlib import Path
+
+from .semantic_catalog import (
+    CATALOG_PATH,
+    CATALOG_VERSION,
+    POLICY_VERSION,
+)
+from .sql_policy import (
+    ANALYTICS_COLUMNS,
+    ANALYST_TABLES,
+    SENSITIVE_PROJECTION_COLUMNS,
+)
+from .workspace import WorkspaceProfile
 
 METRIC_VERSION = "0.1-draft"
 DATASET_VERSION = "olist-kaggle-v2-2026-08-03"
 PROMPT_VERSION = "trusted-olist-prompt-v2"
+
+# Olist is the first adapter used by the demo and regression fixtures.  The
+# policy, catalog, memory, contract and validation components consume the
+# generic WorkspaceProfile interface instead of hard-coding these values.
+OLIST_WORKSPACE = WorkspaceProfile(
+    workspace_id="olist-demo",
+    dataset_id="olist-brazilian-ecommerce",
+    dataset_version=DATASET_VERSION,
+    metric_version=METRIC_VERSION,
+    catalog_version=CATALOG_VERSION,
+    policy_version=POLICY_VERSION,
+    sql_dialect="postgres",
+    analytics_schema="analytics",
+    reader_role="daa_analytics_reader",
+    writer_role="daa_app_writer",
+    allowed_columns=ANALYTICS_COLUMNS,
+    analyst_tables=ANALYST_TABLES,
+    sensitive_projection_columns=SENSITIVE_PROJECTION_COLUMNS,
+    catalog_path=Path(CATALOG_PATH),
+)
 
 SYSTEM_PROMPT = f"""
 你是可信业务数据分析助手。数据来自 Olist Brazilian E-Commerce 公开数据集，版本为

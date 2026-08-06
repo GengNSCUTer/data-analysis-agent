@@ -119,7 +119,7 @@ multi-turn regression. No online accuracy claim is made yet.
 | TASK-008 | Keep `QuestionRouter` as a pure, deterministic function first; cover time, metric, comparison, unauthorized, unsupported, remembered-state, and `should_generate_sql` behavior. | ✅ | 2026-08-03 |
 | TASK-009 | Define a structured working-memory object for `metric_ids`, `time_range`, dimensions, filters, comparison baseline, and previous-result summary. Store it with the conversation/run, never by scraping arbitrary assistant prose. | ✅ | 2026-08-03 |
 | TASK-010 | Add a clarification boundary to `BudgetedChatHandler`: one actionable question, no SQL budget consumption, `termination_reason=clarification_required`, and safe persistence of the original question plus the missing field. | ✅ | 2026-08-03 |
-| TASK-011 | Add `tests/test_question_router.py`, trusted route tests, and a browser regression for “本月销售额” followed by an explicit date range and a subsequent metric follow-up. | ◐ | 2026-08-03 |
+| TASK-011 | Add `tests/test_question_router.py`, trusted route tests, and a browser regression for “本月销售额” followed by an explicit date range and a subsequent metric follow-up. | ✅ | 2026-08-06 |
 
 ### Implementation Phase 4
 
@@ -129,9 +129,9 @@ multi-turn regression. No online accuracy claim is made yet.
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
 | TASK-012 | Implement `src/data_analysis_agent/sql_repair.py` with sanitized error categories, one repair attempt, original/repaired SQL retention, and a stable repair reason. | ✅ | 2026-08-03 |
-| TASK-013 | Re-run `SqlPolicy`, PostgreSQL reader-role execution, statement timeout, and row limits for both the original and repaired candidate; never pass raw database errors to the model. | ◐ | 2026-08-03 |
+| TASK-013 | Re-run `SqlPolicy`, PostgreSQL reader-role execution, statement timeout, and row limits for both the original and repaired candidate; never pass raw database errors to the model. | ✅ | 2026-08-06 |
 | TASK-014 | Implement `src/data_analysis_agent/result_validator.py` for required metric columns, empty-result semantics, time coverage, row-limit truncation, and simple join-amplification checks. Return `valid`, `needs_clarification`, or `refuse`. | ✅ | 2026-08-03 |
-| TASK-015 | Add focused repair/validator tests, wire the server-owned result contract into `ToolContext`, and expose only concise validation evidence to the existing embedded host. A failed check must not become a confident number. | ✅ (runtime contract; full lifecycle pending) | 2026-08-03 |
+| TASK-015 | Add focused repair/validator tests, wire the server-owned result contract into `ToolContext`, and expose only concise validation evidence to the existing embedded host. A failed check must not become a confident number. | ✅ | 2026-08-06 |
 
 ### Implementation Phase 5
 

@@ -9,6 +9,7 @@ from data_analysis_agent.chat_runtime import BudgetedChatHandler
 from data_analysis_agent.run_recorder import AgentRun
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
+from data_analysis_agent.working_memory import WorkingMemory
 from vanna.core.storage import Conversation
 from vanna.core.user import RequestContext
 from vanna.servers.base.models import ChatRequest
@@ -69,6 +70,41 @@ def test_router_uses_working_memory_to_avoid_repeating_clarification(router) -> 
 
     assert route.state == "answerable"
     assert route.metric_ids == ("gmv",)
+
+
+def test_clarification_follow_up_restores_metric_and_adds_explicit_time_range(router) -> None:
+    first_question = "本月销售额是多少"
+    first_selection = router.retriever.retrieve(first_question, _user())
+    first_route = router.classify(
+        first_question,
+        user=_user(),
+        selection=first_selection,
+        conversation_state={},
+    )
+    memory = WorkingMemory().apply(first_question, first_route)
+
+    follow_up = "2017-01-01 至 2017-12-31"
+    follow_up_selection = router.retriever.retrieve(
+        memory.retrieval_context(follow_up), _user()
+    )
+    follow_up_route = router.classify(
+        follow_up,
+        user=_user(),
+        selection=follow_up_selection,
+        conversation_state=memory.as_dict(),
+    )
+    updated = memory.apply(follow_up, follow_up_route)
+
+    assert first_route.state == "missing_time"
+    assert memory.pending_missing == ("time_range",)
+    assert follow_up_route.state == "answerable"
+    assert follow_up_route.metric_ids == ("gmv",)
+    assert updated.metric_ids == ("gmv",)
+    assert updated.time_range == {
+        "start": "2017-01-01",
+        "end": "2017-12-31",
+    }
+    assert updated.pending_missing == ()
 
 
 def test_router_does_not_trust_role_text_instead_of_server_user(router) -> None:

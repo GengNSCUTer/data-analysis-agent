@@ -26,6 +26,7 @@ from .sql_policy import (
     ANALYST_TABLES,
     SENSITIVE_PROJECTION_COLUMNS,
 )
+from .workspace import WorkspaceProfile
 
 
 CATALOG_VERSION = "olist-catalog-v1"
@@ -275,8 +276,26 @@ class ResultContract:
 class CatalogLoader:
     """Load and validate a server-owned YAML Catalog, failing closed on errors."""
 
-    def load(self, path: Path | str = CATALOG_PATH) -> Catalog:
-        catalog_path = Path(path)
+    def __init__(self, workspace: WorkspaceProfile | None = None):
+        self.workspace = workspace
+        self.allowed_columns = (
+            dict(workspace.allowed_columns) if workspace else ANALYTICS_COLUMNS
+        )
+        self.sensitive_projection_columns = (
+            workspace.sensitive_projection_columns
+            if workspace
+            else SENSITIVE_PROJECTION_COLUMNS
+        )
+        self.expected_catalog_version = (
+            workspace.catalog_version if workspace else CATALOG_VERSION
+        )
+        self.expected_policy_version = (
+            workspace.policy_version if workspace else POLICY_VERSION
+        )
+
+    def load(self, path: Path | str | None = None) -> Catalog:
+        configured_path = self.workspace.catalog_path if self.workspace else None
+        catalog_path = Path(path or configured_path or CATALOG_PATH)
         try:
             raw = yaml.safe_load(catalog_path.read_text(encoding="utf-8"))
         except (OSError, yaml.YAMLError) as exc:
@@ -305,13 +324,13 @@ class CatalogLoader:
         dataset_version = self._nonempty(raw["dataset_version"], "dataset_version")
         metric_version = self._nonempty(raw["metric_version"], "metric_version")
         policy_version = self._nonempty(raw["policy_version"], "policy_version")
-        if catalog_version != CATALOG_VERSION:
+        if catalog_version != self.expected_catalog_version:
             raise CatalogValidationError(
-                f"unsupported catalog_version {catalog_version!r}; expected {CATALOG_VERSION!r}"
+                f"unsupported catalog_version {catalog_version!r}; expected {self.expected_catalog_version!r}"
             )
-        if policy_version != POLICY_VERSION:
+        if policy_version != self.expected_policy_version:
             raise CatalogValidationError(
-                f"unsupported policy_version {policy_version!r}; expected {POLICY_VERSION!r}"
+                f"unsupported policy_version {policy_version!r}; expected {self.expected_policy_version!r}"
             )
         tables = tuple(self._parse_table(item, index) for index, item in enumerate(raw["tables"]))
         self._unique([table.table_id for table in tables], "table_id")
@@ -348,7 +367,7 @@ class CatalogLoader:
         physical_name = self._identifier(item["physical_name"], f"tables[{index}].physical_name")
         if physical_name != table_id:
             raise CatalogValidationError(f"table_id and physical_name must match: {table_id}")
-        if physical_name not in ANALYTICS_COLUMNS:
+        if physical_name not in self.allowed_columns:
             raise CatalogValidationError(f"table is not present in SQL Policy: {physical_name}")
         roles = self._roles(item["role_visibility"], f"tables[{index}].role_visibility")
         columns = tuple(
@@ -356,7 +375,7 @@ class CatalogLoader:
             for column_index, column in enumerate(item["columns"])
         )
         self._unique([column.name for column in columns], f"{table_id}.column")
-        known_columns = set(ANALYTICS_COLUMNS[table_id])
+        known_columns = set(self.allowed_columns[table_id])
         catalog_columns = {column.name for column in columns}
         if catalog_columns != known_columns:
             raise CatalogValidationError(
@@ -370,7 +389,7 @@ class CatalogLoader:
         )
         if not set(context_columns) <= catalog_columns:
             raise CatalogValidationError(f"context_columns contain unknown columns: {table_id}")
-        policy_sensitive = set(ANALYTICS_COLUMNS[table_id]) & SENSITIVE_PROJECTION_COLUMNS
+        policy_sensitive = set(self.allowed_columns[table_id]) & self.sensitive_projection_columns
         for column in columns:
             if column.name in policy_sensitive and not column.sensitive:
                 raise CatalogValidationError(

@@ -38,6 +38,7 @@ from data_analysis_agent.metric_context import (
     DATASET_VERSION,
     METRIC_EVIDENCE,
     METRIC_VERSION,
+    OLIST_WORKSPACE,
     SYSTEM_PROMPT,
 )
 from data_analysis_agent.postgres_runner import (
@@ -62,7 +63,10 @@ from vanna.integrations.local.agent_memory import DemoAgentMemory
 from vanna.integrations.local.file_system import LocalFileSystem
 from vanna.integrations.openai import OpenAILlmService
 from vanna.servers.fastapi.routes import register_chat_routes
-from vanna.tools import RunSqlTool
+from data_analysis_agent.trusted_sql_tool import (
+    LlmRepairCandidateProvider,
+    TrustedRunSqlTool,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -90,6 +94,7 @@ def audit_response(audit: dict) -> dict:
         "metric_version": audit["metric_version"],
         "elapsed_ms": audit["elapsed_ms"],
         "row_count": audit["row_count"],
+        "repair_evidence": audit.get("repair_evidence"),
         "created_at": audit["created_at"],
     }
 
@@ -112,12 +117,13 @@ def create_app() -> FastAPI:
         settings=settings,
         model_name=model_name,
         result_validator=ResultValidator(settings.max_rows),
+        workspace=OLIST_WORKSPACE,
     )
     budget = RequestBudget.from_environment()
     conversation_store = PostgresConversationStore(settings)
     run_recorder = PostgresRunRecorder(settings, model_name=model_name)
     agent_memory = DemoAgentMemory()
-    catalog_retriever = CatalogRetriever(CatalogLoader().load())
+    catalog_retriever = CatalogRetriever(CatalogLoader(OLIST_WORKSPACE).load())
     catalog_enhancer = CatalogContextEnhancer(
         catalog_retriever,
         base_enhancer=DefaultLlmContextEnhancer(agent_memory),
@@ -131,9 +137,15 @@ def create_app() -> FastAPI:
     role_resolver = DemoRoleResolver(signer)
     registry = BudgetedToolRegistry()
     query_file_system = LocalFileSystem(str(QUERY_RESULTS_DIRECTORY))
+    llm_service = OpenAILlmService(
+        api_key=api_key,
+        base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
+        model=model_name,
+    )
     registry.register_local_tool(
-        RunSqlTool(
+        TrustedRunSqlTool(
             sql_runner=runner,
+            repair_provider=LlmRepairCandidateProvider(llm_service),
             file_system=query_file_system,
             custom_tool_description="Run a policy-checked, read-only PostgreSQL analytics query.",
         ),
@@ -143,11 +155,7 @@ def create_app() -> FastAPI:
         TrustedVisualizeDataTool(query_file_system), access_groups=["analyst", "admin"]
     )
     agent = Agent(
-        llm_service=OpenAILlmService(
-            api_key=api_key,
-            base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
-            model=model_name,
-        ),
+        llm_service=llm_service,
         tool_registry=registry,
         user_resolver=role_resolver,
         agent_memory=agent_memory,
@@ -175,7 +183,13 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=WEB_COMPONENT_DIST), name="static")
     register_chat_routes(
         app,
-        BudgetedChatHandler(agent, budget, run_recorder, question_router),
+        BudgetedChatHandler(
+            agent,
+            budget,
+            run_recorder,
+            question_router,
+            workspace=OLIST_WORKSPACE,
+        ),
         config={"cdn_url": "/static/vanna-components.js"},
     )
 

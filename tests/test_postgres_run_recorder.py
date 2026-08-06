@@ -57,6 +57,12 @@ async def test_run_recorder_links_query_audit_to_finished_run() -> None:
         usage.set_input("统计订单数")
         usage.record_llm_round()
         usage.consume_tool("run_sql")
+        usage.record_repair(
+            {
+                "repair_attempted": True,
+                "repair_execution_status": "succeeded",
+            }
+        )
         usage.finish()
         await recorder.finish(run, usage)
 
@@ -83,7 +89,7 @@ async def test_run_recorder_links_query_audit_to_finished_run() -> None:
         try:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT termination_reason, tool_calls_used, finished_at "
+                    "SELECT termination_reason, tool_calls_used, repair_evidence, finished_at "
                     "FROM app.agent_runs WHERE run_id = %s",
                     (run.run_id,),
                 )
@@ -99,7 +105,11 @@ async def test_run_recorder_links_query_audit_to_finished_run() -> None:
 
         assert run_row[0] == "completed"
         assert run_row[1] == 1
-        assert run_row[2] is not None
+        assert run_row[2] == {
+            "repair_attempted": True,
+            "repair_execution_status": "succeeded",
+        }
+        assert run_row[3] is not None
         assert audit_row == (run.run_id, "allowed")
     finally:
         connection = psycopg2.connect(

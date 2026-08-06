@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import os
 from time import perf_counter
 from typing import Any
@@ -18,7 +18,8 @@ from vanna.core.tool import ToolContext
 from .sql_policy import PolicyViolation, SqlPolicy
 from .result_validator import ResultValidationError, ResultValidator
 from .sql_repair import SafeSqlExecutionError, sanitize_sql_error
-from .metric_context import DATASET_VERSION, METRIC_VERSION
+from .metric_context import DATASET_VERSION, METRIC_VERSION, OLIST_WORKSPACE
+from .workspace import WorkspaceProfile
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ class PostgresQueryAudit:
         elapsed_ms: int | None = None,
         row_count: int | None = None,
         error_message: str | None = None,
+        repair_evidence: dict[str, Any] | None = None,
     ) -> None:
         connection = psycopg2.connect(
             host=self.settings.host,
@@ -79,8 +81,9 @@ class PostgresQueryAudit:
                     INSERT INTO app.query_audits (
                         run_id, request_id, conversation_id, user_id, user_role, question,
                         original_sql, final_sql, policy_status, policy_reason, model_name,
-                        dataset_version_id, metric_version, elapsed_ms, row_count, error_message
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        dataset_version_id, metric_version, elapsed_ms, row_count,
+                        error_message, repair_evidence
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         context.metadata.get("run_id"),
@@ -99,6 +102,9 @@ class PostgresQueryAudit:
                         elapsed_ms,
                         row_count,
                         error_message,
+                        psycopg2.extras.Json(repair_evidence)
+                        if repair_evidence is not None
+                        else None,
                     ),
                 )
             connection.commit()
@@ -137,9 +143,18 @@ class SecurePostgresRunner(SqlRunner):
         policy: SqlPolicy | None = None,
         model_name: str = "deepseek-ai/DeepSeek-V4-Flash",
         result_validator: ResultValidator | None = None,
+        workspace: WorkspaceProfile | None = None,
     ):
-        self.settings = settings or PostgresConnectionSettings.from_environment()
-        self.policy = policy or SqlPolicy()
+        self.workspace = workspace or OLIST_WORKSPACE
+        configured_settings = settings or PostgresConnectionSettings.from_environment()
+        if workspace is not None:
+            configured_settings = replace(
+                configured_settings,
+                reader_user=workspace.reader_role,
+                writer_user=workspace.writer_role,
+            )
+        self.settings = configured_settings
+        self.policy = policy or SqlPolicy(workspace=self.workspace)
         self.audit = PostgresQueryAudit(self.settings, model_name)
         self.result_validator = result_validator
 
@@ -157,7 +172,9 @@ class SecurePostgresRunner(SqlRunner):
         except PolicyViolation as exc:
             self.audit.record(
                 context, role, args.sql, status="rejected", reason=str(exc),
-                elapsed_ms=int((perf_counter() - started_at) * 1000), error_message=str(exc),
+                elapsed_ms=int((perf_counter() - started_at) * 1000),
+                error_message=str(exc),
+                repair_evidence=context.metadata.get("repair_evidence"),
             )
             raise
 
@@ -178,10 +195,13 @@ class SecurePostgresRunner(SqlRunner):
                 connection.close()
         except Exception as exc:
             safe_error = sanitize_sql_error(exc)
+            context.metadata["safe_sql_error"] = safe_error
+            context.metadata["sql_error"] = safe_error.as_dict()
             self.audit.record(
                 context, role, args.sql, status="execution_error", final_sql=decision.final_sql,
                 reason="PostgreSQL execution failed", elapsed_ms=int((perf_counter() - started_at) * 1000),
                 error_message=safe_error.public_reason,
+                repair_evidence=context.metadata.get("repair_evidence"),
             )
             raise SafeSqlExecutionError(safe_error) from exc
 
@@ -211,6 +231,7 @@ class SecurePostgresRunner(SqlRunner):
                     reason=f"result_validation:{validation.reason}",
                     elapsed_ms=int((perf_counter() - started_at) * 1000),
                     row_count=len(rows),
+                    repair_evidence=context.metadata.get("repair_evidence"),
                 )
                 raise ResultValidationError(validation)
 
@@ -218,5 +239,6 @@ class SecurePostgresRunner(SqlRunner):
             context, role, args.sql, status="allowed", final_sql=decision.final_sql,
             reason=decision.reason, elapsed_ms=int((perf_counter() - started_at) * 1000),
             row_count=len(rows),
+            repair_evidence=context.metadata.get("repair_evidence"),
         )
         return pd.DataFrame(rows)
