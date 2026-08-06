@@ -13,6 +13,7 @@ from .semantic_catalog import CatalogSelection, CatalogRetriever
 
 QuestionState = Literal[
     "answerable",
+    "catalog_answered",
     "missing_time",
     "missing_metric",
     "missing_comparison",
@@ -27,6 +28,10 @@ _UNAUTHORIZED = re.compile(
     re.IGNORECASE,
 )
 _UNSUPPORTED = re.compile(r"预测|机器学习训练|自动下单|发起退款|执行脚本|运行 python|运行代码", re.IGNORECASE)
+_DEFINITION_REQUEST = re.compile(r"是什么|指什么|含义|定义|统计口径|口径是什么|怎么算|如何计算")
+_DATA_INTENT = re.compile(
+    r"概览|多少|数值|统计|查询|分析|趋势|排名|前[一二三四五六七八九十0-9]+|总|平均|比例|数量|金额|按|对比|比较|变化|增长|下降|最好|最高|最低"
+)
 
 
 @dataclass(frozen=True)
@@ -36,6 +41,7 @@ class QuestionRoute:
     metric_ids: tuple[str, ...]
     clarification: str | None
     reason: str
+    direct_answer: str | None = None
 
     @property
     def should_generate_sql(self) -> bool:
@@ -48,6 +54,7 @@ class QuestionRoute:
             "metric_ids": list(self.metric_ids),
             "clarification": self.clarification,
             "reason": self.reason,
+            "direct_answer": self.direct_answer,
             "should_generate_sql": self.should_generate_sql,
         }
 
@@ -87,6 +94,24 @@ class QuestionRouter:
                 "你希望比较或统计哪个指标？例如 GMV、有效订单数、平均履约天数或好评率。",
                 "no_metric_match",
             )
+        definition_match = _DEFINITION_REQUEST.search(question)
+        question_without_definition = _DEFINITION_REQUEST.sub("", question)
+        if definition_match and not _DATA_INTENT.search(question_without_definition):
+            metrics = selection.metrics
+            if not metrics:
+                metrics = tuple(
+                    self.retriever.catalog.metrics_by_id[metric_id]
+                    for metric_id in metric_ids
+                    if metric_id in self.retriever.catalog.metrics_by_id
+                )
+            return QuestionRoute(
+                "catalog_answered",
+                (),
+                metric_ids,
+                None,
+                "catalog_metric_definition",
+                self._format_metric_definitions(metrics),
+            )
         if _RELATIVE_TIME.search(question) and not state.get("time_range"):
             return QuestionRoute(
                 "missing_time",
@@ -106,3 +131,27 @@ class QuestionRouter:
                     "comparison_without_baseline",
                 )
         return QuestionRoute("answerable", (), metric_ids, None, "matched_catalog_and_no_blocking_ambiguity")
+
+    @staticmethod
+    def _format_metric_definitions(metrics) -> str:
+        lines = [
+            "## 指标定义与统计口径",
+            "",
+            "以下内容直接来自当前工作区的 Semantic Catalog，不会触发数据库查询。",
+            "",
+            "| 指标 | 定义 | 时间字段 | 默认过滤 |",
+            "| --- | --- | --- | --- |",
+        ]
+        for metric in metrics:
+            filters = "；".join(metric.default_filters) or "无额外过滤"
+            lines.append(
+                f"| {metric.name}（`{metric.metric_id}`） | {metric.description} | "
+                f"`{metric.time_field}` | {filters} |"
+            )
+        lines.extend(
+            [
+                "",
+                "如需查看实际数值，请继续提出带有统计范围、维度或对比条件的问题。",
+            ]
+        )
+        return "\n".join(lines)

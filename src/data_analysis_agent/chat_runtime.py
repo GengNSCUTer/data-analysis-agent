@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from time import perf_counter
 
-from vanna.components import SimpleTextComponent, StatusCardComponent, UiComponent
+from vanna.components import RichTextComponent, SimpleTextComponent, StatusCardComponent, UiComponent
 from vanna.core.storage import Conversation, Message
 from vanna.servers.base import ChatHandler
 from vanna.servers.base.models import ChatRequest, ChatStreamChunk
@@ -107,6 +108,7 @@ class BudgetedChatHandler(ChatHandler):
                 "help",
                 "/h",
             }:
+                route_started_at = perf_counter()
                 memory = WorkingMemory.from_mapping(
                     conversation.metadata.get("working_memory")
                 )
@@ -151,9 +153,13 @@ class BudgetedChatHandler(ChatHandler):
                 conversation.metadata["dataset_version_id"] = self.workspace.dataset_version_id
                 conversation.metadata["metric_version"] = self.workspace.metric_version
                 await self.agent.conversation_store.update_conversation(conversation)
+                usage.record_timing(
+                    "route_catalog",
+                    int((perf_counter() - route_started_at) * 1000),
+                )
 
                 if not route.should_generate_sql:
-                    detail = route.clarification or "当前请求无法在受控数据范围内回答。"
+                    detail = route.direct_answer or route.clarification or "当前请求无法在受控数据范围内回答。"
                     conversation.add_message(Message(role="user", content=request.message))
                     conversation.add_message(
                         Message(
@@ -163,6 +169,12 @@ class BudgetedChatHandler(ChatHandler):
                         )
                     )
                     await self.agent.conversation_store.update_conversation(conversation)
+                    if route.state == "catalog_answered":
+                        usage.terminate("catalog_answered")
+                        yield self._text_chunk(
+                            conversation_id, request_id, detail
+                        )
+                        return
                     if route.state in {
                         "missing_time",
                         "missing_metric",
@@ -209,5 +221,16 @@ class BudgetedChatHandler(ChatHandler):
                 icon="⚠️",
             ),
             simple_component=SimpleTextComponent(text=detail),
+        )
+        return ChatStreamChunk.from_component(component, conversation_id, request_id)
+
+    @staticmethod
+    def _text_chunk(
+        conversation_id: str, request_id: str, content: str
+    ) -> ChatStreamChunk:
+        """Build a Markdown-capable deterministic response without an LLM call."""
+        component = UiComponent(
+            rich_component=RichTextComponent(content=content, markdown=True),
+            simple_component=SimpleTextComponent(text=content),
         )
         return ChatStreamChunk.from_component(component, conversation_id, request_id)

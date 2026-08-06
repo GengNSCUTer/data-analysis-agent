@@ -66,6 +66,14 @@
 - 边界：Olist 仍是当前 adapter/展示案例，尚无第二真实数据集；演示 cookie 不是生产认证，未实现组织级 RLS；尚未做 SiliconFlow 批量修复成功率和 token/P95 评测。
 - 下一步：建立版本化 v2 评测集，先用固定 Olist golden 和人工标签核验真实模型，再决定是否引入更复杂的 schema retrieval、judge 或多候选策略。
 
+### 2026-08-06：嵌入式可靠性与延迟定位
+
+- 目标：处理 `/embedded-demo` 的窗口恢复布局、非数据库问题误走 SQL、历史消息 Markdown 原样显示和响应过慢四项反馈。
+- 实现：SQL Policy 增加多 CTE 输出列/外层别名识别，并修复 scalar subquery 关联键的敏感列误判；`QuestionRouter` 对纯指标定义/统计口径问题直接从 Catalog 返回 `catalog_answered` Markdown；历史 assistant 消息与流式文本共用转义后渲染的 Markdown renderer；宿主页通过双 `requestAnimationFrame` 与 `ResizeObserver` 同步组件高度。预算台账增加 `route_catalog`、`llm_request`、`sql_policy`、`postgres_sql` 阶段耗时证据。
+- 验证：Web Component `npm run build` 通过；相关后端专项 **63 passed, 1 skipped**；Playwright `tests/e2e/test_trusted_embedded_window.py` **7 passed**；`ruff check`、`compileall` 和 `git diff --check` 通过。真实多指标请求已完成，代表性观测约 77.7 秒，其中两轮 SiliconFlow 模型调用约 77.2 秒，PostgreSQL 约 0.39 秒。
+- 边界：该延迟是单次观测，不是 P95；仍未完成模型批量语义准确率、模型超时/流式优化、真实认证、组织级 RLS 和第二真实数据集。
+- 下一步：先建立带人工标签和 golden SQL 的 v2 评测集，再基于阶段耗时做模型调用超时、流式状态和 Prompt/上下文压缩优化。
+
 ### 2026-08-03：Text-to-SQL 第一阶段运行时合同
 
 - 目标：修正 Catalog/WorkingMemory 派生的结果语义合同没有进入实际 Vanna `ToolContext` 的硬缺口。

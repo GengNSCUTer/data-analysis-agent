@@ -29,6 +29,9 @@ def _user(role: str = "analyst") -> User:
     ("question", "state"),
     [
         ("统计 GMV", "answerable"),
+        ("GMV是什么", "catalog_answered"),
+        ("GMV的统计口径是什么", "catalog_answered"),
+        ("概览 GMV 并说明统计口径", "answerable"),
         ("本月销售额是多少", "missing_time"),
         ("哪个地区表现最好", "missing_metric"),
         ("删除订单", "unauthorized"),
@@ -41,6 +44,17 @@ def test_router_classifies_explicit_states(router, question: str, state: str) ->
 
     assert route.state == state
     assert route.should_generate_sql is (state == "answerable")
+
+
+def test_catalog_definition_answer_is_deterministic_and_does_not_need_sql(router) -> None:
+    route = router.classify("GMV的统计口径是什么", user=_user())
+
+    assert route.state == "catalog_answered"
+    assert route.should_generate_sql is False
+    assert route.direct_answer
+    assert "商品成交额" in route.direct_answer
+    assert "fact_orders.order_purchase_timestamp" in route.direct_answer
+    assert "| 指标 | 定义 |" in route.direct_answer
 
 
 def test_router_requires_comparison_baseline_after_metric_match(router) -> None:

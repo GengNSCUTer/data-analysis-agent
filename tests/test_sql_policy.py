@@ -85,3 +85,45 @@ def test_policy_allows_read_only_cte(policy: SqlPolicy) -> None:
 
     assert decision.tables == ("fact_orders",)
     assert "LIMIT 200" in decision.final_sql
+
+
+def test_policy_allows_qualified_cte_outputs_but_rejects_unknown_outputs(
+    policy: SqlPolicy,
+) -> None:
+    decision = policy.evaluate(
+        "WITH paid_orders AS ("
+        "SELECT COUNT(DISTINCT order_id) AS paid_order_count FROM fact_orders), "
+        "gmv_data AS ("
+        "SELECT SUM(items.price) AS gmv FROM fact_order_items items) "
+        "SELECT p.paid_order_count, g.gmv "
+        "FROM paid_orders p CROSS JOIN gmv_data g"
+    )
+
+    assert "p.paid_order_count" in decision.final_sql
+    assert "g.gmv" in decision.final_sql
+
+    with pytest.raises(PolicyViolation, match="columns are not allowed"):
+        policy.evaluate(
+            "WITH paid_orders AS ("
+            "SELECT COUNT(order_id) AS paid_order_count FROM fact_orders) "
+            "SELECT p.not_a_cte_column FROM paid_orders p"
+        )
+
+
+def test_policy_allows_sensitive_join_keys_inside_scalar_subqueries(
+    policy: SqlPolicy,
+) -> None:
+    decision = policy.evaluate(
+        "SELECT "
+        "(SELECT COUNT(DISTINCT order_id) FROM fact_orders) AS paid_order_count, "
+        "(SELECT SUM(items.price) FROM fact_order_items items "
+        "JOIN fact_orders orders ON items.order_id = orders.order_id) AS gmv"
+    )
+
+    assert "COUNT(DISTINCT order_id)" in decision.final_sql
+    assert "SUM(items.price)" in decision.final_sql
+
+    with pytest.raises(PolicyViolation, match="sensitive columns"):
+        policy.evaluate(
+            "SELECT (SELECT order_id FROM fact_orders) AS leaked_order_id"
+        )

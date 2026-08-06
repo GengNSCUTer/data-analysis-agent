@@ -356,9 +356,30 @@
           width: Math.round(bounds.width), height: Math.round(bounds.height)
         }));
       };
+      let layoutSyncFrame = 0;
       const syncChatHeight = () => {
-        const height = Math.max(1, agentWindow.getBoundingClientRect().height - dragHandleHeight);
+        const bounds = agentWindow.getBoundingClientRect();
+        const height = Math.max(1, bounds.height - dragHandleHeight);
         chat.style.setProperty("--vanna-chat-height", `${height}px`);
+      };
+      const scheduleLayoutSync = () => {
+        if (layoutSyncFrame) return;
+        // Lit applies .normal/.maximized asynchronously.  Two animation frames
+        // let the host box, Shadow DOM grid and scroll container settle before
+        // measuring the height exposed through --vanna-chat-height.
+        layoutSyncFrame = window.requestAnimationFrame(() => {
+          layoutSyncFrame = window.requestAnimationFrame(() => {
+            layoutSyncFrame = 0;
+            if (isDesktop() && chat.windowState === "normal") {
+              syncChatHeight();
+            } else {
+              chat.style.setProperty(
+                "--vanna-chat-height",
+                `${Math.max(1, Math.min(window.innerHeight * 0.78, 640) - dragHandleHeight)}px`
+              );
+            }
+          });
+        });
       };
       const setDesktopBounds = ({ left, top, width, height }, save = false) => {
         const nextWidth = clamp(Number(width) || 440, minimumWidth, maximumWidth());
@@ -369,7 +390,7 @@
           left: `${nextLeft}px`, top: `${nextTop}px`, right: "auto", bottom: "auto",
           width: `${nextWidth}px`, height: `${nextHeight}px`
         });
-        syncChatHeight();
+        scheduleLayoutSync();
         if (save) persistWindow();
       };
       const restoreSavedWindow = () => {
@@ -389,7 +410,14 @@
         if (state === "normal") {
           restoreSavedWindow();
         }
+        scheduleLayoutSync();
       };
+
+      // Observe both drag/resize changes and CSS breakpoint changes.  This also
+      // covers restoring a minimized window while the Lit component is still
+      // switching its host class from .minimized to .normal.
+      const agentWindowResizeObserver = new ResizeObserver(() => scheduleLayoutSync());
+      agentWindowResizeObserver.observe(agentWindow);
 
       customElements.whenDefined("vanna-chat").then(() => {
         const savedConversationId = localStorage.getItem(conversationStorageKey);
@@ -438,7 +466,7 @@
           const bounds = agentWindow.getBoundingClientRect();
           setDesktopBounds(bounds, true);
         } else {
-          chat.style.setProperty("--vanna-chat-height", `${Math.max(1, Math.min(window.innerHeight * 0.78, 640) - dragHandleHeight)}px`);
+          scheduleLayoutSync();
         }
       });
 

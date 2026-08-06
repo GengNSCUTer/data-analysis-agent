@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS app.agent_runs (
     CHECK (termination_reason IN (
         'running', 'completed', 'clarification_required', 'tool_budget_exhausted',
         'context_truncated', 'sql_policy_rejected', 'query_timeout',
-        'execution_error', 'unsupported_request', 'input_too_long'
+        'execution_error', 'unsupported_request', 'catalog_answered', 'input_too_long'
     ))
 );
 
@@ -94,6 +94,20 @@ ALTER TABLE app.agent_runs
     ADD COLUMN IF NOT EXISTS catalog_trace JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE app.agent_runs
     ADD COLUMN IF NOT EXISTS repair_evidence JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- Keep existing installations in sync with the deterministic Catalog-answer
+-- route.  The named constraint is recreated so this migration is safe when
+-- the table was created by an earlier version of this file.
+DO $$
+BEGIN
+    ALTER TABLE app.agent_runs DROP CONSTRAINT IF EXISTS agent_runs_termination_reason_check;
+    ALTER TABLE app.agent_runs
+        ADD CONSTRAINT agent_runs_termination_reason_check CHECK (termination_reason IN (
+            'running', 'completed', 'clarification_required', 'tool_budget_exhausted',
+            'context_truncated', 'sql_policy_rejected', 'query_timeout',
+            'execution_error', 'unsupported_request', 'catalog_answered', 'input_too_long'
+        ));
+END $$;
 
 CREATE TABLE IF NOT EXISTS app.query_audits (
     audit_id BIGSERIAL PRIMARY KEY,

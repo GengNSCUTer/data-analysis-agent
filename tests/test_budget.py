@@ -127,3 +127,13 @@ def test_budget_usage_serializes_server_generated_catalog_trace_only() -> None:
     assert usage.as_dict()["catalog_trace"] == trace
     with pytest.raises(TypeError, match="mapping"):
         usage.record_catalog("raw question")  # type: ignore[arg-type]
+
+
+def test_budget_usage_records_bounded_phase_timing_evidence() -> None:
+    usage = BudgetUsage(RequestBudget())
+    usage.record_timing("llm_request", 120)
+    usage.record_timing("llm_request", 80)
+
+    assert usage.as_dict()["performance"] == {
+        "llm_request": {"count": 2, "total_ms": 200, "last_ms": 80, "max_ms": 120}
+    }

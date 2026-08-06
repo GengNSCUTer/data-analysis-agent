@@ -14,6 +14,7 @@ from data_analysis_agent.sql_repair import (
     ("error", "category", "retryable"),
     [
         ("column foo does not exist", "unknown_column", True),
+        ('missing FROM-clause entry for table "fact_reviews"', "unknown_column", True),
         ('relation "secret" does not exist', "unknown_table", True),
         ("syntax error at or near SELECT", "syntax", True),
         ("canceling statement due to statement timeout", "timeout", False),

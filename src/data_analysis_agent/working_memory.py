@@ -83,7 +83,7 @@ class WorkingMemory:
         metrics = route.metric_ids or self.metric_ids
         pending_question = question.strip()[: self._MAX_TEXT]
         pending_missing = route.missing if route.state not in {"answerable"} else ()
-        if route.state in {"unauthorized", "unsupported"}:
+        if route.state in {"unauthorized", "unsupported", "catalog_answered"}:
             pending_question = None
             pending_missing = ()
         if route.state == "answerable":

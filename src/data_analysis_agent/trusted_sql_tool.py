@@ -148,6 +148,14 @@ class TrustedRunSqlTool(RunSqlTool):
         role = "admin" if "admin" in context.user.group_memberships else "analyst"
         coordinator = OneShotSqlRepair(self.repair_policy, role=role)
         catalog_context = str(context.metadata.get("catalog_context", ""))
+        required_columns = context.metadata.get("required_result_columns", ())
+        if isinstance(required_columns, (list, tuple)) and required_columns:
+            catalog_context = (
+                f"{catalog_context}\n"
+                "<required_result_columns>\n"
+                + ", ".join(str(column) for column in required_columns[:32])
+                + "\n</required_result_columns>"
+            )
         outcome = await coordinator.repair_async(
             args.sql,
             safe_error,

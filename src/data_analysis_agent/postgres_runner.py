@@ -170,6 +170,7 @@ class SecurePostgresRunner(SqlRunner):
         try:
             decision = self.policy.evaluate(args.sql, role=role)
         except PolicyViolation as exc:
+            self._record_timing(context, "sql_policy", started_at)
             self.audit.record(
                 context, role, args.sql, status="rejected", reason=str(exc),
                 elapsed_ms=int((perf_counter() - started_at) * 1000),
@@ -194,6 +195,7 @@ class SecurePostgresRunner(SqlRunner):
             finally:
                 connection.close()
         except Exception as exc:
+            self._record_timing(context, "postgres_sql", started_at)
             safe_error = sanitize_sql_error(exc)
             context.metadata["safe_sql_error"] = safe_error
             context.metadata["sql_error"] = safe_error.as_dict()
@@ -222,6 +224,7 @@ class SecurePostgresRunner(SqlRunner):
             )
             context.metadata["result_validation"] = validation.as_dict()
             if not validation.safe_to_answer:
+                self._record_timing(context, "postgres_sql", started_at)
                 self.audit.record(
                     context,
                     role,
@@ -241,4 +244,11 @@ class SecurePostgresRunner(SqlRunner):
             row_count=len(rows),
             repair_evidence=context.metadata.get("repair_evidence"),
         )
+        self._record_timing(context, "postgres_sql", started_at)
         return pd.DataFrame(rows)
+
+    @staticmethod
+    def _record_timing(context: ToolContext, phase: str, started_at: float) -> None:
+        usage = context.metadata.get("budget_usage")
+        if usage is not None and hasattr(usage, "record_timing"):
+            usage.record_timing(phase, int((perf_counter() - started_at) * 1000))

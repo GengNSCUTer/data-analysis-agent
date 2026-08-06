@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import os
+from time import perf_counter
 from typing import Any, Final
 
 from vanna.core.llm import LlmRequest, LlmResponse
@@ -24,6 +25,7 @@ TERMINATION_REASONS: Final[frozenset[str]] = frozenset(
         "query_timeout",
         "execution_error",
         "unsupported_request",
+        "catalog_answered",
         "input_too_long",
     }
 )
@@ -100,8 +102,10 @@ class BudgetUsage:
     catalog_question: str | None = None
     working_memory: dict[str, Any] | None = None
     repair_evidence: dict[str, Any] | None = None
+    phase_timings_ms: dict[str, list[int]] = field(default_factory=dict)
     last_response_had_tool_calls: bool = False
     _tool_counts: dict[str, int] = field(default_factory=dict)
+    _llm_started_at: float | None = field(default=None, init=False, repr=False)
 
     def set_input(self, message: str) -> None:
         self.input_chars = len(message)
@@ -110,6 +114,36 @@ class BudgetUsage:
 
     def record_llm_round(self) -> None:
         self.llm_rounds_used += 1
+        self._llm_started_at = perf_counter()
+
+    def finish_llm_round(self) -> None:
+        if self._llm_started_at is None:
+            return
+        self.record_timing(
+            "llm_request", int((perf_counter() - self._llm_started_at) * 1000)
+        )
+        self._llm_started_at = None
+
+    def record_timing(self, phase: str, elapsed_ms: int) -> None:
+        """Record bounded phase timing for post-hoc latency diagnosis."""
+        key = str(phase).strip()[:64]
+        if not key:
+            return
+        bucket = self.phase_timings_ms.setdefault(key, [])
+        if len(bucket) < 16:
+            bucket.append(max(0, int(elapsed_ms)))
+
+    def performance_evidence(self) -> dict[str, dict[str, int]]:
+        return {
+            phase: {
+                "count": len(values),
+                "total_ms": sum(values),
+                "last_ms": values[-1],
+                "max_ms": max(values),
+            }
+            for phase, values in self.phase_timings_ms.items()
+            if values
+        }
 
     def record_llm_response(self, has_tool_calls: bool) -> None:
         self.last_response_had_tool_calls = has_tool_calls
@@ -202,6 +236,7 @@ class BudgetUsage:
             "error_type": self.error_type,
             "catalog_trace": self.catalog_trace,
             "repair_evidence": self.repair_evidence,
+            "performance": self.performance_evidence(),
         }
 
     @staticmethod
@@ -256,6 +291,7 @@ class BudgetSafetyMiddleware(LlmMiddleware):
             return response
         usage.record_llm_response(response.is_tool_call())
         usage.record_usage(response.usage)
+        usage.finish_llm_round()
         if usage.termination_reason == "tool_budget_exhausted":
             return LlmResponse(
                 content=(

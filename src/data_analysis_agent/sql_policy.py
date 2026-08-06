@@ -142,6 +142,16 @@ class SqlPolicy:
             raise PolicyViolation(f"forbidden SQL operation: {forbidden.key}")
 
         cte_names = {cte.alias_or_name.lower() for cte in statement.find_all(exp.CTE)}
+        cte_outputs = {
+            cte.alias_or_name.lower(): self._cte_output_columns(cte)
+            for cte in statement.find_all(exp.CTE)
+        }
+        cte_column_refs = dict(cte_outputs)
+        for table in statement.find_all(exp.Table):
+            cte_name = table.name.lower()
+            if not table.db and cte_name in cte_outputs:
+                cte_column_refs[cte_name] = cte_outputs[cte_name]
+                cte_column_refs[table.alias_or_name.lower()] = cte_outputs[cte_name]
         allowed_tables = (
             frozenset(self.analytics_columns)
             if role == "admin"
@@ -172,6 +182,7 @@ class SqlPolicy:
             for column in statement.find_all(exp.Column)
             if column.name.lower() not in self.all_columns
             and not (not column.table and column.name.lower() in derived_aliases)
+            and not self._is_known_cte_column(column, cte_column_refs)
         }
         if unknown_columns:
             raise PolicyViolation(f"columns are not allowed: {', '.join(sorted(unknown_columns))}")
@@ -182,7 +193,7 @@ class SqlPolicy:
                         raise PolicyViolation("analyst queries cannot project all columns")
                     blocked = {
                         column.name.lower()
-                        for column in projection.find_all(exp.Column)
+                        for column in self._projection_columns(projection)
                         if column.name.lower() in self.sensitive_projection_columns
                         and column.find_ancestor(exp.Count) is None
                     }
@@ -220,3 +231,67 @@ class SqlPolicy:
             columns=tuple(sorted(columns)),
             row_limit=row_limit,
         )
+
+    @staticmethod
+    def _cte_output_columns(cte: exp.CTE) -> frozenset[str] | None:
+        """Return explicitly known columns exported by one CTE.
+
+        ``None`` is deliberately used for ``SELECT *`` or an otherwise
+        unaliased/opaque projection.  The policy must not turn an opaque CTE
+        into a wildcard that permits arbitrary qualified column names.
+        """
+        alias = cte.args.get("alias")
+        explicit = alias.args.get("columns") if alias is not None else None
+        if explicit:
+            return frozenset(identifier.name.lower() for identifier in explicit)
+
+        query = cte.this
+        if not isinstance(query, exp.Select):
+            return frozenset()
+        output_names: set[str] = set()
+        for projection in query.expressions:
+            if isinstance(projection, exp.Star):
+                return None
+            if isinstance(projection, exp.Alias) and projection.alias:
+                output_names.add(projection.alias.lower())
+                continue
+            if isinstance(projection, exp.Column):
+                output_names.add(projection.name.lower())
+                continue
+            # sqlglot exposes a stable output_name for a few simple
+            # expressions.  If it cannot prove one, fail closed.
+            output_name = getattr(projection, "output_name", "")
+            if output_name:
+                output_names.add(str(output_name).lower())
+            else:
+                return None
+        return frozenset(output_names)
+
+    @staticmethod
+    def _is_known_cte_column(
+        column: exp.Column, cte_outputs: dict[str, frozenset[str] | None]
+    ) -> bool:
+        if not column.table:
+            return False
+        outputs = cte_outputs.get(column.table.lower())
+        return outputs is not None and column.name.lower() in outputs
+
+    @classmethod
+    def _projection_columns(cls, projection: exp.Expression):
+        """Yield columns belonging to the current SELECT projection only.
+
+        A scalar subquery is validated independently when its own ``Select`` is
+        visited.  Traversing its columns again as if they were outer projected
+        fields incorrectly rejects safe joins such as ``SUM(items.price)``
+        because their internal ``order_id`` join keys are sensitive.
+        """
+        if isinstance(projection, exp.Column):
+            yield projection
+            return
+        for child in projection.iter_expressions():
+            if isinstance(child, (exp.Select, exp.Subquery, exp.CTE)):
+                continue
+            if isinstance(child, exp.Column):
+                yield child
+            else:
+                yield from cls._projection_columns(child)

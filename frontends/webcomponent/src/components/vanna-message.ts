@@ -1,6 +1,8 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { vannaDesignTokens } from '../styles/vanna-design-tokens.js';
+import { renderMarkdown } from './markdown-renderer.js';
 
 @customElement('vanna-message')
 export class VannaMessage extends LitElement {
@@ -81,6 +83,73 @@ export class VannaMessage extends LitElement {
         letter-spacing: 0.01em;
         white-space: pre-wrap;
         font-weight: 400;
+      }
+
+      .message-content.markdown {
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+
+      .message-content.markdown :is(h1, h2, h3, h4, h5, h6) {
+        margin: 0.2em 0 0.5em;
+        line-height: 1.3;
+      }
+
+      .message-content.markdown p {
+        margin: 0.35em 0;
+      }
+
+      .message-content.markdown :is(ul, ol) {
+        margin: 0.35em 0;
+        padding-left: 1.35em;
+      }
+
+      .message-content.markdown blockquote {
+        margin: 0.5em 0;
+        padding-left: 0.8em;
+        border-left: 3px solid var(--vanna-accent-primary-default);
+        color: var(--vanna-foreground-dimmer);
+      }
+
+      .message-content.markdown hr {
+        border: 0;
+        border-top: 1px solid var(--vanna-outline-dimmer);
+        margin: 0.8em 0;
+      }
+
+      .message-content.markdown .text-markdown-table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+        margin: 0.65em 0;
+      }
+
+      .message-content.markdown .text-markdown-table {
+        width: max-content;
+        min-width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92em;
+      }
+
+      .message-content.markdown .text-markdown-table th,
+      .message-content.markdown .text-markdown-table td {
+        padding: 0.45em 0.65em;
+        border: 1px solid var(--vanna-outline-dimmer);
+        text-align: left;
+        white-space: nowrap;
+      }
+
+      .message-content.markdown .text-markdown-table th {
+        background: var(--vanna-background-higher);
+        font-weight: 650;
+      }
+
+      .message-content.markdown .text-markdown-code {
+        max-width: 100%;
+        overflow-x: auto;
+        padding: 0.7em;
+        border-radius: var(--vanna-border-radius-sm);
+        background: var(--vanna-background-higher);
+        white-space: pre;
       }
 
       .message-content a {
@@ -198,6 +267,7 @@ export class VannaMessage extends LitElement {
 
   @property() content = '';
   @property() type: 'user' | 'assistant' = 'user';
+  @property({ type: Boolean }) markdown = false;
   @property({ type: Number }) timestamp = Date.now();
   @property({ reflect: true }) theme = 'light';
 
@@ -209,9 +279,12 @@ export class VannaMessage extends LitElement {
   }
 
   render() {
+    const isMarkdown = this.markdown && this.type === 'assistant';
     return html`
       <div class="message ${this.type}">
-        <div class="message-content">${this.content}</div>
+        <div class="message-content ${isMarkdown ? 'markdown' : ''}">
+          ${isMarkdown ? unsafeHTML(renderMarkdown(this.content)) : this.content}
+        </div>
         <div class="message-timestamp">
           ${this.formatTimestamp(this.timestamp)}
         </div>

@@ -194,7 +194,15 @@ def seeded_history_conversation():
                     """,
                     [
                         (conversation_id, 0, "demo-analyst", "user", "历史会话里的问题"),
-                        (conversation_id, 1, "demo-analyst", "assistant", "历史会话里的结论"),
+                        (
+                            conversation_id,
+                            1,
+                            "demo-analyst",
+                            "assistant",
+                            "## 历史会话里的结论\n\n"
+                            "| 指标 | 数值 |\n| --- | --- |\n"
+                            "| **GMV** | 207,630 元 |",
+                        ),
                     ],
                 )
     finally:
@@ -318,6 +326,17 @@ def test_desktop_window_drag_resize_and_content_sizing(page) -> None:
     chat.locator(".minimized-icon").click()
     browser_page.wait_for_selector("vanna-chat.normal")
     assert browser_page.locator("#agent-window").bounding_box()["width"] == pytest.approx(after_resize["width"], abs=2)
+    browser_page.wait_for_function(
+        """() => {
+          const chat = document.querySelector('vanna-chat');
+          const layout = chat?.shadowRoot?.querySelector('.chat-layout');
+          const input = chat?.shadowRoot?.querySelector('textarea.message-input');
+          const host = chat?.getBoundingClientRect();
+          const inner = layout?.getBoundingClientRect();
+          return Boolean(host && inner && input && host.height > 400
+            && inner.height > 300 && input.getBoundingClientRect().bottom <= host.bottom + 1);
+        }"""
+    )
     assert not console_errors
 
 
@@ -461,6 +480,9 @@ def test_conversation_history_restore_refresh_and_new_session(
     )
     assert "历史会话里的问题" in rendered
     assert "历史会话里的结论" in rendered
+    history_chat = browser_page.locator("vanna-chat")
+    assert history_chat.locator("table.text-markdown-table").count() == 1
+    assert history_chat.locator("strong").count() >= 1
 
     browser_page.reload(wait_until="domcontentloaded")
     browser_page.wait_for_function(
@@ -476,6 +498,10 @@ def test_conversation_history_restore_refresh_and_new_session(
         }""",
         arg=conversation_id,
     )
+
+    history_chat = browser_page.locator("vanna-chat")
+    assert history_chat.locator("table.text-markdown-table").count() == 1
+    assert history_chat.locator("h2").count() >= 1
 
     browser_page.locator("#new-conversation").click()
     browser_page.wait_for_function(

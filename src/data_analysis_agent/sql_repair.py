@@ -97,7 +97,7 @@ _CLASSIFIERS: tuple[tuple[SqlErrorCategory, tuple[str, ...], str, bool], ...] = 
     ),
     (
         "unknown_column",
-        ("column", "unknown column"),
+        ("column", "unknown column", "missing from-clause entry", "undefined column"),
         "生成的查询引用了不存在或不可用的列。",
         True,
     ),
@@ -134,7 +134,12 @@ def sanitize_sql_error(
             # The generic ``table``/``column`` markers only classify when the
             # driver also says the object does not exist; avoid mislabeling
             # arbitrary permission or application messages.
-            if category in {"unknown_column", "unknown_table"} and "does not exist" not in text:
+            if (
+                category in {"unknown_column", "unknown_table"}
+                and "does not exist" not in text
+                and "missing from-clause" not in text
+                and "undefined column" not in text
+            ):
                 continue
             return SanitizedSqlError(category, reason, retryable)
     return SanitizedSqlError(

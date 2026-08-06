@@ -114,6 +114,12 @@ class PostgresRunRecorder:
 
     def _finish_sync(self, run: AgentRun, usage: BudgetUsage) -> None:
         values = usage.as_dict()
+        catalog_trace = dict(values["catalog_trace"] or {})
+        performance = values.get("performance") or {}
+        if performance:
+            # Keep the existing schema stable while making latency breakdowns
+            # queryable with the run's redacted Catalog evidence.
+            catalog_trace["performance"] = performance
         connection = self._connect()
         try:
             with connection:
@@ -143,7 +149,7 @@ class PostgresRunRecorder:
                             values["context_truncated"],
                             values["termination_reason"],
                             values["error_type"],
-                            psycopg2.extras.Json(values["catalog_trace"] or {}),
+                            psycopg2.extras.Json(catalog_trace),
                             psycopg2.extras.Json(values["repair_evidence"] or {}),
                             datetime.now(timezone.utc),
                             run.run_id,
