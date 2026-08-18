@@ -342,24 +342,25 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 已把路由从“是否命中指标”扩展为证据路由：`help`、Catalog 定义、通用业务/知识、数据查询、数据分析、混合请求和结果追问分别标记 `intent`、`requires_database`、`evidence_mode` 与 `reason_code`；通用回答通过同一模型服务但显式不提供 SQL/图表工具，指标定义由 Catalog 直接回答。
 - 已为多指标请求增加服务器生成的 `QueryPlan`：标记单指标、标量多指标概览和分组多指标形状，要求指标/维度/时间结果列，提示不同事实粒度先独立聚合再合法 Join；计划同时进入 Prompt、`ToolContext` 和 Agent Run trace。
 - 已把通过 `ResultValidator` 的结果生成有界可信摘要，写入预算台账和会话 `WorkingMemory.previous_result_summary`；结果追问只可解释该摘要，未有可信摘要时先澄清，不把助手自然语言当作长期业务记忆。
-- 已通过项目层 `TrustedRunSqlTool` 将一次受限 SQL 修复接入 Vanna 工具生命周期：原始 SQL 失败后只向修复模型提供脱敏错误和有界 Catalog，候选 SQL 必须再次通过 AST Policy，并由 reader role 重执行；成功结果还要经过 `ResultValidator`，第二次失败或合同失败直接可信拒答。原始/修复 SQL、错误类别、Policy 状态、执行状态、结果验证和终止原因写入 `repair_evidence`，同时进入 `app.query_audits`、`app.agent_runs` 和预算记录。结果校验继续覆盖空结果、缺列、时间越界、截断和 Join 放大。尚未完成真实认证、组织行范围、第二个真实数据集和 SiliconFlow 批量语义评测。
+- 已通过项目层 `TrustedRunSqlTool` 将一次受限 SQL 修复接入 Vanna 工具生命周期：原始 SQL 失败后只向修复模型提供脱敏错误和有界 Catalog，候选 SQL 必须再次通过 AST Policy，并由 reader role 重执行；成功结果还要经过 `ResultValidator`，第二次失败或合同失败直接可信拒答。原始/修复 SQL、错误类别、Policy 状态、执行状态、结果验证和终止原因写入 `repair_evidence`，同时进入 `app.query_audits`、`app.agent_runs` 和预算记录。结果校验继续覆盖空结果、缺列、时间越界、截断和 Join 放大。24 条真实 SiliconFlow 人工标签核验已完成，但尚未完成真实认证、组织行范围、第二个真实数据集和批量多次重复评测。
 - 本轮补齐了四个运行链路缺口：SQL Policy 能识别多 CTE 输出列并避免把 scalar subquery 关联键误判为敏感投影；仅询问指标定义/统计口径的问题由 `QuestionRouter` 直接返回 Catalog Markdown，不调用 LLM、SQL 或工具；历史会话中的 assistant 文本与流式文本共用安全 Markdown renderer；宿主页用双 `requestAnimationFrame` 和 `ResizeObserver` 在最小化恢复、拖拽、缩放和窗口变化后重新同步聊天高度。`catalog_answered` 已加入数据库终止原因约束。
 - 已为请求台账增加受限阶段耗时证据（`route_catalog`、`llm_request`、`sql_policy`、`postgres_sql`），写入现有 `agent_runs.catalog_trace.performance` JSONB，不扩大数据库表结构。真实 SiliconFlow 多指标请求已成功返回 GMV、有效订单数、平均履约天数和好评率；一次代表性请求约 77.7 秒，其中两轮模型调用约 77.2 秒，PostgreSQL 约 0.39 秒，说明当前主要瓶颈在在线模型响应而非数据库或策略层。该数字是单次观测，不代表 P95 或模型准确率。
-- 尚未完成真实认证、组织行范围、第二个真实数据集、SiliconFlow 批量语义评测和模型调用的流式/缓存优化。
+- 已冻结 `evals/cases/text_to_sql_v2.yaml` 60 条版本化路由/QueryPlan golden，并新增 `scripts/run_text_to_sql_evaluation.py`；确定性离线结果为 **60/60 passed**。报告只保存结构化路由/计划字段和 case ID，`evals/reports/` 忽略，不含密钥、原始问题、模型回答或数据库结果。完整嵌入浏览器回归当前 **9 passed**，覆盖八方向缩放、最小化恢复和窄窗口长 Markdown。另已完成 24 条真实 SiliconFlow 小规模人工标签：24/24 有运行记录，路由 23 pass/1 fail、权限 24 pass、回答有据 17 pass/7 fail；明确记录 token 为数值或 unknown，不把未知 usage 记作零。
+- 尚未完成真实认证、组织行范围、第二个真实数据集、批量多次 SiliconFlow 语义评测和模型调用的流式/缓存优化；下一步只针对本轮的币种、Catalog slice、支付归因和合同后多余 SQL 问题做固定回归。
 
 ### Phase 4：嵌入式交互与证据呈现（基础能力已完成）
 
 - 提供可嵌入既有网页的宿主页示例，控制 Vanna Web Component 的浮动/右侧面板状态；
 - 打通 SSE、表格、SQL、图表、指标证据和角色化展示；
-- 已完成历史会话列表、恢复、刷新恢复、新建会话和受控删除交互；6 条浏览器回归通过；
+- 已完成历史会话列表、恢复、刷新恢复、新建会话和受控删除交互；完整嵌入浏览器回归当前 9 条通过；
 - 不创建独立 Next.js/TailAdmin 应用。
 
 ### Phase 4.5：平台基础收敛（进行中）
 
 - 已完成 PostgreSQL 会话/消息存储、Agent Run 台账、请求级工具/SQL/图表/输入/上下文/输出预算；
 - 已完成 starter 空会话生命周期修复，避免页面刷新制造零消息历史记录；
-- Text-to-SQL 第二轮运行时合同已完成：WorkspaceProfile、Catalog/路由/working memory/结果合同、TrustedRunSqlTool 一次修复、repair evidence 和可信拒答均已落地；浏览器多轮澄清回归已补齐。下一项是建立版本化 v2 评测集并在同一批问题上做真实 SiliconFlow 小规模人工核验。
-- 本轮在上述合同之上完成证据感知意图路由、通用回答工具隔离、多指标 `QueryPlan`、分组结果列合同和可信结果摘要；下一项是用版本化问题集核验路由/语义准确率，再决定是否需要学习型分类器或更强 SQL 形状校验。
+- Text-to-SQL 第二轮运行时合同已完成：WorkspaceProfile、Catalog/路由/working memory/结果合同、TrustedRunSqlTool 一次修复、repair evidence 和可信拒答均已落地；浏览器多轮澄清、八方向缩放和长历史 Markdown 回归已补齐。
+- 本轮在上述合同之上完成证据感知意图路由、通用回答工具隔离、多指标 `QueryPlan`、分组结果列合同、可信结果摘要和 60 条 v2 离线 golden（60/60）；下一项是同一批代表性问题上的真实 SiliconFlow 小规模人工核验，再决定是否需要学习型分类器或更强 SQL 形状校验。
 
 ### Phase 5：评测、加固与作品集
 
@@ -438,3 +439,5 @@ v1 不引入 Redis。
 | 2026-08-06 | 通用工作区与可信修复生命周期 | 新增 `WorkspaceProfile`，将数据集/指标/Catalog/Policy 版本、PostgreSQL Schema/角色、对象白名单和 Catalog 路径从通用核心中抽出；Olist 保留为当前 adapter 和展示案例。新增 `TrustedRunSqlTool`，在不修改 Vanna Agent 核心循环的前提下，将一次 SQL 修复接入原生工具生命周期：错误脱敏、候选二次 Policy、reader role 重执行、ResultValidator 二次校验和可信拒答均已闭环。`app.query_audits` 与 `app.agent_runs` 新增 `repair_evidence` JSONB，预算记录同步修复状态；新增四类生命周期测试、WorkspaceProfile 测试和浏览器多轮澄清回归。专项回归 **84 passed**，PostgreSQL runner/run recorder **4 passed**，多轮浏览器测试 **1 passed**；ruff、compileall 和 diff 检查通过。尚未做真实 SiliconFlow 批量修复成功率、第二数据集和生产认证。 |
 | 2026-08-06 | 嵌入式可靠性与延迟证据 | 修复多 CTE 输出列与 scalar subquery 的 SQL Policy 边界；`QuestionRouter` 对纯指标定义问题直接返回 Catalog Markdown（`catalog_answered`），避免无意义的 SQL/LLM 重试；assistant 历史消息接入与流式文本一致的安全 Markdown renderer，支持标题、表格、强调、列表、引用、代码块和分割线；宿主页通过双 RAF + `ResizeObserver` 同步最小化恢复、拖拽和缩放后的聊天高度。新增阶段耗时证据并确认代表性多指标请求约 77.7 秒，其中 LLM 约 77.2 秒、PostgreSQL 约 0.39 秒。确定性专项 **63 passed, 1 skipped**，Playwright 集成 **7 passed**，Web Component `npm run build` 通过。后续优先做模型调用超时/流式可观测性和 v2 评测集，不把单次时延写成 P95 或准确率。详见 [`docs/verification-2026-08-06.md`](docs/verification-2026-08-06.md)。 |
 | 2026-08-06 | 证据路由、QueryPlan 与结果记忆 | 将 `QuestionRouter` 扩展为 `intent`/`requires_database`/`evidence_mode` 路由；通用业务/知识和结果追问复用模型但不暴露 SQL/图表工具，帮助与指标定义走确定性回答。新增服务器拥有的多指标 `QueryPlan`，将指标、维度、时间和合法聚合策略写入 Prompt、ToolContext 与运行证据，并把分组维度纳入 `ResultContract`。通过 `ResultValidator` 的结果生成最多 8 行、1200 字的可信摘要，持久到 WorkingMemory 供结果追问使用；无摘要的追问先澄清。新增路由、计划、结果摘要和会话记忆回归后，专项集合 **88 passed**；ruff、compileall、`git diff --check` 通过。全量 Vanna 上游测试仍有缺少可选依赖/外部 fixture 的既有失败，不纳入本项目质量门。下一步是版本化 v2 评测和真实模型核验。 |
+| 2026-08-06 | v2 确定性评测与嵌入窗口加固 | 冻结 `evals/cases/text_to_sql_v2.yaml` 60 条路由/QueryPlan golden，新增脱敏离线 runner，结果 **60/60 passed**；该数字只代表确定性合同，不代表在线模型准确率。宿主页支持四边四角八方向缩放，非法/最小化尺寸不再污染恢复缓存；Web Component 补齐窄窗口 flex 约束、历史消息安全 Markdown 和空行表格解析。完整 `tests/e2e/test_trusted_embedded_window.py` **9 passed**，Web Component 构建成功。一次 SQL 修复仍默认最多 1 次（最多 2 次 SQL 执行），是否扩展到 2 次留待真实 SiliconFlow 人工标签评测比较恢复率、语义风险、延迟和 token 成本。 |
+| 2026-08-18 | 真实 SiliconFlow 人工标签评测 | 新增 24 条在线代表性清单、真实 SSE 运行器、人工标签合同和脱敏本地报告。24/24 Agent Run 均记录路由/澄清、SQL、指标语义、结果合同、权限、回答有据、修复、耗时和 token 状态；路由 23 pass/1 fail，权限 24 pass，回答有据 17 pass/7 fail。评测暴露 BRL 被误写为人民币、合同通过后继续发出无关 SQL、Catalog slice 不完整、支付归因未冻结与一次 180 秒未完成。所有修复次数为 0；22 条 provider usage 为 unknown，未把它们写成零。该单次小样本不发布在线总体准确率、P50/P95 或修复恢复率。 |

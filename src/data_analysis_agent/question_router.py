@@ -363,7 +363,9 @@ class QuestionRouter:
                 requires_database=False,
                 evidence_mode="clarification",
             )
-        if _COMPARISON.search(question) and not state.get("comparison"):
+        if _COMPARISON.search(question) and not (
+            state.get("comparison") or state.get("comparison_baseline")
+        ):
             explicit_baseline = bool(re.search(r"上月|上个月|去年|同比|环比|与.+相比", question))
             if not explicit_baseline and re.search(r"相比|对比|比较|变化|增长|下降|趋势|最好|最高|最低|异常", question):
                 return QuestionRoute(

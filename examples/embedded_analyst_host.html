@@ -181,22 +181,100 @@
       .agent-drag-grip i { display: block; width: 3px; height: 3px; background: #a8bcc6; border-radius: 50%; }
 
       .agent-window vanna-chat {
+        display: block;
         min-width: 0;
         min-height: 0;
+        width: 100%;
+        height: 100%;
       }
 
       .agent-resize-handle {
         position: absolute;
+        z-index: 2;
+        touch-action: none;
+        user-select: none;
+      }
+
+      .agent-resize-handle[data-resize-handle="n"],
+      .agent-resize-handle[data-resize-handle="s"] {
+        left: 12px;
+        right: 12px;
+        height: 10px;
+        cursor: ns-resize;
+      }
+
+      .agent-resize-handle[data-resize-handle="n"] {
+        top: 0;
+      }
+
+      .agent-resize-handle[data-resize-handle="s"] {
+        bottom: 0;
+      }
+
+      .agent-resize-handle[data-resize-handle="e"],
+      .agent-resize-handle[data-resize-handle="w"] {
+        top: 12px;
+        bottom: 12px;
+        width: 10px;
+        cursor: ew-resize;
+      }
+
+      .agent-resize-handle[data-resize-handle="e"] {
+        right: 0;
+      }
+
+      .agent-resize-handle[data-resize-handle="w"] {
+        left: 0;
+      }
+
+      .agent-resize-handle[data-resize-handle="ne"],
+      .agent-resize-handle[data-resize-handle="nw"],
+      .agent-resize-handle[data-resize-handle="se"],
+      .agent-resize-handle[data-resize-handle="sw"] {
+        width: 18px;
+        height: 18px;
+      }
+
+      .agent-resize-handle[data-resize-handle="ne"] {
+        top: 0;
+        right: 0;
+        cursor: nesw-resize;
+      }
+
+      .agent-resize-handle[data-resize-handle="nw"] {
+        top: 0;
+        left: 0;
+        cursor: nwse-resize;
+      }
+
+      .agent-resize-handle[data-resize-handle="se"] {
         right: 0;
         bottom: 0;
-        z-index: 2;
-        width: 22px;
-        height: 22px;
         cursor: nwse-resize;
-        touch-action: none;
+      }
+
+      .agent-resize-handle[data-resize-handle="sw"] {
+        left: 0;
+        bottom: 0;
+        cursor: nesw-resize;
       }
 
       .agent-resize-handle::after {
+        position: absolute;
+        inset: 2px;
+        content: "";
+        border-radius: 3px;
+        opacity: 0;
+        transition: opacity 120ms ease, background-color 120ms ease;
+      }
+
+      .agent-resize-handle:hover::after,
+      .agent-window.is-resizing .agent-resize-handle::after {
+        background: rgba(15, 155, 166, 0.16);
+        opacity: 1;
+      }
+
+      .agent-resize-handle[data-resize-handle="se"]::before {
         position: absolute;
         right: 5px;
         bottom: 5px;
@@ -205,6 +283,7 @@
         content: "";
         border-right: 2px solid #66808e;
         border-bottom: 2px solid #66808e;
+        content: "";
       }
 
       @media (max-width: 860px) {
@@ -329,28 +408,50 @@
         sse-endpoint="/api/vanna/v2/chat_sse"
         theme="light"
       ></vanna-chat>
-      <div id="agent-resize-handle" class="agent-resize-handle" role="separator" aria-label="调整经营分析窗口大小" aria-orientation="both"></div>
+      <div class="agent-resize-handle" data-resize-handle="n" role="separator" aria-label="向上调整经营分析窗口大小" aria-orientation="horizontal"></div>
+      <div class="agent-resize-handle" data-resize-handle="e" role="separator" aria-label="向右调整经营分析窗口大小" aria-orientation="vertical"></div>
+      <div class="agent-resize-handle" data-resize-handle="s" role="separator" aria-label="向下调整经营分析窗口大小" aria-orientation="horizontal"></div>
+      <div class="agent-resize-handle" data-resize-handle="w" role="separator" aria-label="向左调整经营分析窗口大小" aria-orientation="vertical"></div>
+      <div class="agent-resize-handle" data-resize-handle="ne" role="separator" aria-label="向右上调整经营分析窗口大小" aria-orientation="both"></div>
+      <div class="agent-resize-handle" data-resize-handle="nw" role="separator" aria-label="向左上调整经营分析窗口大小" aria-orientation="both"></div>
+      <div class="agent-resize-handle" data-resize-handle="se" role="separator" aria-label="向右下调整经营分析窗口大小" aria-orientation="both"></div>
+      <div class="agent-resize-handle" data-resize-handle="sw" role="separator" aria-label="向左下调整经营分析窗口大小" aria-orientation="both"></div>
     </section>
 
     <script>
       const chat = document.querySelector("vanna-chat");
       const agentWindow = document.querySelector("#agent-window");
       const dragHandle = document.querySelector("#agent-drag-handle");
-      const resizeHandle = document.querySelector("#agent-resize-handle");
+      const resizeHandles = [...agentWindow.querySelectorAll("[data-resize-handle]")];
       const windowStorageKey = "data-analysis-agent-embedded-window-v1";
       const conversationStorageKey = "data-analysis-agent-current-conversation-v1";
       const desktopBreakpoint = 640;
       const dragHandleHeight = 32;
       const minimumWidth = 360;
-      const minimumHeight = 420;
+      const minimumHeight = 460;
+      const viewportPadding = 16;
 
       const isDesktop = () => window.innerWidth > desktopBreakpoint;
       const clamp = (value, lower, upper) => Math.min(Math.max(value, lower), upper);
-      const maximumWidth = () => Math.max(minimumWidth, Math.min(760, window.innerWidth - 32));
-      const maximumHeight = () => Math.max(minimumHeight, window.innerHeight - 32);
+      const maximumWidth = () => Math.max(minimumWidth, Math.min(760, window.innerWidth - viewportPadding * 2));
+      const maximumHeight = () => Math.max(minimumHeight, window.innerHeight - viewportPadding * 2);
+      const finiteNumber = (value, fallback) => {
+        const number = Number(value);
+        return Number.isFinite(number) ? number : fallback;
+      };
+      const isValidSavedBounds = (value) => Boolean(
+        value &&
+        Number.isFinite(Number(value.left)) &&
+        Number.isFinite(Number(value.top)) &&
+        Number.isFinite(Number(value.width)) &&
+        Number.isFinite(Number(value.height)) &&
+        Number(value.width) >= minimumWidth &&
+        Number(value.height) >= minimumHeight
+      );
       const persistWindow = () => {
-        if (!isDesktop()) return;
+        if (!isDesktop() || chat.windowState !== "normal" || agentWindow.dataset.windowState !== "normal") return;
         const bounds = agentWindow.getBoundingClientRect();
+        if (!isValidSavedBounds(bounds)) return;
         localStorage.setItem(windowStorageKey, JSON.stringify({
           left: Math.round(bounds.left), top: Math.round(bounds.top),
           width: Math.round(bounds.width), height: Math.round(bounds.height)
@@ -381,11 +482,30 @@
           });
         });
       };
+      const settleLatestMessageScroll = () => {
+        let frames = 0;
+        const settle = () => {
+          frames += 1;
+          if (chat.windowState === "normal" && typeof chat.scrollToLatestMessage === "function") {
+            chat.scrollToLatestMessage();
+          }
+          if (frames < 8) window.requestAnimationFrame(settle);
+        };
+        window.requestAnimationFrame(settle);
+      };
       const setDesktopBounds = ({ left, top, width, height }, save = false) => {
-        const nextWidth = clamp(Number(width) || 440, minimumWidth, maximumWidth());
-        const nextHeight = clamp(Number(height) || 560, minimumHeight, maximumHeight());
-        const nextLeft = clamp(Number(left), 16, Math.max(16, window.innerWidth - nextWidth - 16));
-        const nextTop = clamp(Number(top), 16, Math.max(16, window.innerHeight - nextHeight - 16));
+        const nextWidth = clamp(finiteNumber(width, 440), minimumWidth, maximumWidth());
+        const nextHeight = clamp(finiteNumber(height, 560), minimumHeight, maximumHeight());
+        const nextLeft = clamp(
+          finiteNumber(left, window.innerWidth - nextWidth - 24),
+          viewportPadding,
+          Math.max(viewportPadding, window.innerWidth - nextWidth - viewportPadding)
+        );
+        const nextTop = clamp(
+          finiteNumber(top, window.innerHeight - nextHeight - 24),
+          viewportPadding,
+          Math.max(viewportPadding, window.innerHeight - nextHeight - viewportPadding)
+        );
         Object.assign(agentWindow.style, {
           left: `${nextLeft}px`, top: `${nextTop}px`, right: "auto", bottom: "auto",
           width: `${nextWidth}px`, height: `${nextHeight}px`
@@ -397,18 +517,21 @@
         if (!isDesktop()) return;
         let saved = null;
         try { saved = JSON.parse(localStorage.getItem(windowStorageKey)); } catch (_) { saved = null; }
+        if (!isValidSavedBounds(saved)) saved = null;
         const defaultWidth = 440;
-        const defaultHeight = Math.min(560, maximumHeight());
+        const defaultHeight = clamp(560, minimumHeight, maximumHeight());
         setDesktopBounds(saved || {
           width: defaultWidth, height: defaultHeight,
           left: window.innerWidth - defaultWidth - 24, top: window.innerHeight - defaultHeight - 24
         });
       };
       const setWindowState = (state) => {
-        document.body.dataset.vannaWindowState = state;
-        agentWindow.dataset.windowState = state;
-        if (state === "normal") {
+        const nextState = ["normal", "maximized", "minimized"].includes(state) ? state : "normal";
+        document.body.dataset.vannaWindowState = nextState;
+        agentWindow.dataset.windowState = nextState;
+        if (nextState === "normal") {
           restoreSavedWindow();
+          settleLatestMessageScroll();
         }
         scheduleLayoutSync();
       };
@@ -432,11 +555,32 @@
         setWindowState(event.detail.state);
       });
 
-      const beginPointerAction = (event, action) => {
+      const resizeAxis = (start, size, delta, side, minimum, maximum, viewportStart, viewportEnd) => {
+        if (side === "start") {
+          const fixedEnd = start + size;
+          const lower = Math.max(viewportStart, fixedEnd - maximum);
+          const upper = Math.min(viewportEnd - minimum, fixedEnd - minimum);
+          const nextStart = clamp(start + delta, lower, upper);
+          return { start: nextStart, size: fixedEnd - nextStart };
+        }
+        if (side === "end") {
+          const lower = Math.max(viewportStart + minimum, start + minimum);
+          const upper = Math.min(viewportEnd, start + maximum);
+          const nextEnd = clamp(start + size + delta, lower, upper);
+          return { start, size: nextEnd - start };
+        }
+        return { start, size };
+      };
+      const beginPointerAction = (event, action, direction = "") => {
         if (!isDesktop() || chat.windowState !== "normal" || event.button !== 0) return;
         const target = event.currentTarget;
         const bounds = agentWindow.getBoundingClientRect();
         const start = { x: event.clientX, y: event.clientY, left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height };
+        // Resizing changes line wrapping and therefore the scroll height. Keep
+        // the latest response visible even when the initial history layout is
+        // still settling and the first at-bottom check would be inconclusive.
+        const preserveLatestMessage = action === "resize" &&
+          typeof chat.scrollToLatestMessage === "function";
         agentWindow.classList.add(action === "drag" ? "is-dragging" : "is-resizing");
         target.setPointerCapture(event.pointerId);
         const move = (moveEvent) => {
@@ -445,12 +589,26 @@
           if (action === "drag") {
             setDesktopBounds({ ...start, left: start.left + dx, top: start.top + dy });
           } else {
-            setDesktopBounds({ ...start, width: start.width + dx, height: start.height + dy });
+            const horizontal = direction.includes("w") ? "start" : direction.includes("e") ? "end" : "fixed";
+            const vertical = direction.includes("n") ? "start" : direction.includes("s") ? "end" : "fixed";
+            const nextX = resizeAxis(
+              start.left, start.width, dx, horizontal,
+              minimumWidth, maximumWidth(), viewportPadding, window.innerWidth - viewportPadding
+            );
+            const nextY = resizeAxis(
+              start.top, start.height, dy, vertical,
+              minimumHeight, maximumHeight(), viewportPadding, window.innerHeight - viewportPadding
+            );
+            setDesktopBounds({ left: nextX.start, top: nextY.start, width: nextX.size, height: nextY.size });
+            if (preserveLatestMessage && typeof chat.scrollToLatestMessage === "function") {
+              chat.scrollToLatestMessage();
+            }
           }
         };
         const end = () => {
           agentWindow.classList.remove("is-dragging", "is-resizing");
           persistWindow();
+          if (preserveLatestMessage) settleLatestMessageScroll();
           target.removeEventListener("pointermove", move);
           target.removeEventListener("pointerup", end);
           target.removeEventListener("pointercancel", end);
@@ -460,7 +618,11 @@
         target.addEventListener("pointercancel", end);
       };
       dragHandle.addEventListener("pointerdown", (event) => beginPointerAction(event, "drag"));
-      resizeHandle.addEventListener("pointerdown", (event) => beginPointerAction(event, "resize"));
+      resizeHandles.forEach((handle) => {
+        handle.addEventListener("pointerdown", (event) => beginPointerAction(
+          event, "resize", handle.dataset.resizeHandle || "se"
+        ));
+      });
       window.addEventListener("resize", () => {
         if (isDesktop() && chat.windowState === "normal") {
           const bounds = agentWindow.getBoundingClientRect();

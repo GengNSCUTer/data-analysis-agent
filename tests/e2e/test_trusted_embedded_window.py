@@ -340,6 +340,145 @@ def test_desktop_window_drag_resize_and_content_sizing(page) -> None:
     assert not console_errors
 
 
+def test_desktop_window_supports_all_resize_directions(page) -> None:
+    browser_page, console_errors = page
+    _open_normal_window(browser_page)
+    window = browser_page.locator("#agent-window")
+    browser_page.evaluate(
+        """() => {
+          const element = document.querySelector('#agent-window');
+          Object.assign(element.style, {
+            left: '500px', top: '200px', right: 'auto', bottom: 'auto',
+            width: '440px', height: '560px'
+          });
+        }"""
+    )
+
+    resize_cases = (
+        ("n", 0, -30, "height"),
+        ("e", 50, 0, "width"),
+        ("s", 0, 40, "height"),
+        ("w", -40, 0, "width"),
+        ("ne", 40, -30, "both"),
+        ("nw", -40, -30, "both"),
+        ("se", 40, 40, "both"),
+        ("sw", -40, 40, "both"),
+    )
+    for direction, dx, dy, changed_axis in resize_cases:
+        browser_page.evaluate(
+            """() => {
+              const element = document.querySelector('#agent-window');
+              Object.assign(element.style, {
+                left: '500px', top: '200px', right: 'auto', bottom: 'auto',
+                width: '440px', height: '560px'
+              });
+            }"""
+        )
+        before = window.bounding_box()
+        handle = browser_page.locator(f"[data-resize-handle='{direction}']")
+        handle_box = handle.bounding_box()
+        assert before is not None and handle_box is not None
+        start_x = handle_box["x"] + handle_box["width"] / 2
+        start_y = handle_box["y"] + handle_box["height"] / 2
+        browser_page.mouse.move(start_x, start_y)
+        browser_page.mouse.down()
+        browser_page.mouse.move(start_x + dx, start_y + dy, steps=5)
+        browser_page.mouse.up()
+        after = window.bounding_box()
+        assert after is not None
+        assert after["width"] >= 360
+        assert after["height"] >= 460
+        assert after["x"] >= 16
+        assert after["y"] >= 16
+        assert after["x"] + after["width"] <= 1424
+        assert after["y"] + after["height"] <= 944
+        if changed_axis in {"width", "both"}:
+            assert abs(after["width"] - before["width"]) >= 20
+        if changed_axis in {"height", "both"}:
+            assert abs(after["height"] - before["height"]) >= 20
+    assert not console_errors
+
+
+def test_long_history_markdown_keeps_a_scrollable_view_after_restore(page) -> None:
+    browser_page, console_errors = page
+    chat = _open_normal_window(browser_page)
+    content = (
+        "## 历史会话里的结论\n\n"
+        "根据查询结果，当前数据覆盖 **2天**。\n\n"
+        "| 指标 | 数值 |\n\n"
+        "|------|------|\n\n"
+        "| 📅 营业天数 | 2天 |\n\n"
+        "| 🛒 总支付订单数 | **833 单** |\n\n"
+        "| 💰 总成交额（GMV） | **207,630 元** |\n\n"
+        "| ⭐ 平均好评率 | **91.87%** |\n\n"
+        "---\n\n"
+        "这是一段较长的业务解释，用来验证窄窗口恢复后仍然可以滚动查看完整回答。"
+    )
+    chat.evaluate(
+        """(element, markdown) => element.loadConversation('e2e-long-history', [
+          { role: 'user', content: '概览 GMV' },
+          { role: 'assistant', content: markdown }
+        ])""",
+        content,
+    )
+    browser_page.wait_for_function(
+        """() => document.querySelector('vanna-message')?.shadowRoot?.querySelector(
+          'table.text-markdown-table'
+        ) !== null"""
+    )
+    window = browser_page.locator("#agent-window")
+    before = window.bounding_box()
+    assert before is not None
+    west = browser_page.locator("[data-resize-handle='w']").bounding_box()
+    south = browser_page.locator("[data-resize-handle='s']").bounding_box()
+    assert west is not None and south is not None
+    west_x = west["x"] + west["width"] / 2
+    west_y = west["y"] + west["height"] / 2
+    browser_page.mouse.move(west_x, west_y)
+    browser_page.mouse.down()
+    browser_page.mouse.move(west_x + 80, west_y, steps=5)
+    browser_page.mouse.up()
+    south = browser_page.locator("[data-resize-handle='s']").bounding_box()
+    assert south is not None
+    south_x = south["x"] + south["width"] / 2
+    south_y = south["y"] + south["height"] / 2
+    browser_page.mouse.move(south_x, south_y)
+    browser_page.mouse.down()
+    browser_page.mouse.move(south_x, south_y - 100, steps=5)
+    browser_page.mouse.up()
+    browser_page.wait_for_function(
+        """() => {
+          const chat = document.querySelector('vanna-chat');
+          const messages = chat?.shadowRoot?.querySelector('.chat-messages');
+          return Boolean(messages && messages.clientHeight >= 120 && messages.scrollHeight > messages.clientHeight
+            && messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 2);
+        }"""
+    )
+    messages = chat.locator(".chat-messages")
+    assert messages.evaluate("element => element.scrollTop + element.clientHeight >= element.scrollHeight - 2")
+    assert chat.locator("table.text-markdown-table").count() == 1
+    assert chat.locator("strong").count() >= 3
+
+    chat.locator("button.minimize").click()
+    browser_page.wait_for_selector("vanna-chat.minimized")
+    chat.locator(".minimized-icon").click()
+    browser_page.wait_for_selector("vanna-chat.normal")
+    browser_page.wait_for_function(
+        """() => {
+          const chat = document.querySelector('vanna-chat');
+          const messages = chat?.shadowRoot?.querySelector('.chat-messages');
+          return Boolean(messages && messages.clientHeight >= 120 && messages.scrollHeight > messages.clientHeight
+            && messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 2);
+        }"""
+    )
+    assert messages.evaluate("element => element.scrollTop + element.clientHeight >= element.scrollHeight - 2")
+    assert "历史会话里的结论" in chat.evaluate(
+        """element => Array.from(element.shadowRoot?.querySelectorAll('vanna-message') || [])
+          .map(message => message.shadowRoot?.textContent || '').join('\\n')"""
+    )
+    assert not console_errors
+
+
 def test_mobile_window_is_adaptive_without_horizontal_overflow(page) -> None:
     browser_page, console_errors = page
     browser_page.set_viewport_size({"width": 390, "height": 844})

@@ -30,3 +30,10 @@ frontends/**/.mypy_cache/
 
 # Local research cache (cloned repositories and public API responses)
 github-research-output/
+
+# Deterministic/online evaluation reports may contain run metadata and are
+# regenerated locally; keep them out of version control.
+evals/reports/
+
+# Temporary Feishu device-flow QR codes
+.tmp-lark-auth/

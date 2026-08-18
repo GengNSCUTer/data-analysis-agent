@@ -11,6 +11,8 @@ export class VannaMessage extends LitElement {
     css`
       :host {
         display: block;
+        min-width: 0;
+        max-width: 100%;
         padding: 0 var(--vanna-space-2);
         margin-bottom: var(--vanna-space-4);
         font-family: var(--vanna-font-family-default);
@@ -34,6 +36,7 @@ export class VannaMessage extends LitElement {
 
       .message {
         position: relative;
+        min-width: 0;
         padding: var(--vanna-space-4) var(--vanna-space-5);
         border-radius: var(--vanna-chat-bubble-radius);
         word-wrap: break-word;
@@ -51,6 +54,7 @@ export class VannaMessage extends LitElement {
         border: 1px solid var(--vanna-outline-dimmer);
         color: var(--vanna-foreground-default);
         box-shadow: var(--vanna-shadow-sm);
+        max-width: 100%;
         border-radius: var(--vanna-chat-bubble-radius) var(--vanna-chat-bubble-radius) var(--vanna-chat-bubble-radius) var(--vanna-space-2);
       }
 
@@ -79,6 +83,8 @@ export class VannaMessage extends LitElement {
 
       .message-content {
         margin: 0;
+        min-width: 0;
+        max-width: 100%;
         font-size: 15px;
         letter-spacing: 0.01em;
         white-space: pre-wrap;

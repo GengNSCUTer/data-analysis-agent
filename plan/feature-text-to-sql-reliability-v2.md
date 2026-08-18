@@ -2,7 +2,7 @@
 goal: "Deliver a research-backed second round of reliable Text-to-SQL for the trusted Vanna Olist agent"
 version: "2.0"
 date_created: "2026-08-03"
-last_updated: "2026-08-03"
+last_updated: "2026-08-18"
 owner: "GengNSCUTer/data-analysis-agent"
 status: "In progress"
 tags: ["feature", "text-to-sql", "semantic-layer", "evaluation", "security", "research"]
@@ -34,16 +34,19 @@ question + server-resolved user
 The plan records what is already present in the working tree, what is only a design artifact, and
 what must be proven before the capability can be described as a resume-quality result.
 
-## Current implementation status (2026-08-03)
+## Current implementation status (2026-08-18)
 
 The Catalog slice, role filtering, deterministic route, structured working memory, clarification
 boundary, one-shot policy-checked repair contract, sanitized database errors, deterministic result
 validator, and server-owned `ResultContract` are now implemented under `src/data_analysis_agent/`.
-The trusted demo uses the Catalog, passes the contract into Vanna `ToolContext`, and stores
-`catalog_trace`/working memory in PostgreSQL. The remaining gap is orchestration:
-the Vanna model still performs the candidate/repair loop itself, so a future task must connect the
-`OneShotSqlRepair` outcome and validator evidence to the tool lifecycle and add the browser
-multi-turn regression. No online accuracy claim is made yet.
+The trusted demo uses the Catalog, passes the contract into Vanna `ToolContext`, stores
+`catalog_trace`/working memory in PostgreSQL, and wraps the native SQL tool with
+`TrustedRunSqlTool` so repair and validation evidence are persisted. Browser multi-turn, eight-way
+resize and long-history Markdown regressions are covered. The first measurement loop is now complete:
+a 24-case real SiliconFlow sample has an Agent Run for every case and manual labels for routing,
+clarification, executability, metric semantics, result contract, permission, grounding, repair,
+latency and token status. It exposed concrete defects but does not establish an overall online-
+accuracy, repair-recovery, token-cost or P50/P95 claim.
 
 ## 1. Requirements & Constraints
 
@@ -140,10 +143,10 @@ multi-turn regression. No online accuracy claim is made yet.
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-016 | Add `evals/cases/text_to_sql_v2.yaml` with 60 cases: metrics, join/grain traps, ambiguity, multi-turn working memory, execution/empty-result repair, and RBAC/unsupported cases. Each case stores expected state and semantic assertions, not only a SQL string. |  |  |
-| TASK-017 | Add `scripts/run_text_to_sql_evaluation.py` to run deterministic Policy/PostgreSQL goldens and optionally call SiliconFlow; redact secrets and result rows and preserve model/configuration metadata. |  |  |
-| TASK-018 | Run the same 20--30 representative questions before and after Catalog/route/repair changes; manually label semantic and metric correctness, and report P50/P95 latency and tool/token cost. |  |  |
-| TASK-019 | Write `docs/verification-text-to-sql-v2.md`, update `PROJECT.md`, `docs/TEXT_TO_SQL_RESEARCH.md`, and `docs/AGENT_PLATFORM_NEXT_PLAN.md`, then add the iteration to Feishu and push only reviewed project files. |  |  |
+| TASK-016 | Add `evals/cases/text_to_sql_v2.yaml` with 60 cases: metrics, join/grain traps, ambiguity, multi-turn working memory, execution/empty-result repair, and RBAC/unsupported cases. Each case stores expected state and semantic assertions, not only a SQL string. | ✅ | 2026-08-06 |
+| TASK-017 | Add `scripts/run_text_to_sql_evaluation.py` for the deterministic offline route/QueryPlan contract; redact secrets and result rows and preserve only structured case metadata. A separate online runner remains deferred until the request/label schema is frozen. | ✅ | 2026-08-06 |
+| TASK-018 | Run a 20--30 representative real SiliconFlow sample, manually label routing, clarification, executability, metric correctness, result contract, permission, grounding, repair, latency and token status. Record unknown provider usage as unknown rather than zero; do not claim P50/P95 from one run per case. | ✅ | 2026-08-18 |
+| TASK-019 | Write verification/project/roadmap docs, add the iteration to Feishu, and push only reviewed project files. | ⏳ | 2026-08-18 |
 
 ## 3. Alternatives
 
@@ -181,9 +184,10 @@ multi-turn regression. No online accuracy claim is made yet.
   — runtime prompt/context integration points.
 - **FILE-005**: `src/data_analysis_agent/chat_runtime.py`, `budget.py`, `run_recorder.py`, and the
   existing app migrations — route, budget, and evidence integration.
-- **FILE-006**: `src/data_analysis_agent/sql_repair.py`, `result_validator.py`, and
-  `postgres_runner.py` — bounded repair contract, sanitized execution errors, and result semantics
-  checks; model-driven repair orchestration remains a follow-up integration.
+- **FILE-006**: `src/data_analysis_agent/sql_repair.py`, `trusted_sql_tool.py`,
+  `result_validator.py`, and `postgres_runner.py` — bounded repair lifecycle, sanitized execution
+  errors, and result semantics checks wired into the native Vanna SQL tool; the online recovery rate
+  is still a follow-up measurement.
 - **FILE-007**: `evals/cases/text_to_sql_v2.yaml`, `scripts/run_text_to_sql_evaluation.py`, and
   `tests/test_text_to_sql_contracts.py` — versioned contract and evaluator.
 - **FILE-008**: `docs/TEXT_TO_SQL_RESEARCH.md`, `docs/AGENT_PLATFORM_NEXT_PLAN.md`,

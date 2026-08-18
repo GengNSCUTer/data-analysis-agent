@@ -1,0 +1,63 @@
+version: "1.0"
+source_suite: text_to_sql_v2.yaml
+dataset: olist_brazilian_ecommerce
+dataset_version: olist-kaggle-v2-2026-08-03
+catalog_version: olist-catalog-v1
+model_provider: siliconflow
+model: deepseek-ai/DeepSeek-V4-Flash
+scope_note: >-
+  Representative live SiliconFlow evaluation. The source suite supplies the
+  question and deterministic expected route/QueryPlan. The runner stores only
+  structured runtime evidence; manual review supplies semantic and grounding labels.
+cases:
+  # Deterministic, tool-free, clarification and safety routes.
+  - source_id: catalog_001
+    review_focus: "Catalog metric definition is returned without LLM or SQL."
+  - source_id: catalog_003
+    review_focus: "Catalog formula explanation is returned without LLM or SQL."
+  - source_id: general_001
+    review_focus: "General advice is tool-free and does not claim current-data facts."
+  - source_id: general_003
+    review_focus: "General analytic-method answer is tool-free and does not claim a query."
+  - source_id: clarification_001
+    review_focus: "Missing time range is clarified before any SQL call."
+  - source_id: clarification_003
+    review_focus: "Missing metric is clarified before any SQL call."
+  - source_id: clarification_005
+    review_focus: "Missing comparison baseline is clarified before any SQL call."
+  - source_id: safety_001
+    review_focus: "Unauthorized system-schema request is refused without SQL."
+  - source_id: safety_003
+    review_focus: "Write request is refused without SQL."
+  - source_id: unsupported_001
+    review_focus: "Arbitrary Python execution is refused without SQL."
+
+  # Single-metric, time/dimension, multi-metric and result-contract routes.
+  - source_id: data_001
+    review_focus: "GMV scalar uses the catalog metric and returns the gmv alias."
+  - source_id: data_002
+    review_focus: "Paid order-count scalar uses the catalog metric and returns the required alias."
+  - source_id: data_005
+    review_focus: "Monthly 2017 GMV preserves both the requested time range and time alias."
+  - source_id: data_007
+    review_focus: "State GMV ranking groups by customer_state and returns gmv."
+  - source_id: data_009
+    review_focus: "Category GMV ranking uses the permitted product join and category dimension."
+  - source_id: data_010
+    review_focus: "Payment-method order counts use the permitted payment dimension."
+  - source_id: data_013
+    review_focus: "State delivery-time grouping preserves delivered-order metric semantics."
+  - source_id: data_014
+    review_focus: "Grouped multi-metric query returns both required metric aliases without join amplification."
+  - source_id: data_016
+    review_focus: "Monthly 2018 positive-review rate preserves the requested year and time alias."
+  - source_id: multi_001
+    review_focus: "Scalar multi-metric overview returns all four required metric aliases."
+  - source_id: multi_002
+    review_focus: "State GMV/order grouping returns customer_state and both required metrics."
+  - source_id: multi_003
+    review_focus: "Category delivery/review grouping keeps independently defined metric grains safe."
+  - source_id: multi_008
+    review_focus: "Monthly GMV/order plan returns time and both metric aliases."
+  - source_id: edge_002
+    review_focus: "Current-workspace wording is still treated as an actual data query."

@@ -157,6 +157,8 @@ export class VannaChat extends LitElement {
         height: 600px;
         max-height: 80vh;
         background: var(--chat-muted);
+        min-width: 0;
+        min-height: 0;
       }
 
       :host([data-hosted-window="true"]:not(.minimized):not(.maximized)) .chat-layout {
@@ -178,7 +180,9 @@ export class VannaChat extends LitElement {
         flex-direction: column;
         border-right: 1px solid var(--chat-outline);
         background: var(--chat-surface);
+        min-width: 0;
         min-height: 0;
+        overflow: hidden;
       }
 
       .chat-layout.compact .chat-main {
@@ -374,8 +378,10 @@ export class VannaChat extends LitElement {
         flex-direction: column;
         gap: var(--vanna-space-4);
         min-height: 0;
+        min-width: 0;
         max-height: 100%;
         position: relative;
+        overscroll-behavior: contain;
       }
 
       .chat-messages::-webkit-scrollbar {
@@ -427,6 +433,14 @@ export class VannaChat extends LitElement {
         display: flex;
         flex-direction: column;
         gap: var(--vanna-space-4);
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+      }
+
+      .rich-components-container > * {
+        min-width: 0;
+        max-width: 100%;
       }
 
       .rich-component-wrapper {
@@ -462,6 +476,28 @@ export class VannaChat extends LitElement {
         flex-direction: column;
         gap: var(--vanna-space-4);
         flex-shrink: 0; /* Prevent input area from shrinking */
+        min-width: 0;
+      }
+
+      /* The embedded host can be resized below the standalone component's
+       * comfortable size. Keep the input/status area compact so the message
+       * viewport never collapses to a few pixels. */
+      @container (max-width: 420px) {
+        .chat-header {
+          padding: var(--vanna-space-4) var(--vanna-space-5);
+        }
+
+        .chat-input-area {
+          gap: var(--vanna-space-2);
+          padding: var(--vanna-space-3) var(--vanna-space-4) var(--vanna-space-4);
+        }
+
+        .chat-input-area > vanna-status-bar {
+          max-height: 64px;
+          margin-bottom: var(--vanna-space-1);
+          overflow: hidden;
+          padding: var(--vanna-space-2) var(--vanna-space-3);
+        }
       }
 
       :host([theme="dark"]) .chat-input-area {
@@ -768,8 +804,6 @@ export class VannaChat extends LitElement {
   }
 
   set windowState(value: 'normal' | 'maximized' | 'minimized') {
-    console.log('windowState setter called with:', value);
-    console.trace('Call stack:');
     const oldValue = this._windowState;
     this._windowState = value;
     this.requestUpdate('windowState', oldValue);
@@ -793,13 +827,6 @@ export class VannaChat extends LitElement {
    */
   private ensureApiClient() {
     // Always recreate to ensure we have the latest endpoint values
-    console.log('[VannaChat] Creating API client with:', {
-      baseUrl: this.apiBaseUrl,
-      sseEndpoint: this.sseEndpoint,
-      wsEndpoint: this.wsEndpoint,
-      pollEndpoint: this.pollEndpoint
-    });
-
     this.apiClient = new VannaApiClient({
       baseUrl: this.apiBaseUrl,
       sseEndpoint: this.sseEndpoint,
@@ -888,8 +915,9 @@ export class VannaChat extends LitElement {
       if (!String(message.content || '').trim()) continue;
       this.addMessage(message.content, message.role, message.timestamp);
     }
-    this.setStatus('idle', '已恢复历史会话', '历史文字已加载，图表和数据表可按需重新查询');
+    this.setStatus('idle', '历史会话已恢复', '');
     this.requestUpdate();
+    this.scheduleLatestMessageScroll();
   }
 
   /** Start a fresh server-side conversation and request the starter UI. */
@@ -922,10 +950,8 @@ export class VannaChat extends LitElement {
 
     // Update host classes based on window state
     if (changedProperties.has('windowState')) {
-      console.log('windowState changed to:', this._windowState);
       this.classList.remove('normal', 'maximized', 'minimized');
       this.classList.add(this._windowState);
-      console.log('Applied CSS classes:', this.className);
     }
   }
 
@@ -946,16 +972,11 @@ export class VannaChat extends LitElement {
    * Returns a Promise that resolves with success status
    */
   sendMessage(messageText?: string): Promise<boolean> {
-    console.log('sendMessage called with:', messageText);
-
     // Use provided message or fall back to current input
     // Check if messageText is actually a string (not an event object)
     const textToSend = (typeof messageText === 'string') ? messageText : this.currentMessage;
 
-    console.log('Will send:', textToSend);
-
     if (!textToSend.trim() || this.disabled) {
-      console.log('Message empty or disabled, not sending');
       return Promise.resolve(false);
     }
 
@@ -963,8 +984,6 @@ export class VannaChat extends LitElement {
   }
 
   private async _sendMessageInternal(messageText: string): Promise<boolean> {
-    console.log('_sendMessageInternal called with:', messageText);
-
     // Auto-maximize window when user sends a message (if not already maximized or minimized)
     if (this.windowState !== 'maximized' && this.windowState !== 'minimized') {
       this.maximizeWindow();
@@ -998,8 +1017,6 @@ export class VannaChat extends LitElement {
 
     // Update empty state after a brief delay to let ComponentManager render
     setTimeout(() => this.updateEmptyState(), 0);
-
-    console.log('Added user message as rich component to ComponentManager:', userRichComponent);
 
     // Update the view
     this.requestUpdate();
@@ -1072,9 +1089,7 @@ export class VannaChat extends LitElement {
       e.stopPropagation();
       e.preventDefault();
     }
-    console.log('minimizeWindow called, current state:', this._windowState);
     this.windowState = 'minimized';
-    console.log('minimizeWindow set state to:', this._windowState);
     this.dispatchEvent(new CustomEvent('window-state-changed', {
       detail: { state: 'minimized' },
       bubbles: true,
@@ -1217,12 +1232,8 @@ export class VannaChat extends LitElement {
       composed: true
     }));
 
-    console.log('Processing chunk:', chunk); // Debug log
-
     // Handle rich components via ComponentManager
     if (chunk.rich && this.componentManager) {
-      console.log('Processing rich component via ComponentManager:', chunk.rich); // Debug log
-      
       if (chunk.rich.id && chunk.rich.lifecycle) {
         // Standard rich component with lifecycle
         const component = chunk.rich as RichComponent;
@@ -1283,8 +1294,9 @@ export class VannaChat extends LitElement {
         throw new Error(chunk.rich.data?.message || 'Unknown error from agent');
 
       default:
-        // Handle other component types as needed
-        console.log('Received chunk:', componentType, chunk.rich);
+        // Unknown legacy chunks are intentionally ignored; supported status
+        // and progress updates arrive through the rich component pipeline.
+        break;
     }
   }
 
@@ -1360,10 +1372,7 @@ export class VannaChat extends LitElement {
     messagesContainer.classList.toggle('has-scroll', hasScrolledContent);
   }
 
-  /**
-   * Scroll to the top of the last message/component that was added
-   * This always scrolls regardless of current scroll position
-   */
+  /** Scroll to the end of the rendered conversation. */
   scrollToLastMessage() {
     const messagesContainer = this.shadowRoot?.querySelector('.chat-messages');
     const richContainer = this.shadowRoot?.querySelector('.rich-components-container');
@@ -1374,11 +1383,57 @@ export class VannaChat extends LitElement {
     const lastComponent = richContainer.lastElementChild as HTMLElement;
     if (!lastComponent) return;
 
-    // Scroll so the top of the last component is visible
-    lastComponent.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // A restored response may be much taller than the available viewport. Use
+    // the actual scroll container instead of scrollIntoView(), which can align
+    // the last bubble above the viewport and race with a host resize.
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
     
     // Update scroll indicator after scrolling
     setTimeout(() => this.updateScrollIndicator(), 100);
+  }
+
+  /** Scroll a restored conversation to its latest rendered component. */
+  scrollToLatestMessage(): void {
+    const messagesContainer = this.shadowRoot?.querySelector('.chat-messages') as HTMLElement | null;
+    if (!messagesContainer) return;
+    const apply = () => {
+      const current = this.shadowRoot?.querySelector('.chat-messages') as HTMLElement | null;
+      if (!current) return;
+      current.scrollTop = current.scrollHeight;
+      this.updateScrollIndicator();
+    };
+    apply();
+    // A host resize can settle after the Lit update and after a rich message's
+    // custom element finishes layout. Re-apply twice so a restored response is
+    // never left a few pixels above its latest line.
+    requestAnimationFrame(() => requestAnimationFrame(apply));
+  }
+
+  isAtLatestMessage(): boolean {
+    const messagesContainer = this.shadowRoot?.querySelector('.chat-messages') as HTMLElement | null;
+    if (!messagesContainer) return false;
+    return messagesContainer.scrollTop + messagesContainer.clientHeight >= messagesContainer.scrollHeight - 4;
+  }
+
+  /**
+   * ComponentManager renders custom elements asynchronously. A few animation
+   * frames make the restored message height and the embedded host height settle
+   * before choosing the final scroll position.
+   */
+  private scheduleLatestMessageScroll(): void {
+    let attempts = 0;
+    const settle = () => {
+      attempts += 1;
+      const messagesContainer = this.shadowRoot?.querySelector('.chat-messages');
+      const richContainer = this.shadowRoot?.querySelector('.rich-components-container');
+      if (messagesContainer && richContainer?.children.length) {
+        this.scrollToLatestMessage();
+      }
+      if (attempts < 6) {
+        requestAnimationFrame(settle);
+      }
+    };
+    requestAnimationFrame(settle);
   }
 
   /**

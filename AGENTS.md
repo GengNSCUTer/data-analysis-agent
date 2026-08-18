@@ -58,6 +58,13 @@
 
 ## 7. 最近一次同步记录
 
+### 2026-08-18：真实 SiliconFlow 人工标签评测
+
+- 目标：将已完成的前端加固、v2 确定性资产收敛为可复核的真实模型小样本，不把 SQL 执行成功伪装成语义正确。
+- 实现：新增 24 条 online v1 清单和通过 Trusted Demo SSE 的运行器；报告按 request ID 回读 Agent Run/SQL 审计，逐条记录路由、澄清、SQL、指标口径、结果合同、权限、回答有据、工具/SQL/修复次数、时延和 token 状态。原始问题、回答、SQL、结果行、cookie、密钥和运行报告均不提交 Git。
+- 结论：24/24 Agent Run；路由 23 pass/1 fail，权限 24 pass，回答有据 17 pass/7 fail。`data_014`/`data_016` 的首个正确 SQL 后续被无关 SQL 破坏，ResultValidator 已安全阻断；`multi_003` 因 Catalog slice 遗漏可用 Join 而在 180 秒后未完成。当前没有 repair lifecycle recovery；provider 未返回 usage 时明确记为 unknown。
+- 后续：先修复币种、已通过合同后的工具停止、多指标 Catalog slice 和支付归因；修复后对已失败 case 做固定回归，再评估多次修复或延迟优化。
+
 ### 2026-08-06：证据路由、QueryPlan 与可信结果记忆
 
 - 目标：按 Text-to-SQL 改造顺序拆开“是否命中指标”和“是否允许查库”，补齐多指标查询的服务器计划，并让结果追问只依赖可信结果证据。

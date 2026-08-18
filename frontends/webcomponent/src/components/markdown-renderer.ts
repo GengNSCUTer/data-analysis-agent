@@ -27,14 +27,22 @@ export function renderMarkdown(source: string): string {
       continue;
     }
 
+    // LLM responses often put a blank line between the header and separator
+    // (and between every data row). Markdown tables remain unambiguous when
+    // the next non-empty line is the separator, so tolerate that formatting
+    // without falling back to displaying the pipe syntax literally.
+    let separatorIndex = index + 1;
+    while (separatorIndex < lines.length && !lines[separatorIndex].trim()) {
+      separatorIndex += 1;
+    }
     if (
-      index + 1 < lines.length &&
+      separatorIndex < lines.length &&
       isTableRow(line) &&
-      isTableSeparator(lines[index + 1])
+      isTableSeparator(lines[separatorIndex])
     ) {
       const headers = splitTableRow(line);
       const rows: string[][] = [];
-      index += 2;
+      index = separatorIndex + 1;
       // Blank lines between generated table rows are common in LLM output;
       // ignore them while the following non-empty lines remain table rows.
       while (index < lines.length) {
