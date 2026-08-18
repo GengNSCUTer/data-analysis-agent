@@ -256,6 +256,9 @@ class SecurePostgresRunner(SqlRunner):
             usage = context.metadata.get("budget_usage")
             if usage is not None and hasattr(usage, "set_result_summary"):
                 usage.set_result_summary(result_summary)
+            if usage is not None and hasattr(usage, "mark_result_contract_satisfied"):
+                usage.mark_result_contract_satisfied()
+            context.metadata["result_contract_satisfied"] = True
 
         self.audit.record(
             context, role, args.sql, status="allowed", final_sql=decision.final_sql,

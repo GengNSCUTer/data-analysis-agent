@@ -65,6 +65,13 @@
 - 结论：24/24 Agent Run；路由 23 pass/1 fail，权限 24 pass，回答有据 17 pass/7 fail。`data_014`/`data_016` 的首个正确 SQL 后续被无关 SQL 破坏，ResultValidator 已安全阻断；`multi_003` 因 Catalog slice 遗漏可用 Join 而在 180 秒后未完成。当前没有 repair lifecycle recovery；provider 未返回 usage 时明确记为 unknown。
 - 后续：先修复币种、已通过合同后的工具停止、多指标 Catalog slice 和支付归因；修复后对已失败 case 做固定回归，再评估多次修复或延迟优化。
 
+### 2026-08-18：通用语义检索与结果合同加固
+
+- 目标：将在线评测暴露的币种误标、多跳 Catalog 缺表、支付维度自行猜口径和合同通过后重复 SQL，收敛为可复用的 Workspace/Catalog/预算机制。
+- 实现：Catalog 支持工作区币种元数据与 `DimensionPolicy`；检索在可见 Join 图上做 BFS 路径闭包，受表、Join、列和 Prompt 预算约束；QuestionRouter 对声明为歧义的维度返回零 SQL 澄清；ResultValidator 成功后标记 `result_contract_satisfied`，预算层拦截后续冗余 `run_sql` 并保留可用图表调用；Prompt 增加币种和保守趋势表述合同。没有加入 Olist 问题文本特判。
+- 验证：相关专项测试 71 passed；`run_text_to_sql_evaluation.py` 60/60 passed；全量 pytest 的失败来自 Vanna 上游可选依赖/缺失 fixture，不计入本项目质量门。
+- 后续：补充真实 runner 对合同状态的集成证据，复跑固定失败样本，随后再评估在线模型延迟、usage 采集和第二数据集适配。
+
 ### 2026-08-06：证据路由、QueryPlan 与可信结果记忆
 
 - 目标：按 Text-to-SQL 改造顺序拆开“是否命中指标”和“是否允许查库”，补齐多指标查询的服务器计划，并让结果追问只依赖可信结果证据。

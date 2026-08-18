@@ -192,14 +192,12 @@ cases:
   - id: data_010
     category: data_query
     question: "按支付方式统计有效订单数"
-    expected_state: answerable
-    expected_intent: data_query
-    requires_database: true
-    expected_evidence_mode: database_result
+    expected_state: clarification_required
+    expected_intent: clarification_required
+    requires_database: false
+    expected_evidence_mode: clarification
     expected_metric_ids: [paid_order_count]
-    expected_plan_type: single_metric
-    expected_required_result_columns: [payment_type, paid_order_count]
-    expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+    expected_reason_code: dimension_attribution_requires_clarification
   - id: data_011
     category: data_query
     question: "按月比较平均履约天数"

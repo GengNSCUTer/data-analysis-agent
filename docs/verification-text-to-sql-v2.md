@@ -171,7 +171,13 @@ token status。汇总如下：
 `unknown`，绝不能当作零成本。总客户端时延为 1,374,945 ms；每条单次运行、且模型服务波动
 显著，不把它转写为 P50/P95 或在线准确率。
 
-## 7. 未完成与限制
+## 7. 修复后回归（2026-08-18）
+
+本轮将在线人工标签暴露的问题转换为通用合同：Catalog 的多跳 Join 图闭包、指标维度归因策略、结果合同通过后的冗余 SQL 抑制，以及工作区级币种/趋势展示约束。Olist 只提供 YAML 适配器元数据，运行时代码不识别评测 case 或数据集名称。
+
+验证结果：语义 Catalog、QuestionRouter、预算、Trusted SQL 工具及路由评测专项 **71 passed**；`scripts/run_text_to_sql_evaluation.py` **60/60 passed**。全量 pytest 中的失败属于仓库内 Vanna 上游可选集成测试缺少 `ollama`、`chromadb`、数据库驱动或 fixture，不是本项目本轮改动引入的失败。
+
+## 8. 未完成与限制
 
 - 当前 `ResultValidator` 的指标列、时间列、请求时间范围和 Join 元数据已经由服务器从
   Catalog/WorkingMemory 构建为 `ResultContract` 并传入 `ToolContext`；版本合同也已进入 Catalog Prompt、

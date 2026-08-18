@@ -3,6 +3,9 @@ dataset_version: "olist-kaggle-v2-2026-08-03"
 metric_version: "0.1-draft"
 policy_version: "sql-policy-v1"
 description: "Server-owned semantic catalog for the trusted Olist PostgreSQL analytics schema."
+currency_code: BRL
+currency_symbol: "R$"
+currency_name: "Brazilian real"
 
 tables:
   - table_id: fact_orders
@@ -179,6 +182,10 @@ metrics:
     source_columns: [fact_orders.order_id, fact_orders.order_status]
     default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
     allowed_dimensions: [date, customer_state, customer_city, seller_id, product_category_name, payment_type]
+    dimension_policies:
+      payment_type:
+        description: "一个订单可能对应多条支付记录；必须先明确订单归属支付方式的业务规则，禁止自行使用 payment_sequential=1 代替归属口径。"
+        requires_clarification: true
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 

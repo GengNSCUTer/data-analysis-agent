@@ -88,6 +88,43 @@ async def test_budget_middleware_replaces_model_answer_after_sql_repair_failure(
     assert "可信执行或结果合同校验" in (response.content or "")
 
 
+@pytest.mark.asyncio
+async def test_result_contract_suppresses_redundant_sql_but_keeps_visualization() -> None:
+    usage = BudgetUsage(RequestBudget(max_tool_calls=3, max_sql_calls=2))
+    usage.mark_result_contract_satisfied()
+    from data_analysis_agent.budget import CURRENT_BUDGET
+
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        response = await BudgetSafetyMiddleware().after_llm_response(
+            LlmRequest(messages=[], user=User(id="u")),
+            LlmResponse(
+                content="请继续处理图表",
+                tool_calls=[
+                    ToolCall(id="sql", name="run_sql", arguments={}),
+                    ToolCall(id="chart", name="visualize_data", arguments={}),
+                ],
+            ),
+        )
+    finally:
+        CURRENT_BUDGET.reset(token)
+
+    assert [call.name for call in (response.tool_calls or ())] == ["visualize_data"]
+    assert usage.sql_calls_used == 0
+    assert usage.extra_sql_suppressed == 1
+    assert usage.termination_reason == "running"
+
+
+def test_result_contract_state_is_explicit_and_serialized() -> None:
+    usage = BudgetUsage(RequestBudget())
+    usage.mark_result_contract_satisfied()
+    usage.suppress_extra_sql()
+
+    evidence = usage.as_dict()
+    assert evidence["result_contract_satisfied"] is True
+    assert evidence["extra_sql_suppressed"] == 1
+
+
 def test_unknown_termination_reason_is_rejected() -> None:
     usage = BudgetUsage(RequestBudget())
     with pytest.raises(ValueError, match="unknown termination reason"):

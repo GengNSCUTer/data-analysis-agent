@@ -44,7 +44,7 @@ cases:
   - source_id: data_009
     review_focus: "Category GMV ranking uses the permitted product join and category dimension."
   - source_id: data_010
-    review_focus: "Payment-method order counts use the permitted payment dimension."
+    review_focus: "Payment-method attribution is clarified before SQL because an order may have multiple payment rows."
   - source_id: data_013
     review_focus: "State delivery-time grouping preserves delivered-order metric semantics."
   - source_id: data_014

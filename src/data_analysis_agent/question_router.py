@@ -233,6 +233,35 @@ class QuestionRouter:
             if isinstance(remembered, (list, tuple)):
                 metric_ids = tuple(str(value) for value in remembered)
 
+        # Dimension attribution is a Catalog-owned business rule.  When a
+        # metric explicitly marks a requested dimension as ambiguous, stop
+        # before SQL generation instead of allowing the model to invent a
+        # deduplication rule or pick an arbitrary fact-row representative.
+        if metric_ids and _DATA_INTENT.search(question):
+            requested_dimensions = self.retriever.requested_dimensions(
+                question, selection.metrics
+            )
+            selected_metrics = {
+                metric.metric_id: metric for metric in selection.metrics
+            }
+            for dimension, _table_id in requested_dimensions:
+                for metric_id in metric_ids:
+                    metric = selected_metrics.get(metric_id)
+                    if metric is None:
+                        metric = self.retriever.catalog.metrics_by_id.get(metric_id)
+                    policy = metric.dimension_policies.get(dimension) if metric else None
+                    if policy is not None and policy.requires_clarification:
+                        return QuestionRoute(
+                            "clarification_required",
+                            (f"dimension_policy:{dimension}",),
+                            metric_ids,
+                            "请明确该维度的归属口径后再查询。",
+                            "dimension_attribution_requires_clarification",
+                            intent="clarification_required",
+                            requires_database=False,
+                            evidence_mode="clarification",
+                        )
+
         # A follow-up about a prior result should not be mistaken for a new
         # metric request.  If no trusted result summary exists, ask for the
         # missing context instead of inventing one.

@@ -83,6 +83,36 @@ def test_catalog_retrieval_selects_metric_tables_columns_and_join(catalog) -> No
     assert "`price` (numeric)" in selection.prompt
 
 
+def test_dimension_retrieval_closes_multi_hop_join_path(catalog) -> None:
+    selection = CatalogRetriever(catalog).retrieve(
+        "各品类平均履约天数和好评率", _user("analyst")
+    )
+
+    assert selection.trace.selected_metrics == (
+        "average_delivery_days",
+        "positive_review_rate",
+    )
+    assert set(selection.trace.selected_tables) == {
+        "fact_orders",
+        "fact_reviews",
+        "fact_order_items",
+        "dim_products",
+    }
+    assert set(selection.trace.selected_joins) == {
+        "orders_reviews",
+        "orders_items",
+        "items_products",
+    }
+
+
+def test_catalog_prompt_exposes_workspace_currency_contract(catalog) -> None:
+    selection = CatalogRetriever(catalog).retrieve("统计 GMV", _user("analyst"))
+
+    assert "BRL" in selection.prompt
+    assert "R$" in selection.prompt
+    assert "不得擅自换算" in selection.prompt
+
+
 def test_catalog_retrieval_is_stable_bounded_and_does_not_store_raw_question(catalog) -> None:
     retriever = CatalogRetriever(
         catalog, max_tables=2, max_columns_per_table=3, max_metrics=1, max_joins=1
@@ -249,6 +279,17 @@ def test_empty_question_is_rejected(catalog) -> None:
         pytest.param(
             lambda raw: raw["joins"][0].update(from_table="unknown_table"),
             id="unknown-join-table",
+        ),
+        pytest.param(
+            lambda raw: raw["metrics"][1].update(
+                dimension_policies={
+                    "payment_type": {
+                        "description": "bad",
+                        "requires_clarification": "yes",
+                    }
+                }
+            ),
+            id="invalid-dimension-policy",
         ),
     ],
 )

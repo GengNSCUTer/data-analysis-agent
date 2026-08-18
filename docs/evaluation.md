@@ -94,3 +94,15 @@ python scripts/run_demo_scenario_evaluation.py --database \
 建议的下一轮优化顺序是：修复 BRL/R$ 格式化；一旦已有通过的 `ResultContract` 就阻止无关后续
 SQL；增强多指标请求的 Catalog slice；在 Catalog 中显式冻结支付方式的拆分订单归因；再补 provider
 usage 采集并对这些失败样本做固定回归。
+
+## 修复后确定性回归（2026-08-18）
+
+本轮没有重复消耗在线 SiliconFlow 批次，而是先把四类失败抽象为通用机制并用离线合同覆盖：
+
+- `CatalogRetriever` 在可见 Join 图上闭包检索，能为维度目标补入最短桥接路径，并在预算不足时拒绝不完整上下文；
+- `MetricDefinition.dimension_policies` 冻结指标与维度的归因规则，要求澄清的维度在路由阶段不生成 SQL；
+- 可信结果合同通过后，预算台账记录状态并阻止同一请求的重复 SQL，不把抑制误记成 repair 或 permission failure；
+- Catalog 根级币种元数据和趋势表达规则注入模型上下文，避免工作区无关的全局货币替换。
+
+新增/更新专项断言后，相关测试为 **71 passed**，v2 路由/QueryPlan golden 为 **60/60 passed**。
+该结果证明确定性合同回归，不代表在线模型语义准确率；在线失败样本仍需在后续模型批次中复核。

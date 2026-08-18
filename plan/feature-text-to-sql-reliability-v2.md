@@ -48,6 +48,18 @@ clarification, executability, metric semantics, result contract, permission, gro
 latency and token status. It exposed concrete defects but does not establish an overall online-
 accuracy, repair-recovery, token-cost or P50/P95 claim.
 
+### Fixed reliability gaps (2026-08-18)
+
+The four observed defects are now represented as reusable contracts rather than case-specific
+branches. `CatalogRetriever` closes requested dimensions over the visible undirected Join graph
+with hard table/Join/prompt limits; `MetricDefinition.dimension_policies` lets a workspace require
+clarification for an ambiguous attribution rule; a successful `ResultContract` is recorded in
+`BudgetUsage` and suppresses redundant `run_sql` calls without consuming SQL budget; and optional
+Catalog currency metadata plus conservative trend wording are injected into the model context.
+The Olist YAML is only an adapter declaration. The focused regression suite is 71 passed and the
+60-case deterministic v2 suite remains 60/60. No new online SiliconFlow batch was consumed in this
+iteration, so online semantic accuracy and repair recovery remain unmeasured.
+
 ## 1. Requirements & Constraints
 
 - **REQ-001**: Preserve Vanna as the Agent, SSE, and native `<vanna-chat>` base. Do not create a

@@ -347,6 +347,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 已为请求台账增加受限阶段耗时证据（`route_catalog`、`llm_request`、`sql_policy`、`postgres_sql`），写入现有 `agent_runs.catalog_trace.performance` JSONB，不扩大数据库表结构。真实 SiliconFlow 多指标请求已成功返回 GMV、有效订单数、平均履约天数和好评率；一次代表性请求约 77.7 秒，其中两轮模型调用约 77.2 秒，PostgreSQL 约 0.39 秒，说明当前主要瓶颈在在线模型响应而非数据库或策略层。该数字是单次观测，不代表 P95 或模型准确率。
 - 已冻结 `evals/cases/text_to_sql_v2.yaml` 60 条版本化路由/QueryPlan golden，并新增 `scripts/run_text_to_sql_evaluation.py`；确定性离线结果为 **60/60 passed**。报告只保存结构化路由/计划字段和 case ID，`evals/reports/` 忽略，不含密钥、原始问题、模型回答或数据库结果。完整嵌入浏览器回归当前 **9 passed**，覆盖八方向缩放、最小化恢复和窄窗口长 Markdown。另已完成 24 条真实 SiliconFlow 小规模人工标签：24/24 有运行记录，路由 23 pass/1 fail、权限 24 pass、回答有据 17 pass/7 fail；明确记录 token 为数值或 unknown，不把未知 usage 记作零。
 - 尚未完成真实认证、组织行范围、第二个真实数据集、批量多次 SiliconFlow 语义评测和模型调用的流式/缓存优化；下一步只针对本轮的币种、Catalog slice、支付归因和合同后多余 SQL 问题做固定回归。
+- 2026-08-18 可靠性修复已完成：Catalog 维度检索使用可见 Join 图的 BFS 闭包，自动补齐多跳桥接表并在表/Join/Prompt 预算超限时 fail closed；MetricDefinition 支持 Catalog 声明的维度归因策略，支付方式等未冻结口径会在 SQL 前澄清；工作区 Catalog 可声明币种展示合同与趋势表述约束；ResultContract 通过后记录可信状态并抑制重复 `run_sql`，不消耗 SQL/工具预算且保留 `visualize_data`。Olist 仅更新适配器 YAML，不在运行时写 case 特判。专项 71 passed，v2 离线 golden 60/60；全量上游可选依赖测试仍不作为项目质量门。
 
 ### Phase 4：嵌入式交互与证据呈现（基础能力已完成）
 

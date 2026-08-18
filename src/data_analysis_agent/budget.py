@@ -105,6 +105,8 @@ class BudgetUsage:
     query_plan_prompt: str | None = None
     result_summary: str | None = None
     repair_evidence: dict[str, Any] | None = None
+    result_contract_satisfied: bool = False
+    extra_sql_suppressed: int = 0
     phase_timings_ms: dict[str, list[int]] = field(default_factory=dict)
     last_response_had_tool_calls: bool = False
     _tool_counts: dict[str, int] = field(default_factory=dict)
@@ -210,6 +212,14 @@ class BudgetUsage:
             return
         self.result_summary = str(summary).strip()[:1_200] or None
 
+    def mark_result_contract_satisfied(self) -> None:
+        """Mark that a server-validated result is available for this request."""
+        self.result_contract_satisfied = True
+
+    def suppress_extra_sql(self) -> None:
+        """Record a redundant SQL request without consuming SQL budget."""
+        self.extra_sql_suppressed += 1
+
     def record_repair(self, evidence: dict[str, Any]) -> None:
         """Persist bounded, server-generated SQL repair evidence with the run."""
         if not isinstance(evidence, dict):
@@ -255,6 +265,8 @@ class BudgetUsage:
             "query_plan": self.query_plan,
             "result_summary": self.result_summary,
             "repair_evidence": self.repair_evidence,
+            "result_contract_satisfied": self.result_contract_satisfied,
+            "extra_sql_suppressed": self.extra_sql_suppressed,
             "performance": self.performance_evidence(),
         }
 
@@ -280,6 +292,21 @@ class BudgetedToolRegistry(ToolRegistry):
 
     async def execute(self, tool_call: ToolCall, context: ToolContext) -> ToolResult:
         usage = context.metadata.get("budget_usage")
+        if (
+            isinstance(usage, BudgetUsage)
+            and usage.result_contract_satisfied
+            and tool_call.name == "run_sql"
+        ):
+            usage.suppress_extra_sql()
+            usage.finish()
+            return ToolResult(
+                success=True,
+                result_for_llm=(
+                    "本轮已有查询结果通过服务器结果合同；请基于已验证结果完成回答，"
+                    "不要再次执行 SQL。"
+                ),
+                metadata={"suppressed_after_result_contract": True},
+            )
         if isinstance(usage, BudgetUsage) and not usage.consume_tool(tool_call.name):
             message = (
                 "本次请求已达到工具调用预算，不能继续执行查询；请缩小问题范围后重试。"
@@ -327,4 +354,24 @@ class BudgetSafetyMiddleware(LlmMiddleware):
                 ),
                 finish_reason="trusted_query_failed",
             )
+        if usage.result_contract_satisfied and response.is_tool_call():
+            sql_calls = [
+                call for call in (response.tool_calls or ()) if call.name == "run_sql"
+            ]
+            if sql_calls:
+                usage.extra_sql_suppressed += len(sql_calls)
+                remaining = [
+                    call for call in (response.tool_calls or ()) if call.name != "run_sql"
+                ]
+                if not remaining:
+                    usage.finish()
+                return LlmResponse(
+                    content=(
+                        response.content
+                        or "查询结果已经通过服务器结果合同。请基于已验证结果给出最终回答。"
+                    ),
+                    tool_calls=remaining or None,
+                    finish_reason=("result_contract_satisfied" if not remaining else response.finish_reason),
+                    metadata={**response.metadata, "suppressed_after_result_contract": len(sql_calls)},
+                )
         return response
