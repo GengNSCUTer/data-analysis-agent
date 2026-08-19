@@ -177,6 +177,8 @@ token status。汇总如下：
 
 验证结果：语义 Catalog、QuestionRouter、预算、Trusted SQL 工具及路由评测专项 **71 passed**；`scripts/run_text_to_sql_evaluation.py` **60/60 passed**。全量 pytest 中的失败属于仓库内 Vanna 上游可选集成测试缺少 `ollama`、`chromadb`、数据库驱动或 fixture，不是本项目本轮改动引入的失败。
 
+2026-08-19 追加真实数据库与 SSE 边界测试：第一条有效 SQL 在真实 PostgreSQL 通过 `ResultValidator` 后，固定模型第二轮仍返回 `run_sql`；`BudgetSafetyMiddleware` 在 LLM 响应边界删除该调用，`BudgetedToolRegistry` 保持为兜底。Agent Run 最终仅记录 1 次 SQL/工具调用、1 条 allowed 审计、`completed` 终止原因和 `result_contract_satisfied`/`extra_sql_suppressed` 证据。项目专项为 **75 passed**，v2 golden 仍为 **60/60**；该固定回归不消耗 SiliconFlow，也不用于声称在线模型性能。
+
 ## 8. 未完成与限制
 
 - 当前 `ResultValidator` 的指标列、时间列、请求时间范围和 Join 元数据已经由服务器从

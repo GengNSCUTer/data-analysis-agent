@@ -79,6 +79,13 @@
 - 验证：`RUN_PROJECT_DB=1 DATA_ANALYSIS_POSTGRES_HOST=/tmp pytest tests/test_postgres_runner.py tests/test_postgres_run_recorder.py` 为 **5 passed**；ruff、compileall 和 diff check 通过。
 - 风险/下一步：测试验证的是确定性真实数据库链路，不包含在线模型多轮行为；后续可针对真实 SSE 请求补充一条模型发出重复工具调用的固定 mock 回归。
 
+### 2026-08-19：SSE 模型响应合同回归
+
+- 目标：验证冗余 SQL 在模型响应边界被抑制，而不只依赖工具注册表的最后防线。
+- 实现：用固定 `LlmService` 驱动真实 `Agent`、`BudgetedChatHandler`、PostgreSQL ConversationStore/RunRecorder 和生产 SQL 工具链；同一请求中第一轮模型调用受控 SQL，第二轮模型再次返回 `run_sql`。`BudgetSafetyMiddleware` 移除第二轮工具调用，Agent 正常完成。
+- 验证：真实数据库专项由 5 项扩展为 **6 passed**；合并预算、Catalog、路由、SQL 工具、PostgreSQL 与运行记录专项为 **75 passed**，v2 golden **60/60 passed**。断言 Agent Run 为 1 次 SQL/工具调用、`completed`、合同/抑制证据完整，且仅有 1 条 allowed 审计。
+- 后续：接着处理在线模型的 token usage 可观测性和长响应超时边界；仍不据固定模型回归声称在线准确率或延迟分位数。
+
 ### 2026-08-06：证据路由、QueryPlan 与可信结果记忆
 
 - 目标：按 Text-to-SQL 改造顺序拆开“是否命中指标”和“是否允许查库”，补齐多指标查询的服务器计划，并让结果追问只依赖可信结果证据。
