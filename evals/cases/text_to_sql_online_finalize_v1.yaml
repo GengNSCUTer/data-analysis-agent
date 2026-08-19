@@ -1,0 +1,13 @@
+version: "1.0-finalization-regression"
+source_suite: text_to_sql_v2.yaml
+dataset: olist_brazilian_ecommerce
+dataset_version: olist-kaggle-v2-2026-08-03
+catalog_version: olist-catalog-v1
+model_provider: siliconflow
+model: deepseek-ai/DeepSeek-V4-Flash
+scope_note: >-
+  One-case live regression for server-side trusted-result finalization. The
+  source suite retains the question and deterministic query contract.
+cases:
+  - source_id: data_005
+    review_focus: "Validated monthly GMV should end without a model-generated trend claim or extra model turn."

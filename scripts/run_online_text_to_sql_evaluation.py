@@ -331,6 +331,11 @@ def _redacted_evidence(row: dict[str, Any] | None) -> dict[str, Any]:
     trace = row.get("catalog_trace") or {}
     repair = row.get("repair_evidence") or {}
     performance = trace.get("performance") if isinstance(trace, dict) else None
+    deterministic_result_finalized = bool(
+        trace.get("deterministic_result_finalized")
+        if isinstance(trace, dict)
+        else False
+    )
     has_usage = any(
         row.get(field) is not None
         for field in ("input_tokens", "output_tokens", "total_tokens")
@@ -358,6 +363,7 @@ def _redacted_evidence(row: dict[str, Any] | None) -> dict[str, Any]:
         "repair_attempted": bool(repair.get("repair_attempted")) if isinstance(repair, dict) else False,
         "repair_succeeded": bool(repair.get("repair_execution_status") == "succeeded") if isinstance(repair, dict) else False,
         "repair_terminal_reason": repair.get("terminal_reason") if isinstance(repair, dict) else None,
+        "deterministic_result_finalized": deterministic_result_finalized,
     }
 
 

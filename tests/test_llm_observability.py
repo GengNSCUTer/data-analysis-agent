@@ -49,6 +49,11 @@ class ProviderTimeoutLlm(ImmediateLlm):
         raise APITimeoutError(request=object())
 
 
+class FailingLlm(ImmediateLlm):
+    async def send_request(self, request: LlmRequest) -> LlmResponse:
+        raise AssertionError("trusted result finalization must avoid the provider")
+
+
 def _request() -> LlmRequest:
     return LlmRequest(messages=[], user=User(id="observability-test"))
 
@@ -108,7 +113,7 @@ async def test_llm_timeout_without_trusted_result_is_safe_and_terminal() -> None
 
 @pytest.mark.asyncio
 async def test_llm_timeout_after_trusted_result_keeps_verified_result_available() -> None:
-    usage = BudgetUsage(RequestBudget())
+    usage = BudgetUsage(RequestBudget(deterministic_result_finalization=False))
     usage.mark_result_contract_satisfied()
     token = CURRENT_BUDGET.set(usage)
     try:
@@ -147,3 +152,44 @@ async def test_provider_timeout_uses_the_same_safe_terminal_response() -> None:
             "error_type": "llm_timeout",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_validated_result_is_finalized_without_a_provider_summary() -> None:
+    usage = BudgetUsage(RequestBudget())
+    usage.mark_result_contract_satisfied()
+    usage.set_result_summary(
+        '已通过结果合同的可信结果摘要：{"metric_ids":["gmv"],'
+        '"columns":["time","gmv"],"row_count":2}'
+    )
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        response = await ObservedLlmService(FailingLlm(), timeout_seconds=1).send_request(
+            _request()
+        )
+    finally:
+        CURRENT_BUDGET.reset(token)
+
+    assert response.finish_reason == "trusted_result_finalized"
+    assert "返回行数：2" in (response.content or "")
+    assert "持续上升" not in (response.content or "")
+    assert usage.deterministic_result_finalized is True
+    assert usage.llm_observations == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_chart_path_keeps_provider_summary_available() -> None:
+    usage = BudgetUsage(RequestBudget())
+    usage.mark_result_contract_satisfied()
+    usage.disable_deterministic_result_finalization()
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        response = await ObservedLlmService(ImmediateLlm(), timeout_seconds=1).send_request(
+            _request()
+        )
+    finally:
+        CURRENT_BUDGET.reset(token)
+
+    assert response.content == "ok"
+    assert usage.deterministic_result_finalized is False
+    assert usage.llm_observations[0]["status"] == "completed"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+import re
 from time import perf_counter
 
 from vanna.components import RichTextComponent, SimpleTextComponent, StatusCardComponent, UiComponent
@@ -29,6 +30,10 @@ TOOL_FREE_SYSTEM_PROMPT = """
 请说明需要进入受控数据查询流程，并请用户提供指标、时间范围或维度。回答应简洁、中文、可执行；
 如果问题属于当前工作区的指标定义，应优先依赖服务器提供的 Semantic Catalog，而不是猜测口径。
 """.strip()
+
+_EXPLICIT_VISUALIZATION_REQUEST = re.compile(
+    r"图表|图形|可视化|柱状图|折线图|饼图|散点图|画图|绘图"
+)
 
 
 class BudgetedChatHandler(ChatHandler):
@@ -59,6 +64,10 @@ class BudgetedChatHandler(ChatHandler):
         }
         usage = request.request_context.metadata["budget_usage"]
         usage.set_input(request.message)
+        if _EXPLICIT_VISUALIZATION_REQUEST.search(request.message):
+            # A requested chart needs the model's next turn to select the
+            # already-validated result artifact; do not preempt that workflow.
+            usage.disable_deterministic_result_finalization()
         tracker_token = CURRENT_BUDGET.set(usage)
         run = None
         try:

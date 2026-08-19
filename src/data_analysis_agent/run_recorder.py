@@ -126,6 +126,10 @@ class PostgresRunRecorder:
             catalog_trace["result_contract_satisfied"] = True
         if values.get("extra_sql_suppressed"):
             catalog_trace["extra_sql_suppressed"] = values["extra_sql_suppressed"]
+        if values.get("deterministic_result_finalized"):
+            catalog_trace["deterministic_result_finalized"] = True
+        if values.get("deterministic_result_finalization_disabled"):
+            catalog_trace["deterministic_result_finalization_disabled"] = True
         if values.get("llm_observations"):
             catalog_trace["llm_observations"] = values["llm_observations"]
         connection = self._connect()

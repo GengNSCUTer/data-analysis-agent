@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.run_online_text_to_sql_evaluation import _load_live_cases
+from scripts.run_online_text_to_sql_evaluation import _load_live_cases, _redacted_evidence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,3 +29,18 @@ def test_targeted_online_manifest_loads_six_source_contracts() -> None:
         "data_005",
         "multi_001",
     ]
+
+
+def test_redacted_evidence_includes_finalization_without_content() -> None:
+    evidence = _redacted_evidence(
+        {
+            "catalog_trace": {
+                "deterministic_result_finalized": True,
+                "result_summary": "must not appear in the report",
+            },
+            "repair_evidence": {},
+        }
+    )
+
+    assert evidence["deterministic_result_finalized"] is True
+    assert "result_summary" not in evidence

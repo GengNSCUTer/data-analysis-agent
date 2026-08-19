@@ -65,6 +65,7 @@ async def test_run_recorder_links_query_audit_to_finished_run() -> None:
         )
         usage.mark_result_contract_satisfied()
         usage.suppress_extra_sql()
+        usage.mark_deterministic_result_finalized()
         usage.record_llm_observation(
             status="completed",
             elapsed_ms=42,
@@ -119,6 +120,7 @@ async def test_run_recorder_links_query_audit_to_finished_run() -> None:
         }
         assert run_row[3]["result_contract_satisfied"] is True
         assert run_row[3]["extra_sql_suppressed"] == 1
+        assert run_row[3]["deterministic_result_finalized"] is True
         assert run_row[3]["llm_observations"] == [
             {
                 "status": "completed",

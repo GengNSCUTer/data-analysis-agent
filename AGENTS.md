@@ -92,6 +92,12 @@
 - 验证：LLM/线程/评测器单测 **8 passed**；项目 PostgreSQL/run recorder **10 passed**；真实 SSE 定向复测 **6/6 Agent Run、0 客户端错误**，路由 6/6、SQL 可执行 5/5、结果合同 5/5、权限 6/6，5 条查库请求各 1 条 SQL，usage 均 reported，总客户端耗时 499,174 ms。人工语义/最终 grounded 仍有 3 条 pending，不发布在线准确率或 P50/P95。
 - 边界：在线模型仍可能有较高延迟；人工标签尚未覆盖全部定向结果；报告只保存在被忽略的 `evals/reports/`，不含问题、回答、SQL、数据行或密钥。下一步是将定向失败转成固定回归并优化模型轮次/缓存，而不是扩大 SQL 修复次数。
 
+### 2026-08-19：可信结果确定性收口
+
+- 实现：未显式要求图表时，已通过 `ResultValidator` 的 SQL 结果由服务端依据结果合同收口，不再调用模型生成最终摘要；收口不产生趋势、币种或因果判断。图表请求显式禁用收口，保留 `visualize_data`。运行台账和在线脱敏评测均记录 `deterministic_result_finalized`。
+- 验证：真实 `data_005` SSE 回归为 `deterministic_result_finalized=true`、1 条实际 PostgreSQL 执行、2 次模型调用、68,516 ms；首次模型 SQL 被 AST Policy 以敏感 `order_id` 拒绝，第二次有效，因此两轮不是冗余总结。单测 25 passed（1 skipped）、PostgreSQL 10 passed、v2 60/60。
+- 边界：这是一个定向单次时延观测，不是 P50/P95；服务端收口优先保证“表格可核对、结论不越界”，更丰富的业务解释应通过后续明确追问和可信结果摘要完成。
+
 ### 2026-08-06：证据路由、QueryPlan 与可信结果记忆
 
 - 目标：按 Text-to-SQL 改造顺序拆开“是否命中指标”和“是否允许查库”，补齐多指标查询的服务器计划，并让结果追问只依赖可信结果证据。

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from time import perf_counter
 from typing import Any, AsyncGenerator
 
@@ -51,6 +52,15 @@ class ObservedLlmService(LlmService):
         self.model = getattr(delegate, "model", "unknown")
 
     async def send_request(self, request: LlmRequest) -> LlmResponse:
+        usage = CURRENT_BUDGET.get()
+        if usage is not None and usage.can_finalize_trusted_result():
+            usage.mark_deterministic_result_finalized()
+            usage.finish()
+            return LlmResponse(
+                content=_trusted_result_completion(usage.result_summary),
+                finish_reason="trusted_result_finalized",
+                metadata={"deterministic_result_finalized": True},
+            )
         started = perf_counter()
         try:
             response = await asyncio.wait_for(
@@ -146,3 +156,33 @@ class ObservedLlmService(LlmService):
                 finish_reason=finish_reason,
                 error_type=error_type,
             )
+
+
+def _trusted_result_completion(summary: str | None) -> str:
+    """Render only server-derived result metadata after a validated SQL result.
+
+    The DataFrame component has already been emitted by the SQL tool.  This
+    concise closing text deliberately avoids model-generated trend, currency,
+    or causal claims that the result contract cannot prove.
+    """
+    payload: dict[str, Any] = {}
+    prefix = "已通过结果合同的可信结果摘要："
+    if summary and summary.startswith(prefix):
+        try:
+            decoded = json.loads(summary[len(prefix) :])
+            if isinstance(decoded, dict):
+                payload = decoded
+        except json.JSONDecodeError:
+            pass
+    columns = [str(value) for value in payload.get("columns", [])[:16]]
+    metric_ids = [str(value) for value in payload.get("metric_ids", [])[:16]]
+    row_count = payload.get("row_count")
+    lines = ["查询已完成，以上表格已通过服务器结果合同校验。"]
+    if isinstance(row_count, int):
+        lines.append(f"- 返回行数：{row_count}")
+    if columns:
+        lines.append(f"- 返回列：{', '.join(f'`{column}`' for column in columns)}")
+    if metric_ids:
+        lines.append(f"- 已核对指标：{', '.join(f'`{metric}`' for metric in metric_ids)}")
+    lines.append("- 本轮未生成额外模型总结，避免对趋势、币种或因果作出超出结果证据的推断。")
+    return "\n".join(lines)

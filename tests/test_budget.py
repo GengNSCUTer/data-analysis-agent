@@ -115,6 +115,23 @@ async def test_result_contract_suppresses_redundant_sql_but_keeps_visualization(
     assert usage.termination_reason == "running"
 
 
+@pytest.mark.asyncio
+async def test_validated_result_does_not_consume_a_model_round_when_finalized() -> None:
+    usage = BudgetUsage(RequestBudget())
+    usage.mark_result_contract_satisfied()
+    from data_analysis_agent.budget import CURRENT_BUDGET
+
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        await BudgetSafetyMiddleware().before_llm_request(
+            LlmRequest(messages=[], user=User(id="u"))
+        )
+    finally:
+        CURRENT_BUDGET.reset(token)
+
+    assert usage.llm_rounds_used == 0
+
+
 def test_result_contract_state_is_explicit_and_serialized() -> None:
     usage = BudgetUsage(RequestBudget())
     usage.mark_result_contract_satisfied()

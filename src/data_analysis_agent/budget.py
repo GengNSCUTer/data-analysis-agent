@@ -44,9 +44,12 @@ class RequestBudget:
     max_context_messages: int = 40
     max_output_tokens: int = 1_200
     llm_timeout_seconds: float = 120.0
+    deterministic_result_finalization: bool = True
 
     def __post_init__(self) -> None:
         for name, value in self.__dict__.items():
+            if isinstance(value, bool):
+                continue
             if value <= 0:
                 raise ValueError(f"{name} must be positive")
         if self.max_sql_calls > self.max_tool_calls:
@@ -59,6 +62,17 @@ class RequestBudget:
         def read(name: str, default: int) -> int:
             value = os.getenv(name)
             return default if value is None else int(value)
+
+        def read_bool(name: str, default: bool) -> bool:
+            value = os.getenv(name)
+            if value is None:
+                return default
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+            raise ValueError(f"{name} must be a boolean value")
 
         return cls(
             max_tool_iterations=read(
@@ -84,6 +98,10 @@ class RequestBudget:
                     "DATA_ANALYSIS_LLM_TIMEOUT_SECONDS",
                     str(cls.llm_timeout_seconds),
                 )
+            ),
+            deterministic_result_finalization=read_bool(
+                "DATA_ANALYSIS_DETERMINISTIC_RESULT_FINALIZATION",
+                cls.deterministic_result_finalization,
             ),
         )
 
@@ -114,6 +132,8 @@ class BudgetUsage:
     repair_evidence: dict[str, Any] | None = None
     result_contract_satisfied: bool = False
     extra_sql_suppressed: int = 0
+    deterministic_result_finalized: bool = False
+    deterministic_result_finalization_disabled: bool = False
     llm_observations: list[dict[str, Any]] = field(default_factory=list)
     phase_timings_ms: dict[str, list[int]] = field(default_factory=dict)
     last_response_had_tool_calls: bool = False
@@ -247,6 +267,22 @@ class BudgetUsage:
         """Mark that a server-validated result is available for this request."""
         self.result_contract_satisfied = True
 
+    def can_finalize_trusted_result(self) -> bool:
+        """Whether the next Agent turn may avoid an ungrounded model summary."""
+        return (
+            self.budget.deterministic_result_finalization
+            and self.result_contract_satisfied
+            and not self.deterministic_result_finalized
+            and not self.deterministic_result_finalization_disabled
+        )
+
+    def mark_deterministic_result_finalized(self) -> None:
+        self.deterministic_result_finalized = True
+
+    def disable_deterministic_result_finalization(self) -> None:
+        """Keep the model loop available when a user explicitly requests a chart."""
+        self.deterministic_result_finalization_disabled = True
+
     def suppress_extra_sql(self) -> None:
         """Record a redundant SQL request without consuming SQL budget."""
         self.extra_sql_suppressed += 1
@@ -298,6 +334,8 @@ class BudgetUsage:
             "repair_evidence": self.repair_evidence,
             "result_contract_satisfied": self.result_contract_satisfied,
             "extra_sql_suppressed": self.extra_sql_suppressed,
+            "deterministic_result_finalized": self.deterministic_result_finalized,
+            "deterministic_result_finalization_disabled": self.deterministic_result_finalization_disabled,
             "llm_observations": list(self.llm_observations),
             "performance": self.performance_evidence(),
         }
@@ -357,7 +395,7 @@ class BudgetSafetyMiddleware(LlmMiddleware):
 
     async def before_llm_request(self, request: LlmRequest) -> LlmRequest:
         usage = CURRENT_BUDGET.get()
-        if usage is not None:
+        if usage is not None and not usage.can_finalize_trusted_result():
             usage.record_llm_round()
         return request
 

@@ -192,6 +192,19 @@ asyncio 与 OpenAI `APITimeoutError`、可信结果前后超时；OpenAI 适配�
 准确率、修复恢复率或 P50/P95。报告与人工标签位于被忽略的 `evals/reports/`，不含问题原文、
 回答原文、SQL、数据行或密钥。
 
+## 2026-08-19 可信结果确定性收口
+
+为避免已验证表格后的模型自由总结把波动序列描述为“持续上升”，新增默认开启的
+`deterministic_result_finalization`。在无显式图表请求时，`ObservedLlmService` 检测到
+`ResultValidator` 已通过的结果合同后直接返回服务器生成的收口说明，包含行数、合同列和指标 ID，
+不生成趋势、币种或因果判断；该步骤不调用 provider、不增加 LLM round。图表请求由请求边界显式
+关闭该优化，继续允许模型选择 `visualize_data`。
+
+`data_005` 真实 SSE 定向回归记录 `deterministic_result_finalized=true`、1 条实际 PostgreSQL
+执行、2 次模型调用、68,516 ms 客户端耗时；两次模型调用分别对应一次敏感投影 Policy 拒绝和一次
+有效 SQL，不包含最终总结调用。相关单测 25 passed（1 个未启用数据库时跳过），真实 PostgreSQL
+专项 10 passed，v2 golden 60/60 passed。该回归不替代人工语义审阅，且不用于发布 P50/P95。
+
 ## 8. 未完成与限制
 
 - 当前 `ResultValidator` 的指标列、时间列、请求时间范围和 Join 元数据已经由服务器从
