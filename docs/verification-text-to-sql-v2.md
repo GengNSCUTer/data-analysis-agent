@@ -224,7 +224,7 @@ asyncio 与 OpenAI `APITimeoutError`、可信结果前后超时；OpenAI 适配�
   不能替代真实模型评测。
 - Olist 仍是当前 adapter/展示案例，`WorkspaceProfile` 尚未通过第二个真实数据集验证；演示会话不是生产认证，
   尚未实现组织级 RLS。
-- 2026-08-19 投影修复：内部 CTE 可使用敏感键完成 Join、过滤和聚合，最外层仍只能返回
+- 2026-08-19 投影修复：内部 CTE 或受控聚合子查询可使用敏感键完成 Join、过滤和聚合，最外层仍只能返回
   `required_result_columns`，且拒绝敏感结果列、别名、`GROUP BY` 和 `ORDER BY`。专项 50 passed、
   v2 golden 60/60、真实 PostgreSQL 链路 11 passed；真实 `data_005` 为 1 SQL/1 LLM 轮次/0
   rejected audit/1 allowed audit，结果合同通过并完成确定性收口。修复后单次耗时约 93 秒，不用于

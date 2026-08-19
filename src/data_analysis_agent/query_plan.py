@@ -218,7 +218,7 @@ class QueryPlan:
                 "额外投影任何明细列、标识列或未声明字段。"
             ),
             (
-                "- 敏感标识列仅可在内部 CTE/子查询中用于 JOIN ON、WHERE、"
+                "- 敏感标识列仅可在内部 CTE 或受控聚合子查询中用于 JOIN ON、WHERE、"
                 "COUNT/COUNT DISTINCT 或其他受控聚合；不得原样出现在顶层最终 SELECT、"
                 "最终结果别名、GROUP BY 或 ORDER BY 中。内部 CTE 如需按关联键保持事实粒度，"
                 "可以保留该键，但外层最终结果必须丢弃它。"
