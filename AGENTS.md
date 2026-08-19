@@ -72,6 +72,13 @@
 - 验证：相关专项测试 71 passed；`run_text_to_sql_evaluation.py` 60/60 passed；全量 pytest 的失败来自 Vanna 上游可选依赖/缺失 fixture，不计入本项目质量门。
 - 后续：补充真实 runner 对合同状态的集成证据，复跑固定失败样本，随后再评估在线模型延迟、usage 采集和第二数据集适配。
 
+### 2026-08-19：真实 PostgreSQL 合同链路集成测试
+
+- 目标：验证结果合同状态不是仅存在于单元测试或内存对象，而是能沿真实 SQL 工具链和 Agent Run 持久化链路闭环。
+- 实现：新增 `test_result_contract_state_flows_through_real_runner_and_budget_registry`，使用项目专属 PostgreSQL 执行真实有效订单聚合，经 `ResultValidator` 通过后检查 `ToolContext`/`BudgetUsage` 状态；再次提交 `run_sql` 时由 `BudgetedToolRegistry` 抑制，不增加 SQL/tool budget，且查询审计不产生第二条记录。运行记录将合同通过和冗余 SQL 抑制计入既有 `catalog_trace` JSONB，不改数据库表结构。
+- 验证：`RUN_PROJECT_DB=1 DATA_ANALYSIS_POSTGRES_HOST=/tmp pytest tests/test_postgres_runner.py tests/test_postgres_run_recorder.py` 为 **5 passed**；ruff、compileall 和 diff check 通过。
+- 风险/下一步：测试验证的是确定性真实数据库链路，不包含在线模型多轮行为；后续可针对真实 SSE 请求补充一条模型发出重复工具调用的固定 mock 回归。
+
 ### 2026-08-06：证据路由、QueryPlan 与可信结果记忆
 
 - 目标：按 Text-to-SQL 改造顺序拆开“是否命中指标”和“是否允许查库”，补齐多指标查询的服务器计划，并让结果追问只依赖可信结果证据。

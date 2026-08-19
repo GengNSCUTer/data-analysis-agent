@@ -122,6 +122,10 @@ class PostgresRunRecorder:
             catalog_trace["performance"] = performance
         if values.get("result_summary"):
             catalog_trace["result_summary"] = values["result_summary"]
+        if values.get("result_contract_satisfied"):
+            catalog_trace["result_contract_satisfied"] = True
+        if values.get("extra_sql_suppressed"):
+            catalog_trace["extra_sql_suppressed"] = values["extra_sql_suppressed"]
         connection = self._connect()
         try:
             with connection:
