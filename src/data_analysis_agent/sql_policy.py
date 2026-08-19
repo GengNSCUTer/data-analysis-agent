@@ -188,6 +188,13 @@ class SqlPolicy:
             raise PolicyViolation(f"columns are not allowed: {', '.join(sorted(unknown_columns))}")
         if role == "analyst":
             for select in statement.find_all(exp.Select):
+                # A CTE is an internal relational stage.  Its grouping/join
+                # keys never reach the caller unless an outer SELECT projects
+                # them, and that outer projection is checked below.  Rejecting
+                # the internal key here forced otherwise safe grain-preserving
+                # queries into an unnecessary model retry.
+                if select.find_ancestor(exp.CTE) is not None:
+                    continue
                 for projection in select.expressions:
                     if isinstance(projection, exp.Star):
                         raise PolicyViolation("analyst queries cannot project all columns")
@@ -200,6 +207,26 @@ class SqlPolicy:
                     if blocked:
                         raise PolicyViolation(
                             f"analyst cannot project sensitive columns: {', '.join(sorted(blocked))}"
+                        )
+                    alias = projection.alias if isinstance(projection, exp.Alias) else ""
+                    if alias and alias.lower() in self.sensitive_projection_columns:
+                        raise PolicyViolation(
+                            f"analyst cannot use sensitive columns as result aliases: {alias.lower()}"
+                        )
+
+                for clause_name in ("group", "order"):
+                    clause = select.args.get(clause_name)
+                    if clause is None:
+                        continue
+                    blocked = {
+                        column.name.lower()
+                        for column in clause.find_all(exp.Column)
+                        if column.name.lower() in self.sensitive_projection_columns
+                    }
+                    if blocked:
+                        raise PolicyViolation(
+                            f"analyst cannot use sensitive columns in {clause_name.upper()} BY: "
+                            f"{', '.join(sorted(blocked))}"
                         )
 
         for function in statement.find_all(exp.Func):

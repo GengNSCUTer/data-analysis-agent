@@ -87,6 +87,43 @@ def test_policy_allows_read_only_cte(policy: SqlPolicy) -> None:
     assert "LIMIT 200" in decision.final_sql
 
 
+def test_policy_allows_internal_cte_join_key_but_not_final_projection(policy: SqlPolicy) -> None:
+    decision = policy.evaluate(
+        "WITH order_gmv AS ("
+        "SELECT order_id, SUM(price) AS gmv FROM fact_order_items GROUP BY order_id) "
+        "SELECT o.order_purchase_timestamp AS time, SUM(g.gmv) AS gmv "
+        "FROM fact_orders o JOIN order_gmv g ON o.order_id = g.order_id "
+        "GROUP BY o.order_purchase_timestamp",
+        role="analyst",
+    )
+
+    assert "order_gmv" in decision.final_sql
+    assert "LIMIT 200" in decision.final_sql
+
+    with pytest.raises(PolicyViolation, match="sensitive columns"):
+        policy.evaluate(
+            "WITH order_gmv AS ("
+            "SELECT order_id, SUM(price) AS gmv FROM fact_order_items GROUP BY order_id) "
+            "SELECT g.order_id, g.gmv FROM order_gmv g",
+            role="analyst",
+        )
+
+
+@pytest.mark.parametrize(
+    "sql, message",
+    [
+        ("SELECT COUNT(order_id) AS order_id FROM fact_orders", "result aliases"),
+        ("SELECT customer_state FROM dim_customers GROUP BY order_id, customer_state", "GROUP BY"),
+        ("SELECT customer_state FROM dim_customers ORDER BY order_id", "ORDER BY"),
+    ],
+)
+def test_policy_rejects_sensitive_top_level_alias_group_and_order(
+    policy: SqlPolicy, sql: str, message: str
+) -> None:
+    with pytest.raises(PolicyViolation, match=message):
+        policy.evaluate(sql, role="analyst")
+
+
 def test_policy_allows_qualified_cte_outputs_but_rejects_unknown_outputs(
     policy: SqlPolicy,
 ) -> None:

@@ -1,0 +1,13 @@
+version: "1.0-sensitive-projection-regression"
+source_suite: text_to_sql_v2.yaml
+dataset: olist_brazilian_ecommerce
+dataset_version: olist-kaggle-v2-2026-08-03
+catalog_version: olist-catalog-v1
+model_provider: siliconflow
+model: deepseek-ai/DeepSeek-V4-Flash
+scope_note: >-
+  One-case live regression for server-owned final-projection grounding. The
+  source suite retains the question and deterministic query contract.
+cases:
+  - source_id: data_005
+    review_focus: "Monthly GMV should produce an allowed first SQL candidate without projecting an internal sensitive join key."

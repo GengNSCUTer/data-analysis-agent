@@ -33,6 +33,10 @@ def test_scalar_multi_metric_plan_requires_one_cte_per_metric() -> None:
     )
     assert plan.required_result_columns == plan.metric_ids
     assert "每个指标先在自己的事实粒度独立聚合" in plan.prompt_context()
+    assert "顶层最终 SELECT 的结果列白名单" in plan.prompt_context()
+    assert "必须且只能返回上述白名单列" in plan.prompt_context()
+    assert "不得原样出现在顶层最终 SELECT" in plan.prompt_context()
+    assert "内部 CTE 如需按关联键保持事实粒度" in plan.prompt_context()
     assert plan.as_dict()["metric_plans"][0]["grain"]
 
 
@@ -55,6 +59,9 @@ def test_grouped_plan_detects_dimension_and_time_grain() -> None:
     assert plan.time_grain == "month"
     assert plan.required_result_columns[-1] == "time"
     assert plan.time_range == {"start": "2017-01-01", "end": "2017-12-31"}
+    prompt = plan.prompt_context()
+    assert "`customer_state`, `paid_order_count`, `gmv`, `time`" in prompt
+    assert "最终结果别名、GROUP BY 或 ORDER BY 中" in prompt
 
 
 def test_single_metric_plan_does_not_invent_dimensions() -> None:

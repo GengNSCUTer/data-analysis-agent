@@ -1071,10 +1071,26 @@ class CatalogRetriever:
             lines.append("\n### 允许的 Join 路径")
             for join in joins:
                 lines.append(f"- `{join.join_id}`：{join.on}（{join.cardinality}；{join.reason}）")
+        sensitive_columns = tuple(
+            f"{table.table_id}.{name}"
+            for table in tables
+            for name in columns_by_table.get(table.table_id, ())
+            if table.columns_by_name[name].sensitive
+        )
         lines.extend(
             [
                 "\n### 生成约束",
                 "- 只生成单条 PostgreSQL 只读查询；不得读取 Catalog 未列出的表/列，不得 SELECT *。",
+                (
+                    "- 本轮敏感列："
+                    f"{', '.join(f'`{column}`' for column in sensitive_columns) or '无'}。"
+                ),
+                (
+                    "- 敏感列只可在内部计算中用于允许的关联、过滤或聚合；绝不能作为"
+                    "最终结果列、最终结果别名、最终查询层的 GROUP BY 或 ORDER BY 键。"
+                    "内部 CTE 可保留必要关联键以维持事实粒度，但外层必须丢弃它。Catalog 列出"
+                    "它们是为了正确计算，不代表允许展示。"
+                ),
                 "- 跨订单、商品、支付和评价事实表时，先在各自事实粒度聚合，避免一对多 Join 放大。",
                 "- 生成 SQL 后仍必须通过项目 AST Policy、PostgreSQL reader role、超时和行数限制。",
                 "- 只有结果序列严格支持时才使用‘持续上升/持续下降’；否则应描述为整体变化、最高/最低或存在波动。",

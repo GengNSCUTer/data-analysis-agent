@@ -133,3 +133,15 @@
   `git diff --check` 通过。未将在线模型准确率、token 成本或完整自动修复生命周期写成已完成能力。
 - GitHub：`cc8b688 feat(text-to-sql): wire semantic result contract` 已推送到 `main`；后续同步文档提交
   会继续记录在飞书项目文档。
+
+### 2026-08-19：敏感关联键投影误拒绝修复
+
+- 问题：真实 `data_005` 首轮 SQL 在内部 CTE 中按 `order_id` 聚合并用于 Join，最终只返回
+  `time/gmv`；旧 AST Policy 将 CTE 内部关联键误当作对外投影，造成一次不必要的模型重试。
+- 实现：SQL Policy 区分内部 CTE/子查询阶段与最外层结果阶段。CTE 内可保留敏感键以保持事实
+  粒度；最外层仍拒绝敏感结果列、结果别名、`GROUP BY` 和 `ORDER BY`，并继续执行 Catalog、
+  reader role 和 ResultValidator 边界。QueryPlan/Catalog Prompt 同步明确顶层结果列白名单和
+  内部键使用规则，不绑定 Olist 字段名。
+- 验证：专项 **50 passed**，v2 golden **60/60**，真实 PostgreSQL 链路 **11 passed**；真实
+  SiliconFlow 回归由 `2 SQL/2 LLM rounds/1 rejected audit` 收敛为 `1 SQL/1 LLM round/0
+  rejected audit`，结果合同通过、1 条 allowed 审计、`deterministic_result_finalized=true`。

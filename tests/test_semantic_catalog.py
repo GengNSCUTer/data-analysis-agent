@@ -113,6 +113,15 @@ def test_catalog_prompt_exposes_workspace_currency_contract(catalog) -> None:
     assert "不得擅自换算" in selection.prompt
 
 
+def test_catalog_prompt_marks_sensitive_columns_as_internal_only(catalog) -> None:
+    selection = CatalogRetriever(catalog).retrieve("统计 GMV", _user("analyst"))
+
+    assert "本轮敏感列" in selection.prompt
+    assert "`fact_order_items.order_id`" in selection.prompt
+    assert "只可在内部计算中用于允许的关联、过滤或聚合" in selection.prompt
+    assert "绝不能作为最终结果列、最终结果别名、最终查询层的 GROUP BY 或 ORDER BY 键" in selection.prompt
+
+
 def test_catalog_retrieval_is_stable_bounded_and_does_not_store_raw_question(catalog) -> None:
     retriever = CatalogRetriever(
         catalog, max_tables=2, max_columns_per_table=3, max_metrics=1, max_joins=1
