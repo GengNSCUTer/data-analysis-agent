@@ -350,6 +350,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 2026-08-18 可靠性修复已完成：Catalog 维度检索使用可见 Join 图的 BFS 闭包，自动补齐多跳桥接表并在表/Join/Prompt 预算超限时 fail closed；MetricDefinition 支持 Catalog 声明的维度归因策略，支付方式等未冻结口径会在 SQL 前澄清；工作区 Catalog 可声明币种展示合同与趋势表述约束；ResultContract 通过后记录可信状态并抑制重复 `run_sql`，不消耗 SQL/工具预算且保留 `visualize_data`。Olist 仅更新适配器 YAML，不在运行时写 case 特判。专项 71 passed，v2 离线 golden 60/60；全量上游可选依赖测试仍不作为项目质量门。
 - 2026-08-19 真实 PostgreSQL 合同链路集成测试已补齐：通过 `TrustedRunSqlTool`、`SecurePostgresRunner`、`ResultValidator` 和 `BudgetedToolRegistry` 执行真实有效订单聚合；首条 SQL 合同通过后，第二条 `run_sql` 被抑制且 SQL/tool 使用量仍为 1，查询审计仅保留一条 allowed 记录。`PostgresRunRecorder` 同时将 `result_contract_satisfied` 与 `extra_sql_suppressed` 写入现有 `catalog_trace` JSONB。项目 PostgreSQL 专项 **5 passed**（`RUN_PROJECT_DB=1`）。
 - 2026-08-19 SSE/Agent 边界回归已补齐：固定 LLM 在同一 `BudgetedChatHandler` 请求中先返回有效 SQL、再返回冗余 SQL；真实 PostgreSQL 首次执行与结果合同通过后，`BudgetSafetyMiddleware` 在模型响应边界移除第二个工具调用，Agent Run 仅记录 1 次 SQL/工具调用和 1 条 allowed 审计，`catalog_trace` 持久化合同与抑制证据。该测试不调用 SiliconFlow；项目专项加 PostgreSQL 链路 **75 passed**，v2 离线 golden **60/60**。
+- 2026-08-19 LLM 可观测性与定向在线复测：`ObservedLlmService` 增加 OpenAI/httpx/asyncio 超时归一、单轮安全结束和有界 provider usage/耗时观测；Vanna OpenAI-compatible 同步请求移入工作线程，避免真实 SiliconFlow 阻塞 FastAPI 事件循环。新增 6 条显式 opt-in 定向清单与评测器门槛测试；真实 SSE 结果为 6/6 Agent Run、0 客户端错误、路由 6/6、5 条查库请求各 1 条 SQL、SQL 可执行 5/5、结果合同 5/5、权限 6/6，5 条 usage 均 reported，总客户端耗时 499,174 ms。人工语义/最终表述 3 条 pending、1 条趋势表述 fail；不据此宣称在线准确率或 P95。`PostgresRunRecorder` 已验证观测写入既有 `catalog_trace` JSONB，数据库 schema 不变。
 
 ### Phase 4：嵌入式交互与证据呈现（基础能力已完成）
 

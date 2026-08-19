@@ -179,6 +179,19 @@ token status。汇总如下：
 
 2026-08-19 追加真实数据库与 SSE 边界测试：第一条有效 SQL 在真实 PostgreSQL 通过 `ResultValidator` 后，固定模型第二轮仍返回 `run_sql`；`BudgetSafetyMiddleware` 在 LLM 响应边界删除该调用，`BudgetedToolRegistry` 保持为兜底。Agent Run 最终仅记录 1 次 SQL/工具调用、1 条 allowed 审计、`completed` 终止原因和 `result_contract_satisfied`/`extra_sql_suppressed` 证据。项目专项为 **75 passed**，v2 golden 仍为 **60/60**；该固定回归不消耗 SiliconFlow，也不用于声称在线模型性能。
 
+## 2026-08-19 LLM 观测与定向在线复测
+
+新增 `ObservedLlmService`、provider usage/耗时观测和单轮超时边界；Vanna OpenAI-compatible
+同步调用改用工作线程，确保 FastAPI 事件循环可交付取消。专项单测覆盖 reported/unknown usage、
+asyncio 与 OpenAI `APITimeoutError`、可信结果前后超时；OpenAI 适配器线程边界单测通过。
+`PostgresRunRecorder` 集成断言确认 `llm_observations` 进入既有 `catalog_trace` JSONB。
+
+定向在线结果：6/6 Agent Run，0 客户端错误；路由 6/6，SQL 可执行 5/5，结果合同 5/5，权限 6/6；
+5 条查库请求各执行 1 条 SQL，provider token usage 均为 reported，总客户端耗时 499,174 ms。
+人工语义/最终 grounded labels 有 3 条 pending，1 条趋势表述标为 fail；该小样本不代表总体
+准确率、修复恢复率或 P50/P95。报告与人工标签位于被忽略的 `evals/reports/`，不含问题原文、
+回答原文、SQL、数据行或密钥。
+
 ## 8. 未完成与限制
 
 - 当前 `ResultValidator` 的指标列、时间列、请求时间范围和 Join 元数据已经由服务器从

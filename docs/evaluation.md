@@ -95,6 +95,23 @@ python scripts/run_demo_scenario_evaluation.py --database \
 SQL；增强多指标请求的 Catalog slice；在 Catalog 中显式冻结支付方式的拆分订单归因；再补 provider
 usage 采集并对这些失败样本做固定回归。
 
+## 2026-08-19 定向复测与超时观测
+
+针对上一轮暴露的多跳 Catalog、重复 SQL、时间序列和多指标概览风险，从同一 v2 source suite
+选择 6 条 case（`data_010`、`multi_003`、`data_014`、`data_016`、`data_005`、`multi_001`）。
+运行器新增 `--allow-small-sample`，默认的 20--30 条批量评测门槛不变；定向 manifest 只保存
+source ID 和 review focus，问题原文仍只存在于版本化 source suite。
+
+本轮使用真实 FastAPI/SSE 和 SiliconFlow `deepseek-ai/DeepSeek-V4-Flash`，6/6 Agent Run、0
+客户端错误；支付归因样本正确零 SQL 澄清，5 条查库样本均只执行 1 条 SQL，SQL 可执行 5/5、
+结果合同 5/5、权限合规 6/6、路由 6/6。provider usage 在 5 条查库样本中均为 `reported`，
+总客户端耗时约 499 秒；人工语义/最终表述仍有 3 条 pending，不据此发布在线准确率或 P95。
+
+可靠性方面，OpenAI-compatible Vanna 适配器的同步 HTTP 调用已移入工作线程，避免阻塞事件循环，
+`ObservedLlmService` 统一识别 asyncio/OpenAI/httpx 超时并记录有界 `llm_observations`；超时无可信
+结果时只返回安全提示，有可信结果时保留已验证结果。观测写入既有 `agent_runs.catalog_trace`
+JSONB，不修改数据库表结构。
+
 ## 修复后确定性回归（2026-08-18）
 
 本轮没有重复消耗在线 SiliconFlow 批次，而是先把四类失败抽象为通用机制并用离线合同覆盖：

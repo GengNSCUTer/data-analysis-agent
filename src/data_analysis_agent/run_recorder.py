@@ -126,6 +126,8 @@ class PostgresRunRecorder:
             catalog_trace["result_contract_satisfied"] = True
         if values.get("extra_sql_suppressed"):
             catalog_trace["extra_sql_suppressed"] = values["extra_sql_suppressed"]
+        if values.get("llm_observations"):
+            catalog_trace["llm_observations"] = values["llm_observations"]
         connection = self._connect()
         try:
             with connection:

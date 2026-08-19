@@ -174,3 +174,24 @@ def test_budget_usage_records_bounded_phase_timing_evidence() -> None:
     assert usage.as_dict()["performance"] == {
         "llm_request": {"count": 2, "total_ms": 200, "last_ms": 80, "max_ms": 120}
     }
+
+
+def test_budget_usage_records_bounded_llm_observations_without_prompt_content() -> None:
+    usage = BudgetUsage(RequestBudget())
+    usage.record_llm_observation(
+        status="completed",
+        elapsed_ms=42,
+        usage_status="unknown",
+        finish_reason="stop",
+    )
+
+    evidence = usage.as_dict()
+    assert evidence["llm_observations"] == [
+        {
+            "status": "completed",
+            "elapsed_ms": 42,
+            "usage_status": "unknown",
+            "finish_reason": "stop",
+        }
+    ]
+    assert "question" not in repr(evidence)

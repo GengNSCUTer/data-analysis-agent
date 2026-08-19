@@ -43,6 +43,7 @@ class RequestBudget:
     max_context_chars: int = 12_000
     max_context_messages: int = 40
     max_output_tokens: int = 1_200
+    llm_timeout_seconds: float = 120.0
 
     def __post_init__(self) -> None:
         for name, value in self.__dict__.items():
@@ -78,6 +79,12 @@ class RequestBudget:
             max_output_tokens=read(
                 "DATA_ANALYSIS_MAX_OUTPUT_TOKENS", cls.max_output_tokens
             ),
+            llm_timeout_seconds=float(
+                os.getenv(
+                    "DATA_ANALYSIS_LLM_TIMEOUT_SECONDS",
+                    str(cls.llm_timeout_seconds),
+                )
+            ),
         )
 
 
@@ -107,6 +114,7 @@ class BudgetUsage:
     repair_evidence: dict[str, Any] | None = None
     result_contract_satisfied: bool = False
     extra_sql_suppressed: int = 0
+    llm_observations: list[dict[str, Any]] = field(default_factory=list)
     phase_timings_ms: dict[str, list[int]] = field(default_factory=dict)
     last_response_had_tool_calls: bool = False
     _tool_counts: dict[str, int] = field(default_factory=dict)
@@ -152,6 +160,29 @@ class BudgetUsage:
 
     def record_llm_response(self, has_tool_calls: bool) -> None:
         self.last_response_had_tool_calls = has_tool_calls
+
+    def record_llm_observation(
+        self,
+        *,
+        status: str,
+        elapsed_ms: int,
+        usage_status: str,
+        finish_reason: str | None = None,
+        error_type: str | None = None,
+    ) -> None:
+        """Record bounded provider status without storing prompts or responses."""
+        if len(self.llm_observations) >= 16:
+            return
+        observation: dict[str, Any] = {
+            "status": str(status)[:32],
+            "elapsed_ms": max(0, int(elapsed_ms)),
+            "usage_status": str(usage_status)[:16],
+        }
+        if finish_reason:
+            observation["finish_reason"] = str(finish_reason)[:64]
+        if error_type:
+            observation["error_type"] = str(error_type)[:64]
+        self.llm_observations.append(observation)
 
     def consume_tool(self, tool_name: str) -> bool:
         """Consume one individual call, including calls in one model response."""
@@ -267,6 +298,7 @@ class BudgetUsage:
             "repair_evidence": self.repair_evidence,
             "result_contract_satisfied": self.result_contract_satisfied,
             "extra_sql_suppressed": self.extra_sql_suppressed,
+            "llm_observations": list(self.llm_observations),
             "performance": self.performance_evidence(),
         }
 

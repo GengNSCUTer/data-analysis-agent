@@ -86,6 +86,12 @@
 - 验证：真实数据库专项由 5 项扩展为 **6 passed**；合并预算、Catalog、路由、SQL 工具、PostgreSQL 与运行记录专项为 **75 passed**，v2 golden **60/60 passed**。断言 Agent Run 为 1 次 SQL/工具调用、`completed`、合同/抑制证据完整，且仅有 1 条 allowed 审计。
 - 后续：接着处理在线模型的 token usage 可观测性和长响应超时边界；仍不据固定模型回归声称在线准确率或延迟分位数。
 
+### 2026-08-19：LLM 可观测性与 6 条定向 SiliconFlow 复测
+
+- 实现：`ObservedLlmService` 统一 asyncio/OpenAI/httpx timeout，记录 bounded `llm_observations`；Vanna OpenAI-compatible 同步调用移到工作线程，避免阻塞事件循环。新增 targeted manifest 和 `--allow-small-sample`，默认批量评测门槛仍为 20--30 条。
+- 验证：LLM/线程/评测器单测 **8 passed**；项目 PostgreSQL/run recorder **10 passed**；真实 SSE 定向复测 **6/6 Agent Run、0 客户端错误**，路由 6/6、SQL 可执行 5/5、结果合同 5/5、权限 6/6，5 条查库请求各 1 条 SQL，usage 均 reported，总客户端耗时 499,174 ms。人工语义/最终 grounded 仍有 3 条 pending，不发布在线准确率或 P50/P95。
+- 边界：在线模型仍可能有较高延迟；人工标签尚未覆盖全部定向结果；报告只保存在被忽略的 `evals/reports/`，不含问题、回答、SQL、数据行或密钥。下一步是将定向失败转成固定回归并优化模型轮次/缓存，而不是扩大 SQL 修复次数。
+
 ### 2026-08-06：证据路由、QueryPlan 与可信结果记忆
 
 - 目标：按 Text-to-SQL 改造顺序拆开“是否命中指标”和“是否允许查库”，补齐多指标查询的服务器计划，并让结果追问只依赖可信结果证据。

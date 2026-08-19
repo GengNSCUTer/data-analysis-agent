@@ -157,13 +157,18 @@ class DemoSseClient:
         }
 
 
-def _load_live_cases(case_file: Path, source_file: Path) -> tuple[dict[str, Any], list[LiveCase]]:
+def _load_live_cases(
+    case_file: Path, source_file: Path, *, allow_small_sample: bool = False
+) -> tuple[dict[str, Any], list[LiveCase]]:
     manifest = yaml.safe_load(case_file.read_text(encoding="utf-8")) or {}
     source = yaml.safe_load(source_file.read_text(encoding="utf-8")) or {}
     source_cases = {str(case["id"]): case for case in source.get("cases", [])}
     selected = manifest.get("cases") or []
     identifiers = [str(item.get("source_id", "")) for item in selected]
-    if not 20 <= len(selected) <= 30:
+    if allow_small_sample:
+        if not 1 <= len(selected) <= 12:
+            raise ValueError("targeted live evaluation must select 1–12 cases")
+    elif not 20 <= len(selected) <= 30:
         raise ValueError("live evaluation must select 20–30 representative cases")
     if len(identifiers) != len(set(identifiers)):
         raise ValueError("live evaluation case IDs must be unique")
@@ -382,9 +387,12 @@ def run_suite(
     role: str,
     timeout_seconds: int,
     pause_seconds: float,
+    allow_small_sample: bool = False,
     manual_labels: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    manifest, cases = _load_live_cases(case_file, source_file)
+    manifest, cases = _load_live_cases(
+        case_file, source_file, allow_small_sample=allow_small_sample
+    )
     settings = PostgresConnectionSettings.from_environment()
     client = DemoSseClient(base_url, role, timeout_seconds)
     results: list[dict[str, Any]] = []
@@ -442,11 +450,14 @@ def refresh_report(
     *,
     case_file: Path,
     source_file: Path,
+    allow_small_sample: bool = False,
     manual_labels: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Refresh only local run evidence and labels without making model calls."""
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    _, cases = _load_live_cases(case_file, source_file)
+    _, cases = _load_live_cases(
+        case_file, source_file, allow_small_sample=allow_small_sample
+    )
     case_map = {case.case_id: case for case in cases}
     settings = PostgresConnectionSettings.from_environment()
     for result in report.get("results", []):
@@ -475,6 +486,11 @@ def main() -> None:
     parser.add_argument("--timeout-seconds", type=int, default=180)
     parser.add_argument("--pause-seconds", type=float, default=1.0)
     parser.add_argument(
+        "--allow-small-sample",
+        action="store_true",
+        help="Allow a 1–12 case targeted regression; never relaxes the default 20–30 case gate.",
+    )
+    parser.add_argument(
         "--manual-labels",
         type=Path,
         help="Optional YAML map of human-reviewed labels; never contains raw answers or SQL.",
@@ -487,7 +503,9 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     load_dotenv(ROOT / ".env")
-    _, cases = _load_live_cases(args.cases, args.source_cases)
+    _, cases = _load_live_cases(
+        args.cases, args.source_cases, allow_small_sample=args.allow_small_sample
+    )
     manual_labels = _load_manual_labels(
         args.manual_labels, {case.case_id for case in cases}
     )
@@ -496,6 +514,7 @@ def main() -> None:
             args.refresh_report,
             case_file=args.cases,
             source_file=args.source_cases,
+            allow_small_sample=args.allow_small_sample,
             manual_labels=manual_labels,
         )
     else:
@@ -506,6 +525,7 @@ def main() -> None:
             role=args.role,
             timeout_seconds=args.timeout_seconds,
             pause_seconds=max(0.0, args.pause_seconds),
+            allow_small_sample=args.allow_small_sample,
             manual_labels=manual_labels,
         )
     args.output.parent.mkdir(parents=True, exist_ok=True)

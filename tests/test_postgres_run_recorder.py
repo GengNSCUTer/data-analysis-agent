@@ -65,6 +65,12 @@ async def test_run_recorder_links_query_audit_to_finished_run() -> None:
         )
         usage.mark_result_contract_satisfied()
         usage.suppress_extra_sql()
+        usage.record_llm_observation(
+            status="completed",
+            elapsed_ms=42,
+            usage_status="reported",
+            finish_reason="stop",
+        )
         usage.finish()
         await recorder.finish(run, usage)
 
@@ -113,6 +119,14 @@ async def test_run_recorder_links_query_audit_to_finished_run() -> None:
         }
         assert run_row[3]["result_contract_satisfied"] is True
         assert run_row[3]["extra_sql_suppressed"] == 1
+        assert run_row[3]["llm_observations"] == [
+            {
+                "status": "completed",
+                "elapsed_ms": 42,
+                "usage_status": "reported",
+                "finish_reason": "stop",
+            }
+        ]
         assert run_row[4] is not None
         assert audit_row == (run.run_id, "allowed")
     finally:

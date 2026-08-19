@@ -41,6 +41,7 @@ from data_analysis_agent.metric_context import (
     OLIST_WORKSPACE,
     SYSTEM_PROMPT,
 )
+from data_analysis_agent.llm_observability import ObservedLlmService
 from data_analysis_agent.postgres_runner import (
     PostgresConnectionSettings,
     SecurePostgresRunner,
@@ -137,10 +138,17 @@ def create_app() -> FastAPI:
     role_resolver = DemoRoleResolver(signer)
     registry = BudgetedToolRegistry()
     query_file_system = LocalFileSystem(str(QUERY_RESULTS_DIRECTORY))
-    llm_service = OpenAILlmService(
+    provider_llm_service = OpenAILlmService(
         api_key=api_key,
         base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
         model=model_name,
+        timeout=budget.llm_timeout_seconds,
+    )
+    # Vanna's streaming adapter currently cannot carry provider usage into the
+    # final response. The outer SSE transport remains enabled; model calls are
+    # non-streaming so usage and timeout evidence remain observable.
+    llm_service = ObservedLlmService(
+        provider_llm_service, timeout_seconds=budget.llm_timeout_seconds
     )
     registry.register_local_tool(
         TrustedRunSqlTool(
@@ -172,6 +180,7 @@ def create_app() -> FastAPI:
             max_tool_iterations=budget.max_tool_iterations,
             max_tokens=budget.max_output_tokens,
             temperature=0.0,
+            stream_responses=False,
             input_placeholder="输入经营分析问题",
             idle_status_message="已就绪",
             idle_status_detail="选择示例问题或直接输入",

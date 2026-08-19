@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import asyncio
 from typing import Any, AsyncGenerator, Dict, List, Optional, cast
 
 from vanna.core.llm import (
@@ -69,8 +70,12 @@ class OpenAILlmService(LlmService):
         """Send a non-streaming request to OpenAI and return the response."""
         payload = self._build_payload(request)
 
-        # Call the API synchronously; this function is async but we can block here.
-        resp = self._client.chat.completions.create(**payload, stream=False)
+        # The OpenAI SDK client is synchronous.  Keep it off the event loop so
+        # request-level cancellation and timeout policies can still be applied
+        # by callers such as the trusted Agent runtime.
+        resp = await asyncio.to_thread(
+            self._client.chat.completions.create, **payload, stream=False
+        )
 
         if not resp.choices:
             return LlmResponse(content=None, tool_calls=None, finish_reason=None)

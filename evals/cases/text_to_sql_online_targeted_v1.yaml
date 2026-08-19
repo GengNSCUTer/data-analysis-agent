@@ -1,0 +1,23 @@
+version: "1.0-targeted"
+source_suite: text_to_sql_v2.yaml
+dataset: olist_brazilian_ecommerce
+dataset_version: olist-kaggle-v2-2026-08-03
+catalog_version: olist-catalog-v1
+model_provider: siliconflow
+model: deepseek-ai/DeepSeek-V4-Flash
+scope_note: >-
+  Six-case regression selection. Questions and expected contracts remain in the
+  versioned source suite; this file stores only case IDs and review focus.
+cases:
+  - source_id: data_010
+    review_focus: "Payment attribution should clarify before SQL when one order can have multiple payment rows."
+  - source_id: multi_003
+    review_focus: "Category delivery/review grouping should retrieve the complete multi-hop join path."
+  - source_id: data_014
+    review_focus: "Grouped multi-metric result should satisfy both aliases and suppress redundant SQL."
+  - source_id: data_016
+    review_focus: "Monthly review-rate result should preserve the requested year and time alias."
+  - source_id: data_005
+    review_focus: "Monthly GMV should preserve time series semantics and workspace currency display."
+  - source_id: multi_001
+    review_focus: "Scalar overview should return all four requested metrics with the correct currency wording."
