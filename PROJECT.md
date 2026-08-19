@@ -404,6 +404,7 @@ v1 不引入 Redis。
 
 | 日期 | 事项 | 结论 |
 | --- | --- | --- |
+| 2026-08-19 | SSE 澄清流状态收尾 | 修复嵌入式窗口在 SQL 前澄清/归因阻断只返回 `status_card` 时，SSE 已正常结束但状态栏仍停留在 `Sending message...` 的问题。前端将服务端 `status_bar_update` 同步到 Lit 状态，避免后续渲染恢复旧 loading；对未发送终态状态更新的普通用户请求，在正常 SSE 或 polling 结束时清空临时 loading，同时保留 starter UI 和服务端 error/success/warning 终态。新增确定性 Playwright 回归，验证澄清卡片可见、状态回到 `idle`、输入可继续使用；修正历史结果预览测试的 Shadow DOM 读取断言。Web Component 构建通过，嵌入窗口回归 **10 passed, 1 skipped**，服务已重启至 `127.0.0.1:32010`。 |
 | 2026-08-19 | 可信结果呈现与归因边界 | 已验证的分组结果由服务器展示中文概览、样例行和完整表格提示，替代机器式审计结尾，且不重新引入自由模型总结；支付方式 GMV 与品类履约/好评率的未冻结一对多归因均在 SQL 前阻断，并明确要求配置 Catalog 归属/分摊规则而非承诺自然语言追问即可执行。确定性专项 77 passed、v2 golden 60/60，Playwright 直接渲染验证表格语义和桌面无横向溢出。 |
 | 2026-08-02 | 项目立项 | 确定为 Python 可信数据分析 Agent，不继续以 Java 本地生活平台作为主项目。 |
 | 2026-08-02 | Agent 选型 | 选择 Vanna，而非 PandasAI。 |

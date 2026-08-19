@@ -336,7 +336,7 @@ export class VannaStatusBar extends LitElement {
     `
   ];
 
-  @property() status: 'idle' | 'working' | 'error' | 'success' = 'idle';
+  @property() status: 'idle' | 'working' | 'error' | 'success' | 'warning' = 'idle';
   @property() message = '';
   @property() detail = '';
   @property() theme = 'light';

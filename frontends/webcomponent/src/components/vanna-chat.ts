@@ -16,6 +16,8 @@ export interface ConversationHistoryMessage {
   timestamp?: string;
 }
 
+type ChatStatus = 'idle' | 'working' | 'error' | 'success' | 'warning';
+
 @customElement('vanna-chat')
 export class VannaChat extends LitElement {
   static styles = [
@@ -793,7 +795,7 @@ export class VannaChat extends LitElement {
   @property() startingState: 'normal' | 'maximized' | 'minimized' = 'normal';
 
   @state() private currentMessage = '';
-  @state() private status: 'idle' | 'working' | 'error' | 'success' = 'idle';
+  @state() private status: ChatStatus = 'idle';
   @state() private statusMessage = '';
   @state() private statusDetail = '';
   private _windowState: 'normal' | 'maximized' | 'minimized' = 'normal';
@@ -1185,8 +1187,7 @@ export class VannaChat extends LitElement {
         await this.processChunk(chunk);
       }
 
-      // Backend is responsible for final status via StatusBarUpdateComponent
-      // No frontend status clearing here
+      this.settleCompletedStream(request);
 
     } catch (error) {
       console.warn('SSE streaming failed, falling back to polling:', error);
@@ -1200,7 +1201,7 @@ export class VannaChat extends LitElement {
           await this.processChunk(chunk);
         }
 
-        // Backend is responsible for final status via StatusBarUpdateComponent
+        this.settleCompletedStream(request);
 
       } catch (pollError) {
         // Only set error status if polling also fails (connection error)
@@ -1231,6 +1232,8 @@ export class VannaChat extends LitElement {
       bubbles: true,
       composed: true
     }));
+
+    this.syncStatusBarUpdate(chunk);
 
     // Handle rich components via ComponentManager
     if (chunk.rich && this.componentManager) {
@@ -1298,6 +1301,41 @@ export class VannaChat extends LitElement {
         // and progress updates arrive through the rich component pipeline.
         break;
     }
+  }
+
+  /**
+   * Keep the component state in sync with server-owned UI updates. The rich
+   * component manager applies these updates directly to the status element,
+   * but its parent would otherwise retain the initial working state and could
+   * restore stale loading text on the next Lit render.
+   */
+  private syncStatusBarUpdate(chunk: ChatStreamChunk): void {
+    if (chunk.rich?.type !== 'status_bar_update') return;
+
+    const data = chunk.rich.data || {};
+    const status = data.status;
+    if (!this.isChatStatus(status)) return;
+
+    this.setStatus(
+      status,
+      typeof data.message === 'string' ? data.message : '',
+      typeof data.detail === 'string' ? data.detail : '',
+    );
+  }
+
+  /**
+   * A normal SSE completion is authoritative even when a short-circuiting
+   * server path only streams a result/status card and no status_bar_update.
+   * Starter UI requests intentionally keep their server-provided idle state.
+   */
+  private settleCompletedStream(request: { message?: unknown }): void {
+    if (!String(request.message || '').trim() || this.status !== 'working') return;
+    this.clearStatus();
+  }
+
+  private isChatStatus(value: unknown): value is ChatStatus {
+    return value === 'idle' || value === 'working' || value === 'error'
+      || value === 'success' || value === 'warning';
   }
 
 

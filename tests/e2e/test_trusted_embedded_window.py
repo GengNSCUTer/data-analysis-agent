@@ -80,6 +80,37 @@ def _mock_text_sse(conversation_id: str, request_id: str, content: str) -> str:
     return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\ndata: [DONE]\n\n"
 
 
+def _mock_status_card_sse(
+    conversation_id: str,
+    request_id: str,
+    title: str,
+    description: str,
+) -> str:
+    """Build the no-SQL clarification response used by the trusted handler."""
+    chunk = {
+        "rich": {
+            "id": f"e2e-status-card-{request_id}",
+            "type": "status_card",
+            "lifecycle": "create",
+            "data": {
+                "title": title,
+                "status": "warning",
+                "description": description,
+                "icon": "!",
+            },
+            "children": [],
+            "timestamp": 0,
+            "visible": True,
+            "interactive": False,
+        },
+        "simple": {"type": "text", "data": {"text": description}},
+        "conversation_id": conversation_id,
+        "request_id": request_id,
+        "timestamp": 0,
+    }
+    return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\ndata: [DONE]\n\n"
+
+
 def test_browser_multiturn_clarification_preserves_conversation_contract(page) -> None:
     """Exercise the embedded UI contract with deterministic SSE responses.
 
@@ -151,6 +182,55 @@ def test_browser_multiturn_clarification_preserves_conversation_contract(page) -
     assert "当前轮次未执行 SQL" in rendered
     assert "2017 年时间范围" in rendered
     assert "按州返回结果" in rendered
+    assert not console_errors
+
+
+def test_browser_clarification_stream_clears_transient_sending_status(page) -> None:
+    """A completed no-SQL clarification must not leave the input in loading UI."""
+
+    browser_page, console_errors = page
+
+    def mock_chat(route) -> None:
+        payload = json.loads(route.request.post_data or "{}")
+        conversation_id = payload.get("conversation_id", "")
+        request_id = payload.get("request_id", "e2e-request")
+        if not payload.get("message"):
+            body = "data: [DONE]\n\n"
+        else:
+            body = _mock_status_card_sse(
+                conversation_id,
+                request_id,
+                "需要补充信息",
+                "当前工作区尚未冻结该指标按维度汇总的归属口径。",
+            )
+        route.fulfill(
+            status=200,
+            headers={"Content-Type": "text/event-stream"},
+            body=body,
+        )
+
+    browser_page.route("**/api/vanna/v2/chat_sse", mock_chat)
+    chat = _open_normal_window(browser_page)
+    input_box = chat.locator("textarea.message-input")
+    input_box.fill("各品类平均履约天数和好评率")
+    chat.locator("button.send-button").click()
+
+    browser_page.wait_for_function(
+        "([needle]) => document.querySelector('vanna-chat')?.shadowRoot?.textContent.includes(needle)",
+        arg=["当前工作区尚未冻结"],
+    )
+    browser_page.wait_for_function(
+        """() => {
+          const chat = document.querySelector('vanna-chat');
+          const status = chat?.shadowRoot?.querySelector('vanna-status-bar');
+          return status?.message !== 'Sending message...';
+        }"""
+    )
+
+    status_bar = chat.locator("vanna-status-bar")
+    assert status_bar.evaluate("element => element.status") == "idle"
+    assert status_bar.evaluate("element => element.message") == ""
+    assert input_box.is_enabled()
     assert not console_errors
 
 
@@ -510,14 +590,15 @@ def test_trusted_result_preview_renders_as_a_readable_table(page) -> None:
     )
     table = chat.locator("table.text-markdown-table")
     table.wait_for()
-    browser_page.wait_for_function(
-        """() => document.querySelector('vanna-chat')?.shadowRoot?.textContent.includes(
-          '已返回 75 个分组，完整明细见上表')"""
+    rendered_preview = chat.evaluate(
+        """element => Array.from(element.shadowRoot?.querySelectorAll('vanna-message') || [])
+          .map(message => message.shadowRoot?.textContent || '').join('\\n')"""
     )
 
     assert table.locator("th").all_inner_texts() == ["商品品类", "平均履约天数", "好评率"]
     assert table.locator("td").all_inner_texts() == ["health_beauty", "2.50 天", "91.87%"]
-    assert "不代表排名或趋势" in chat.evaluate("element => element.shadowRoot.textContent")
+    assert "已返回 75 个分组，完整明细见上表" in rendered_preview
+    assert "不代表排名或趋势" in rendered_preview
     widths = browser_page.evaluate(
         """() => ({
           clientWidth: document.documentElement.clientWidth,
