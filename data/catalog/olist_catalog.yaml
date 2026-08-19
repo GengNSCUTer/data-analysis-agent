@@ -169,6 +169,10 @@ metrics:
     source_columns: [fact_orders.order_status, fact_order_items.price]
     default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
     allowed_dimensions: [date, customer_state, customer_city, product_category_name, seller_id, payment_type]
+    dimension_policies:
+      payment_type:
+        description: "一个订单可能对应多条支付记录；必须先明确 GMV 按支付方式拆分、分摊或归属的业务规则，禁止自行使用 payment_sequential=1 代替归属口径。"
+        requires_clarification: true
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 
@@ -199,6 +203,10 @@ metrics:
     source_columns: [fact_orders.order_purchase_timestamp, fact_orders.order_delivered_customer_date]
     default_filters: ["fact_orders.order_delivered_customer_date IS NOT NULL"]
     allowed_dimensions: [date, customer_state, customer_city, seller_id, product_category_name]
+    dimension_policies:
+      product_category_name:
+        description: "一个订单可能包含多个品类；按品类汇总履约天数时，必须先明确是按订单归属、按商品行加权还是采用其他分摊规则，禁止直接通过订单商品行重复订单履约时长。"
+        requires_clarification: true
     recommended_chart: line
     role_visibility: [analyst, admin]
 
@@ -212,6 +220,10 @@ metrics:
     source_columns: [fact_reviews.review_score]
     default_filters: ["fact_reviews.review_score BETWEEN 1 AND 5"]
     allowed_dimensions: [date, customer_state, customer_city, seller_id, product_category_name]
+    dimension_policies:
+      product_category_name:
+        description: "一条订单评价可能关联多个品类；按品类汇总好评率时，必须先明确评价归属或分摊规则，禁止通过订单商品行复制评价后直接计算。"
+        requires_clarification: true
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 

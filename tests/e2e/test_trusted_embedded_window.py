@@ -479,6 +479,55 @@ def test_long_history_markdown_keeps_a_scrollable_view_after_restore(page) -> No
     assert not console_errors
 
 
+def test_trusted_result_preview_renders_as_a_readable_table(page) -> None:
+    """A validated grouped result must not degrade into opaque audit metadata."""
+    browser_page, console_errors = page
+    browser_page.route(
+        "**/api/vanna/v2/chat_sse",
+        lambda route: route.fulfill(
+            status=200,
+            headers={"Content-Type": "text/event-stream"},
+            body="data: [DONE]\n\n",
+        ),
+    )
+    preview = (
+        "### 查询结果\n\n"
+        "已返回 75 个分组，完整明细见上表。\n"
+        "以下为表格中的前几条记录，不代表排名或趋势：\n\n"
+        "| 商品品类 | 平均履约天数 | 好评率 |\n"
+        "| --- | --- | --- |\n"
+        "| health_beauty | 2.50 天 | 91.87% |\n\n"
+        "结果已通过服务器结果合同的字段、数值及适用范围/截断检查。"
+        "为避免超出结果证据，本轮未额外推断趋势、排名、币种或因果。"
+    )
+    chat = _open_normal_window(browser_page)
+    chat.evaluate(
+        """(element, markdown) => element.loadConversation('e2e-trusted-preview', [
+          { role: 'user', content: '各品类平均履约天数和好评率' },
+          { role: 'assistant', content: markdown }
+        ])""",
+        preview,
+    )
+    table = chat.locator("table.text-markdown-table")
+    table.wait_for()
+    browser_page.wait_for_function(
+        """() => document.querySelector('vanna-chat')?.shadowRoot?.textContent.includes(
+          '已返回 75 个分组，完整明细见上表')"""
+    )
+
+    assert table.locator("th").all_inner_texts() == ["商品品类", "平均履约天数", "好评率"]
+    assert table.locator("td").all_inner_texts() == ["health_beauty", "2.50 天", "91.87%"]
+    assert "不代表排名或趋势" in chat.evaluate("element => element.shadowRoot.textContent")
+    widths = browser_page.evaluate(
+        """() => ({
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: document.documentElement.scrollWidth
+        })"""
+    )
+    assert widths["scrollWidth"] == widths["clientWidth"]
+    assert not console_errors
+
+
 def test_mobile_window_is_adaptive_without_horizontal_overflow(page) -> None:
     browser_page, console_errors = page
     browser_page.set_viewport_size({"width": 390, "height": 844})

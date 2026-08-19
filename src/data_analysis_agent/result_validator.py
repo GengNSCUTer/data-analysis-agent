@@ -60,6 +60,7 @@ def build_result_summary(
     metric_ids: Sequence[str] = (),
     required_columns: Sequence[str] = (),
     column_aliases: Mapping[str, Sequence[str]] | None = None,
+    column_labels: Mapping[str, str] | None = None,
     max_rows: int = 8,
     max_chars: int = 1_200,
 ) -> str:
@@ -77,6 +78,7 @@ def build_result_summary(
         raise ValueError("summary limits must be positive")
 
     aliases = column_aliases or {}
+    labels = column_labels or {}
     allowed: list[str] = []
     for name in (*required_columns, *metric_ids):
         text = str(name).strip()
@@ -108,6 +110,9 @@ def build_result_summary(
         "time_start": validation.time_start,
         "time_end": validation.time_end,
         "sample_rows": rows,
+        "column_labels": {
+            column: _display_label(column, labels) for column in selected_columns[:16]
+        },
     }
     # Prefer complete sample rows, then progressively reduce the preview if a
     # provider returns unexpectedly verbose values.
@@ -137,6 +142,20 @@ def _summary_scalar(value: Any) -> Any:
     if isinstance(value, (int, bool, str)):
         return value if not isinstance(value, str) else value[:160]
     return str(value)[:160]
+
+
+def _display_label(column: str, labels: Mapping[str, str]) -> str:
+    """Resolve a Catalog label even when SQL uses a casing-only alias."""
+    if column in labels:
+        return str(labels[column])[:80]
+    normalized = "".join(character for character in column.lower() if character.isalnum())
+    for candidate, label in labels.items():
+        candidate_normalized = "".join(
+            character for character in str(candidate).lower() if character.isalnum()
+        )
+        if candidate_normalized == normalized:
+            return str(label)[:80]
+    return column.replace("_", " ")[:80]
 
 
 class ResultValidator:

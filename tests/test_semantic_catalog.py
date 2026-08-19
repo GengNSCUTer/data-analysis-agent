@@ -12,6 +12,7 @@ from data_analysis_agent.semantic_catalog import (
     CatalogLoader,
     CatalogRetriever,
     CatalogValidationError,
+    ResultContract,
 )
 from data_analysis_agent.sql_policy import ANALYTICS_COLUMNS
 from vanna.core.user import User
@@ -103,6 +104,16 @@ def test_dimension_retrieval_closes_multi_hop_join_path(catalog) -> None:
         "orders_items",
         "items_products",
     }
+
+
+def test_result_contract_derives_display_labels_from_catalog(catalog) -> None:
+    question = "各州 GMV 和有效订单数"
+    selection = CatalogRetriever(catalog).retrieve(question, _user("analyst"))
+    contract = ResultContract.from_selection(selection, question, catalog=catalog)
+
+    assert contract.result_column_labels["gmv"] == "商品成交额"
+    assert contract.result_column_labels["paid_order_count"] == "有效订单数"
+    assert contract.result_column_labels["customer_state"] == "州"
 
 
 def test_catalog_prompt_exposes_workspace_currency_contract(catalog) -> None:

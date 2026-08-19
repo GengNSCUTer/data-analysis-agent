@@ -159,11 +159,11 @@ class ObservedLlmService(LlmService):
 
 
 def _trusted_result_completion(summary: str | None) -> str:
-    """Render only server-derived result metadata after a validated SQL result.
+    """Render a bounded user-facing conclusion from a validated result only.
 
-    The DataFrame component has already been emitted by the SQL tool.  This
-    concise closing text deliberately avoids model-generated trend, currency,
-    or causal claims that the result contract cannot prove.
+    The SQL tool has already emitted the complete table.  This renderer is
+    deliberately deterministic: it can quote values from the validated sample
+    rows, but never infer a ranking, trend, currency, or causal relationship.
     """
     payload: dict[str, Any] = {}
     prefix = "已通过结果合同的可信结果摘要："
@@ -176,13 +176,79 @@ def _trusted_result_completion(summary: str | None) -> str:
             pass
     columns = [str(value) for value in payload.get("columns", [])[:16]]
     metric_ids = [str(value) for value in payload.get("metric_ids", [])[:16]]
+    labels = payload.get("column_labels", {})
+    labels = labels if isinstance(labels, dict) else {}
+    sample_rows = payload.get("sample_rows", [])
+    sample_rows = sample_rows if isinstance(sample_rows, list) else []
     row_count = payload.get("row_count")
+    if not isinstance(row_count, int) or row_count < 0:
+        return _trusted_result_fallback(columns, metric_ids)
+
+    display_columns = columns[:8]
+    has_dimensions = any(column not in metric_ids for column in display_columns)
+    lines = ["### 查询结果"]
+    if row_count == 1 and sample_rows:
+        lines.append("已返回 1 条结果：")
+    elif has_dimensions:
+        lines.append(f"已返回 {row_count} 个分组，完整明细见上表。")
+    else:
+        lines.append(f"已返回 {row_count} 条结果，完整明细见上表。")
+
+    preview_rows = [row for row in sample_rows[:3] if isinstance(row, dict)]
+    if display_columns and preview_rows:
+        if row_count > len(preview_rows):
+            lines.append("以下为表格中的前几条记录，不代表排名或趋势：")
+        lines.extend(("", _markdown_preview(display_columns, preview_rows, labels)))
+
+    lines.extend(
+        (
+            "",
+            "结果已通过服务器结果合同的字段、数值及适用范围/截断检查。"
+            "为避免超出结果证据，本轮未额外推断趋势、排名、币种或因果。",
+        )
+    )
+    return "\n".join(lines)
+
+
+def _trusted_result_fallback(columns: list[str], metric_ids: list[str]) -> str:
+    """Retain a safe concise response for legacy or malformed summaries."""
     lines = ["查询已完成，以上表格已通过服务器结果合同校验。"]
-    if isinstance(row_count, int):
-        lines.append(f"- 返回行数：{row_count}")
     if columns:
         lines.append(f"- 返回列：{', '.join(f'`{column}`' for column in columns)}")
     if metric_ids:
         lines.append(f"- 已核对指标：{', '.join(f'`{metric}`' for metric in metric_ids)}")
-    lines.append("- 本轮未生成额外模型总结，避免对趋势、币种或因果作出超出结果证据的推断。")
+    lines.append("- 未生成额外模型推断，请以表格结果为准。")
     return "\n".join(lines)
+
+
+def _markdown_preview(
+    columns: list[str], rows: list[dict[str, Any]], labels: dict[str, Any]
+) -> str:
+    header = [str(labels.get(column) or column.replace("_", " "))[:80] for column in columns]
+    rendered = ["| " + " | ".join(_escape_markdown(value) for value in header) + " |"]
+    rendered.append("| " + " | ".join("---" for _ in columns) + " |")
+    for row in rows:
+        values = [_format_preview_value(column, row.get(column)) for column in columns]
+        rendered.append("| " + " | ".join(_escape_markdown(value) for value in values) + " |")
+    return "\n".join(rendered)
+
+
+def _format_preview_value(column: str, value: Any) -> str:
+    if value is None:
+        return "-"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return str(value)[:120]
+    normalized = "".join(character for character in column.lower() if character.isalnum())
+    if normalized == "positivereviewrate" and 0 <= numeric <= 1:
+        return f"{numeric * 100:.2f}%"
+    if normalized == "averagedeliverydays":
+        return f"{numeric:.2f} 天"
+    if numeric.is_integer():
+        return str(int(numeric))
+    return f"{numeric:.2f}"
+
+
+def _escape_markdown(value: str) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ")

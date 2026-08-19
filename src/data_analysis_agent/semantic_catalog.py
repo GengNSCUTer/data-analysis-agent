@@ -203,6 +203,7 @@ class ResultContract:
     requested_start: str | None
     requested_end: str | None
     selected_join_ids: tuple[str, ...]
+    result_column_labels: Mapping[str, str]
 
     @classmethod
     def from_selection(
@@ -232,6 +233,17 @@ class ResultContract:
         required = tuple(required_result_columns or ()) or (
             metric_ids + (("time",) if result_time_column else ())
         )
+        result_column_labels: dict[str, str] = {
+            metric.metric_id: metric.name for metric in selection.metrics
+        }
+        for table in selection.tables:
+            for column in table.columns:
+                # The first alias is the Catalog-owned UI label.  It is only
+                # presentation metadata and never changes the SQL contract.
+                if column.aliases:
+                    result_column_labels.setdefault(column.name, column.aliases[0])
+        if result_time_column:
+            result_column_labels.setdefault("time", "时间")
         return cls(
             catalog_version=catalog.catalog_version,
             dataset_version=catalog.dataset_version,
@@ -245,6 +257,7 @@ class ResultContract:
             requested_start=(time_range or {}).get("start"),
             requested_end=(time_range or {}).get("end"),
             selected_join_ids=tuple(join.join_id for join in selection.joins),
+            result_column_labels=MappingProxyType(result_column_labels),
         )
 
     def as_tool_metadata(self) -> dict[str, Any]:
@@ -268,6 +281,7 @@ class ResultContract:
             "requested_start": self.requested_start,
             "requested_end": self.requested_end,
             "selected_join_ids": list(self.selected_join_ids),
+            "result_column_labels": dict(self.result_column_labels),
             # The Catalog alone cannot prove runtime row multiplication.
             "join_multiplicity": None,
         }

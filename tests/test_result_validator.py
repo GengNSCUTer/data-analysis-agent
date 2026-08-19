@@ -103,3 +103,29 @@ def test_result_summary_is_bounded_and_uses_only_contract_columns() -> None:
     assert "uncontracted_column" not in summary
     assert "do not persist" not in summary
     assert "gmv" in summary
+
+
+def test_result_summary_uses_catalog_labels_for_casing_only_sql_aliases() -> None:
+    frame = pd.DataFrame(
+        {
+            "productcategoryname": ["health_beauty"],
+            "averagedeliverydays": [2.5],
+            "positivereviewrate": [0.9187],
+        }
+    )
+    validation = ResultValidator().validate(frame, metric_columns=("averagedeliverydays",))
+
+    summary = build_result_summary(
+        frame,
+        validation,
+        required_columns=tuple(frame.columns),
+        column_labels={
+            "product_category_name": "商品品类",
+            "average_delivery_days": "平均履约天数",
+            "positive_review_rate": "好评率",
+        },
+    )
+
+    assert '"productcategoryname":"商品品类"' in summary
+    assert '"averagedeliverydays":"平均履约天数"' in summary
+    assert '"positivereviewrate":"好评率"' in summary

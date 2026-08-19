@@ -249,6 +249,7 @@ class SecurePostgresRunner(SqlRunner):
                 column_aliases=context.metadata.get(
                     "required_result_column_aliases", {}
                 ),
+                column_labels=context.metadata.get("result_column_labels", {}),
                 max_rows=8,
                 max_chars=1_200,
             )

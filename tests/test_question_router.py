@@ -135,6 +135,27 @@ def test_explicit_comparison_baseline_is_answerable(router) -> None:
     assert route.metric_ids == ("gmv",)
 
 
+@pytest.mark.parametrize(
+    "question",
+    (
+        "不同支付方式的 GMV",
+        "各品类平均履约天数和好评率",
+    ),
+)
+def test_router_requires_catalog_attribution_policy_before_sql(
+    router: QuestionRouter, question: str
+) -> None:
+    route = router.classify(question, user=_user())
+
+    assert route.state == "clarification_required"
+    assert route.intent == "clarification_required"
+    assert route.requires_database is False
+    assert route.should_generate_sql is False
+    assert route.reason_code == "dimension_attribution_requires_clarification"
+    assert route.clarification
+    assert "归属口径" in route.clarification
+
+
 def test_router_uses_working_memory_to_avoid_repeating_clarification(router) -> None:
     state = {
         "metric_ids": ["gmv"],

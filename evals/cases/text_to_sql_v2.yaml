@@ -241,14 +241,14 @@ cases:
   - id: data_015
     category: data_query
     question: "不同支付方式的 GMV"
-    expected_state: answerable
-    expected_intent: data_query
-    requires_database: true
-    expected_evidence_mode: database_result
+    expected_state: clarification_required
+    expected_intent: clarification_required
+    requires_database: false
+    expected_evidence_mode: clarification
     expected_metric_ids: [gmv]
-    expected_plan_type: single_metric
-    expected_required_result_columns: [payment_type, gmv]
-    expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+    expected_plan_type: null
+    expected_required_result_columns: []
+    expected_reason_code: dimension_attribution_requires_clarification
   - id: data_016
     category: data_query
     question: "2018年按月统计好评率"
@@ -287,14 +287,14 @@ cases:
   - id: multi_003
     category: multi_metric
     question: "各品类平均履约天数和好评率"
-    expected_state: answerable
-    expected_intent: data_query
-    requires_database: true
-    expected_evidence_mode: database_result
+    expected_state: clarification_required
+    expected_intent: clarification_required
+    requires_database: false
+    expected_evidence_mode: clarification
     expected_metric_ids: [average_delivery_days, positive_review_rate]
-    expected_plan_type: grouped_multi_metric
-    expected_required_result_columns: [product_category_name, average_delivery_days, positive_review_rate]
-    expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+    expected_plan_type: null
+    expected_required_result_columns: []
+    expected_reason_code: dimension_attribution_requires_clarification
   - id: multi_004
     category: multi_metric
     question: "各州平均履约天数和好评率"
