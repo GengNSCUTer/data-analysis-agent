@@ -145,3 +145,10 @@
 - 验证：专项 **50 passed**，v2 golden **60/60**，真实 PostgreSQL 链路 **11 passed**；真实
   SiliconFlow 回归由 `2 SQL/2 LLM rounds/1 rejected audit` 收敛为 `1 SQL/1 LLM round/0
   rejected audit`，结果合同通过、1 条 allowed 审计、`deterministic_result_finalized=true`。
+
+### 2026-08-19：真实业务解释与图表质量评测
+
+- 目标：用真实 SiliconFlow 业务问题验证指标语义、结果解释和显式图表请求，不把 SQL 执行成功当作业务正确。
+- 实现：新增 20 条脱敏 quality manifest（其中 5 条携带有界图表意图）、人工标签和运行器结构性图表证据字段；报告不保留问题、回答、SQL、行或图表 payload。
+- 验证：20/20 Agent Run，权限 20/20；指标语义 11 pass / 2 fail / 7 N/A，回答有据 11 pass / 9 fail；原批次 3/5 发出图表组件、2/5 在 SQL 前超时。Playwright 真实页面确认 SVG、标签、数据标记和无横向溢出，但折线图请求实际渲染为柱状图；独立州图表重放 180 秒超时。评测合同测试 9 passed，嵌入窗口 E2E 9 passed。
+- 风险/下一步：支付方式归因、评价行粒度与图表类型仍由模型提示主导，下一轮必须把三者收敛为服务器 Result/Chart Contract，再评估模型超时、缓存或异步化；不发布总体准确率、图表成功率或 P50/P95。

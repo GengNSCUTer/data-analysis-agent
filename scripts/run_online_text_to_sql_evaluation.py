@@ -43,6 +43,7 @@ LABEL_FIELDS = (
     "result_contract_valid",
     "permission_compliant",
     "answer_grounded",
+    "chart_quality",
 )
 LABEL_VALUES = {"pass", "fail", "not_applicable", "pending_manual"}
 
@@ -60,6 +61,7 @@ class LiveCase:
     expected_metric_ids: tuple[str, ...]
     expected_required_result_columns: tuple[str, ...]
     review_focus: str
+    question_suffix: str = ""
 
 
 class DemoSseClient:
@@ -118,7 +120,7 @@ class DemoSseClient:
         request_id = f"online-{case.case_id}-{uuid4().hex[:12]}"
         conversation_id = f"online-{case.case_id}-{uuid4().hex[:12]}"
         payload = {
-            "message": case.question,
+            "message": case.question + case.question_suffix,
             "conversation_id": conversation_id,
             "request_id": request_id,
             "metadata": {"evaluation_case_id": case.case_id},
@@ -150,6 +152,11 @@ class DemoSseClient:
             "response_error": response_error,
             "sse_event_count": len(raw_events),
             "rich_component_types": dict(sorted(rich_types.items())),
+            # Keep chart evaluation evidence structural: component presence is
+            # useful for quality review, while chart titles, labels and values
+            # are intentionally excluded from the local report.
+            "chart_component_emitted": bool(rich_types.get("chart")),
+            "dataframe_component_emitted": bool(rich_types.get("dataframe")),
             "answer_sha256": sha256(response_text.encode("utf-8")).hexdigest()
             if response_text
             else None,
@@ -195,6 +202,7 @@ def _load_live_cases(
                     source_case.get("expected_required_result_columns", [])
                 ),
                 review_focus=review_focus,
+                question_suffix=str(selection.get("question_suffix", ""))[:200],
             )
         )
     return manifest, cases
@@ -236,6 +244,8 @@ def _database_evidence(request_id: str, settings: PostgresConnectionSettings) ->
 
 def _automatic_labels(case: LiveCase, evidence: dict[str, Any] | None) -> dict[str, str]:
     labels = dict.fromkeys(LABEL_FIELDS, "pending_manual")
+    if not case.question_suffix:
+        labels["chart_quality"] = "not_applicable"
     if evidence is None:
         return labels
     termination = evidence.get("termination_reason")
@@ -300,6 +310,11 @@ def _automatic_labels(case: LiveCase, evidence: dict[str, Any] | None) -> dict[s
             permission_compliant="pass" if sql_calls == 0 else "fail",
             answer_grounded="pending_manual",
         )
+    # A chart quality label is only meaningful when the requested chart tool
+    # actually ran. A timeout before visualization is tracked elsewhere as a
+    # completion failure, rather than being mistaken for a chart pass/fail.
+    if case.question_suffix and int(evidence.get("visualization_calls_used") or 0) == 0:
+        labels["chart_quality"] = "not_applicable"
     return labels
 
 
@@ -417,6 +432,7 @@ def run_suite(
                     "metric_ids": list(case.expected_metric_ids),
                     "required_result_columns": list(case.expected_required_result_columns),
                     "review_focus": case.review_focus,
+                    "chart_requested": bool(case.question_suffix),
                 },
                 "client": client_result,
                 "runtime": runtime,
@@ -471,6 +487,17 @@ def refresh_report(
         case = case_map.get(case_id)
         if case is None:
             raise ValueError(f"report references unknown case: {case_id}")
+        client = result.get("client")
+        if isinstance(client, dict):
+            # Older redacted reports already retain type counts. Backfill the
+            # structural chart flags without replaying the online model call.
+            rich_types = client.get("rich_component_types") or {}
+            client["chart_component_emitted"] = bool(
+                isinstance(rich_types, dict) and rich_types.get("chart")
+            )
+            client["dataframe_component_emitted"] = bool(
+                isinstance(rich_types, dict) and rich_types.get("dataframe")
+            )
         request_id = str((result.get("client") or {}).get("request_id", ""))
         evidence = _database_evidence(request_id, settings)
         result["runtime"] = _redacted_evidence(evidence)

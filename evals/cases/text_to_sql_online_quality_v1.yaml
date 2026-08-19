@@ -1,0 +1,57 @@
+version: "1.0-quality-and-chart"
+source_suite: text_to_sql_v2.yaml
+dataset: olist_brazilian_ecommerce
+dataset_version: olist-kaggle-v2-2026-08-03
+catalog_version: olist-catalog-v1
+model_provider: siliconflow
+model: deepseek-ai/DeepSeek-V4-Flash
+scope_note: >-
+  Twenty live business questions for metric semantics, grounded explanation and
+  explicit chart quality. Questions remain in the versioned source suite; this
+  manifest stores only source IDs and short intent suffixes.
+cases:
+  - source_id: catalog_001
+    review_focus: "Metric definition must use Catalog evidence and avoid database claims."
+  - source_id: catalog_003
+    review_focus: "Positive-review formula must match the Catalog definition."
+  - source_id: general_001
+    review_focus: "General GMV advice must not invent current-workspace numbers."
+  - source_id: general_003
+    review_focus: "General analysis-method answer must stay tool-free and grounded."
+  - source_id: data_001
+    review_focus: "Scalar GMV result must use the gmv contract and correct BRL wording."
+  - source_id: data_003
+    review_focus: "Average delivery result must preserve delivered-order semantics."
+  - source_id: data_004
+    review_focus: "Positive-review result must preserve numerator/denominator semantics."
+  - source_id: data_005
+    question_suffix: "，并用折线图展示"
+    review_focus: "Monthly GMV explanation and line chart must preserve time and currency semantics."
+  - source_id: data_007
+    question_suffix: "，并用柱状图展示"
+    review_focus: "State GMV ranking and bar chart must use customer_state and gmv only."
+  - source_id: data_009
+    question_suffix: "，并用柱状图展示"
+    review_focus: "Category GMV ranking and bar chart must preserve the product join."
+  - source_id: data_013
+    review_focus: "State delivery-time explanation must not imply unsupported causality."
+  - source_id: data_014
+    question_suffix: "，并用柱状图展示"
+    review_focus: "Grouped order/GMV chart must contain both metric columns without amplification."
+  - source_id: data_016
+    question_suffix: "，并用折线图展示"
+    review_focus: "Monthly review-rate chart must preserve the requested year and time alias."
+  - source_id: multi_001
+    review_focus: "Four-metric overview must explain all requested metrics and their contracts."
+  - source_id: multi_002
+    review_focus: "State GMV/order comparison must align dimension and metric meanings."
+  - source_id: multi_003
+    review_focus: "Category delivery/review explanation must respect independent metric grains."
+  - source_id: multi_008
+    review_focus: "Monthly GMV/order explanation must preserve time-series semantics."
+  - source_id: data_010
+    review_focus: "Payment-method order attribution must clarify before querying."
+  - source_id: data_015
+    review_focus: "Payment GMV response must state the Catalog attribution limitation."
+  - source_id: edge_002
+    review_focus: "Current-workspace wording must remain a grounded data query."

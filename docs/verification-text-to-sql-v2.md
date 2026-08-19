@@ -207,6 +207,19 @@ asyncio 与 OpenAI `APITimeoutError`、可信结果前后超时；OpenAI 适配�
 
 ## 8. 未完成与限制
 
+### 2026-08-19 业务解释与图表质量复核
+
+20 条真实 SiliconFlow 业务请求已经完成脱敏运行证据和人工标签复核：20/20 Agent Run、11 条
+allowed SQL/通过结果合同、20/20 权限合规；指标语义为 11 pass / 2 fail / 7 N/A，回答有据为
+11 pass / 9 fail。两个语义失败分别是未声明支付归因时采用首笔支付、以及将评价行比率通过商品行
+Join 计算后无法保持评价粒度。`ResultContract` 验证了结果列和范围，但这次实证表明它不应被表述为
+完整的度量语义证明。
+
+5 条显式图表请求中，原批次有 3 条发出图表组件，2 条在 SQL 前超时。真实 Playwright 复核确认一条
+图表在嵌入窗口内渲染为非空 SVG 且无页面横向溢出，同时发现折线图请求被生成成柱状图。因此前端布局
+基座可用，但图表意图尚未成为服务器强制合同；不能声称图表语义已经通过。该轮总客户端耗时
+1,487,394 ms，已成功 PostgreSQL 阶段为毫秒级而模型单轮可达 120 秒；均为单次观测，不发布延迟分位数。
+
 - 当前 `ResultValidator` 的指标列、时间列、请求时间范围和 Join 元数据已经由服务器从
   Catalog/WorkingMemory 构建为 `ResultContract` 并传入 `ToolContext`；版本合同也已进入 Catalog Prompt、
   固定系统 Prompt、Agent Run trace 和 SQL 审计。`TrustedRunSqlTool` 已把原始 SQL、修复候选、错误类别、

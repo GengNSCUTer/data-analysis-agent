@@ -352,6 +352,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 2026-08-19 SSE/Agent 边界回归已补齐：固定 LLM 在同一 `BudgetedChatHandler` 请求中先返回有效 SQL、再返回冗余 SQL；真实 PostgreSQL 首次执行与结果合同通过后，`BudgetSafetyMiddleware` 在模型响应边界移除第二个工具调用，Agent Run 仅记录 1 次 SQL/工具调用和 1 条 allowed 审计，`catalog_trace` 持久化合同与抑制证据。该测试不调用 SiliconFlow；项目专项加 PostgreSQL 链路 **75 passed**，v2 离线 golden **60/60**。
 - 2026-08-19 LLM 可观测性与定向在线复测：`ObservedLlmService` 增加 OpenAI/httpx/asyncio 超时归一、单轮安全结束和有界 provider usage/耗时观测；Vanna OpenAI-compatible 同步请求移入工作线程，避免真实 SiliconFlow 阻塞 FastAPI 事件循环。新增 6 条显式 opt-in 定向清单与评测器门槛测试；真实 SSE 结果为 6/6 Agent Run、0 客户端错误、路由 6/6、5 条查库请求各 1 条 SQL、SQL 可执行 5/5、结果合同 5/5、权限 6/6，5 条 usage 均 reported，总客户端耗时 499,174 ms。人工语义/最终表述 3 条 pending、1 条趋势表述 fail；不据此宣称在线准确率或 P95。`PostgresRunRecorder` 已验证观测写入既有 `catalog_trace` JSONB，数据库 schema 不变。
 - 2026-08-19 可信结果确定性收口：对未显式要求图表的 SQL 请求，`ResultValidator` 通过后由服务器基于结果合同输出行数、指标列和校验状态，跳过最后一轮自由模型总结，防止把波动误述为持续趋势、擅自换算币种或补造因果。图表请求保留模型/`visualize_data` 路径。真实月度 GMV 回归记录 `deterministic_result_finalized=true`、1 条实际 PostgreSQL 执行、2 次模型调用、68,516 ms；其中第一次模型 SQL 因敏感 `order_id` 投影被 Policy 拒绝，第二次有效，不存在最终总结模型调用。专项单测 25 passed（1 skipped）、真实 PostgreSQL 10 passed、v2 golden 60/60。
+- 2026-08-19 业务质量评测：新增 20 条真实业务请求与 5 条显式图表意图的在线清单；真实 SSE 为 20/20 Agent Run、11 条允许 SQL/结果合同、20/20 权限合规。人工复核得到指标语义 11 pass / 2 fail / 7 N/A、回答有据 11 pass / 9 fail；失败暴露未冻结的一对多支付归因，以及评价行指标跨商品行 Join 后的粒度丢失。原批次 3/5 发出图表组件、2/5 SQL 前超时；真实 Playwright 页面确认 SVG 和自适应布局可用，但折线图请求被生成成柱状图。下一轮应先把归因、度量粒度和图表类型收敛为服务端合同，再处理模型 120 秒超时与吞吐优化。
 
 ### Phase 4：嵌入式交互与证据呈现（基础能力已完成）
 
@@ -422,6 +423,7 @@ v1 不引入 Redis。
 | 2026-08-03 | 本地 PostgreSQL 实例 | 确认其他项目分别占用 35432/35433，随后以用户态 PostgreSQL 12.20 在本项目专属仓库外目录启动 `data_analysis_agent`，仅监听 `127.0.0.1:35434`。本轮未加载 Olist 数据。 |
 | 2026-08-03 | Olist 真实入库与 golden 基线 | analytics 8 表已真实加载到项目专属 PostgreSQL，行数与转换报告一致、关联质量违规为 0；固化 GMV 13,494,400.74、有效订单 98,207、平均履约 12.558702 天、好评率 0.770680 的技术回归基线。业务口径仍标记为草案。 |
 | 2026-08-03 | SQL 安全内核与数据库角色 | 新增 `sqlglot` AST 策略与 PostgreSQL 双角色：Agent 查询角色仅可读取 `analytics`，应用写角色仅可写审计表。策略已覆盖单语句、只读 AST、Schema/表/列白名单、敏感投影限制、函数拒绝与角色化 LIMIT；尚未接入 Vanna 运行入口。 |
+| 2026-08-19 | 真实业务质量评测 | 新增 20 条脱敏在线业务评测和 5 条图表意图；20/20 权限合规，识别支付归因、评价粒度、模型超时和图表类型未遵守四类后续加固项。 |
 | 2026-08-03 | 可信 Olist 查询闭环 | 新增 `trusted_olist_web_demo.py`、受控 PostgreSQL Runner、指标上下文和持久审计；真实 SSE 已验证中文州订单问题、策略归一化 SQL、结果表、中文结论及数据/指标版本记录。`analyst` 无法访问 `app`，查询账号与审计写账号已分离；身份仍为演示请求头。 |
 | 2026-08-03 | 嵌入式窄浮窗修复 | 将 Vanna Web Component 的窄布局从视口媒体查询改为组件容器查询，修复宽屏宿主页中 440px 浮窗被进度栏挤压的问题。宿主页改为展示 Olist 真实 golden 指标和州排名，不再展示合成华东/华南数据。 |
 | 2026-08-03 | PostgreSQL 信任边界集成测试 | 新增显式 `RUN_PROJECT_DB=1` 集成测试，验证受控查询、允许/拒绝审计以及 reader/writer 跨 Schema 权限拒绝；默认测试环境安全跳过，不依赖本地数据库。 |
