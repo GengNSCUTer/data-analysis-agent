@@ -367,8 +367,9 @@ class QuestionRouter:
                         "clarification_required",
                         (f"dimension_policy:{dimension}",),
                         metric_ids,
-                        f"请先明确“{metric_name}”按“{dimension}”汇总时的归属口径："
-                        f"{policy.description}",
+                        f"当前工作区尚未冻结“{metric_name}”按“{dimension}”汇总的归属口径："
+                        f"{policy.description} 请改用无此归因歧义的维度，"
+                        "或先由管理员在 Semantic Catalog 中配置归属/分摊规则。",
                         "dimension_attribution_requires_clarification",
                         intent="clarification_required",
                         requires_database=False,

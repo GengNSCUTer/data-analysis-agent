@@ -353,7 +353,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 2026-08-19 LLM 可观测性与定向在线复测：`ObservedLlmService` 增加 OpenAI/httpx/asyncio 超时归一、单轮安全结束和有界 provider usage/耗时观测；Vanna OpenAI-compatible 同步请求移入工作线程，避免真实 SiliconFlow 阻塞 FastAPI 事件循环。新增 6 条显式 opt-in 定向清单与评测器门槛测试；真实 SSE 结果为 6/6 Agent Run、0 客户端错误、路由 6/6、5 条查库请求各 1 条 SQL、SQL 可执行 5/5、结果合同 5/5、权限 6/6，5 条 usage 均 reported，总客户端耗时 499,174 ms。人工语义/最终表述 3 条 pending、1 条趋势表述 fail；不据此宣称在线准确率或 P95。`PostgresRunRecorder` 已验证观测写入既有 `catalog_trace` JSONB，数据库 schema 不变。
 - 2026-08-19 可信结果确定性收口：对未显式要求图表的 SQL 请求，`ResultValidator` 通过后由服务器基于结果合同输出行数、指标列和校验状态，跳过最后一轮自由模型总结，防止把波动误述为持续趋势、擅自换算币种或补造因果。图表请求保留模型/`visualize_data` 路径。真实月度 GMV 回归记录 `deterministic_result_finalized=true`、1 条实际 PostgreSQL 执行、2 次模型调用、68,516 ms；其中第一次模型 SQL 因敏感 `order_id` 投影被 Policy 拒绝，第二次有效，不存在最终总结模型调用。专项单测 25 passed（1 skipped）、真实 PostgreSQL 10 passed、v2 golden 60/60。
 - 2026-08-19 业务质量评测：新增 20 条真实业务请求与 5 条显式图表意图的在线清单；真实 SSE 为 20/20 Agent Run、11 条允许 SQL/结果合同、20/20 权限合规。人工复核得到指标语义 11 pass / 2 fail / 7 N/A、回答有据 11 pass / 9 fail；失败暴露未冻结的一对多支付归因，以及评价行指标跨商品行 Join 后的粒度丢失。原批次 3/5 发出图表组件、2/5 SQL 前超时；真实 Playwright 页面确认 SVG 和自适应布局可用，但折线图请求被生成成柱状图。下一轮应先把归因、度量粒度和图表类型收敛为服务端合同，再处理模型 120 秒超时与吞吐优化。
-- 2026-08-19 可信结果呈现与归因边界收敛：确定性收口不再只显示行数、列名和指标 ID。服务端仅从已通过 `ResultValidator` 的有界 DataFrame 摘要中渲染中文结果概览、最多三条样例行和完整表格提示，不调用模型作趋势、排名、币种或因果推断；Catalog 提供字段展示名，SQL 别名仅大小写/下划线差异时仍可识别。`GMV × payment_type`、`average_delivery_days × product_category_name`、`positive_review_rate × product_category_name` 的一对多归因歧义均由 `dimension_policies` 在 SQL 前要求用户明确口径，避免模型选择首笔支付或通过商品行放大订单/评价。该机制由每个工作区 Catalog 声明，不依赖 Olist case ID。
+- 2026-08-19 可信结果呈现与归因边界收敛：确定性收口不再只显示行数、列名和指标 ID。服务端仅从已通过 `ResultValidator` 的有界 DataFrame 摘要中渲染中文结果概览、最多三条样例行和完整表格提示，不调用模型作趋势、排名、币种或因果推断；Catalog 提供字段展示名，SQL 别名仅大小写/下划线差异时仍可识别。`GMV × payment_type`、`average_delivery_days × product_category_name`、`positive_review_rate × product_category_name` 的一对多归因歧义均由 `dimension_policies` 在 SQL 前阻断，避免模型选择首笔支付或通过商品行放大订单/评价。当前工作区尚未配置这些归属/分摊规则，因此路由明确提示应改查无歧义维度或由管理员配置 Catalog，不假称用户补一句自然语言就可安全执行。该机制由每个工作区 Catalog 声明，不依赖 Olist case ID。
 
 ### Phase 4：嵌入式交互与证据呈现（基础能力已完成）
 
@@ -404,7 +404,7 @@ v1 不引入 Redis。
 
 | 日期 | 事项 | 结论 |
 | --- | --- | --- |
-| 2026-08-19 | 可信结果呈现与归因边界 | 已验证的分组结果由服务器展示中文概览、样例行和完整表格提示，替代机器式审计结尾，且不重新引入自由模型总结；支付方式 GMV 与品类履约/好评率的未冻结一对多归因均在 SQL 前澄清。确定性专项 77 passed、v2 golden 60/60，Playwright 直接渲染验证表格语义和桌面无横向溢出。 |
+| 2026-08-19 | 可信结果呈现与归因边界 | 已验证的分组结果由服务器展示中文概览、样例行和完整表格提示，替代机器式审计结尾，且不重新引入自由模型总结；支付方式 GMV 与品类履约/好评率的未冻结一对多归因均在 SQL 前阻断，并明确要求配置 Catalog 归属/分摊规则而非承诺自然语言追问即可执行。确定性专项 77 passed、v2 golden 60/60，Playwright 直接渲染验证表格语义和桌面无横向溢出。 |
 | 2026-08-02 | 项目立项 | 确定为 Python 可信数据分析 Agent，不继续以 Java 本地生活平台作为主项目。 |
 | 2026-08-02 | Agent 选型 | 选择 Vanna，而非 PandasAI。 |
 | 2026-08-02 | 前后端基座 | 使用 Vanna + FastAPI；前端只保留可嵌入的 Vanna Web Component 与原生宿主页，不再建设 TailAdmin。 |

@@ -206,9 +206,10 @@ AST Policy 拒绝，第二轮生成有效 SQL；不存在额外的结果总结�
 不宣称趋势、不补充币种，也不作因果解释，且不再次调用模型；它只声明本轮合同实际适用的字段、数值、范围或截断检查。
 
 另一方面，Catalog 将以下组合标为 `requires_clarification`：GMV 按支付方式、平均履约天数按品类、
-好评率按品类。`QuestionRouter` 在 SQL 前返回包含具体归因原因的澄清，而不是让模型自行采用首笔支付
-或通过商品行复制订单/评价。规则由每个指标的 `dimension_policies` 描述，可由其他 Workspace 的 Catalog
-替换，并没有按 Olist 问题文本或评测编号分支。
+好评率按品类。`QuestionRouter` 在 SQL 前返回包含具体归因原因的阻断，而不是让模型自行采用首笔支付
+或通过商品行复制订单/评价。当前工作区未配置这些归属/分摊规则时，路由会明确要求改查无歧义维度或由
+管理员更新 Catalog，不会假称用户追加一条自然语言口径后就能安全执行。规则由每个指标的
+`dimension_policies` 描述，可由其他 Workspace 的 Catalog 替换，并没有按 Olist 问题文本或评测编号分支。
 
 本轮离线专项为 **77 passed**，v2 路由/QueryPlan golden 为 **60/60 passed**；Playwright 通过真实
 `<vanna-chat>` 加载受限结果预览，验证中文表格渲染、样例值和桌面无横向溢出。该回归验证确定性展示

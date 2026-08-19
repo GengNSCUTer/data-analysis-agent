@@ -153,7 +153,8 @@ def test_router_requires_catalog_attribution_policy_before_sql(
     assert route.should_generate_sql is False
     assert route.reason_code == "dimension_attribution_requires_clarification"
     assert route.clarification
-    assert "归属口径" in route.clarification
+    assert "尚未冻结" in route.clarification
+    assert "Semantic Catalog" in route.clarification
 
 
 def test_router_uses_working_memory_to_avoid_repeating_clarification(router) -> None:
