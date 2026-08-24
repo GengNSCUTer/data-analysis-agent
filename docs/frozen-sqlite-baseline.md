@@ -155,7 +155,52 @@ observed after launch, not selected by the experiment. Future training runs must
 use an isolated service or process with explicit device binding and record the
 same logical/physical mapping.
 
-After the data gate is complete, run a small ordered smoke batch first:
+## Full Native Development Baseline
+
+On 2026-08-24, the same frozen model, prompt and decode configuration generated
+one primary candidate for all 1,034 native Spider development cases. The run used
+a temporary, project-owned Ollama service on `127.0.0.1:11437`, started after an
+occupancy check with `CUDA_VISIBLE_DEVICES=1`. Under the repository mapping this
+is logical CUDA `1` and physical `nvidia-smi` GPU `3` (RTX 4090). The service
+reused the existing local model store and was stopped after the run; no
+model weight was copied, downloaded or committed.
+
+All prediction and diagnostic artifacts remain outside Git at
+`/disk2/gengnan/data-analysis-agent-data/experiments/spider-qwen25coder3b-full-v1-20260824/`.
+The prediction JSONL has exactly 1,034 records, stable native order, unique case
+IDs and exactly one `candidate_index=0` per case. The generated candidates were
+then passed unchanged into the isolated Adapter with its existing single-query,
+read-only, 1,000-row and 5,000-ms execution limits.
+
+| Measurement | Observed value |
+| --- | --- |
+| Generated candidates | 1,034 / 1,034 |
+| Local secure SQLite execution | 884 / 1,034 |
+| AST policy rejections | 0 / 1,034 |
+| SQLite execution errors | 150 / 1,034 |
+| Timeouts | 0 / 1,034 |
+| Execution-error categories | 138 `no_such_column`; 5 `no_such_table`; 5 `ambiguous_column`; 2 `sqlite_misuse` |
+| Model generation elapsed time | 466,667 ms total; 451.3 ms mean; 429.0 ms median; 2,951 ms max; 0 unknown |
+| Generated tokens | 32,662 total; 31.6 mean; 28.0 median; 125 max; 0 unknown |
+| Prediction JSONL SHA-256 | `9459b8262d62983c6e40c92b8bcc3be756bc4f2afd19562c8c9b1b5f06d572b0` |
+| Diagnostic JSON SHA-256 | `43561e69f6420bfc9f12a5d4822b65e0a96ff838e115eba8d5511e1e5f237744` |
+
+`884/1,034` is an operational execution diagnostic only. It is not Spider
+Execution Accuracy, exact match, Test Suite Accuracy or semantic accuracy:
+the Adapter does not read gold SQL or gold answers, and it only establishes that
+model SQL passed the local read-only policy and executed. The 138 nonexistent-
+column failures are a broad pre-training schema-linking signal, not evidence for
+a dataset-specific prompt patch or a production PostgreSQL policy change.
+
+The current data artifact remains the third-party 2020-01 Spider mirror, which
+predates the official 2020-08 corrections. The independently distributed official
+Test Suite databases still lack verified terms, release identity, hashes and
+compatibility evidence for this mirror. The full candidate coverage now satisfies
+the bridge's coverage guard, but the bridge must not be run to produce a score
+until those separate asset gates are resolved.
+
+The original ordered smoke command is retained below for a smaller reproducible
+run; it was completed before the full batch above:
 
 ```bash
 /disk2/gengnan/conda_envs/data-analysis-agent/bin/python \
@@ -221,8 +266,10 @@ and cannot become a Test Suite Accuracy score.
 
 ## Next Research Gate
 
-Once the first legal native-data baseline is recorded, retain its model digest,
-prompt, dataset checksum and predictions unchanged.  Only then create a
-separate Python/conda training environment for QLoRA/SFT; that training run
-must use the existing holdout isolation protocol and compare against this
-frozen baseline without altering the PostgreSQL safety/runtime contracts.
+The full native-data baseline is now frozen. Retain its model digest, prompt,
+dataset checksum and external prediction hash unchanged. The next implementation
+gate is a separate Python/Conda QLoRA/SFT environment with the existing holdout
+isolation protocol; every later training run must compare with this frozen
+baseline without altering the PostgreSQL safety/runtime contracts. This does not
+remove the independent Test Suite asset gate, so no official Spider score may be
+claimed unless its terms and release compatibility are separately verified.
