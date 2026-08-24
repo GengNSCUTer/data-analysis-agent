@@ -1,0 +1,15 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+# Frozen direct dependencies for the isolated QLoRA/SFT environment.
+# CUDA 12.1 wheels remain compatible with the host NVIDIA 535.54.03 driver
+# (reported CUDA capability 12.2). Do not change these in place for a later run;
+# create a new environment specification instead.
+torch==2.5.1+cu121
+accelerate==1.3.0
+bitsandbytes==0.45.1
+datasets==3.2.0
+peft==0.14.0
+safetensors==0.5.2
+sentencepiece==0.2.0
+transformers==4.48.3
+trl==0.15.2
