@@ -1,0 +1,51 @@
+manifest_id: post_training_candidates_v1
+manifest_version: "1"
+status: template_only
+purpose: "Template for auditable, redacted post-training candidates; no training rows are included."
+source_policy:
+  allowed:
+    - deterministic_goldens_not_in_holdout
+    - manually_reviewed_failures
+    - verified_query_variants
+    - deterministic_negative_examples
+  forbidden:
+    - v2_holdout
+    - raw_user_text
+    - raw_result_rows
+    - api_keys_or_cookies
+    - unlicensed_dataset_content
+split_policy:
+  grouping:
+    - sql_shape
+    - semantic_template
+    - catalog_snapshot
+    - workspace_id
+    - business_time_range
+required_fields:
+  - sample_id
+  - source
+  - license
+  - timestamp
+  - workspace_id
+  - catalog_snapshot
+  - role_scope
+  - question_redacted
+  - working_memory
+  - target_route
+  - query_plan
+  - candidate_sql
+  - execution_outcome
+  - review
+  - label_provenance
+  - split
+forbidden_fields:
+  - raw_question
+  - raw_user_text
+  - raw_result_rows
+  - api_key
+  - cookie
+  - access_token
+  - password
+  - user_id
+  - order_id
+candidate_ids: []
