@@ -1,0 +1,58 @@
+id: sqlite_frozen_baseline_v1
+status: ready_for_fixture_smoke_only
+purpose: >-
+  Reproducible local candidate generation for a future Spider 1.0 SQLite dev
+  baseline. This manifest does not authorize benchmark-data acquisition or
+  claim an official score.
+
+dataset:
+  id: spider_dev
+  planned_release: spider_1_0_2020-08-corrected
+  native_dialect: sqlite
+  source_repository:
+    url: https://github.com/taoyds/spider
+    commit: b7b5b8c890cd30e35427348bb9eb8c6d1350ca7c
+    code_license: Apache-2.0
+  data_license_status: pending_explicit_source_verification
+  acquisition_gate: >-
+    Do not download spider.zip until the selected source gives explicit terms
+    for the raw dataset and the acquisition record includes date, source URL,
+    archive checksum and extraction checksum.
+  planned_storage_location: /disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/<release>
+
+model:
+  provider: ollama
+  identifier: qwen2.5-coder:3b
+  manifest_digest: f72c60cabf6237b07f6e632b2c48d533cef25eda2efbd34bed21c5e9c01e6225
+  model_blob_sha256: 4a188102020e9c9530b687fd6400f775c45e90a0d7baafe65bd0a36963fbb7ba
+  parameter_size: 3B
+  quantization: Q4_K_M
+  license: Qwen Research License Agreement (2024-09-19; non-commercial research/evaluation)
+  storage: Ollama local model store; never commit or redistribute the weight blob
+  inference_engine:
+    ollama_server_version: 0.13.1
+    ollama_cli_version: 0.31.2
+    note: >-
+      The local CLI and server currently differ. Preserve both values with every
+      baseline result; do not compare output across an engine upgrade as though
+      it were the same frozen runtime.
+
+generation:
+  prompt_version: sqlite-frozen-baseline-v1
+  temperature: 0.0
+  top_k: 1
+  top_p: 1
+  seed: 42
+  max_tokens: 512
+  request_timeout_seconds: 120
+  max_schema_characters: 20000
+  candidate_count: 1
+  question_handling: native question stays in memory only; never enters prediction JSONL/report
+  output_location: /disk2/gengnan/data-analysis-agent-data/experiments/<run>/predictions.jsonl
+
+evaluation_boundary:
+  diagnostics: scripts/run_sqlite_benchmark.py
+  official_score: >-
+    Attach only an artifact created by an unmodified official Spider evaluator.
+    The local diagnostic runner must not be reported as Spider EX or Test Suite Accuracy.
+  production_runtime: PostgreSQL/Vanna path remains unchanged
