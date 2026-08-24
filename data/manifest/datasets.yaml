@@ -182,3 +182,24 @@ datasets:
       official task site uses Test Suite Accuracy for leaderboard reporting; local
       adapter diagnostics are neither Test Suite Accuracy nor Execution Accuracy. Raw
       data, predictions and reports remain outside Git.
+
+  - id: spider_test_suite_assets
+    name: Official Spider Test Suite Database Assets
+    role: official_metric_asset_candidate
+    source_urls:
+      - https://github.com/taoyds/test-suite-sql-eval
+      - https://drive.google.com/file/d/1mkCx2GOFIqNesD4y8TDAO1yX1QZORP5w/view?usp=sharing
+    evaluator_code:
+      repository: https://github.com/taoyds/test-suite-sql-eval
+      commit: e97acc546ecbee8fa27fa8dbf025ef61493a876c
+      code_license: Apache-2.0
+    license: pending explicit verification of the separately distributed test-suite database assets
+    status: code_verified_assets_not_downloaded
+    planned_storage_location: /disk2/gengnan/data-analysis-agent-data/text-to-sql/test-suite-sql-eval/<release>/database
+    notes: >-
+      The official evaluator README requires a separately downloaded Google Drive
+      database package. Its Apache-2.0 code license is not a license for those
+      assets. Do not download or run until the asset terms, release identity,
+      archive/extracted hashes and compatibility with the selected Spider mirror
+      are recorded. The project bridge refuses partial predictions because the
+      upstream evaluator silently zips a short prediction file with gold cases.

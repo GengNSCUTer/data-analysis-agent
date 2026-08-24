@@ -59,7 +59,8 @@ extracted contents must be verified before model generation starts.
 | Extracted `database/` tree | `f85f3482bfb1ad5fb93ac49dc83c288d57c8d3da7f4871493f97c348aad5248d` (166 `.sqlite` files) |
 | Extracted development-database tree | `29504fcf305416369d18d04ee645a59c3efa2312a47796dce1631c884c820a13` (20 SQLite databases) |
 | Native layout validation | Passed: 398 safe `spider/` archive members, 1,034 dev cases, 20 dev database IDs, all required `<db_id>/<db_id>.sqlite` files present |
-| Selected official evaluator and revision | Pending separate evaluator verification |
+| Official evaluator code | `taoyds/test-suite-sql-eval` commit `e97acc546ecbee8fa27fa8dbf025ef61493a876c`, Apache-2.0 code, clean checkout verified outside Git |
+| Official test-suite database assets | Pending explicit asset terms, release identity, hashes and compatibility decision; not downloaded |
 
 The database-tree digest is calculated by lexicographically sorting every
 `.sqlite` path relative to `database/`, then hashing each relative path, a NUL
@@ -73,3 +74,6 @@ diagnostics only. It does not consume gold SQL or calculate any benchmark score.
 The official Spider task page identifies Test Suite Accuracy as its official
 leaderboard metric. A future score requires the unmodified official test-suite
 evaluator and its assets; it must be preserved as a distinct external artifact.
+The project bridge additionally requires full case coverage to prevent the
+upstream evaluator's `zip(predictions, gold)` behavior from silently shortening
+the denominator.

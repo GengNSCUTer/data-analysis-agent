@@ -79,6 +79,20 @@ generation:
 
 evaluation_boundary:
   diagnostics: scripts/run_sqlite_benchmark.py
+  official_bridge: scripts/run_official_spider_test_suite.py
+  official_evaluator_code:
+    repository: https://github.com/taoyds/test-suite-sql-eval
+    commit: e97acc546ecbee8fa27fa8dbf025ef61493a876c
+    code_license: Apache-2.0
+    checkout_location: /disk2/gengnan/data-analysis-agent-data/text-to-sql/sources/test-suite-sql-eval
+  test_suite_database_assets:
+    status: pending_explicit_terms_and_release_compatibility
+    source_url: https://drive.google.com/file/d/1mkCx2GOFIqNesD4y8TDAO1yX1QZORP5w/view?usp=sharing
+    required_before_run:
+      - record_asset_terms_and_release_identity
+      - record_archive_and_extracted_tree_sha256
+      - verify_selected_Spider_mirror_compatibility
+      - store_assets_outside_Git
   official_score: >-
     The Spider task page identifies Test Suite Accuracy as its official leaderboard
     metric. Attach it only from the unmodified official test-suite evaluator and

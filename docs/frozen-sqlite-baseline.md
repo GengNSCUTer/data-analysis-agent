@@ -185,6 +185,33 @@ It may be reported only after the exact unmodified official test-suite evaluator
 its required assets, version and input format have been separately verified and
 its generated artifact is attached to the report.
 
+## Official Test Suite Boundary
+
+The official evaluator code is pinned outside Git at
+`/disk2/gengnan/data-analysis-agent-data/text-to-sql/sources/test-suite-sql-eval`,
+commit `e97acc546ecbee8fa27fa8dbf025ef61493a876c` (Apache-2.0 code). Its README
+requires a **separate** Google Drive package of generated test-suite databases.
+The code license does not establish terms for those database assets, so they are
+not downloaded or run yet. Their terms, release identity, archive and extracted
+tree hashes, and compatibility with this 2020-01 Spider mirror remain a required
+gate. In particular, the test suites likely target the later official correction
+release, while the current mirror predates it.
+
+`scripts/run_official_spider_test_suite.py` is a narrow bridge to the unmodified
+official `evaluation.py`, intended for a future full-coverage run. It verifies
+the exact evaluator commit and a clean worktree, requires exactly one
+`candidate_index=0` for every native case in original order, validates that all
+referenced test-suite SQLite files exist, and places gold SQL, prediction text,
+raw evaluator output and evidence outside Git. It invokes only `--etype exec`
+and does not parse, recalculate or reinterpret the official score.
+
+The full-coverage requirement is essential: the upstream evaluator treats the
+Spider development file as one session and iterates with `zip(predictions,
+gold)`. A short prediction file would otherwise silently receive a denominator
+equal to its own length. The present 20-case smoke was independently verified
+to fail before input preparation or evaluator invocation. It is therefore not
+and cannot become a Test Suite Accuracy score.
+
 ## Next Research Gate
 
 Once the first legal native-data baseline is recorded, retain its model digest,
