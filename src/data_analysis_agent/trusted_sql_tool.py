@@ -99,6 +99,7 @@ class TrustedRunSqlTool(RunSqlTool):
     async def execute(self, context: ToolContext, args: RunSqlToolArgs) -> ToolResult:
         result = await super().execute(context, args)
         if result.success:
+            self._remember_result_artifact(context, result)
             return result
 
         safe_error = context.metadata.get("safe_sql_error")
@@ -189,6 +190,7 @@ class TrustedRunSqlTool(RunSqlTool):
             evidence["repair_execution_status"] = "succeeded"
             evidence["result_validation"] = context.metadata.get("result_validation")
             retry_result.metadata["sql_repair"] = evidence
+            self._remember_result_artifact(context, retry_result)
             return retry_result
 
         evidence["repair_execution_status"] = "failed"
@@ -200,6 +202,14 @@ class TrustedRunSqlTool(RunSqlTool):
             evidence=evidence,
             detail="修复后的 SQL 仍未通过可信执行链，系统未输出未经验证的数字。",
         )
+
+    @staticmethod
+    def _remember_result_artifact(context: ToolContext, result: ToolResult) -> None:
+        """Bind a chart to the one successful result emitted in this request."""
+
+        output_file = result.metadata.get("output_file")
+        if isinstance(output_file, str) and output_file:
+            context.metadata["current_result_filename"] = output_file
 
     @staticmethod
     def _evidence(outcome: SqlRepairOutcome) -> dict[str, object]:

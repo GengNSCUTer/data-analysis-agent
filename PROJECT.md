@@ -121,7 +121,10 @@ SQL 先通过 `sqlglot` AST 策略，再由 `daa_analytics_reader` 只读角色�
 结果表、中文结论、最终 SQL 和审计记录闭环。
 
 SQLite fixture 只用于可重复的上游冒烟验证，不代表最终业务数据；可信原型使用已加载的
-Olist 分析表。受控 Plotly 图表已实现：它只能读取当前 `RunSqlTool` 生成的紧凑查询结果文件，
+Olist 分析表。图表由服务器拥有的 `ChartContract` 从用户意图、`QueryPlan` 与 `ResultContract`
+派生，固定允许的图表类型、横轴、指标列、可选系列、标题、当前 SQL 结果工件与行数边界。
+当前仅支持柱状图和折线图；不支持或缺少必要横轴的请求会在 SQL 前澄清/拒绝，不能由模型或
+前端静默改图。图表层仅渲染已经通过 `ResultValidator` 的当前结果，不补值、去重、聚合或重算。
 前端在普通、缩放、最大化和 390px 窄屏嵌入窗口中均有确定性浏览器回归。真实认证、行级范围
 与真实模型调用下的完整图表链路验收仍属于后续阶段，不能把演示请求头当作生产认证。
 
@@ -238,7 +241,7 @@ recommended_chart / owner / effective_from
 | 前端 | Vanna `<vanna-chat>` + 宿主页 HTML/CSS | Web Component 可嵌入任意已有网页，不建立独立前端工程。 |
 | 宿主层 | 原生 HTML/CSS/浏览器事件 | 控制浮动入口、右侧面板、中文文案和业务页面上下文，降低上游组件修改成本。 |
 | 聊天/富结果组件 | Vanna `<vanna-chat>` | 复用 SQL、表格、Plotly 图、SSE、最小化和最大化交互。 |
-| 图表 | Vanna Plotly 结果 | 通过受控 `VisualizeDataTool` 生成图表，不另引入图表前端框架。 |
+| 图表 | Plotly `graph_objects` + 服务端 ChartContract | 图表类型、字段、标题和当前查询工件均由服务器合同固定；不另引入图表前端框架。 |
 | 测试 | pytest + API 集成测试；后续前端 E2E | 从 SQL 策略和评测集开始保证核心质量。 |
 | 状态与队列 | v1 仅 PostgreSQL | 持久化状态是核心；Redis 只在确有缓存、限流或异步任务需求时引入。 |
 
@@ -331,8 +334,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 创建 FastAPI 应用、认证/角色占位、PostgreSQL 双角色配置；
 - 已接入 Vanna Agent 与受控工具，真实查询只能通过策略和 `daa_analytics_reader`；
 - 已实现 `sqlglot` SQL Policy、超时/行数限制、持久审计、指标与数据版本证据；
-- 已实现受控 Plotly 图表：仅接受本次查询产生的 `query_results_<id>.csv`，限制 200 行和 3 列；
-  图表不能读取任意文件。
+- 已实现服务端 `ChartContract`：由用户意图、`QueryPlan` 和 `ResultContract` 固定 bar/line、横轴、指标列、系列、标题与当前 SQL 结果工件；不支持的图形和缺少横轴的请求在 SQL 前终止，图表层不做二次聚合。
 - 已提供演示级签名会话：固定 `analyst` / `admin` 身份映射同时约束 SSE、SQL 策略与审计 API，
   页面可切换并展示其用途和非生产边界；旧请求头不能提升权限。
 - 已增加 PostgreSQL 会话/消息存储、Agent Run 台账、请求级预算和上下文裁剪基础；后端历史 API 已提供列表、详情和删除。
@@ -354,6 +356,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 2026-08-19 可信结果确定性收口：对未显式要求图表的 SQL 请求，`ResultValidator` 通过后由服务器基于结果合同输出行数、指标列和校验状态，跳过最后一轮自由模型总结，防止把波动误述为持续趋势、擅自换算币种或补造因果。图表请求保留模型/`visualize_data` 路径。真实月度 GMV 回归记录 `deterministic_result_finalized=true`、1 条实际 PostgreSQL 执行、2 次模型调用、68,516 ms；其中第一次模型 SQL 因敏感 `order_id` 投影被 Policy 拒绝，第二次有效，不存在最终总结模型调用。专项单测 25 passed（1 skipped）、真实 PostgreSQL 10 passed、v2 golden 60/60。
 - 2026-08-19 业务质量评测：新增 20 条真实业务请求与 5 条显式图表意图的在线清单；真实 SSE 为 20/20 Agent Run、11 条允许 SQL/结果合同、20/20 权限合规。人工复核得到指标语义 11 pass / 2 fail / 7 N/A、回答有据 11 pass / 9 fail；失败暴露未冻结的一对多支付归因，以及评价行指标跨商品行 Join 后的粒度丢失。原批次 3/5 发出图表组件、2/5 SQL 前超时；真实 Playwright 页面确认 SVG 和自适应布局可用，但折线图请求被生成成柱状图。下一轮应先把归因、度量粒度和图表类型收敛为服务端合同，再处理模型 120 秒超时与吞吐优化。
 - 2026-08-19 可信结果呈现与归因边界收敛：确定性收口不再只显示行数、列名和指标 ID。服务端仅从已通过 `ResultValidator` 的有界 DataFrame 摘要中渲染中文结果概览、最多三条样例行和完整表格提示，不调用模型作趋势、排名、币种或因果推断；Catalog 提供字段展示名，SQL 别名仅大小写/下划线差异时仍可识别。`GMV × payment_type`、`average_delivery_days × product_category_name`、`positive_review_rate × product_category_name` 的一对多归因歧义均由 `dimension_policies` 在 SQL 前阻断，避免模型选择首笔支付或通过商品行放大订单/评价。当前工作区尚未配置这些归属/分摊规则，因此路由明确提示应改查无歧义维度或由管理员配置 Catalog，不假称用户补一句自然语言就可安全执行。该机制由每个工作区 Catalog 声明，不依赖 Olist case ID。
+- 2026-08-24 可信图表、通用归因治理与后训练数据边界：新增服务器拥有的 `ChartContract`，仅在合同有效时允许图表工具继续运行；服务器直接构造 bar/line 图表，忽略模型提供的类型、标题和文件名，且拒绝额外列、缺失/非数值字段、重复横轴、无可解析时间轴和图表层二次聚合。Catalog 的维度策略升级为 `safe_direct`、`requires_attribution`、`server_owned_rule` 三态；后者只有对应归因规则被服务器真实注册时才可放行，当前 Olist 未注册归因 SQL compiler，继续 fail closed。新增后训练数据协议和 v2 golden holdout 清单，60 条确定性用例永久隔离，训练不能替代 AST、PostgreSQL role、结果/图表合同或服务器归因规则。本轮确定性专项 **96 passed**、v2 golden **60/60 passed**，并通过 `ruff`、`compileall` 与 diff 检查；不调用 SiliconFlow，不下载模型、不创建训练环境、不执行微调。
 
 ### Phase 4：嵌入式交互与证据呈现（基础能力已完成）
 
@@ -367,7 +370,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 已完成 PostgreSQL 会话/消息存储、Agent Run 台账、请求级工具/SQL/图表/输入/上下文/输出预算；
 - 已完成 starter 空会话生命周期修复，避免页面刷新制造零消息历史记录；
 - Text-to-SQL 第二轮运行时合同已完成：WorkspaceProfile、Catalog/路由/working memory/结果合同、TrustedRunSqlTool 一次修复、repair evidence 和可信拒答均已落地；浏览器多轮澄清、八方向缩放和长历史 Markdown 回归已补齐。
-- 本轮在上述合同之上完成证据感知意图路由、通用回答工具隔离、多指标 `QueryPlan`、分组结果列合同、可信结果摘要和 60 条 v2 离线 golden（60/60）；下一项是同一批代表性问题上的真实 SiliconFlow 小规模人工核验，再决定是否需要学习型分类器或更强 SQL 形状校验。
+- 已完成后训练准备第一阶段：`ChartContract` 与归因三态接入运行时，`QueryPlan`/`ResultContract`/审计记录携带归因需求证据；`docs/post-training-data-protocol.md` 固化样本字段、来源、脱敏、评测和训练边界，`evals/manifests/post_training_holdout_v1.yaml` 将 v2 60 条 golden 永久隔离。下一项是在不接触 holdout 的前提下，单独采集和人工复核训练候选样本，再设计可复现实验基线。
 
 ### Phase 5：评测、加固与作品集
 
@@ -401,9 +404,11 @@ v1 不引入 Redis。
 - [`plan/feature-text-to-sql-reliability-v1.md`](plan/feature-text-to-sql-reliability-v1.md)
 - [`plan/feature-text-to-sql-reliability-v2.md`](plan/feature-text-to-sql-reliability-v2.md)
 - [`docs/verification-text-to-sql-v2.md`](docs/verification-text-to-sql-v2.md)
+- [`docs/post-training-data-protocol.md`](docs/post-training-data-protocol.md)
 
 | 日期 | 事项 | 结论 |
 | --- | --- | --- |
+| 2026-08-24 | 后训练准备第一阶段 | 新增服务器拥有的 `ChartContract`，从用户问题、`QueryPlan` 和 `ResultContract` 派生受控 bar/line 图表边界，并固定横轴、指标列、系列、标题与当前 SQL 结果工件；图表层拒绝模型自选类型/标题/文件、额外列、缺失或非数值字段、重复横轴和二次聚合。`DimensionPolicy` 升级为 `safe_direct` / `requires_attribution` / `server_owned_rule`，后者仅在实际服务器规则注册后才可放行，当前 Olist 没有归因 SQL compiler，继续 fail closed。新增后训练数据协议、60 条 v2 golden holdout manifest 与完整性测试；训练候选永远不能替代 AST、PostgreSQL reader role、Result/Chart Contract 或服务器归因规则。本轮专项 **96 passed**、v2 golden **60/60 passed**、`ruff`/`compileall`/diff check 通过；未调用在线模型、未创建训练环境、未执行微调。 |
 | 2026-08-19 | SSE 澄清流状态收尾 | 修复嵌入式窗口在 SQL 前澄清/归因阻断只返回 `status_card` 时，SSE 已正常结束但状态栏仍停留在 `Sending message...` 的问题。前端将服务端 `status_bar_update` 同步到 Lit 状态，避免后续渲染恢复旧 loading；对未发送终态状态更新的普通用户请求，在正常 SSE 或 polling 结束时清空临时 loading，同时保留 starter UI 和服务端 error/success/warning 终态。新增确定性 Playwright 回归，验证澄清卡片可见、状态回到 `idle`、输入可继续使用；修正历史结果预览测试的 Shadow DOM 读取断言。Web Component 构建通过，嵌入窗口回归 **10 passed, 1 skipped**，服务已重启至 `127.0.0.1:32010`。 |
 | 2026-08-19 | 可信结果呈现与归因边界 | 已验证的分组结果由服务器展示中文概览、样例行和完整表格提示，替代机器式审计结尾，且不重新引入自由模型总结；支付方式 GMV 与品类履约/好评率的未冻结一对多归因均在 SQL 前阻断，并明确要求配置 Catalog 归属/分摊规则而非承诺自然语言追问即可执行。确定性专项 77 passed、v2 golden 60/60，Playwright 直接渲染验证表格语义和桌面无横向溢出。 |
 | 2026-08-02 | 项目立项 | 确定为 Python 可信数据分析 Agent，不继续以 Java 本地生活平台作为主项目。 |

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-import re
 from time import perf_counter
 
 from vanna.components import RichTextComponent, SimpleTextComponent, StatusCardComponent, UiComponent
@@ -13,6 +12,7 @@ from vanna.servers.base import ChatHandler
 from vanna.servers.base.models import ChatRequest, ChatStreamChunk
 
 from .budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
+from .chart_contract import ChartContract
 from .metric_context import OLIST_WORKSPACE, PROMPT_VERSION
 from .question_router import QuestionRouter
 from .query_plan import QueryPlan
@@ -30,11 +30,6 @@ TOOL_FREE_SYSTEM_PROMPT = """
 请说明需要进入受控数据查询流程，并请用户提供指标、时间范围或维度。回答应简洁、中文、可执行；
 如果问题属于当前工作区的指标定义，应优先依赖服务器提供的 Semantic Catalog，而不是猜测口径。
 """.strip()
-
-_EXPLICIT_VISUALIZATION_REQUEST = re.compile(
-    r"图表|图形|可视化|柱状图|折线图|饼图|散点图|画图|绘图"
-)
-
 
 class BudgetedChatHandler(ChatHandler):
     """Attach one isolated budget tracker and run record to each chat request."""
@@ -64,10 +59,6 @@ class BudgetedChatHandler(ChatHandler):
         }
         usage = request.request_context.metadata["budget_usage"]
         usage.set_input(request.message)
-        if _EXPLICIT_VISUALIZATION_REQUEST.search(request.message):
-            # A requested chart needs the model's next turn to select the
-            # already-validated result artifact; do not preempt that workflow.
-            usage.disable_deterministic_result_finalization()
         tracker_token = CURRENT_BUDGET.set(usage)
         run = None
         try:
@@ -165,6 +156,16 @@ class BudgetedChatHandler(ChatHandler):
                     required_result_columns=(
                         query_plan.required_result_columns if query_plan else None
                     ),
+                    requested_dimensions=(
+                        query_plan.dimensions if query_plan else ()
+                    ),
+                )
+                chart_contract = (
+                    ChartContract.from_query_plan(
+                        request.message, query_plan, result_contract
+                    )
+                    if query_plan is not None
+                    else None
                 )
                 # These fields are server-derived and overwrite any client
                 # metadata before the Agent constructs ToolContext.
@@ -174,6 +175,11 @@ class BudgetedChatHandler(ChatHandler):
                 catalog_context = selection.prompt
                 if query_plan is not None:
                     catalog_context += query_plan.prompt_context()
+                if chart_contract is not None:
+                    request.request_context.metadata["chart_contract"] = (
+                        chart_contract.as_tool_metadata()
+                    )
+                    catalog_context += chart_contract.prompt_context()
                 request.request_context.metadata["catalog_context"] = catalog_context[: self.budget.max_context_chars]
                 request.request_context.metadata["prompt_version"] = PROMPT_VERSION
                 catalog_evidence = {
@@ -184,6 +190,8 @@ class BudgetedChatHandler(ChatHandler):
                 if query_plan is not None:
                     request.request_context.metadata["query_plan"] = query_plan.as_dict()
                     catalog_evidence["query_plan"] = query_plan.as_dict()
+                if chart_contract is not None:
+                    catalog_evidence["chart_contract"] = chart_contract.as_evidence()
                 usage.record_catalog(catalog_evidence)
                 usage.set_catalog_context(
                     retrieval_question, updated_memory.as_dict()
@@ -200,6 +208,31 @@ class BudgetedChatHandler(ChatHandler):
                     "route_catalog",
                     int((perf_counter() - route_started_at) * 1000),
                 )
+
+                if chart_contract is not None and not chart_contract.safe_to_visualize and chart_contract.requested:
+                    detail = chart_contract.clarification or "当前图表请求无法在受控范围内执行。"
+                    conversation.add_message(Message(role="user", content=request.message))
+                    conversation.add_message(
+                        Message(
+                            role="assistant",
+                            content=detail,
+                            metadata={"chart_contract": chart_contract.as_evidence()},
+                        )
+                    )
+                    await self.agent.conversation_store.update_conversation(conversation)
+                    if chart_contract.status == "clarification_required":
+                        usage.terminate("clarification_required")
+                        title = "需要补充图表信息"
+                    else:
+                        usage.terminate("unsupported_request")
+                        title = "图表请求未执行"
+                    yield self._budget_chunk(conversation_id, request_id, title, detail)
+                    return
+
+                if chart_contract is not None and chart_contract.safe_to_visualize:
+                    # A server-valid chart contract permits exactly the next
+                    # visualization turn after a validated SQL result.
+                    usage.disable_deterministic_result_finalization()
 
                 if not route.should_generate_sql:
                     detail = route.direct_answer or route.clarification or "当前请求无法在受控数据范围内回答。"

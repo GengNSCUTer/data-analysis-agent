@@ -12,7 +12,11 @@ import re
 from typing import Any, Literal, Mapping
 
 from .question_router import QuestionRoute
-from .semantic_catalog import CatalogSelection, MetricDefinition
+from .semantic_catalog import (
+    AttributionRequirement,
+    CatalogSelection,
+    MetricDefinition,
+)
 
 
 PlanType = Literal[
@@ -89,6 +93,7 @@ class QueryPlan:
     comparison_baseline: str | None
     required_result_columns: tuple[str, ...]
     metric_plans: tuple[MetricPlan, ...]
+    attribution_requirements: tuple[AttributionRequirement, ...]
     execution_strategy: str
     warnings: tuple[str, ...] = ()
 
@@ -140,6 +145,18 @@ class QueryPlan:
         )
         if unsupported_dimensions:
             warnings.append("dimension_not_supported_by_all_metrics")
+        attribution_requirements = tuple(
+            AttributionRequirement(
+                metric_id=metric.metric_id,
+                metric_grain=metric.grain,
+                dimension=dimension,
+                policy_mode=policy.mode,
+                attribution_rule_id=policy.attribution_rule_id,
+            )
+            for metric in metrics
+            for dimension in dimensions
+            if (policy := metric.dimension_policies.get(dimension)) is not None
+        )
 
         return cls(
             plan_type=plan_type,
@@ -151,6 +168,7 @@ class QueryPlan:
             comparison_baseline=comparison,
             required_result_columns=tuple(dict.fromkeys(required_columns)),
             metric_plans=tuple(MetricPlan.from_metric(metric) for metric in metrics),
+            attribution_requirements=attribution_requirements,
             execution_strategy=execution_strategy,
             warnings=tuple(warnings),
         )
@@ -200,6 +218,10 @@ class QueryPlan:
             "comparison_baseline": self.comparison_baseline,
             "required_result_columns": list(self.required_result_columns),
             "metric_plans": [metric.as_dict() for metric in self.metric_plans],
+            "attribution_requirements": [
+                requirement.as_dict()
+                for requirement in self.attribution_requirements
+            ],
             "execution_strategy": self.execution_strategy,
             "warnings": list(self.warnings),
         }
@@ -234,6 +256,18 @@ class QueryPlan:
             lines.append(f"- 已确认比较基线：{self.comparison_baseline}。")
         if self.warnings:
             lines.append(f"- 需要注意：{'；'.join(self.warnings)}。")
+        for requirement in self.attribution_requirements:
+            if requirement.policy_mode == "safe_direct":
+                lines.append(
+                    f"- `{requirement.metric_id}` 按 `{requirement.dimension}` 使用安全直连维度；"
+                    f"指标事实粒度保持为 `{requirement.metric_grain}`。"
+                )
+            elif requirement.policy_mode == "server_owned_rule":
+                lines.append(
+                    f"- `{requirement.metric_id}` 按 `{requirement.dimension}` 的归因规则为"
+                    f"服务器拥有的 `{requirement.attribution_rule_id}`；不得由模型自行推断、"
+                    "替换或实现该规则。"
+                )
         if self.plan_type == "scalar_multi_metric_overview":
             lines.extend(
                 [

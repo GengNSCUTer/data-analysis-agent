@@ -13,7 +13,7 @@ import hashlib
 import re
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Literal, Mapping, Sequence
 import unicodedata
 
 import yaml
@@ -56,7 +56,32 @@ class DimensionPolicy:
     """Workspace-owned rule for attributing a metric to a dimension."""
 
     description: str
-    requires_clarification: bool = False
+    mode: Literal[
+        "safe_direct", "requires_attribution", "server_owned_rule"
+    ] = "safe_direct"
+    attribution_rule_id: str | None = None
+
+
+@dataclass(frozen=True)
+class AttributionRequirement:
+    """Auditable metric-grain evidence for a requested attributed dimension."""
+
+    metric_id: str
+    metric_grain: str
+    dimension: str
+    policy_mode: Literal[
+        "safe_direct", "requires_attribution", "server_owned_rule"
+    ]
+    attribution_rule_id: str | None = None
+
+    def as_dict(self) -> dict[str, str | None]:
+        return {
+            "metric_id": self.metric_id,
+            "metric_grain": self.metric_grain,
+            "dimension": self.dimension,
+            "policy_mode": self.policy_mode,
+            "attribution_rule_id": self.attribution_rule_id,
+        }
 
 
 @dataclass(frozen=True)
@@ -116,6 +141,7 @@ class Catalog:
     currency_code: str | None = None
     currency_symbol: str | None = None
     currency_name: str | None = None
+    available_attribution_rule_ids: frozenset[str] = frozenset()
 
     @property
     def tables_by_id(self) -> dict[str, CatalogTable]:
@@ -130,6 +156,11 @@ class Catalog:
             return self.tables_by_id[table_id]
         except KeyError as exc:
             raise CatalogValidationError(f"unknown Catalog table: {table_id}") from exc
+
+    def has_available_attribution_rule(self, rule_id: str | None) -> bool:
+        """Whether a server implementation, not a prompt, owns the rule."""
+
+        return bool(rule_id and rule_id in self.available_attribution_rule_ids)
 
 
 @dataclass(frozen=True)
@@ -204,6 +235,8 @@ class ResultContract:
     requested_end: str | None
     selected_join_ids: tuple[str, ...]
     result_column_labels: Mapping[str, str]
+    metric_fact_grains: Mapping[str, str]
+    attribution_requirements: tuple[AttributionRequirement, ...] = ()
 
     @classmethod
     def from_selection(
@@ -214,6 +247,7 @@ class ResultContract:
         *,
         catalog: Catalog,
         required_result_columns: Sequence[str] | None = None,
+        requested_dimensions: Sequence[str] = (),
     ) -> "ResultContract":
         metric_ids = tuple(metric.metric_id for metric in selection.metrics)
         time_fields = tuple(
@@ -244,6 +278,9 @@ class ResultContract:
                     result_column_labels.setdefault(column.name, column.aliases[0])
         if result_time_column:
             result_column_labels.setdefault("time", "时间")
+        attribution_requirements = cls._attribution_requirements(
+            selection.metrics, requested_dimensions
+        )
         return cls(
             catalog_version=catalog.catalog_version,
             dataset_version=catalog.dataset_version,
@@ -258,7 +295,32 @@ class ResultContract:
             requested_end=(time_range or {}).get("end"),
             selected_join_ids=tuple(join.join_id for join in selection.joins),
             result_column_labels=MappingProxyType(result_column_labels),
+            metric_fact_grains=MappingProxyType(
+                {metric.metric_id: metric.grain for metric in selection.metrics}
+            ),
+            attribution_requirements=attribution_requirements,
         )
+
+    @staticmethod
+    def _attribution_requirements(
+        metrics: Sequence[MetricDefinition], requested_dimensions: Sequence[str]
+    ) -> tuple[AttributionRequirement, ...]:
+        requirements: list[AttributionRequirement] = []
+        for metric in metrics:
+            for dimension in requested_dimensions:
+                policy = metric.dimension_policies.get(dimension)
+                if policy is None:
+                    continue
+                requirements.append(
+                    AttributionRequirement(
+                        metric_id=metric.metric_id,
+                        metric_grain=metric.grain,
+                        dimension=dimension,
+                        policy_mode=policy.mode,
+                        attribution_rule_id=policy.attribution_rule_id,
+                    )
+                )
+        return tuple(requirements)
 
     def as_tool_metadata(self) -> dict[str, Any]:
         """Return only bounded, JSON-safe fields for ``ToolContext.metadata``."""
@@ -282,6 +344,11 @@ class ResultContract:
             "requested_end": self.requested_end,
             "selected_join_ids": list(self.selected_join_ids),
             "result_column_labels": dict(self.result_column_labels),
+            "metric_fact_grains": dict(self.metric_fact_grains),
+            "attribution_requirements": [
+                requirement.as_dict()
+                for requirement in self.attribution_requirements
+            ],
             # The Catalog alone cannot prove runtime row multiplication.
             "join_multiplicity": None,
         }
@@ -300,14 +367,28 @@ class ResultContract:
             "requested_start": self.requested_start,
             "requested_end": self.requested_end,
             "selected_join_ids": list(self.selected_join_ids),
+            "metric_fact_grains": dict(self.metric_fact_grains),
+            "attribution_requirements": [
+                requirement.as_dict()
+                for requirement in self.attribution_requirements
+            ],
         }
 
 
 class CatalogLoader:
     """Load and validate a server-owned YAML Catalog, failing closed on errors."""
 
-    def __init__(self, workspace: WorkspaceProfile | None = None):
+    def __init__(
+        self,
+        workspace: WorkspaceProfile | None = None,
+        *,
+        available_attribution_rule_ids: Iterable[str] = (),
+    ):
         self.workspace = workspace
+        self.available_attribution_rule_ids = frozenset(
+            self._identifier(rule_id, "available_attribution_rule_id")
+            for rule_id in available_attribution_rule_ids
+        )
         self.allowed_columns = (
             dict(workspace.allowed_columns) if workspace else ANALYTICS_COLUMNS
         )
@@ -388,6 +469,7 @@ class CatalogLoader:
             currency_code=self._optional_nonempty(raw.get("currency_code"), "currency_code"),
             currency_symbol=self._optional_nonempty(raw.get("currency_symbol"), "currency_symbol"),
             currency_name=self._optional_nonempty(raw.get("currency_name"), "currency_name"),
+            available_attribution_rule_ids=self.available_attribution_rule_ids,
         )
 
     def _parse_table(self, raw: Any, index: int) -> CatalogTable:
@@ -576,24 +658,40 @@ class CatalogLoader:
                 )
             if not isinstance(raw_policy, dict):
                 raise CatalogValidationError(f"{label}.{dimension} must be a mapping")
-            unknown = set(raw_policy) - {"description", "requires_clarification"}
-            if unknown or "description" not in raw_policy:
+            required = {"description", "mode"}
+            unknown = set(raw_policy) - {"description", "mode", "attribution_rule_id"}
+            missing = required - set(raw_policy)
+            if missing or unknown:
                 detail = []
-                if "description" not in raw_policy:
-                    detail.append("missing ['description']")
+                if missing:
+                    detail.append(f"missing {sorted(missing)}")
                 if unknown:
                     detail.append(f"unknown {sorted(unknown)}")
                 raise CatalogValidationError(f"invalid {label}.{dimension}: {'; '.join(detail)}")
-            requires_clarification = raw_policy.get("requires_clarification", False)
-            if not isinstance(requires_clarification, bool):
+            mode = raw_policy["mode"]
+            if mode not in {
+                "safe_direct",
+                "requires_attribution",
+                "server_owned_rule",
+            }:
                 raise CatalogValidationError(
-                    f"{label}.{dimension}.requires_clarification must be boolean"
+                    f"{label}.{dimension}.mode is not supported"
+                )
+            rule_id = raw_policy.get("attribution_rule_id")
+            if mode == "server_owned_rule":
+                rule_id = CatalogLoader._identifier(
+                    rule_id, f"{label}.{dimension}.attribution_rule_id"
+                )
+            elif rule_id is not None:
+                raise CatalogValidationError(
+                    f"{label}.{dimension}.attribution_rule_id is allowed only for server_owned_rule"
                 )
             policies[dimension] = DimensionPolicy(
                 description=CatalogLoader._nonempty(
                     raw_policy["description"], f"{label}.{dimension}.description"
                 ),
-                requires_clarification=requires_clarification,
+                mode=mode,
+                attribution_rule_id=rule_id,
             )
         return MappingProxyType(policies)
 
@@ -1070,7 +1168,16 @@ class CatalogRetriever:
                     ]
                 )
                 for dimension, policy in metric.dimension_policies.items():
-                    action = "必须先向用户澄清" if policy.requires_clarification else "按此规则执行"
+                    if policy.mode == "safe_direct":
+                        action = "可按安全直连维度执行"
+                    elif policy.mode == "requires_attribution":
+                        action = "必须先向用户澄清"
+                    elif self.catalog.has_available_attribution_rule(
+                        policy.attribution_rule_id
+                    ):
+                        action = "仅可使用已注册的服务器归因规则"
+                    else:
+                        action = "服务器尚未启用实际归因实现，必须先向用户澄清"
                     lines.append(f"  维度归因 `{dimension}`：{policy.description}（{action}，不得自行猜测）。")
         lines.append("\n### 可用表和列")
         columns_by_table = dict(selected_columns)

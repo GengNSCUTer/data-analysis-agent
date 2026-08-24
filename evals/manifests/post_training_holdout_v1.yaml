@@ -1,0 +1,125 @@
+manifest_version: "1"
+suite_version: "2.0"
+source: "../cases/text_to_sql_v2.yaml"
+forbidden_for_training: true
+cases:
+  - case_id: help_001
+    forbidden_for_training: true
+  - case_id: help_002
+    forbidden_for_training: true
+  - case_id: catalog_001
+    forbidden_for_training: true
+  - case_id: catalog_002
+    forbidden_for_training: true
+  - case_id: catalog_003
+    forbidden_for_training: true
+  - case_id: general_001
+    forbidden_for_training: true
+  - case_id: general_002
+    forbidden_for_training: true
+  - case_id: general_003
+    forbidden_for_training: true
+  - case_id: general_004
+    forbidden_for_training: true
+  - case_id: data_001
+    forbidden_for_training: true
+  - case_id: data_002
+    forbidden_for_training: true
+  - case_id: data_003
+    forbidden_for_training: true
+  - case_id: data_004
+    forbidden_for_training: true
+  - case_id: data_005
+    forbidden_for_training: true
+  - case_id: data_006
+    forbidden_for_training: true
+  - case_id: data_007
+    forbidden_for_training: true
+  - case_id: data_008
+    forbidden_for_training: true
+  - case_id: data_009
+    forbidden_for_training: true
+  - case_id: data_010
+    forbidden_for_training: true
+  - case_id: data_011
+    forbidden_for_training: true
+  - case_id: data_012
+    forbidden_for_training: true
+  - case_id: data_013
+    forbidden_for_training: true
+  - case_id: data_014
+    forbidden_for_training: true
+  - case_id: data_015
+    forbidden_for_training: true
+  - case_id: data_016
+    forbidden_for_training: true
+  - case_id: multi_001
+    forbidden_for_training: true
+  - case_id: multi_002
+    forbidden_for_training: true
+  - case_id: multi_003
+    forbidden_for_training: true
+  - case_id: multi_004
+    forbidden_for_training: true
+  - case_id: multi_005
+    forbidden_for_training: true
+  - case_id: multi_006
+    forbidden_for_training: true
+  - case_id: multi_007
+    forbidden_for_training: true
+  - case_id: multi_008
+    forbidden_for_training: true
+  - case_id: clarification_001
+    forbidden_for_training: true
+  - case_id: clarification_002
+    forbidden_for_training: true
+  - case_id: clarification_003
+    forbidden_for_training: true
+  - case_id: clarification_004
+    forbidden_for_training: true
+  - case_id: clarification_005
+    forbidden_for_training: true
+  - case_id: clarification_006
+    forbidden_for_training: true
+  - case_id: clarification_007
+    forbidden_for_training: true
+  - case_id: clarification_008
+    forbidden_for_training: true
+  - case_id: memory_001
+    forbidden_for_training: true
+  - case_id: memory_002
+    forbidden_for_training: true
+  - case_id: memory_003
+    forbidden_for_training: true
+  - case_id: memory_004
+    forbidden_for_training: true
+  - case_id: memory_005
+    forbidden_for_training: true
+  - case_id: safety_001
+    forbidden_for_training: true
+  - case_id: safety_002
+    forbidden_for_training: true
+  - case_id: safety_003
+    forbidden_for_training: true
+  - case_id: safety_004
+    forbidden_for_training: true
+  - case_id: safety_005
+    forbidden_for_training: true
+  - case_id: unsupported_001
+    forbidden_for_training: true
+  - case_id: unsupported_002
+    forbidden_for_training: true
+  - case_id: unsupported_003
+    forbidden_for_training: true
+  - case_id: edge_001
+    forbidden_for_training: true
+  - case_id: edge_002
+    forbidden_for_training: true
+  - case_id: edge_003
+    forbidden_for_training: true
+  - case_id: edge_004
+    forbidden_for_training: true
+  - case_id: edge_005
+    forbidden_for_training: true
+  - case_id: edge_006
+    forbidden_for_training: true

@@ -14,6 +14,7 @@ from data_analysis_agent.semantic_catalog import (
     CatalogValidationError,
     ResultContract,
 )
+from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.sql_policy import ANALYTICS_COLUMNS
 from vanna.core.user import User
 
@@ -114,6 +115,49 @@ def test_result_contract_derives_display_labels_from_catalog(catalog) -> None:
     assert contract.result_column_labels["gmv"] == "商品成交额"
     assert contract.result_column_labels["paid_order_count"] == "有效订单数"
     assert contract.result_column_labels["customer_state"] == "州"
+    assert contract.metric_fact_grains == {
+        "gmv": "order_item",
+        "paid_order_count": "order",
+    }
+
+
+def test_catalog_dimension_policy_uses_explicit_attribution_mode(catalog) -> None:
+    policy = catalog.metrics_by_id["gmv"].dimension_policies["payment_type"]
+
+    assert policy.mode == "requires_attribution"
+    assert policy.attribution_rule_id is None
+    assert catalog.available_attribution_rule_ids == frozenset()
+
+
+def test_server_owned_rule_requires_registered_server_implementation(tmp_path: Path) -> None:
+    def mutate(raw: dict) -> None:
+        metric = next(item for item in raw["metrics"] if item["metric_id"] == "gmv")
+        metric["dimension_policies"]["payment_type"] = {
+            "description": "A server compiler owns the documented allocation.",
+            "mode": "server_owned_rule",
+            "attribution_rule_id": "payment_allocation_v1",
+        }
+
+    path = _mutated_catalog(tmp_path, mutate)
+    unregistered = CatalogLoader().load(path)
+    registered = CatalogLoader(
+        available_attribution_rule_ids=["payment_allocation_v1"]
+    ).load(path)
+    user = _user("analyst")
+
+    assert not unregistered.has_available_attribution_rule("payment_allocation_v1")
+    assert registered.has_available_attribution_rule("payment_allocation_v1")
+    assert (
+        QuestionRouter(CatalogRetriever(unregistered)).classify(
+            "不同支付方式的 GMV", user=user
+        ).reason_code
+        == "dimension_attribution_rule_unavailable"
+    )
+    # This verifies Catalog declaration and registration wiring only. It does
+    # not claim that the Olist demo has a SQL compiler for this allocation.
+    assert QuestionRouter(CatalogRetriever(registered)).classify(
+        "不同支付方式的 GMV", user=user
+    ).should_generate_sql
 
 
 def test_catalog_prompt_exposes_workspace_currency_contract(catalog) -> None:

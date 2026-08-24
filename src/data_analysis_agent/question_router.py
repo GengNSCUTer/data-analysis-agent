@@ -361,7 +361,9 @@ class QuestionRouter:
                 if metric is None:
                     metric = self.retriever.catalog.metrics_by_id.get(metric_id)
                 policy = metric.dimension_policies.get(dimension) if metric else None
-                if policy is not None and policy.requires_clarification:
+                if policy is None or policy.mode == "safe_direct":
+                    continue
+                if policy.mode == "requires_attribution":
                     metric_name = metric.name if metric is not None else metric_id
                     return QuestionRoute(
                         "clarification_required",
@@ -371,6 +373,22 @@ class QuestionRouter:
                         f"{policy.description} 请改用无此归因歧义的维度，"
                         "或先由管理员在 Semantic Catalog 中配置归属/分摊规则。",
                         "dimension_attribution_requires_clarification",
+                        intent="clarification_required",
+                        requires_database=False,
+                        evidence_mode="clarification",
+                    )
+                if not self.retriever.catalog.has_available_attribution_rule(
+                    policy.attribution_rule_id
+                ):
+                    metric_name = metric.name if metric is not None else metric_id
+                    return QuestionRoute(
+                        "clarification_required",
+                        (f"attribution_rule:{policy.attribution_rule_id}",),
+                        metric_ids,
+                        f"当前工作区声明“{metric_name}”按“{dimension}”需要服务器归因规则，"
+                        f"但规则 `{policy.attribution_rule_id}` 尚未有可执行的服务器实现。"
+                        "请改用无此归因歧义的维度，或由管理员完成规则实现并启用后再查询。",
+                        "dimension_attribution_rule_unavailable",
                         intent="clarification_required",
                         requires_database=False,
                         evidence_mode="clarification",

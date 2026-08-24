@@ -172,7 +172,7 @@ metrics:
     dimension_policies:
       payment_type:
         description: "一个订单可能对应多条支付记录；必须先明确 GMV 按支付方式拆分、分摊或归属的业务规则，禁止自行使用 payment_sequential=1 代替归属口径。"
-        requires_clarification: true
+        mode: requires_attribution
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 
@@ -189,7 +189,7 @@ metrics:
     dimension_policies:
       payment_type:
         description: "一个订单可能对应多条支付记录；必须先明确订单归属支付方式的业务规则，禁止自行使用 payment_sequential=1 代替归属口径。"
-        requires_clarification: true
+        mode: requires_attribution
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 
@@ -206,7 +206,7 @@ metrics:
     dimension_policies:
       product_category_name:
         description: "一个订单可能包含多个品类；按品类汇总履约天数时，必须先明确是按订单归属、按商品行加权还是采用其他分摊规则，禁止直接通过订单商品行重复订单履约时长。"
-        requires_clarification: true
+        mode: requires_attribution
     recommended_chart: line
     role_visibility: [analyst, admin]
 
@@ -223,7 +223,7 @@ metrics:
     dimension_policies:
       product_category_name:
         description: "一条订单评价可能关联多个品类；按品类汇总好评率时，必须先明确评价归属或分摊规则，禁止通过订单商品行复制评价后直接计算。"
-        requires_clarification: true
+        mode: requires_attribution
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 

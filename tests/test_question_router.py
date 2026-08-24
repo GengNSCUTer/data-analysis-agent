@@ -364,6 +364,125 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
     assert agent.metadata["prompt_version"] == "trusted-olist-prompt-v2"
     assert recorder.usage.catalog_trace["result_contract"]["metric_ids"] == ["gmv"]
     assert recorder.usage.query_plan["plan_type"] == "single_metric"
+    assert recorder.usage.deterministic_result_finalization_disabled is False
+
+
+@pytest.mark.asyncio
+async def test_budgeted_handler_passes_valid_server_chart_contract_to_tool_context(
+    router: QuestionRouter,
+) -> None:
+    user = _user()
+
+    class Resolver:
+        async def resolve_user(self, context):
+            return user
+
+    class Store:
+        def __init__(self):
+            self.conversation = None
+
+        async def get_conversation(self, conversation_id, resolved_user):
+            return self.conversation
+
+        async def update_conversation(self, conversation):
+            self.conversation = conversation
+
+    @dataclass
+    class Recorder:
+        usage = None
+
+        async def start(self, **kwargs):
+            return AgentRun("run-chart", kwargs["request_id"], kwargs["conversation_id"])
+
+        async def finish(self, run, usage):
+            self.usage = usage
+
+    class Agent:
+        def __init__(self):
+            self.user_resolver = Resolver()
+            self.conversation_store = Store()
+            self.metadata = None
+
+        async def send_message(self, request_context, message, conversation_id=None):
+            self.metadata = dict(request_context.metadata)
+            if False:
+                yield  # pragma: no cover
+
+    agent = Agent()
+    recorder = Recorder()
+    handler = BudgetedChatHandler(agent, RequestBudget(), recorder, question_router=router)
+    request = ChatRequest(
+        message="2017年按月统计 GMV，并生成折线图",
+        conversation_id="conversation-chart",
+        request_context=RequestContext(),
+    )
+
+    _ = [chunk async for chunk in handler.handle_stream(request)]
+
+    assert agent.metadata["chart_contract"]["status"] == "valid"
+    assert agent.metadata["chart_contract"]["chart_type"] == "line"
+    assert agent.metadata["chart_contract"]["x_column"] == "time"
+    assert recorder.usage.deterministic_result_finalization_disabled is True
+    assert recorder.usage.catalog_trace["chart_contract"]["status"] == "valid"
+
+
+@pytest.mark.asyncio
+async def test_budgeted_handler_clarifies_unsupported_chart_before_agent_or_sql(
+    router: QuestionRouter,
+) -> None:
+    user = _user()
+
+    class Resolver:
+        async def resolve_user(self, context):
+            return user
+
+    class Store:
+        def __init__(self):
+            self.conversation = None
+
+        async def get_conversation(self, conversation_id, resolved_user):
+            return self.conversation
+
+        async def update_conversation(self, conversation):
+            self.conversation = conversation
+
+    @dataclass
+    class Recorder:
+        usage = None
+
+        async def start(self, **kwargs):
+            return AgentRun("run-chart-block", kwargs["request_id"], kwargs["conversation_id"])
+
+        async def finish(self, run, usage):
+            self.usage = usage
+
+    class Agent:
+        def __init__(self):
+            self.user_resolver = Resolver()
+            self.conversation_store = Store()
+            self.called = False
+
+        async def send_message(self, **kwargs):
+            self.called = True
+            raise AssertionError("invalid chart request must stop before Agent.send_message")
+            yield  # pragma: no cover
+
+    agent = Agent()
+    recorder = Recorder()
+    handler = BudgetedChatHandler(agent, RequestBudget(), recorder, question_router=router)
+    request = ChatRequest(
+        message="按州统计 GMV，并生成折线图",
+        conversation_id="conversation-chart-block",
+        request_context=RequestContext(),
+    )
+
+    chunks = [chunk async for chunk in handler.handle_stream(request)]
+
+    assert chunks
+    assert agent.called is False
+    assert recorder.usage.sql_calls_used == 0
+    assert recorder.usage.termination_reason == "clarification_required"
+    assert recorder.usage.catalog_trace["chart_contract"]["status"] == "clarification_required"
 
 
 @pytest.mark.asyncio
