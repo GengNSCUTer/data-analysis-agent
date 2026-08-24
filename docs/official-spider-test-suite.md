@@ -14,8 +14,8 @@ The official evaluator code is cloned outside this repository from
 commit `e97acc546ecbee8fa27fa8dbf025ef61493a876c`. That repository is Apache-2.0.
 Its README separately directs users to download generated test-suite databases
 from Google Drive. The source-code license does not automatically cover those
-database assets, so the assets remain `not_downloaded` until their explicit
-terms, release identity and checksums are verified.
+database assets. The package is now stored and hashed outside Git; its terms
+and official-release comparability remain separate publication gates.
 
 The current Spider data is a 2020-01 Kaggle mirror which predates the official
 August 2020 correction release. The official Test Suite package was downloaded
@@ -31,6 +31,15 @@ These checks establish structural compatibility only. The independent asset
 license/terms are not separately verified, and this older mirror is still not
 proven comparable to the current official leaderboard release, so no official
 evaluator score has been run or published.
+
+An internal full-coverage run was subsequently completed with the unmodified
+evaluator at the pinned commit. It evaluated all 1,034 cases and returned the
+following execution diagnostic: easy `0.820`, medium `0.620`, hard `0.437`,
+extra `0.300`, all `0.585`. The run is stored outside Git at
+`/disk2/gengnan/data-analysis-agent-data/experiments/spider-qwen25coder3b-test-suite-v3-20260824/`;
+its gold/prediction/raw-output hashes are recorded in the manifest and evidence
+file. These numbers are an internal reference for the selected mirror and
+asset, not a current official leaderboard claim.
 
 ## Bridge Contract
 

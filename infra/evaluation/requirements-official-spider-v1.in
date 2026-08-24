@@ -1,0 +1,4 @@
+# Dependencies required by the pinned taoyds/test-suite-sql-eval checkout.
+# Keep these separate from the production Vanna runtime environment.
+nltk==3.8.1
+sqlparse>=0.5.0

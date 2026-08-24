@@ -194,10 +194,42 @@ a dataset-specific prompt patch or a production PostgreSQL policy change.
 
 The current data artifact remains the third-party 2020-01 Spider mirror, which
 predates the official 2020-08 corrections. The independently distributed official
-Test Suite databases still lack verified terms, release identity, hashes and
-compatibility evidence for this mirror. The full candidate coverage now satisfies
-the bridge's coverage guard, but the bridge must not be run to produce a score
-until those separate asset gates are resolved.
+Test Suite database archive and extracted tree are now hashed and structurally
+checked against this mirror, but its independent terms and current official
+release comparability are still not verified. The full candidate coverage now
+satisfies the bridge's coverage guard; the resulting run is recorded below as an
+internal reference only.
+
+## Internal Test Suite Reference Run
+
+After the Test Suite archive was downloaded through the temporary local-VPN SSH
+reverse proxy, the pinned unmodified evaluator was run in a detached `screen`
+session against the complete 1,034-case frozen predictions. The bridge folded
+formatting whitespace in 41 multi-line model SQL candidates into one physical
+line while preserving quoted literals; it rejected line comments rather than
+changing their semantics. The evaluator ran with `PYTHONDONTWRITEBYTECODE=1`
+so its pinned external checkout remained clean.
+
+| Measurement | Observed value |
+| --- | --- |
+| Evaluated cases | 1,034 / 1,034 |
+| Evaluator commit | `e97acc546ecbee8fa27fa8dbf025ef61493a876c` |
+| Evaluation type | `exec` |
+| Easy / medium / hard / extra | `0.820 / 0.620 / 0.437 / 0.300` |
+| All execution diagnostic | `0.585` |
+| Return code | `0` |
+| External run directory | `/disk2/gengnan/data-analysis-agent-data/experiments/spider-qwen25coder3b-test-suite-v3-20260824/` |
+| Gold SHA-256 | `d9b457826163d062f2efc3c8971d988d58dae9a8817ed76ada9f2f1df2a01cac` |
+| Prediction SHA-256 | `ee9de5ddcf464151cd05a17df30b7bbb504df34cf6c953ade94f222129ada8c7` |
+| Raw output SHA-256 | `7b4d4996a08591648de0cdbad00ff004adcb53a3351146ae6672bfe7046f6d03` |
+
+This is a **full internal reference run**, not a current official Spider
+leaderboard result: the selected Kaggle mirror predates the official correction
+release and the independent Test Suite asset terms/release identity are not
+separately verified. It is nevertheless a fixed baseline for comparing later
+local SFT/QLoRA experiments under the same data, evaluator, prompt and
+prediction contract. It must not be confused with the SQLite Adapter's
+`884/1,034` operational execution diagnostic.
 
 The original ordered smoke command is retained below for a smaller reproducible
 run; it was completed before the full batch above:
@@ -261,8 +293,9 @@ The full-coverage requirement is essential: the upstream evaluator treats the
 Spider development file as one session and iterates with `zip(predictions,
 gold)`. A short prediction file would otherwise silently receive a denominator
 equal to its own length. The present 20-case smoke was independently verified
-to fail before input preparation or evaluator invocation. It is therefore not
-and cannot become a Test Suite Accuracy score.
+to fail before input preparation or evaluator invocation. The completed
+1,034-case run is the only full-coverage result currently retained, and it
+remains an internal reference, not a current official leaderboard score.
 
 ## Next Research Gate
 

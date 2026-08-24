@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -90,8 +91,8 @@ def prepare_complete_spider_test_suite_inputs(
     prediction_lines: list[str] = []
     for case_id, database_id, gold_sql in normalized_cases:
         candidate_sql = prediction_by_case[case_id]
-        _require_single_line_sql(candidate_sql, "candidate SQL")
-        _require_single_line_sql(gold_sql, "gold SQL")
+        candidate_sql = _serialize_single_line_sql(candidate_sql, "candidate SQL")
+        gold_sql = _serialize_single_line_sql(gold_sql, "gold SQL")
         if "\t" in database_id or "\n" in database_id or "\r" in database_id:
             raise OfficialSpiderTestSuiteError("native db_id cannot contain a tab or newline")
         gold_lines.append(f"{gold_sql}\t{database_id}\n")
@@ -178,6 +179,9 @@ def run_unmodified_spider_test_suite(
     ]
     if keep_distinct:
         command.append("--keep_distinct")
+    evaluator_environment = os.environ.copy()
+    # The evaluator checkout is pinned and must remain clean after a run.
+    evaluator_environment.setdefault("PYTHONDONTWRITEBYTECODE", "1")
     try:
         with output_path.open("x", encoding="utf-8") as output_file:
             completed = subprocess.run(
@@ -188,6 +192,7 @@ def run_unmodified_spider_test_suite(
                 check=False,
                 timeout=timeout_seconds,
                 text=True,
+                env=evaluator_environment,
             )
     except subprocess.TimeoutExpired as exc:
         raise OfficialSpiderTestSuiteError("official evaluator timed out; inspect external output") from exc
@@ -306,9 +311,66 @@ def _git_output(root: Path, *arguments: str) -> str:
     return completed.stdout.strip()
 
 
-def _require_single_line_sql(sql: str, field_name: str) -> None:
-    if "\r" in sql or "\n" in sql or "\t" in sql:
-        raise OfficialSpiderTestSuiteError(f"{field_name} must be one line for the official evaluator")
+def _serialize_single_line_sql(sql: str, field_name: str) -> str:
+    """Fold formatting whitespace without changing quoted SQL literals.
+
+    The upstream evaluator consumes one SQL statement per physical line. Model
+    formatting commonly emits newlines between clauses, which are equivalent
+    whitespace outside literals. A line comment is rejected because folding its
+    newline would change the meaning of the following SQL text.
+    """
+
+    output: list[str] = []
+    quote: str | None = None
+    pending_space = False
+    index = 0
+    while index < len(sql):
+        character = sql[index]
+        if quote is not None:
+            if character in "\r\n":
+                raise OfficialSpiderTestSuiteError(
+                    f"{field_name} contains a newline inside a quoted literal"
+                )
+            output.append(character)
+            if character == quote:
+                if index + 1 < len(sql) and sql[index + 1] == quote:
+                    output.append(sql[index + 1])
+                    index += 2
+                    continue
+                quote = None
+            elif character == "\\" and index + 1 < len(sql):
+                output.append(sql[index + 1])
+                index += 2
+                continue
+            index += 1
+            continue
+
+        if character in "'\"`":
+            if pending_space and output and output[-1] != " ":
+                output.append(" ")
+            pending_space = False
+            output.append(character)
+            quote = character
+            index += 1
+            continue
+        if character == "-" and index + 1 < len(sql) and sql[index + 1] == "-":
+            raise OfficialSpiderTestSuiteError(
+                f"{field_name} contains a line comment that cannot be folded safely"
+            )
+        if character.isspace():
+            pending_space = True
+            index += 1
+            continue
+        if pending_space and output and output[-1] != " ":
+            output.append(" ")
+        pending_space = False
+        output.append(character)
+        index += 1
+
+    normalized = "".join(output).strip()
+    if not normalized:
+        raise OfficialSpiderTestSuiteError(f"{field_name} must not be empty")
+    return normalized
 
 
 def _sha256_file(path: Path) -> str:

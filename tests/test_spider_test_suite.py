@@ -133,6 +133,45 @@ def test_prepare_keeps_gold_and_prediction_inputs_outside_repository(tmp_path: P
         )
 
 
+def test_prepare_folds_formatting_whitespace_but_preserves_literals(tmp_path: Path) -> None:
+    repository_root = tmp_path / "repository"
+    repository_root.mkdir()
+    cases = [{"db_id": "demo", "query": "SELECT 'a  b' FROM items"}]
+    predictions = [
+        SqlPrediction(
+            case_id="spider_dev:00000",
+            candidate_sql="SELECT 'a  b'\nFROM items",
+        )
+    ]
+
+    inputs = prepare_complete_spider_test_suite_inputs(
+        native_cases=cases,
+        predictions=predictions,
+        output_directory=tmp_path / "external",
+        repository_root=repository_root,
+    )
+
+    assert inputs.prediction_path.read_text(encoding="utf-8") == "SELECT 'a  b' FROM items\n"
+
+
+def test_prepare_rejects_line_comments_when_folding_sql(tmp_path: Path) -> None:
+    repository_root = tmp_path / "repository"
+    repository_root.mkdir()
+    with pytest.raises(OfficialSpiderTestSuiteError, match="line comment"):
+        prepare_complete_spider_test_suite_inputs(
+            native_cases=_native_cases(),
+            predictions=[
+                SqlPrediction(
+                    case_id="spider_dev:00000",
+                    candidate_sql="SELECT value FROM items -- keep\nWHERE value IS NOT NULL",
+                ),
+                _complete_predictions()[1],
+            ],
+            output_directory=tmp_path / "external-comments",
+            repository_root=repository_root,
+        )
+
+
 def test_verify_official_evaluator_rejects_dirty_worktree(tmp_path: Path) -> None:
     evaluator_root, commit = _make_evaluator_repository(tmp_path)
     assert verify_unmodified_official_evaluator(

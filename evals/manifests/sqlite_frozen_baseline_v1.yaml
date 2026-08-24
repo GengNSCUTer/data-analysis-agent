@@ -86,13 +86,43 @@ evaluation_boundary:
     code_license: Apache-2.0
     checkout_location: /disk2/gengnan/data-analysis-agent-data/text-to-sql/sources/test-suite-sql-eval
   test_suite_database_assets:
-    status: pending_explicit_terms_and_release_compatibility
+    status: acquired_structurally_compatible_terms_pending
     source_url: https://drive.google.com/file/d/1mkCx2GOFIqNesD4y8TDAO1yX1QZORP5w/view?usp=sharing
+    archive_name: testsuitedatabases.zip
+    archive_bytes: 1269456098
+    archive_sha256: 9ec24ea8debc6bd04abfe137b5f1a739b5a8836f32c0464e4dfc94eb7f41da96
+    extracted_root: /disk2/gengnan/data-analysis-agent-data/text-to-sql/test-suite-databases-official-2020-12-27
+    extracted_database_root: /disk2/gengnan/data-analysis-agent-data/text-to-sql/test-suite-databases-official-2020-12-27/database
+    extracted_sqlite_count: 3194
+    extracted_database_directory_count: 28
+    extracted_sqlite_tree_sha256: c9529ce837eeb68a7eb98af9dfa1caf721ff566ebb871835a9910e96b3d963bd
+    native_spider_dev_database_files_present: true
+    native_spider_dev_schema_mismatches: 0
     required_before_run:
-      - record_asset_terms_and_release_identity
-      - record_archive_and_extracted_tree_sha256
-      - verify_selected_Spider_mirror_compatibility
+      - record_asset_terms_and_release_identity_for_public_claims
+      - record_official_release_compatibility_for_public_claims
       - store_assets_outside_Git
+    internal_reference_run:
+      status: completed_not_leaderboard_comparable
+      run_directory: /disk2/gengnan/data-analysis-agent-data/experiments/spider-qwen25coder3b-test-suite-v3-20260824
+      evaluated_cases: 1034
+      evaluator_commit: e97acc546ecbee8fa27fa8dbf025ef61493a876c
+      etype: exec
+      plug_value: false
+      keep_distinct: false
+      execution_accuracy: 0.585
+      difficulty_breakdown:
+        easy: 0.820
+        medium: 0.620
+        hard: 0.437
+        extra: 0.300
+      gold_sha256: d9b457826163d062f2efc3c8971d988d58dae9a8817ed76ada9f2f1df2a01cac
+      prediction_sha256: ee9de5ddcf464151cd05a17df30b7bbb504df34cf6c953ade94f222129ada8c7
+      raw_output_sha256: 7b4d4996a08591648de0cdbad00ff004adcb53a3351146ae6672bfe7046f6d03
+      status_reason: >-
+        Full 1034-case run completed with the unmodified evaluator. This is an
+        internal reference on the 2020-01 Kaggle mirror and downloaded asset;
+        it is not reported as a current official Spider leaderboard score.
   official_score: >-
     The Spider task page identifies Test Suite Accuracy as its official leaderboard
     metric. Attach it only from the unmodified official test-suite evaluator and
