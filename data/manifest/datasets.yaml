@@ -113,3 +113,38 @@ datasets:
     license: usage terms must be reviewed on the current Tianchi page
     status: candidate
     notes: Do not download or redistribute until the current terms are recorded.
+
+  - id: bird_dev
+    name: BIRD Development Benchmark
+    role: text_to_sql_offline_benchmark
+    source_urls:
+      - https://bird-bench.github.io/
+      - https://github.com/AlibabaResearch/DAMO-ConvAI/tree/main/bird
+    native_dialect: sqlite
+    license: pending explicit verification of the selected data-release terms
+    status: planned_no_download
+    planned_storage_location: /disk2/gengnan/data-analysis-agent-data/text-to-sql/bird/<release>
+    expected_layout:
+      cases: dev.json
+      databases: dev_databases/<db_id>/<db_id>.sqlite
+    notes: >-
+      Offline research and official-EX comparison only. Do not treat the repository code
+      license as a dataset license; record release ID, terms, checksums and download date
+      before acquisition. Raw data, predictions and reports remain outside Git.
+
+  - id: spider_dev
+    name: Spider Development Benchmark
+    role: text_to_sql_offline_benchmark
+    source_urls:
+      - https://yale-lily.github.io/spider
+      - https://github.com/taoyds/spider
+    native_dialect: sqlite
+    license: pending explicit verification of the selected data-release terms
+    status: planned_no_download
+    planned_storage_location: /disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/<release>
+    expected_layout:
+      cases: dev.json
+      databases: database/<db_id>/<db_id>.sqlite
+    notes: >-
+      Offline research and official-EX comparison only. Pin the exact release and official
+      evaluator before download; raw data, predictions and reports remain outside Git.

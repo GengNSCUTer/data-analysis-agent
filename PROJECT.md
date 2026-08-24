@@ -371,6 +371,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 已完成 starter 空会话生命周期修复，避免页面刷新制造零消息历史记录；
 - Text-to-SQL 第二轮运行时合同已完成：WorkspaceProfile、Catalog/路由/working memory/结果合同、TrustedRunSqlTool 一次修复、repair evidence 和可信拒答均已落地；浏览器多轮澄清、八方向缩放和长历史 Markdown 回归已补齐。
 - 已完成后训练准备第一阶段：`ChartContract` 与归因三态接入运行时，`QueryPlan`/`ResultContract`/审计记录携带归因需求证据；`docs/post-training-data-protocol.md` 固化样本字段、来源、脱敏、评测和训练边界，`evals/manifests/post_training_holdout_v1.yaml` 将 v2 60 条 golden 永久隔离。下一项是在不接触 holdout 的前提下，单独采集和人工复核训练候选样本，再设计可复现实验基线。
+- 已完成后训练研究的 SQLite benchmark Adapter 基础设施：离线 `ReadOnlySqliteExecutor` 使用 SQLite 方言 AST、只读 URI、SQLite authorizer、超时和行数上限执行外部候选 SQL；`scripts/run_sqlite_benchmark.py` 仅消费 BIRD/Spider 原生 `dev.json` 和外部预测 JSONL，输出版本化模型/Prompt/候选/执行证据报告。它不接入 Vanna/前端/生产 PostgreSQL，也不自行计算官方 EX；BIRD/Spider 原始数据、模型预测和报告都继续留在仓库外或忽略目录，许可与 checksum 在下载前再冻结。详情见 [`docs/sqlite-benchmark-adapter.md`](docs/sqlite-benchmark-adapter.md)。
 
 ### Phase 5：评测、加固与作品集
 
@@ -405,9 +406,11 @@ v1 不引入 Redis。
 - [`plan/feature-text-to-sql-reliability-v2.md`](plan/feature-text-to-sql-reliability-v2.md)
 - [`docs/verification-text-to-sql-v2.md`](docs/verification-text-to-sql-v2.md)
 - [`docs/post-training-data-protocol.md`](docs/post-training-data-protocol.md)
+- [`docs/sqlite-benchmark-adapter.md`](docs/sqlite-benchmark-adapter.md)
 
 | 日期 | 事项 | 结论 |
 | --- | --- | --- |
+| 2026-08-24 | SQLite benchmark Adapter 基础设施 | 新增独立 SQLite 离线执行器和 `run_sqlite_benchmark.py`：以 `sqlglot` SQLite AST 限制单条只读查询，拒绝 DDL/DML、事务、`ATTACH`/`DETACH`、危险 `PRAGMA` 和扩展加载；以 SQLite `mode=ro`、`query_only`、authorizer、progress-handler 超时与服务端 `LIMIT` 形成纵深保护。BIRD/Spider 原生 `dev.json` 只用于生成稳定 case/database locator，问题、证据和 gold SQL 不进入报告；外部 JSONL 预测记录候选 SQL、token/生成耗时和执行证据，结果行不落盘。报告明确将本地执行诊断与官方 EX 分开，官方 EX 只能挂载未修改官方评测器生成的带版本摘要。本轮 **18 passed**、`ruff` 与 `compileall` 通过；未下载 BIRD/Spider、未下载模型、未创建训练环境、未更改 PostgreSQL/Vanna 生产链路。 |
 | 2026-08-24 | 后训练准备第一阶段 | 新增服务器拥有的 `ChartContract`，从用户问题、`QueryPlan` 和 `ResultContract` 派生受控 bar/line 图表边界，并固定横轴、指标列、系列、标题与当前 SQL 结果工件；图表层拒绝模型自选类型/标题/文件、额外列、缺失或非数值字段、重复横轴和二次聚合。`DimensionPolicy` 升级为 `safe_direct` / `requires_attribution` / `server_owned_rule`，后者仅在实际服务器规则注册后才可放行，当前 Olist 没有归因 SQL compiler，继续 fail closed。新增后训练数据协议、60 条 v2 golden holdout manifest 与完整性测试；训练候选永远不能替代 AST、PostgreSQL reader role、Result/Chart Contract 或服务器归因规则。本轮专项 **96 passed**、v2 golden **60/60 passed**、`ruff`/`compileall`/diff check 通过；未调用在线模型、未创建训练环境、未执行微调。 |
 | 2026-08-19 | SSE 澄清流状态收尾 | 修复嵌入式窗口在 SQL 前澄清/归因阻断只返回 `status_card` 时，SSE 已正常结束但状态栏仍停留在 `Sending message...` 的问题。前端将服务端 `status_bar_update` 同步到 Lit 状态，避免后续渲染恢复旧 loading；对未发送终态状态更新的普通用户请求，在正常 SSE 或 polling 结束时清空临时 loading，同时保留 starter UI 和服务端 error/success/warning 终态。新增确定性 Playwright 回归，验证澄清卡片可见、状态回到 `idle`、输入可继续使用；修正历史结果预览测试的 Shadow DOM 读取断言。Web Component 构建通过，嵌入窗口回归 **10 passed, 1 skipped**，服务已重启至 `127.0.0.1:32010`。 |
 | 2026-08-19 | 可信结果呈现与归因边界 | 已验证的分组结果由服务器展示中文概览、样例行和完整表格提示，替代机器式审计结尾，且不重新引入自由模型总结；支付方式 GMV 与品类履约/好评率的未冻结一对多归因均在 SQL 前阻断，并明确要求配置 Catalog 归属/分摊规则而非承诺自然语言追问即可执行。确定性专项 77 passed、v2 golden 60/60，Playwright 直接渲染验证表格语义和桌面无横向溢出。 |
