@@ -18,10 +18,19 @@ database assets, so the assets remain `not_downloaded` until their explicit
 terms, release identity and checksums are verified.
 
 The current Spider data is a 2020-01 Kaggle mirror which predates the official
-August 2020 correction release. Until the future test-suite asset is verified as
-compatible with this precise mirror, no official evaluator invocation is
-authorized. A score from mismatched data and test suites would not be a valid
-Spider comparison even if the process returns zero.
+August 2020 correction release. The official Test Suite package was downloaded
+through a temporary local-VPN SSH reverse proxy on 2026-08-24 and extracted
+outside Git. Its archive SHA-256 is
+`9ec24ea8debc6bd04abfe137b5f1a739b5a8836f32c0464e4dfc94eb7f41da96`, its
+extracted SQLite tree SHA-256 is
+`c9529ce837eeb68a7eb98af9dfa1caf721ff566ebb871835a9910e96b3d963bd`, and its
+layout contains 3,194 SQLite files in 28 task directories. All 20 database IDs
+used by the current 1,034-case dev mirror are present. A table/column/type
+comparison against the current mirror found no mismatch for those 20 databases.
+These checks establish structural compatibility only. The independent asset
+license/terms are not separately verified, and this older mirror is still not
+proven comparable to the current official leaderboard release, so no official
+evaluator score has been run or published.
 
 ## Bridge Contract
 
@@ -37,7 +46,8 @@ is started:
 3. The native case order becomes the official gold/prediction file order.
    Candidate generation completes before gold SQL is read for evaluation.
 4. The separate test-suite database root must contain every required
-   `<db_id>/<db_id>.sqlite` file.
+   `<db_id>/<db_id>.sqlite` file. The downloaded root is
+   `/disk2/gengnan/data-analysis-agent-data/text-to-sql/test-suite-databases-official-2020-12-27/database`.
 5. Gold SQL, prediction SQL, unmodified evaluator stdout/stderr and the evidence
    JSON are written only outside this Git worktree. The evidence JSON contains
    hashes and run configuration, not SQL text or a locally parsed score.
@@ -51,9 +61,12 @@ smoke exits with code 2 at this guard and produces no evaluator artifacts.
 
 ## Future Run Gate
 
-Before the command below can be used, update the data manifest and provenance
-with the test-suite asset license/terms, source URL, release identifier, archive
-SHA-256, extracted database-tree SHA-256 and an explicit compatibility decision.
+Before the command below can be used for a reported official score, update the
+data manifest and provenance with the test-suite asset license/terms, source
+URL, release identifier, archive SHA-256, extracted database-tree SHA-256 and an
+explicit official-release compatibility decision. The downloaded asset
+metadata is recorded outside Git in
+`/disk2/gengnan/data-analysis-agent-data/text-to-sql/test-suite-databases-official-2020-12-27/acquisition-manifest.json`.
 Generate all 1,034 frozen predictions using an unchanged model/prompt contract;
 do not fill missing cases with fabricated SQL.
 
