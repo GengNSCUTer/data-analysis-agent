@@ -68,6 +68,21 @@ class StaticChatClient:
         )
 
 
+class FailingAfterFirstChatClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete(self, prompt: str) -> ModelCompletion:
+        self.calls += 1
+        if self.calls == 2:
+            raise BaselineGenerationError("simulated later model failure")
+        return ModelCompletion(
+            content="SELECT COUNT(*) AS order_count FROM orders",
+            generated_tokens=12,
+            generation_elapsed_ms=7,
+        )
+
+
 def test_native_generation_cases_keep_question_only_for_in_memory_prompt() -> None:
     cases = load_native_generation_cases(
         [{"db_id": "shop", "question": "How many orders are there?", "query": "gold"}],
@@ -144,6 +159,29 @@ def test_generation_output_contains_adapter_contract_but_not_question(
     assert predictions[0].generated_tokens == 12
     assert question in client.prompts[0]
     assert question not in json.dumps(predictions[0].__dict__)
+
+
+def test_each_successful_prediction_can_be_persisted_before_later_failure(
+    generation_database_root: Path,
+) -> None:
+    cases = load_native_generation_cases(
+        [
+            {"db_id": "shop", "question": "How many orders are there?"},
+            {"db_id": "shop", "question": "How many customers are there?"},
+        ],
+        dataset_id="spider_dev",
+    )
+    persisted_case_ids: list[str] = []
+
+    with pytest.raises(BaselineGenerationError, match="simulated later model failure"):
+        generate_predictions(
+            cases=cases,
+            database_root=generation_database_root,
+            client=FailingAfterFirstChatClient(),
+            on_prediction=lambda prediction: persisted_case_ids.append(prediction.case_id),
+        )
+
+    assert persisted_case_ids == ["spider_dev:00000"]
 
 
 def test_generated_prediction_runs_through_existing_sqlite_adapter(

@@ -111,6 +111,13 @@ only the Adapter contract:
 Questions, prompts, gold SQL, database rows, API keys and chat history are not
 written to this file by project code.
 
+The CLI durably appends and `fsync`s one candidate record immediately after each
+successful completion, before requesting the next case. If a later request
+times out or the model service fails, the completed prefix remains valid and
+`--resume` generates only missing `candidate_index=0` cases. This does not
+silently skip failures or alter the native case order; it only avoids losing
+already generated external records during a long batch.
+
 ## First Native Smoke Run
 
 On 2026-08-24, the frozen contract was run on the first 20 native cases of

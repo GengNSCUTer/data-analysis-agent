@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
 from time import perf_counter
-from typing import Any, Iterable, Mapping, Protocol
+from typing import Any, Callable, Iterable, Mapping, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -265,8 +266,14 @@ def generate_predictions(
     database_root: Path,
     client: ChatClient,
     max_schema_characters: int = 20_000,
+    on_prediction: Callable[[SqlPrediction], None] | None = None,
 ) -> list[SqlPrediction]:
-    """Generate one candidate per case without executing any model output."""
+    """Generate one candidate per case without executing any model output.
+
+    ``on_prediction`` runs after each successful model response. The CLI uses it
+    to durably persist an external JSONL record before requesting the next case,
+    so a later timeout does not discard an otherwise valid prefix of a long run.
+    """
 
     predictions: list[SqlPrediction] = []
     for case in cases:
@@ -274,15 +281,16 @@ def generate_predictions(
             database_root, case, max_schema_characters=max_schema_characters
         )
         completion = client.complete(render_sql_prompt(case, schema))
-        predictions.append(
-            SqlPrediction(
-                case_id=case.case_id,
-                candidate_sql=extract_sql_candidate(completion.content),
-                candidate_index=0,
-                generated_tokens=completion.generated_tokens,
-                generation_elapsed_ms=completion.generation_elapsed_ms,
-            )
+        prediction = SqlPrediction(
+            case_id=case.case_id,
+            candidate_sql=extract_sql_candidate(completion.content),
+            candidate_index=0,
+            generated_tokens=completion.generated_tokens,
+            generation_elapsed_ms=completion.generation_elapsed_ms,
         )
+        if on_prediction is not None:
+            on_prediction(prediction)
+        predictions.append(prediction)
     return predictions
 
 
@@ -313,13 +321,14 @@ def load_existing_prediction_case_ids(path: Path) -> set[str]:
 
 
 def append_predictions(path: Path, predictions: Iterable[SqlPrediction]) -> None:
-    """Append only Adapter-compatible records; never write prompts or questions."""
+    """Durably append Adapter-compatible records; never write prompts or questions."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as stream:
         for prediction in predictions:
             stream.write(json.dumps(asdict(prediction), ensure_ascii=False) + "\n")
             stream.flush()
+            os.fsync(stream.fileno())
 
 
 def ensure_path_outside_repository(path: Path, repository_root: Path) -> Path:

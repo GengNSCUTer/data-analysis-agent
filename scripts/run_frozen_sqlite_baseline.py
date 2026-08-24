@@ -103,8 +103,8 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_seconds=args.timeout_seconds,
             ),
             max_schema_characters=args.max_schema_characters,
+            on_prediction=lambda prediction: append_predictions(output_path, [prediction]),
         )
-        append_predictions(output_path, predictions)
     except (BaselineGenerationError, ValueError) as exc:
         print(f"baseline input error: {exc}", file=sys.stderr)
         return 2
