@@ -1,24 +1,51 @@
 id: sqlite_frozen_baseline_v1
-status: ready_for_fixture_smoke_only
+status: ready_for_spider_dev_smoke
 purpose: >-
-  Reproducible local candidate generation for a future Spider 1.0 SQLite dev
-  baseline. This manifest does not authorize benchmark-data acquisition or
-  claim an official score.
+  Reproducible local candidate generation for a versioned Spider 1.0 SQLite
+  development mirror. This manifest authorizes only the recorded offline research
+  acquisition and local diagnostics; it does not claim an official score.
 
 dataset:
   id: spider_dev
-  planned_release: spider_1_0_2020-08-corrected
+  release_id: spider-1.0-kaggle-mirror-v1-2020-01-27
   native_dialect: sqlite
+  raw_data_source:
+    task_page_url: https://yale-lily.github.io/spider
+    official_archive_url: https://drive.google.com/file/d/1403EGqzIDoHMdQF4c9Bkyl7dZLZ5Wt6J/view?usp=sharing
+    distribution_url: https://www.kaggle.com/datasets/jeromeblanchet/yale-universitys-spider-10-nlp-dataset
+    distribution_version: 1
+    distribution_published_at: "2020-01-27T20:22:40Z"
+    data_license: CC BY-SA 4.0 (original official Spider data)
+    license_evidence: >-
+      The official task page explicitly says the downloadable Spider dataset is
+      distributed under CC BY-SA 4.0; verified 2026-08-24. The actual source is
+      a Kaggle v1 mirror that cites the official page but declares its own metadata
+      license as unknown; retain original-source attribution and CC BY-SA terms.
+    retrieval_date: "2026-08-24"
   source_repository:
     url: https://github.com/taoyds/spider
     commit: b7b5b8c890cd30e35427348bb9eb8c6d1350ca7c
     code_license: Apache-2.0
-  data_license_status: pending_explicit_source_verification
+  data_license_status: verified_official_task_page
+  acquired_artifacts:
+    archive_name: archive.zip
+    archive_bytes: 100663520
+    archive_sha256: ed2a34b84e9665606da73497f4166b1c8d94056517614c33f9dcdca45346be0f
+    extracted_root: extracted/spider
+    dev_json_sha256: 7770d539e4093291a9e7dc383deeb6c09410be566b5542c044b65a291c28eb0e
+    tables_json_sha256: b68de9166952871d64554486fca4b25ff88509e983857a6af428250ffd58b67f
+    database_tree_sha256: f85f3482bfb1ad5fb93ac49dc83c288d57c8d3da7f4871493f97c348aad5248d
+    dev_database_tree_sha256: 29504fcf305416369d18d04ee645a59c3efa2312a47796dce1631c884c820a13
+    dev_case_count: 1034
+    dev_database_count: 20
+    sqlite_database_count: 166
+    archive_member_count: 398
+    native_layout_validated: true
   acquisition_gate: >-
-    Do not download spider.zip until the selected source gives explicit terms
-    for the raw dataset and the acquisition record includes date, source URL,
-    archive checksum and extraction checksum.
-  planned_storage_location: /disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/<release>
+    The raw-data license and archive/extracted-content hashes are verified. Before
+    any separate official-evaluator experiment, record its exact revision and
+    preserve its external artifact.
+  storage_location: /disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/spider-1.0-kaggle-mirror-v1-2020-01-27
 
 model:
   provider: ollama
@@ -53,6 +80,10 @@ generation:
 evaluation_boundary:
   diagnostics: scripts/run_sqlite_benchmark.py
   official_score: >-
-    Attach only an artifact created by an unmodified official Spider evaluator.
-    The local diagnostic runner must not be reported as Spider EX or Test Suite Accuracy.
+    The Spider task page identifies Test Suite Accuracy as its official leaderboard
+    metric. Attach it only from the unmodified official test-suite evaluator and
+    its required test-suite assets. The local diagnostic runner must not be
+    reported as Spider Execution Accuracy or Test Suite Accuracy. This 2020-01
+    Kaggle mirror predates the official 2020-08 correction release and is never
+    a leaderboard-comparable dataset artifact.
   production_runtime: PostgreSQL/Vanna path remains unchanged

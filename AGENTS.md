@@ -56,7 +56,23 @@
 - 自有目录约定为 Vanna 源码根目录、`examples/`、`src/data_analysis_agent/`、`tests/`、`docs/`、`data/`、`evals/` 和 `infra/`；本仓库是唯一开发、提交和推送位置。若仍保留 `/disk2/gengnan/_upstream/tailadmin-nextjs-dashboard/`，它只作历史参考，严禁在其中实现本项目业务代码；
 - 文档更新应陈述已验证事实与未决假设，不能把计划描述成已实现能力。
 
-## 7. 最近一次同步记录
+## 7. GPU 资源与设备映射
+
+本机 CUDA 逻辑设备编号与 `nvidia-smi` 物理编号并非同一顺序。后续所有本地推理、评测、微调和后训练任务必须以此映射为准，并在实验 manifest、日志或启动命令中同时记录逻辑设备与物理 GPU 编号。
+
+| `CUDA_VISIBLE_DEVICES` 中的逻辑编号 | 实际 GPU | `nvidia-smi` 物理编号 |
+| --- | --- | --- |
+| `0` | NVIDIA GeForce RTX 4090 | `2` |
+| `1` | NVIDIA GeForce RTX 4090 | `3` |
+| `2` | NVIDIA GeForce RTX 3090 | `0` |
+| `3` | NVIDIA GeForce RTX 3090 | `1` |
+
+- 等价映射为：逻辑 CUDA `0,1,2,3` 分别对应 `nvidia-smi` 的 `2,3,0,1`；不得按 `nvidia-smi` 默认顺序猜测模型实际落点；
+- 启动任何占用显存的任务前，必须重新执行 `nvidia-smi` 检查显存和进程占用；不得停止、重启或抢占其他项目的进程；
+- 训练/评测脚本应明确设置 `CUDA_VISIBLE_DEVICES`。进程内部的 `cuda:0` 仅表示该变量可见设备集合中的第一个设备，不能单独当作物理卡号；
+- 不假定四张卡能够同时使用。多卡训练、分布式启动或显存预算必须在实际空闲状态、互连和任务授权均确认后另行决定。
+
+## 8. 最近一次同步记录
 
 ### 2026-08-18：真实 SiliconFlow 人工标签评测
 
