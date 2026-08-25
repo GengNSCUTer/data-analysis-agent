@@ -142,6 +142,37 @@ did the adapter improve schema linking and preserve SQL semantics, or merely
 make more queries executable? Execution alone does not validate SQL intent,
 join multiplicity, aggregation grain or business metric meaning.
 
+## Base Recovery Result
+
+The Base raw prediction JSONL completed before the recovery work and remains
+unchanged: 1,034/1,034 ordered primary candidates, SHA-256
+`8978b8ab0734069f4975810ba19e6221db4cfeb2545e357778f12cfcca29cc0e`,
+128,957 generated tokens, and 4,631,685 ms generation time on logical CUDA `1`
+/ physical GPU `3` (RTX 4090). The initial unnormalized diagnostic is retained
+outside Git as a pre-normalization audit artifact with SHA-256
+`320f68dee858dd71409998ab03c555bdb5521a9dbc1115c448957e0b37a101ef`; it is
+not comparable to the Adapter because Markdown answer sections were still
+being treated as part of the SQL candidate.
+
+Under the frozen shared normalizer, Base SQLite diagnostics have complete
+coverage: 831 executed, 4 policy rejected, 199 execution errors and 0 timeouts.
+The normalized report SHA-256 is
+`433cf3a7a4d358547a0bfa72ad239ee594297eedf76a9ad1d17c7102315d071b`.
+The four policy rejections are genuine malformed or non-SQL candidates; the
+dominant execution failures are unresolved schema links such as nonexistent
+columns, not server faults.
+
+The unmodified pinned Test Suite evaluator completed all 1,034 cases. Its raw
+internal output reports execution values `0.748 / 0.448 / 0.241 / 0.094 / 0.427`
+for easy / medium / hard / extra / all. Evidence SHA-256 values are prediction
+input `207585672ec91bd9aa455f525a3e1d89736d9415fd77ba88679178a5315936d9` and raw
+output `ddec7e34daee62b2f5bbe767407cde979c9f4e0bc5a168a1ca9de95b10b39f5e`.
+This is an internal result for the frozen 2020-01 mirror and Test Suite asset
+combination, not a current official Spider leaderboard result. It must not be
+compared with the 831 SQLite executions as though they were the same metric.
+The Adapter generation is running under the same normalizer and evaluator
+contract; no QLoRA quality conclusion is possible until it completes.
+
 ## Learning Checkpoint
 
 For an interview, describe this as a controlled ablation. The independent

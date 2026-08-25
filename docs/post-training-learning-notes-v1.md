@@ -145,11 +145,30 @@ SQL 可执行只说明语法、对象名和类型大致成立，不说明指标�
 
 未完成：
 
-- 用同一个 Qwen 1.5B base/adapter、同一个 Spider dev 输入和同一 Test Suite 协议做前后对比；
+- 当前 Qwen 1.5B Base 已在固定 Spider dev/Test Suite 协议上完成，Adapter 正在按完全相同的合同生成和评测；待 Adapter 完成后再做前后对比；
 - 扩大且人工抽检训练候选，加入 schema-linking、路由/澄清和安全负例；
 - DPO/GRPO。它们都不能使用 v2 永久 holdout。
 
-## 5.1 本次 SFT smoke 要学会什么
+### 5.1 如何解读这次 Base 的三层结果
+
+Base 的 SFT 前向 loss、SQLite 诊断和 Test Suite 输出分别在测不同的东西。此前 `0.466989` 的
+validation loss 是 teacher forcing 下对 26 条验证 SQL token 的交叉熵，主要验证训练工程和目标 token 拟合；它
+不能预测 dev 集生成效果。现在 Base 对 1,034 条 dev completion 在共享展示包装规范化后得到 831 条 SQLite
+安全执行、4 条 policy rejection、199 条 execution error。这个 831/1,034 反映“候选在一个固定开发库中能否
+被解析、通过只读策略并执行”，其中主要失败是 schema linking，例如生成不存在的列。
+
+同一批候选进入未修改 Test Suite evaluator 后，内部 all execution value 为 `0.427`。它低于单库可执行比例是
+正常的：Test Suite 会在更多生成数据库实例上验证预测结果与 gold 的行为是否一致，能过滤“列和语法都对、但
+过滤条件、Join 或聚合语义错”的偶然可执行 SQL。反过来，Test Suite 也不是业务生产正确率，仍不能覆盖 Olist
+工作区的指标口径、权限、ResultContract 和图表合同。
+
+面试时可以这样回答：我没有把 loss 下降或 SQLite 可执行率当作微调成功，而是冻结 prompt、decode、数据、
+模型 revision、GPU 和 evaluator，先记录 Base 的生成成本、SQLite 错误类别和 Test Suite 内部结果，再让只改变
+LoRA adapter 是否加载的 Adapter 走同一管线。只有比较 delta、人工查看改变的样本并确认没有数据泄漏后，才讨论
+模型是否真的提高了 schema linking 或语义正确性。由于当前镜像早于官方修订，`0.427` 只能称为固定资产组合上
+的内部评测输出，不能写成当前 Spider 官方榜单成绩。
+
+## 5.2 本次 SFT smoke 要学会什么
 
 **为什么按 db_id 分组？** 同一个 Spider 数据库共享表、列、外键和命名风格。若随机把同库问题分到
 train/validation，模型可能在训练中已经见过同一份 schema，validation loss 会过于乐观。此次 102/26
@@ -226,7 +245,7 @@ LoRA target_modules / rank / alpha / dropout：
 2. 用 128 条 train-only 候选验证 schema + question + SQL 的 tokenization 和 labels mask；
 3. 已下载并冻结 Qwen 1.5B，完成不训练的 forward smoke；
 4. 已完成 schema-disjoint 的极小 SFT smoke，验证了 loss、显存、checkpoint 和 adapter reload；
-5. 用同一 Qwen 1.5B base/adapter 在冻结 Spider dev/Test Suite 协议上做前后对比；
+5. 等待正在运行的 Adapter 在同一 Qwen 1.5B / Spider dev / Test Suite 协议下完成，再做前后对比；
 6. 扩大训练集前继续人工抽检数据、增加不泄漏的 schema-linking/安全样本；
 7. 只有 SFT 基线稳定后，再讨论 DPO/GRPO 和执行反馈奖励。
 

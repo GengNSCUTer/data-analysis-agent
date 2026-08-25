@@ -1,5 +1,5 @@
 manifest_id: post_training_base_adapter_evaluation_v1
-status: base_generation_complete_recovery_pending
+status: base_evaluated_adapter_generation_running
 purpose: >-
   Compare the frozen Qwen/Qwen2.5-Coder-1.5B base and the first SFT LoRA adapter
   under identical Spider dev inputs, schema/question serialization and greedy
@@ -76,23 +76,41 @@ preflight:
     - no_production_PostgreSQL_or_Vanna_replacement
 execution_state:
   base_generation:
-    status: completed_before_diagnostics
+    status: completed_and_evaluated
     completed_cases: 1034
     prediction_jsonl_sha256: 8978b8ab0734069f4975810ba19e6221db4cfeb2545e357778f12cfcca29cc0e
     generated_tokens: 128957
     generation_elapsed_ms: 4631685
-    recovery_required: true
-    recovery_reason: >-
+    recovery_required: false
+    recovery_history: >-
       SQLite diagnostics stopped on a malformed model candidate because the
       policy only caught ParseError and not sqlglot TokenError. The diagnostic
       now maps all sqlglot parser/tokenizer failures to policy_rejected and
       continues the batch. A subsequent bridge recovery exposed Markdown answer
       sections in raw completions; the shared normalizer removes only those
       presentation wrappers for both members before either evaluator.
+    pre_normalization_sqlite_diagnostic_sha256: 320f68dee858dd71409998ab03c555bdb5521a9dbc1115c448957e0b37a101ef
+    normalized_sqlite_diagnostic:
+      report_sha256: 433cf3a7a4d358547a0bfa72ad239ee594297eedf76a9ad1d17c7102315d071b
+      executed_candidates: 831
+      policy_rejected_candidates: 4
+      execution_error_candidates: 199
+      timeout_candidates: 0
+    official_test_suite_internal_result:
+      status: completed_unmodified_evaluator_output_not_leaderboard_claim
+      evaluated_cases: 1034
+      raw_execution_values:
+        easy: 0.748
+        medium: 0.448
+        hard: 0.241
+        extra: 0.094
+        all: 0.427
+      normalized_prediction_input_sha256: 207585672ec91bd9aa455f525a3e1d89736d9415fd77ba88679178a5315936d9
+      raw_output_sha256: ddec7e34daee62b2f5bbe767407cde979c9f4e0bc5a168a1ca9de95b10b39f5e
   adapter_generation:
-    status: not_started
+    status: running
   official_test_suite:
-    base_status: not_started
+    base_status: completed_unmodified_evaluator_output_not_leaderboard_claim
     adapter_status: not_started
 recovery_contract:
   opt_in_environment_variable: BASE_REUSE_GENERATION=1
