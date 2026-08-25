@@ -1,5 +1,9 @@
 # 数据分析 Agent｜微调与后训练学习笔记 v1
 
+> 已重组：本文保留第一轮实验的详细教学与历史分析。当前建议按
+> [后训练研究总览](post-training-index.md) -> [学习指南](post-training-learning-guide.md) ->
+> [实验台账](post-training-experiment-log.md) 的顺序阅读，避免将概念与实时实验结果混读。
+
 > 本文是本项目的学习材料和实验记录模板，不把计划写成已实现能力。当前状态：QLoRA
 > 环境已验证，Spider train-only 候选已生成；Qwen 1.5B 已完成 forward-only smoke 和一次
 > 8-step QLoRA SFT 工程 smoke。Base/Adapter 的完整受控对照已完成，当前得到的是

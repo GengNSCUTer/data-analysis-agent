@@ -1,0 +1,44 @@
+# 后训练实验台账
+
+本台账只记录已完成实验和待评测的受控实验，不在这里讲通用概念。原始训练样本、SQL、预测、数据库、模型权重、checkpoint 和完整日志都留在仓库外；这里仅记录可复核的配置、哈希和聚合结果。
+
+## 固定边界
+
+- 研究模型：`Qwen/Qwen2.5-Coder-1.5B`，revision `df3ce67c0e24480f20468b6ef2894622d69eb73b`。
+- 训练数据：Spider train-only 候选 128 条，按 `db_id` 切成 102 train / 26 validation；训练与验证 schema 不重叠。
+- 评测数据：固定 2020-01 Spider mirror 的 1,034 dev prompts；生成不读取其 gold SQL。Test Suite 输出只作为固定资产组合的内部对照，不写为当前官方榜单成绩。
+- 永久隔离：项目的 60 条 v2 golden 不进入训练、偏好数据、示例或改写。
+- 运行时隔离：生产 Vanna/FastAPI/PostgreSQL 代码不被离线训练改写；模型候选仍需通过服务器安全和结果合同。
+
+## 已完成
+
+| ID | 假设 / 目的 | 配置 | 结果 | 结论 |
+| --- | --- | --- | --- | --- |
+| `forward-smoke-v1` | 验证 1.5B 4-bit QLoRA 加载、mask 与显存 | QLoRA, LoRA r=16, 单 train-only 样本 | finite loss 0.884486，peak allocated 约 1.94 GiB | 工程链路可用；没有 backward 或质量结论。 |
+| `sft-smoke-v1` | 验证训练、checkpoint、adapter reload | QLoRA, 8 steps, effective batch 4 | train/eval loss 0.556203/0.466989，adapter 74 MB，peak allocated 约 3.31 GiB | 只说明工程可跑；8 steps 约 0.31 epoch。 |
+| `base-adapter-pair-v1` | 验证首轮 adapter 是否改善生成行为 | 相同 4-bit base、prompt、greedy decode、1,034 dev | SQLite executed 831 -> 666；Test Suite internal all 0.427 -> 0.215 | 负向 ablation；不支持“QLoRA 提升 Text-to-SQL”的说法。 |
+| `analysis-v1` | 确认回退模式 | 上述 pair 的聚合诊断与受限人工 changed-case 审核 | 253 条从 executed 变失败，88 条反向恢复；20 个库中 17 回退、3 不变；抽检的 4 条表面恢复均不满足语义 | 不能用执行 recovery 代替正确率；下一步先控制变量。 |
+| `qlora_coverage26_v1` | 验证约一轮训练覆盖后的 QLoRA 工程路径 | 4-bit NF4，26 steps，effective batch 4，LoRA r16/alpha32/dropout0.05 | train/eval loss 0.427482/0.290193；peak allocated 4.35 GiB；fresh reload finite loss 0.249638 | 训练和 reload 通过；尚未与对应 4-bit base 做全量质量对照。 |
+| `bf16_lora_coverage26_v1` | 在同配置下验证直接 bf16 LoRA 是否可行 | bf16 base，26 steps，其余与 QLoRA 相同 | train/eval loss 0.426504/0.309192；peak allocated 5.19 GiB；fresh reload finite loss 0.245578 | 1.5B 可在 24GB 卡做 bf16 LoRA；尚未与对应 bf16 base 做全量质量对照。 |
+
+本轮的外部训练/reload evidence SHA-256：`qlora_coverage26_v1` 为 `c00413757f24c3bfc338b5eec3dfe689720ec03be9e55be8a415d6d0c96f587e` / `c83fa84ab2b845bbb8dc94a2a92d8b67aa786d59fccfa4d60f295ffb23cec36a`；`bf16_lora_coverage26_v1` 为 `266a6f9a4471ca9734ebd7a01829ef8a601e7628023570e08b441369bc039afd` / `1e68125d350364c8a6d8a1734cae6c4a9622576ae945e24810f936be2a877cdb`。每对依次对应 `sft_smoke.json` 和 `adapter_validation.json`。
+
+## 下一道质量门
+
+| ID | 已冻结的训练变量 | 必须新增的对照 | 质量门 |
+| --- | --- | --- | --- |
+| `qlora_coverage26_v1` | 102/26 split、26 steps、seed 20260825、lr 2e-4、effective batch 4、LoRA r16/alpha32/dropout0.05、4-bit NF4 | 使用同一 4-bit base 对 1,034 dev 做 base/adapter 成对生成、SQLite diagnostics 与 Test Suite bridge | 不能比对应 base 退化；随后做状态迁移和人工 changed-case 审核。 |
+| `bf16_lora_coverage26_v1` | 其余完全相同，唯一改为 bf16 frozen base | 先建立 bf16 base，再与 bf16 adapter 使用相同 1,034 dev/greedy/evaluator 合同 | 不能把 bf16 adapter 与 4-bit base 直接比较；必须先消除加载精度这一混杂变量。 |
+
+这两个任务并行只节省墙钟时间，不改变统计含义。它们分别在 logic 0 -> physical 2 和 logic 1 -> physical 3 的 4090 上运行，脚本在进程内校验 UUID，避免把 `CUDA_VISIBLE_DEVICES` 的逻辑编号误当成 `nvidia-smi` 物理编号。
+
+## 结果写入规则
+
+一个训练任务完成后，依次记录：
+
+1. `sft_smoke.json` 中的模型 revision、数据 SHA-256、steps、loss、GPU UUID、peak memory 和 adapter hash。
+2. 同精度 base 与 adapter 的完整 1,034-case 生成、SQLite diagnostics 和 Test Suite bridge。
+3. 状态迁移、错误类别和有限人工 changed-case 审核。
+4. 是否满足“不比对应 base 回退”的门槛。未满足则记录失败假设，不能跳到 DPO/GRPO。
+
+只有这四层都有证据，才更新“模型质量”结论；训练完成、loss 变小或 SQL 外观更像 SQL 都不够。

@@ -74,6 +74,14 @@
 
 ## 8. 最近一次同步记录
 
+### 2026-08-25：后训练材料重组与 26-step LoRA/QLoRA 覆盖度实验
+
+- 目标：将概念学习、实时项目状态和实验结论拆开，验证首轮 8-step 负向 ablation 是否至少受训练覆盖度或 4-bit 基座加载方式影响。
+- 文档：新增 `docs/post-training-index.md` 作为唯一入口，新增独立学习指南和实验台账；历史路线/笔记保留为参考并明确不承担实时状态。项目运行时的 Vanna/PostgreSQL 可信链路与 Spider SQLite 离线研究边界被单独说明。
+- 实现：SFT runner 和 adapter reload validator 都支持 `qlora_4bit` / `bf16_lora`，记录 launcher 声明的物理 GPU、进程内 UUID、量化方式和证据；两个 26-step 任务使用同一 Qwen 1.5B revision、102/26 schema-disjoint split、seed、学习率、有效 batch 与 LoRA 配置，只改冻结基座的 4-bit NF4/bf16 表示。
+- 验证：QLoRA 在 logical `0` / physical `2` 的 RTX 4090 完成 26 step，train/eval loss `0.427482/0.290193`、allocated peak `4,675,977,728` bytes；bf16 LoRA 在 logical `1` / physical `3` 完成，`0.426504/0.309192`、`5,574,457,856` bytes。两个 74 MB adapter 均 fresh PEFT reload 并在 validation sample 得到 finite loss。Python dataset tests **2 passed**、shell syntax、CLI help 和 diff check 通过。
+- 边界：loss/reload 只证明训练工程与资源差异，不构成 SQL 执行、Test Suite 或业务语义质量结论。下一步必须对每种加载精度单独完成同合同的 1,034-case base/adapter 对照、错误迁移与人工语义核验；不进入 DPO/GRPO。
+
 ### 2026-08-18：真实 SiliconFlow 人工标签评测
 
 - 目标：将已完成的前端加固、v2 确定性资产收敛为可复核的真实模型小样本，不把 SQL 执行成功伪装成语义正确。

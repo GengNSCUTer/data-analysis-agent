@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reload a saved QLoRA adapter and validate one held-out split forward pass."""
+"""Reload a saved LoRA/QLoRA adapter and validate one held-out forward pass."""
 
 from __future__ import annotations
 
@@ -27,6 +27,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--sample-index", type=int, default=0)
     parser.add_argument("--max-seq-length", type=int, default=1536)
+    parser.add_argument(
+        "--base-weight-mode",
+        choices=("qlora_4bit", "bf16_lora"),
+        default="qlora_4bit",
+        help="The frozen-base storage precision used to create this adapter.",
+    )
+    parser.add_argument(
+        "--physical-nvidia-smi-device",
+        type=int,
+        required=True,
+        help="Physical nvidia-smi device ID recorded by the launcher.",
+    )
+    parser.add_argument(
+        "--expected-gpu-uuid",
+        default=None,
+        help="Optional physical GPU UUID guard; rejects an unexpected CUDA mapping.",
+    )
     return parser.parse_args()
 
 
@@ -71,7 +88,7 @@ def encode(row: dict[str, Any], tokenizer: Any, max_seq_length: int) -> dict[str
 def main() -> int:
     args = parse_args()
     if not torch.cuda.is_available():
-        raise RuntimeError("CUDA is required to validate a QLoRA adapter")
+        raise RuntimeError("CUDA is required to validate an adapter")
     if not (args.adapter_dir / "adapter_config.json").is_file():
         raise FileNotFoundError(args.adapter_dir / "adapter_config.json")
     if not (args.adapter_dir / "adapter_model.safetensors").is_file():
@@ -83,18 +100,19 @@ def main() -> int:
     batch = encode(row, tokenizer, args.max_seq_length)
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
-    base = AutoModelForCausalLM.from_pretrained(
-        args.model_dir,
-        local_files_only=True,
-        quantization_config=BitsAndBytesConfig(
+    model_load_kwargs: dict[str, Any] = {
+        "local_files_only": True,
+        "torch_dtype": torch.bfloat16,
+        "device_map": {"": 0},
+    }
+    if args.base_weight_mode == "qlora_4bit":
+        model_load_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=torch.bfloat16,
-        ),
-        torch_dtype=torch.bfloat16,
-        device_map={"": 0},
-    )
+        )
+    base = AutoModelForCausalLM.from_pretrained(args.model_dir, **model_load_kwargs)
     model = PeftModel.from_pretrained(base, args.adapter_dir, is_trainable=False)
     model.eval()
     started = datetime.now(timezone.utc)
@@ -107,8 +125,13 @@ def main() -> int:
     gpu_uuid = str(gpu.uuid)
     if not gpu_uuid.startswith("GPU-"):
         gpu_uuid = "GPU-" + gpu_uuid
+    if args.expected_gpu_uuid is not None and gpu_uuid != args.expected_gpu_uuid:
+        raise RuntimeError(
+            "CUDA device UUID does not match launcher guard: "
+            f"expected {args.expected_gpu_uuid}, got {gpu_uuid}"
+        )
     evidence = {
-        "experiment_type": "qlora_adapter_reload_validation",
+        "experiment_type": "adapter_reload_validation",
         "started_at": started.replace(microsecond=0).isoformat(),
         "adapter": {
             "adapter_config_sha256": sha256_file(args.adapter_dir / "adapter_config.json"),
@@ -123,11 +146,12 @@ def main() -> int:
             "raw_question_or_sql_saved": False,
         },
         "result": {"finite_loss": True, "loss": loss},
+        "base_weight_mode": args.base_weight_mode,
         "gpu": {
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
             "name": gpu.name,
             "uuid": gpu_uuid,
-            "physical_nvidia_smi_device": 3,
+            "physical_nvidia_smi_device": args.physical_nvidia_smi_device,
             "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
         },
     }

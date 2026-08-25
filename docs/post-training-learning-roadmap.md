@@ -1,5 +1,9 @@
 # 微调与后训练学习路线
 
+> 已重组：从现在起先阅读 [后训练研究总览](post-training-index.md)，概念学习使用
+> [学习指南](post-training-learning-guide.md)，实验事实使用
+> [实验台账](post-training-experiment-log.md)。本文保留为原始路线草案，避免把历史材料与当前状态混在一起。
+
 目标不是代跑一个训练脚本，而是能解释每个设计、复现实验、定位失败，并说明为什么运行时安全合同不能交给模型决定。正式训练前必须完成小批量 forward smoke、数据审计和 holdout 检查；这些前置项已在 2026-08-25 的 8-step QLoRA SFT 工程 smoke 中通过，但不等于模型质量已经提升。
 
 ## 阶段 1：语言模型基础

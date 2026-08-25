@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a small, resumable QLoRA SFT smoke on external train-only candidates.
+"""Run a small, resumable LoRA or QLoRA SFT experiment on external candidates.
 
 This script deliberately trains only the LoRA adapter. Source rows, model
 weights, checkpoints and logs must all live outside the Git working tree.
@@ -56,6 +56,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument(
+        "--base-weight-mode",
+        choices=("qlora_4bit", "bf16_lora"),
+        default="qlora_4bit",
+        help=(
+            "qlora_4bit stores the frozen base in 4-bit NF4; bf16_lora keeps "
+            "the frozen base in bf16. Both modes train the same LoRA adapter."
+        ),
+    )
+    parser.add_argument(
+        "--physical-nvidia-smi-device",
+        type=int,
+        required=True,
+        help="Physical nvidia-smi device ID recorded by the launcher.",
+    )
+    parser.add_argument(
+        "--expected-gpu-uuid",
+        default=None,
+        help="Optional physical GPU UUID guard; rejects an unexpected CUDA mapping.",
+    )
+    parser.add_argument(
+        "--experiment-label",
+        default="unnamed",
+        help="Stable external experiment label recorded in the evidence manifest.",
+    )
     return parser.parse_args()
 
 
@@ -213,21 +238,26 @@ def main() -> int:
     checkpoint_dir = args.output_dir / "adapter_checkpoints"
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
-    quantization = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=torch.bfloat16,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_dir,
-        local_files_only=True,
-        quantization_config=quantization,
-        torch_dtype=torch.bfloat16,
-        device_map={"": 0},
-    )
+    model_load_kwargs: dict[str, Any] = {
+        "local_files_only": True,
+        "torch_dtype": torch.bfloat16,
+        "device_map": {"": 0},
+    }
+    if args.base_weight_mode == "qlora_4bit":
+        model_load_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+    model = AutoModelForCausalLM.from_pretrained(args.model_dir, **model_load_kwargs)
     model.config.use_cache = False
-    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+    if args.base_weight_mode == "qlora_4bit":
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+    elif hasattr(model, "enable_input_require_grads"):
+        # Non-reentrant checkpointing still needs the first adapter input to be
+        # differentiable on some Transformers model implementations.
+        model.enable_input_require_grads()
     model = get_peft_model(
         model,
         LoraConfig(
@@ -291,8 +321,14 @@ def main() -> int:
     gpu_uuid = str(gpu.uuid)
     if not gpu_uuid.startswith("GPU-"):
         gpu_uuid = "GPU-" + gpu_uuid
+    if args.expected_gpu_uuid is not None and gpu_uuid != args.expected_gpu_uuid:
+        raise RuntimeError(
+            "CUDA device UUID does not match launcher guard: "
+            f"expected {args.expected_gpu_uuid}, got {gpu_uuid}"
+        )
     evidence = {
-        "experiment_type": "qlora_sft_smoke",
+        "experiment_type": "adapter_sft_coverage_ablation",
+        "experiment_label": args.experiment_label,
         "started_at": started.replace(microsecond=0).isoformat(),
         "model": {
             "id": model_manifest["model_id"],
@@ -321,9 +357,10 @@ def main() -> int:
             "learning_rate": args.learning_rate,
             "optimizer": "paged_adamw_8bit",
             "gradient_checkpointing": True,
-            "load_in_4bit": True,
-            "quant_type": "nf4",
-            "double_quant": True,
+            "base_weight_mode": args.base_weight_mode,
+            "load_in_4bit": args.base_weight_mode == "qlora_4bit",
+            "quant_type": "nf4" if args.base_weight_mode == "qlora_4bit" else None,
+            "double_quant": args.base_weight_mode == "qlora_4bit",
             "compute_dtype": "bfloat16",
             "lora_r": args.lora_r,
             "lora_alpha": args.lora_alpha,
@@ -344,7 +381,7 @@ def main() -> int:
         "gpu": {
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
             "process_local_device": 0,
-            "physical_nvidia_smi_device": 3,
+            "physical_nvidia_smi_device": args.physical_nvidia_smi_device,
             "name": gpu.name,
             "uuid": gpu_uuid,
             "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
