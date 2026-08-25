@@ -10,6 +10,7 @@ QLORA_PYTHON="${QLORA_PYTHON:-/disk2/gengnan/conda_envs/data-analysis-agent-qlor
 EVAL_PYTHON="${EVAL_PYTHON:-/disk2/gengnan/conda_envs/data-analysis-agent/bin/python}"
 RUN_LABEL="${RUN_LABEL:?set RUN_LABEL=base or RUN_LABEL=adapter}"
 REUSE_GENERATION="${REUSE_GENERATION:-0}"
+BASE_WEIGHT_MODE="${BASE_WEIGHT_MODE:-qlora_4bit}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}"
 export CUDA_VISIBLE_DEVICES
 export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
@@ -26,10 +27,16 @@ EVALUATOR_ROOT="${EVALUATOR_ROOT:-/disk2/gengnan/data-analysis-agent-data/text-t
 EVALUATOR_COMMIT="${EVALUATOR_COMMIT:-e97acc546ecbee8fa27fa8dbf025ef61493a876c}"
 TEST_SUITE_DATABASE_ROOT="${TEST_SUITE_DATABASE_ROOT:-/disk2/gengnan/data-analysis-agent-data/text-to-sql/test-suite-databases-official-2020-12-27/database}"
 RUN_DIRECTORY="${RUN_DIRECTORY:-/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-${RUN_LABEL}-spider-dev-v1-20260825}"
+PHYSICAL_NVIDIA_SMI_DEVICE="${PHYSICAL_NVIDIA_SMI_DEVICE:-}"
+EXPECTED_GPU_UUID="${EXPECTED_GPU_UUID:-}"
 LOG_FILE="${RUN_DIRECTORY}/screen-run.log"
 
 if [[ "${RUN_LABEL}" != "base" && "${RUN_LABEL}" != "adapter" ]]; then
   echo "[error] RUN_LABEL must be base or adapter" >&2
+  exit 2
+fi
+if [[ "${BASE_WEIGHT_MODE}" != "qlora_4bit" && "${BASE_WEIGHT_MODE}" != "bf16_lora" ]]; then
+  echo "[error] BASE_WEIGHT_MODE must be qlora_4bit or bf16_lora" >&2
   exit 2
 fi
 for required_path in "${QLORA_PYTHON}" "${EVAL_PYTHON}" "${MODEL_DIR}" "${CASES}" "${TABLES_JSON}" "${DATABASE_ROOT}" "${EVALUATOR_ROOT}" "${TEST_SUITE_DATABASE_ROOT}"; do
@@ -46,7 +53,7 @@ if [[ "${REUSE_GENERATION}" != "0" && "${REUSE_GENERATION}" != "1" ]]; then
   echo "[error] REUSE_GENERATION must be 0 or 1" >&2
   exit 2
 fi
-if [[ -e "${RUN_DIRECTORY}/official-evaluator-evidence.json" ]]; then
+if [[ -e "${RUN_DIRECTORY}/official-test-suite/official-evaluator-evidence.json" ]]; then
   echo "[error] run directory already contains official evaluator evidence; choose a new RUN_DIRECTORY" >&2
   exit 2
 fi
@@ -69,7 +76,10 @@ echo "[start] $(date --iso-8601=seconds)"
 echo "[run_label] ${RUN_LABEL}"
 echo "[run_directory] ${RUN_DIRECTORY}"
 echo "[reuse_generation] ${REUSE_GENERATION}"
+echo "[base_weight_mode] ${BASE_WEIGHT_MODE}"
 echo "[cuda_visible_devices] ${CUDA_VISIBLE_DEVICES}"
+echo "[physical_nvidia_smi_device] ${PHYSICAL_NVIDIA_SMI_DEVICE:-unrecorded}"
+echo "[expected_gpu_uuid] ${EXPECTED_GPU_UUID:-unguarded}"
 echo "[model_dir] ${MODEL_DIR}"
 echo "[adapter_dir] ${ADAPTER_DIR}"
 nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total --format=csv,noheader
@@ -84,7 +94,14 @@ generation_args=(
   --max-input-tokens 1536
   --max-new-tokens 256
   --seed 42
+  --base-weight-mode "${BASE_WEIGHT_MODE}"
 )
+if [[ -n "${PHYSICAL_NVIDIA_SMI_DEVICE}" ]]; then
+  generation_args+=(--physical-nvidia-smi-device "${PHYSICAL_NVIDIA_SMI_DEVICE}")
+fi
+if [[ -n "${EXPECTED_GPU_UUID}" ]]; then
+  generation_args+=(--expected-gpu-uuid "${EXPECTED_GPU_UUID}")
+fi
 if [[ "${RUN_LABEL}" == "adapter" ]]; then
   generation_args+=(--adapter-dir "${ADAPTER_DIR}")
 fi
@@ -100,8 +117,8 @@ fi
   --database-root "${DATABASE_ROOT}" \
   --predictions "${RUN_DIRECTORY}/predictions.jsonl" \
   --dataset-version spider-spider-1.0-kaggle-mirror-v1-2020-01-27-dev \
-  --model-id qwen2.5-coder-1.5b-qlora-comparison \
-  --model-version "${RUN_LABEL}" \
+  --model-id qwen2.5-coder-1.5b-adapter-comparison \
+  --model-version "${BASE_WEIGHT_MODE}-${RUN_LABEL}" \
   --prompt-version spider-sft-schema-question-sql-v1 \
   --output "${RUN_DIRECTORY}/sqlite-diagnostics.json"
 

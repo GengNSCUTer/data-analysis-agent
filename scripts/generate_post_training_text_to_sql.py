@@ -59,6 +59,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-cases", type=int)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--base-weight-mode",
+        choices=("qlora_4bit", "bf16_lora"),
+        default="qlora_4bit",
+        help="Frozen-base storage precision; both modes generate with a LoRA adapter when loaded.",
+    )
+    parser.add_argument(
+        "--physical-nvidia-smi-device",
+        type=int,
+        default=None,
+        help="Physical nvidia-smi device ID recorded by a guarded launcher.",
+    )
+    parser.add_argument(
+        "--expected-gpu-uuid",
+        default=None,
+        help="Optional physical GPU UUID guard; rejects an unexpected CUDA mapping.",
+    )
     return parser.parse_args()
 
 
@@ -146,19 +163,19 @@ def load_model(args: argparse.Namespace) -> tuple[Any, Any, dict[str, Any]]:
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
-    quantization = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=torch.bfloat16,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_dir,
-        local_files_only=True,
-        quantization_config=quantization,
-        torch_dtype=torch.bfloat16,
-        device_map={"": 0},
-    )
+    model_load_kwargs: dict[str, Any] = {
+        "local_files_only": True,
+        "torch_dtype": torch.bfloat16,
+        "device_map": {"": 0},
+    }
+    if args.base_weight_mode == "qlora_4bit":
+        model_load_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+    model = AutoModelForCausalLM.from_pretrained(args.model_dir, **model_load_kwargs)
     adapter_metadata: dict[str, Any] = {"enabled": False}
     if args.run_label == "adapter":
         if args.adapter_dir is None:
@@ -228,6 +245,15 @@ def main() -> int:
     np.random.seed(args.seed)
     set_seed(args.seed)
     tokenizer, model, adapter_metadata = load_model(args)
+    gpu = torch.cuda.get_device_properties(0)
+    gpu_uuid = str(gpu.uuid)
+    if not gpu_uuid.startswith("GPU-"):
+        gpu_uuid = "GPU-" + gpu_uuid
+    if args.expected_gpu_uuid is not None and gpu_uuid != args.expected_gpu_uuid:
+        raise GenerationInputError(
+            "CUDA device UUID does not match launcher guard: "
+            f"expected {args.expected_gpu_uuid}, got {gpu_uuid}"
+        )
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     started = datetime.now(timezone.utc)
@@ -280,10 +306,6 @@ def main() -> int:
         total_generation_elapsed_ms += elapsed_ms
         max_observed_total_tokens = max(max_observed_total_tokens, int(output_ids.shape[-1]))
 
-    gpu = torch.cuda.get_device_properties(0)
-    gpu_uuid = str(gpu.uuid)
-    if not gpu_uuid.startswith("GPU-"):
-        gpu_uuid = "GPU-" + gpu_uuid
     evidence = {
         "experiment_type": "qwen25coder15b_base_adapter_generation",
         "run_label": args.run_label,
@@ -292,9 +314,10 @@ def main() -> int:
             "id": model_manifest["model_id"],
             "revision": model_manifest["revision"],
             "download_manifest_sha256": sha256_file(model_manifest_path),
-            "load_in_4bit": True,
-            "quant_type": "nf4",
-            "double_quant": True,
+            "base_weight_mode": args.base_weight_mode,
+            "load_in_4bit": args.base_weight_mode == "qlora_4bit",
+            "quant_type": "nf4" if args.base_weight_mode == "qlora_4bit" else None,
+            "double_quant": args.base_weight_mode == "qlora_4bit",
             "compute_dtype": "bfloat16",
         },
         "adapter": adapter_metadata,
@@ -328,7 +351,7 @@ def main() -> int:
         "gpu": {
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
             "process_local_device": 0,
-            "physical_nvidia_smi_device": 3,
+            "physical_nvidia_smi_device": args.physical_nvidia_smi_device,
             "name": gpu.name,
             "uuid": gpu_uuid,
             "peak_allocated_bytes": torch.cuda.max_memory_allocated(),

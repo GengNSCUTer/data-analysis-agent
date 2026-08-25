@@ -82,6 +82,12 @@
 - 验证：QLoRA 在 logical `0` / physical `2` 的 RTX 4090 完成 26 step，train/eval loss `0.427482/0.290193`、allocated peak `4,675,977,728` bytes；bf16 LoRA 在 logical `1` / physical `3` 完成，`0.426504/0.309192`、`5,574,457,856` bytes。两个 74 MB adapter 均 fresh PEFT reload 并在 validation sample 得到 finite loss。Python dataset tests **2 passed**、shell syntax、CLI help 和 diff check 通过。
 - 边界：loss/reload 只证明训练工程与资源差异，不构成 SQL 执行、Test Suite 或业务语义质量结论。下一步必须对每种加载精度单独完成同合同的 1,034-case base/adapter 对照、错误迁移与人工语义核验；不进入 DPO/GRPO。
 
+### 2026-08-25：26-step matching Base/Adapter 全量评测已启动
+
+- QLoRA-26 与 bf16 LoRA-26 的完整质量评测已分别在 `daa-qwen15b-qlora26-eval-v1` 与 `daa-qwen15b-bf16lora26-eval-v1` 中启动。前者复用已完成的 matching 4-bit Base，只生成新 adapter；后者在同一 GPU 上按 bf16 Base、bf16 adapter 的顺序运行，避免同一精度对照发生显存竞争。
+- 设备守卫固定为 logic `0` -> physical `2` -> UUID `GPU-129ba5d7-5a0a-745d-5a49-11dc7967bb52`，以及 logic `1` -> physical `3` -> UUID `GPU-10863af0-8588-7625-5609-640ba794f64b`。启动前 bf16 adapter 的 2-case fresh-load smoke 已通过。
+- 每条完成后才依次读取 1,034-case generation evidence、SQLite diagnostics、pinned Test Suite bridge 和安全聚合的 paired report；在此之前不得宣称 non-regression、精度差异或语义提升。
+
 ### 2026-08-18：真实 SiliconFlow 人工标签评测
 
 - 目标：将已完成的前端加固、v2 确定性资产收敛为可复核的真实模型小样本，不把 SQL 执行成功伪装成语义正确。

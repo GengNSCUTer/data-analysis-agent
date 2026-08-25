@@ -10,6 +10,17 @@
 - 永久隔离：项目的 60 条 v2 golden 不进入训练、偏好数据、示例或改写。
 - 运行时隔离：生产 Vanna/FastAPI/PostgreSQL 代码不被离线训练改写；模型候选仍需通过服务器安全和结果合同。
 
+## 当前运行
+
+2026-08-25 18:06 CST 已启动两条独立的完整质量评测。启动前，bf16 Base/Adapter 和 QLoRA Adapter 都完成了 2-case 模型加载冒烟验证；适配器存在、加载精度与声明一致，且进程内 CUDA UUID 与 launcher 声明的物理 4090 一致。冒烟只验证加载路径，不参与质量统计。
+
+| ID | `screen` 会话 | 当前阶段 | 对照合同 | 结果尚未产生 |
+| --- | --- | --- | --- | --- |
+| `qlora_coverage26_pair_v1` | `daa-qwen15b-qlora26-eval-v1` | 生成 26-step QLoRA adapter 的 1,034 条候选 | 使用已冻结的 matching 4-bit Base；同 prompt、greedy decode、normalizer、SQLite diagnostics、pinned Test Suite | 运行结束后才读取 adapter SQLite/Test Suite evidence 与 paired report。 |
+| `bf16_lora_coverage26_pair_v1` | `daa-qwen15b-bf16lora26-eval-v1` | 先生成 bf16 Base 的 1,034 条候选，随后同卡生成 bf16 adapter | Base 和 adapter 均以 bf16 加载；其余合同与 QLoRA 线相同 | 运行结束后才比较 bf16 Base 与 bf16 adapter；不得与 4-bit Base 直接比较。 |
+
+两条任务分别使用 logic `0` -> physical `2` / logic `1` -> physical `3` 的 RTX 4090。脚本会在进程内核验 UUID；它们不抢占、停止或重启其他用户的 GPU 进程。每条任务生成后会顺序执行 SQLite 诊断、未修改的官方 Test Suite bridge 和仅汇总安全元数据的 paired analysis。若任一阶段失败，脚本不会创建 pair 的 `completed` 标识，因此“已启动”不能被误写为“已完成”。
+
 ## 已完成
 
 | ID | 假设 / 目的 | 配置 | 结果 | 结论 |
