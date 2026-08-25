@@ -214,6 +214,17 @@ audit of improvements and regressions. No DPO/GRPO run, training-scale increase
 or prompt/data change should be treated as a remedy before that diagnosis
 identifies the observed error modes.
 
+## Initial Diagnostic Result
+
+The changed-case diagnosis is complete and recorded in
+[`post-training-base-adapter-analysis-v1.md`](post-training-base-adapter-analysis-v1.md).
+It confirms broad execution regressions rather than one-schema failure, a
+shift from Base prompt continuations to direct query-shaped Adapter output, and
+new qualified schema/alias-reference failures. It also establishes that eight
+optimizer steps processed only about `0.314` epoch of the 102-row train split.
+The next proposed ablation changes only that coverage horizon to 26 steps; it
+does not yet authorize a training run, data expansion or preference/RL training.
+
 ## Learning Checkpoint
 
 For an interview, describe this as a controlled ablation. The independent

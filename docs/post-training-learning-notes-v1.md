@@ -180,6 +180,22 @@ LoRA adapter 是否加载的 Adapter 走同一管线。完整 delta 出现回退
 changed-case 和错误类型诊断。能诚实报告失败 ablation，说明评测能否证伪假设，而不是只挑成功数字。由于当前镜像
 早于官方修订，`0.427` 和 `0.215` 都只是固定资产组合上的内部输出，不能写成当前 Spider 官方榜单成绩。
 
+### 5.2.1 从负向结果学习什么
+
+这轮有一个容易忽略但很关键的事实：102 条 train-only 候选不等于模型已经训练过完整 102 条。global batch
+size 是 4，`max_steps=8` 只产生最多 32 次样本暴露，Trainer 的 epoch 是 `0.313725...`。因此该 adapter
+既可能因为样本太少，也可能因为更新尚未覆盖足够多 schema 而出现不稳定变化；但两者都还是待验证假设。
+
+诊断器显示 Base 有 806 条 completion 在首段 SQL 后继续输出 prompt 风格 section，Adapter 则有 1,033 条
+直接 query-shaped completion，且 256-token cap hit 从 342 降到 43。这说明 adapter 学到了停止/展示格式行为。
+然而共享 normalizer 后，Adapter SQL 的中位长度反而从 87 字符升到 158 字符；不存在列错误中，带限定别名的
+引用从 Base 的 16 条升到 Adapter 的 254 条。格式更像 SQL、原始 token 更少，都不足以说明 schema linking 更好。
+
+对 3 条回退和 4 条“错误变可执行”的非随机样本做人工核验后，后四条仍存在错误 Join/粒度、缺失要求列或错误
+聚合指标。因此“从 error 变 executed”的 88 条只能叫 execution recovery，不能叫正确 SQL。下一步的最小实验
+只把 step 从 8 扩展至 26，让有效 batch 4 覆盖 102 条训练数据约一轮；完整评测不回退才有资格讨论扩大数据或
+DPO/GRPO。
+
 ## 5.3 本次 SFT smoke 要学会什么
 
 **为什么按 db_id 分组？** 同一个 Spider 数据库共享表、列、外键和命名风格。若随机把同库问题分到

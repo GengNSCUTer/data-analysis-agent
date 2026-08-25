@@ -1,5 +1,5 @@
 manifest_id: post_training_base_adapter_evaluation_v1
-status: paired_evaluation_complete_analysis_pending
+status: paired_evaluation_complete_analyzed_negative_ablation
 purpose: >-
   Compare the frozen Qwen/Qwen2.5-Coder-1.5B base and the first SFT LoRA adapter
   under identical Spider dev inputs, schema/question serialization and greedy
@@ -156,6 +156,44 @@ paired_result:
     Perform reproducible status-transition, error-category, output-length and
     bounded changed-case analysis before changing data scale, hyperparameters,
     prompt format, or starting DPO/GRPO.
+analysis:
+  status: completed_limited_diagnosis_not_semantic_accuracy
+  implementation: scripts/analyze_post_training_comparison.py
+  safe_external_report: >-
+    /disk2/gengnan/data-analysis-agent-data/experiments/
+    qwen25coder15b-base-adapter-pair-v1-20260825/analysis-v1/safe-comparison.json
+  safe_external_report_sha256: cbfe9e5f5b521ed2a98f491568c252f0b8c8fb59f12a4a350fdc654b07903009
+  report_scope:
+    raw_question_or_sql_written: false
+    raw_error_message_written: false
+    result_rows_written: false
+    bounded_case_ids_only: true
+  confirmed_findings:
+    executed_to_error_or_policy_rejected: 253
+    error_or_policy_rejected_to_executed: 88
+    database_count: 20
+    improved_database_count: 0
+    regressed_database_count: 17
+    unchanged_database_count: 3
+    base_section_continuations: 806
+    adapter_direct_query_completions: 1033
+    base_generation_cap_hits: 342
+    adapter_generation_cap_hits: 43
+    base_normalized_completion_median_characters: 87
+    adapter_normalized_completion_median_characters: 158
+    training_epoch_completed: 0.3137254901960784
+    maximum_train_sample_exposures: 32
+  bounded_manual_audit:
+    status: completed_non_random_diagnostic_only
+    base_executed_to_adapter_failed_cases: 3
+    apparent_execution_recoveries_reviewed: 4
+    semantically_acceptable_apparent_recoveries: 0
+    semantic_accuracy_claim: false
+  next_smallest_experiment: >-
+    Keep all frozen settings and extend only the SFT horizon from eight to 26
+    optimizer steps, approximately one effective pass over 102 rows at global
+    batch size four; require full paired evaluation and non-regression before
+    data scaling or DPO/GRPO.
 recovery_contract:
   opt_in_environment_variable: BASE_REUSE_GENERATION=1
   requires_existing_base_artifacts:
