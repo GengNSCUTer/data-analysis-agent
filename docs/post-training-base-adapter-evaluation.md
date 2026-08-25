@@ -170,8 +170,49 @@ output `ddec7e34daee62b2f5bbe767407cde979c9f4e0bc5a168a1ca9de95b10b39f5e`.
 This is an internal result for the frozen 2020-01 mirror and Test Suite asset
 combination, not a current official Spider leaderboard result. It must not be
 compared with the 831 SQLite executions as though they were the same metric.
-The Adapter generation is running under the same normalizer and evaluator
-contract; no QLoRA quality conclusion is possible until it completes.
+
+## Completed Paired Result
+
+The pair completed at `2026-08-25 16:25:57 +0800`. The Adapter completed all
+1,034 ordered candidates under the same frozen base revision, 4-bit loading,
+prompt, greedy decode, shared normalizer, SQLite diagnostic and pinned Test
+Suite evaluator. Its raw external prediction JSONL SHA-256 is
+`8babd2e44206bd004153d9552dab89fc1606b57931537a42dcb9c7ff7fb406dd`.
+
+| Observation | Base | Adapter | Adapter minus Base |
+| --- | ---: | ---: | ---: |
+| Generated tokens | 128,957 | 61,796 | -67,161 (-52.1%) |
+| Generation elapsed time | 4,631,685 ms | 4,797,725 ms | +166,040 ms (+3.6%) |
+| SQLite executed | 831 | 666 | -165 |
+| SQLite policy rejected | 4 | 29 | +25 |
+| SQLite execution error | 199 | 339 | +140 |
+| SQLite timeout | 0 | 0 | 0 |
+| Test Suite easy | 0.748 | 0.488 | -0.260 |
+| Test Suite medium | 0.448 | 0.152 | -0.296 |
+| Test Suite hard | 0.241 | 0.092 | -0.149 |
+| Test Suite extra | 0.094 | 0.100 | +0.006 |
+| Test Suite all | 0.427 | 0.215 | -0.212 |
+
+The Adapter normalized SQLite report SHA-256 is
+`346bead6b027b8fd043b1433f666daa5c3a23aad6607ce372f42794d2ba7d82a`.
+Its unmodified Test Suite evidence hashes are normalized prediction input
+`d67b185cff6dce472cd01be025662a0341e52522374f1d77dfd0b06e32207de8` and raw
+output `6e97ace9e4cadc75b7f4a71fc0c0464018a48946734ac873469bd3988cc242b8`.
+All predictions, SQL and raw reports remain outside Git.
+
+Under this tiny 102-sample, eight-optimizer-step schema-disjoint QLoRA SFT
+smoke configuration, loading the Adapter cut generated-token volume but
+degraded SQLite execution and the pinned Test Suite result. This is a negative
+ablation result for this exact configuration. It does not show that QLoRA or
+SFT cannot improve Text-to-SQL, and it does not establish a business semantic
+accuracy result. SQLite execution, Test Suite behavior and manual semantic
+review still measure different properties.
+
+The next gate is a reproducible changed-case diagnosis: status-transition
+matrix, error-category delta, output-length distribution and a bounded manual
+audit of improvements and regressions. No DPO/GRPO run, training-scale increase
+or prompt/data change should be treated as a remedy before that diagnosis
+identifies the observed error modes.
 
 ## Learning Checkpoint
 
@@ -181,4 +222,7 @@ decode, data, database snapshot and evaluator. The dependent variables include
 execution diagnostics, Test Suite result, latency and manually reviewed failure
 categories. This is stronger than saying “validation loss fell,” because it
 tests behavior at generation time rather than only teacher-forced target-token
-fit.
+fit. A credible negative ablation is useful evidence as well: it shows that the
+evaluation was strong enough to reject a plausible but unsupported improvement
+claim, and it turns the next training change into a testable hypothesis rather
+than blind scale-up.

@@ -2,7 +2,8 @@
 
 > 本文是本项目的学习材料和实验记录模板，不把计划写成已实现能力。当前状态：QLoRA
 > 环境已验证，Spider train-only 候选已生成；Qwen 1.5B 已完成 forward-only smoke 和一次
-> 8-step QLoRA SFT 工程 smoke。尚未做质量对比、DPO 或 GRPO。
+> 8-step QLoRA SFT 工程 smoke。Base/Adapter 的完整受控对照已完成，当前得到的是
+> 一个需要进一步诊断的负向 ablation；尚未启动 DPO 或 GRPO。
 
 ## 1. 为什么要做后训练
 
@@ -145,7 +146,7 @@ SQL 可执行只说明语法、对象名和类型大致成立，不说明指标�
 
 未完成：
 
-- 当前 Qwen 1.5B Base 已在固定 Spider dev/Test Suite 协议上完成，Adapter 正在按完全相同的合同生成和评测；待 Adapter 完成后再做前后对比；
+- 对已完成的 Qwen 1.5B Base/Adapter 对照做状态迁移、错误类别、输出长度和受限人工 changed-case 分析，确认回退的具体模式；
 - 扩大且人工抽检训练候选，加入 schema-linking、路由/澄清和安全负例；
 - DPO/GRPO。它们都不能使用 v2 永久 holdout。
 
@@ -162,13 +163,24 @@ validation loss 是 teacher forcing 下对 26 条验证 SQL token 的交叉熵�
 过滤条件、Join 或聚合语义错”的偶然可执行 SQL。反过来，Test Suite 也不是业务生产正确率，仍不能覆盖 Olist
 工作区的指标口径、权限、ResultContract 和图表合同。
 
+### 5.2 已完成的 Base vs Adapter 受控对照
+
+唯一自变量是是否加载 74 MB LoRA adapter；模型 revision、4-bit 配置、prompt、贪心 decode、1,034 条
+Spider dev 输入、SQLite 诊断和 Test Suite evaluator 均冻结。Base 得到 831 条 SQLite executed、4 条
+policy rejected、199 条 execution error 和 Test Suite all=`0.427`；Adapter 分别为 666、29、339 和
+`0.215`。Adapter 生成 61,796 token，少于 Base 的 128,957 token，但总生成时间反而略长。
+
+所以这次的正确结论是：在 102 条训练样本、8 个 optimizer step 的 schema-disjoint QLoRA SFT smoke 配置下，
+Adapter 在固定 Spider mirror/Test Suite 资产组合上出现明显回退。少生成 token 不等于 SQL 更好，validation loss
+下降也不等于 dev 生成能力提升。这是该配置的负向证据，不是“QLoRA 无效”或“不能做 SFT”的普遍结论。
+
 面试时可以这样回答：我没有把 loss 下降或 SQLite 可执行率当作微调成功，而是冻结 prompt、decode、数据、
 模型 revision、GPU 和 evaluator，先记录 Base 的生成成本、SQLite 错误类别和 Test Suite 内部结果，再让只改变
-LoRA adapter 是否加载的 Adapter 走同一管线。只有比较 delta、人工查看改变的样本并确认没有数据泄漏后，才讨论
-模型是否真的提高了 schema linking 或语义正确性。由于当前镜像早于官方修订，`0.427` 只能称为固定资产组合上
-的内部评测输出，不能写成当前 Spider 官方榜单成绩。
+LoRA adapter 是否加载的 Adapter 走同一管线。完整 delta 出现回退后，我不会直接堆数据或进入 RL，而会先做
+changed-case 和错误类型诊断。能诚实报告失败 ablation，说明评测能否证伪假设，而不是只挑成功数字。由于当前镜像
+早于官方修订，`0.427` 和 `0.215` 都只是固定资产组合上的内部输出，不能写成当前 Spider 官方榜单成绩。
 
-## 5.2 本次 SFT smoke 要学会什么
+## 5.3 本次 SFT smoke 要学会什么
 
 **为什么按 db_id 分组？** 同一个 Spider 数据库共享表、列、外键和命名风格。若随机把同库问题分到
 train/validation，模型可能在训练中已经见过同一份 schema，validation loss 会过于乐观。此次 102/26
@@ -245,8 +257,9 @@ LoRA target_modules / rank / alpha / dropout：
 2. 用 128 条 train-only 候选验证 schema + question + SQL 的 tokenization 和 labels mask；
 3. 已下载并冻结 Qwen 1.5B，完成不训练的 forward smoke；
 4. 已完成 schema-disjoint 的极小 SFT smoke，验证了 loss、显存、checkpoint 和 adapter reload；
-5. 等待正在运行的 Adapter 在同一 Qwen 1.5B / Spider dev / Test Suite 协议下完成，再做前后对比；
-6. 扩大训练集前继续人工抽检数据、增加不泄漏的 schema-linking/安全样本；
-7. 只有 SFT 基线稳定后，再讨论 DPO/GRPO 和执行反馈奖励。
+5. 已完成 Base/Adapter 的同合同对照，并确认当前 smoke 配置在 SQLite/Test Suite 上回退；
+6. 先诊断状态变化、schema-linking 错误和输出停止行为，再提出下一个最小 SFT ablation；
+7. 扩大训练集前继续人工抽检数据、增加不泄漏的 schema-linking/安全样本；
+8. 只有 SFT 基线稳定且没有退化后，再讨论 DPO/GRPO 和执行反馈奖励。
 
 本轮的目标是建立可解释、可回滚的学习闭环，而不是尽快得到一个不可复核的“微调后分数”。

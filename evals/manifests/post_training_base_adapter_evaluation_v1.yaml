@@ -1,5 +1,5 @@
 manifest_id: post_training_base_adapter_evaluation_v1
-status: base_evaluated_adapter_generation_running
+status: paired_evaluation_complete_analysis_pending
 purpose: >-
   Compare the frozen Qwen/Qwen2.5-Coder-1.5B base and the first SFT LoRA adapter
   under identical Spider dev inputs, schema/question serialization and greedy
@@ -108,10 +108,54 @@ execution_state:
       normalized_prediction_input_sha256: 207585672ec91bd9aa455f525a3e1d89736d9415fd77ba88679178a5315936d9
       raw_output_sha256: ddec7e34daee62b2f5bbe767407cde979c9f4e0bc5a168a1ca9de95b10b39f5e
   adapter_generation:
-    status: running
+    status: completed_and_evaluated
+    completed_at: '2026-08-25T16:25:57+08:00'
+    completed_cases: 1034
+    prediction_jsonl_sha256: 8babd2e44206bd004153d9552dab89fc1606b57931537a42dcb9c7ff7fb406dd
+    generated_tokens: 61796
+    generation_elapsed_ms: 4797725
+    normalized_sqlite_diagnostic:
+      report_sha256: 346bead6b027b8fd043b1433f666daa5c3a23aad6607ce372f42794d2ba7d82a
+      executed_candidates: 666
+      policy_rejected_candidates: 29
+      execution_error_candidates: 339
+      timeout_candidates: 0
+    official_test_suite_internal_result:
+      status: completed_unmodified_evaluator_output_not_leaderboard_claim
+      evaluated_cases: 1034
+      raw_execution_values:
+        easy: 0.488
+        medium: 0.152
+        hard: 0.092
+        extra: 0.100
+        all: 0.215
+      normalized_prediction_input_sha256: d67b185cff6dce472cd01be025662a0341e52522374f1d77dfd0b06e32207de8
+      raw_output_sha256: 6e97ace9e4cadc75b7f4a71fc0c0464018a48946734ac873469bd3988cc242b8
   official_test_suite:
     base_status: completed_unmodified_evaluator_output_not_leaderboard_claim
-    adapter_status: not_started
+    adapter_status: completed_unmodified_evaluator_output_not_leaderboard_claim
+paired_result:
+  completion_marker: >-
+    qwen25coder15b-base-adapter-pair-v1-20260825/completed at
+    2026-08-25T16:25:57+08:00; raw artifacts remain outside Git.
+  deltas_adapter_minus_base:
+    generated_tokens: -67161
+    generation_elapsed_ms: 166040
+    sqlite_executed_candidates: -165
+    sqlite_policy_rejected_candidates: 25
+    sqlite_execution_error_candidates: 140
+    sqlite_timeout_candidates: 0
+    test_suite_all: -0.212
+  interpretation_before_case_analysis: >-
+    Under the fixed 102-sample, eight-optimizer-step schema-disjoint QLoRA SFT
+    smoke configuration, the adapter generated fewer tokens but regressed on
+    both the single-database SQLite diagnostic and the pinned Test Suite output.
+    This is negative evidence for this configuration, not a general claim that
+    QLoRA or SFT cannot improve Text-to-SQL.
+  next_gate: >-
+    Perform reproducible status-transition, error-category, output-length and
+    bounded changed-case analysis before changing data scale, hyperparameters,
+    prompt format, or starting DPO/GRPO.
 recovery_contract:
   opt_in_environment_variable: BASE_REUSE_GENERATION=1
   requires_existing_base_artifacts:
