@@ -1,8 +1,8 @@
 # 数据分析 Agent｜微调与后训练学习笔记 v1
 
 > 本文是本项目的学习材料和实验记录模板，不把计划写成已实现能力。当前状态：QLoRA
-> 环境已验证，Spider train-only 候选已生成，Qwen 1.5B 已完成 forward-only QLoRA smoke；
-> 尚未开始 SFT、DPO 或 GRPO。
+> 环境已验证，Spider train-only 候选已生成；Qwen 1.5B 已完成 forward-only smoke 和一次
+> 8-step QLoRA SFT 工程 smoke。尚未做质量对比、DPO 或 GRPO。
 
 ## 1. 为什么要做后训练
 
@@ -138,12 +138,36 @@ SQL 可执行只说明语法、对象名和类型大致成立，不说明指标�
   （物理 GPU 3，RTX 4090），启动前必须重新检查占用。
 - 候选：Spider train-only 128 条，位于仓库外 `spider-sft-candidates-v1-20260825`，128/128 通过只读
   SQLite `EXPLAIN QUERY PLAN`，v2 holdout 碰撞 0。JSONL hash 记录在 `post_training_candidates_v1.yaml`。
+- SFT smoke：128 条候选按 Spider `db_id` 分成 102 条 train / 26 条 validation，66/19 个 schema 完全不重叠，
+  SQL shape 交集也为 0。Qwen 1.5B 使用 4-bit NF4 和 `r=16` LoRA，`batch=1`、accumulation=4、8 个
+  optimizer step；train/eval loss 分别为 `0.556203/0.466989`，峰值 allocated 显存约 3.31 GiB。adapter 为
+  74 MB，已从基座重新加载并在 validation 样本上得到有限 loss。完整证据见 `post_training_sft_smoke_v1.yaml`。
 
 未完成：
 
-- train/validation 分组与极小 SFT smoke；
-- 与冻结基线在同一评测协议上的比较；
+- 用同一个 Qwen 1.5B base/adapter、同一个 Spider dev 输入和同一 Test Suite 协议做前后对比；
+- 扩大且人工抽检训练候选，加入 schema-linking、路由/澄清和安全负例；
 - DPO/GRPO。它们都不能使用 v2 永久 holdout。
+
+## 5.1 本次 SFT smoke 要学会什么
+
+**为什么按 db_id 分组？** 同一个 Spider 数据库共享表、列、外键和命名风格。若随机把同库问题分到
+train/validation，模型可能在训练中已经见过同一份 schema，validation loss 会过于乐观。此次 102/26
+切分让 validation schema 从未出现在训练中；这比随机切分更接近 schema linking 的泛化问题，但规模仍
+然太小，不代表标准 benchmark 成绩。
+
+**8 个 step 实际做了什么？** 每个 micro-batch 只有 1 个样本，连续积累 4 次梯度后才更新一次 LoRA 参数，
+所以有效 batch size 是 `1 × 4 × 1 = 4`。基座 4-bit 权重不更新；训练器只对约 1,846 万 adapter 参数做
+`backward + optimizer.step`。这就是 QLoRA 的“参数高效”部分。
+
+**loss 怎么读？** Causal LM loss 是每个未 mask 目标 token 的平均负对数似然。`0.466989` 表示模型对这 26
+条 validation SQL token 的拟合程度，不等于“46.7% 错误率”，也不能和另一个模型、另一个 tokenizer、
+另一个数据切分的 loss 直接横比。adapter reload 的单样本 loss `0.309798` 更不能代表整体验证集；它只证明
+adapter 文件能被 PEFT 正确恢复和前向运行。
+
+**这次为什么要保存 checkpoint 和 adapter？** checkpoint 含 optimizer、scheduler 和随机状态，可用
+`--resume-from-checkpoint` 中断续跑；adapter 只保存 LoRA 增量，能在原始冻结基座上重新挂载。二者均在
+仓库外，避免把模型或训练状态提交到 Git。
 
 ## 6. 面试高频问题与回答框架
 
@@ -201,8 +225,9 @@ LoRA target_modules / rank / alpha / dropout：
 1. 先读懂 tokenizer、causal LM loss 和单 batch forward；
 2. 用 128 条 train-only 候选验证 schema + question + SQL 的 tokenization 和 labels mask；
 3. 已下载并冻结 Qwen 1.5B，完成不训练的 forward smoke；
-4. 在外部目录做极小 SFT smoke，只观察 loss、显存和输出格式；
-5. 扩大训练集前先建立 train/validation 分组和固定回归；
-6. 只有 SFT 基线稳定后，再讨论 DPO/GRPO 和执行反馈奖励。
+4. 已完成 schema-disjoint 的极小 SFT smoke，验证了 loss、显存、checkpoint 和 adapter reload；
+5. 用同一 Qwen 1.5B base/adapter 在冻结 Spider dev/Test Suite 协议上做前后对比；
+6. 扩大训练集前继续人工抽检数据、增加不泄漏的 schema-linking/安全样本；
+7. 只有 SFT 基线稳定后，再讨论 DPO/GRPO 和执行反馈奖励。
 
 本轮的目标是建立可解释、可回滚的学习闭环，而不是尽快得到一个不可复核的“微调后分数”。

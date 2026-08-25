@@ -1,0 +1,77 @@
+manifest_id: post_training_sft_smoke_v1
+status: passed_smoke_not_quality_claim
+purpose: >-
+  Verify external schema-disjoint splitting, single-GPU QLoRA optimization,
+  checkpoint/adapter persistence and adapter reload. This is not an accuracy
+  comparison or a production model release.
+verification_script: scripts/verify_post_training_sft_artifacts.py
+executed_at: "2026-08-25T02:08:08+00:00"
+model:
+  id: Qwen/Qwen2.5-Coder-1.5B
+  revision: df3ce67c0e24480f20468b6ef2894622d69eb73b
+  base_download_manifest_sha256: 484d1e01b35f19c6c764d2801239c20ca17da4270a76869825bffc08022829c1
+data:
+  source_candidates_manifest: evals/manifests/post_training_candidates_v1.yaml
+  split_generator: scripts/split_post_training_candidates.py
+  split_audit_external_path: /disk2/gengnan/data-analysis-agent-data/experiments/spider-sft-split-v1-20260825/split_audit.json
+  split_audit_sha256: 5f3293237af1351fa9ed01866830504309a545ff4acbfdeed55020081344df1f
+  train_rows: 102
+  validation_rows: 26
+  train_database_groups: 66
+  validation_database_groups: 19
+  train_validation_database_overlap: 0
+  train_validation_sql_shape_overlap: 0
+  v2_holdout_used: false
+  train_jsonl_sha256: a960d0a00cbce859c02ba8c599170fdc230fc70b33b3bda86e036c92cdc4e7a1
+  validation_jsonl_sha256: 460d863b8eab94cb3f4e7bfdf7e950e4a69e72608ce7e17d5819b1ff8dea2ea9
+training:
+  cuda_visible_devices: "1"
+  physical_nvidia_smi_device: 3
+  gpu_uuid: GPU-10863af0-8588-7625-5609-640ba794f64b
+  max_seq_length: 1536
+  observed_max_train_sequence_tokens: 1204
+  observed_max_validation_sequence_tokens: 505
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 4
+  global_batch_size: 4
+  max_steps: 8
+  learning_rate: 0.0002
+  optimizer: paged_adamw_8bit
+  load_in_4bit: true
+  quant_type: nf4
+  double_quant: true
+  compute_dtype: bfloat16
+  gradient_checkpointing: true
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    trainable_parameters: 18464768
+    total_parameters: 907081216
+    trainable_percent: 2.035625
+results:
+  global_step: 8
+  train_loss: 0.5562028214335442
+  validation_loss: 0.4669891893863678
+  elapsed_seconds: 27.946445
+  peak_allocated_bytes: 3557137920
+  peak_reserved_bytes: 4003463168
+artifacts:
+  external_experiment_dir: /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-sft-smoke-v1-20260825
+  sft_evidence_sha256: e5a24e7ae0e4cea84134d327616424677425ac22e9a14e011da14007389cfae1
+  adapter_model_bytes: 73911112
+  adapter_model_sha256: 7e5b69c2307005d9043020936f4dc4d8586f186ed72ace3e85c6796bb0ef9610
+  adapter_config_sha256: 7040bfb12f48408ada2a0e8519fd59da4af290a816d0c8012e1c2995c66c6c0b
+  adapter_reload_evidence_sha256: 67ab6314f1efb5873886511ec35b413a8d664a20604c18ee9c2b04d075a8f783
+  adapter_reload_validation_loss: 0.30979809165000916
+boundaries:
+  base_weights_updated: false
+  adapter_only: true
+  raw_training_rows_in_git: false
+  raw_questions_or_sql_in_evidence: false
+  production_postgres_or_vanna_modified: false
+  official_spider_leaderboard_claim: false
+  quality_claim: >-
+    Eight optimizer steps establish engineering feasibility only. Loss values
+    are not SQL execution accuracy, Test Suite Accuracy or business semantic
+    correctness.

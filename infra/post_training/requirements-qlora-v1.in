@@ -13,3 +13,8 @@ safetensors==0.5.2
 sentencepiece==0.2.0
 transformers==4.48.3
 trl==0.15.2
+
+# Training-only test support. Keep the QLoRA smoke dataset and adapter reload
+# checks runnable under the repository's normal pytest configuration.
+pytest==9.1.1
+pytest-asyncio==1.4.0

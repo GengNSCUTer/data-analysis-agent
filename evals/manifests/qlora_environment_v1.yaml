@@ -1,8 +1,9 @@
 id: qlora_environment_v1
-status: environment_bootstrap_verified
+status: environment_and_sft_smoke_verified
 purpose: >-
-  Isolated dependency environment for future local QLoRA/SFT experiments.
-  It creates no training data, downloads no base model and does not start training.
+  Isolated dependency environment for local QLoRA/SFT experiments. The
+  environment bootstrap and one external, schema-disjoint SFT smoke have been
+  verified without changing the production runtime.
 
 environment:
   conda_prefix: /disk2/gengnan/conda_envs/data-analysis-agent-qlora
@@ -28,8 +29,9 @@ device_policy:
 
 data_and_model_boundary:
   base_model_status: downloaded_frozen_external_only
-  training_data_status: prepared_external_train_only_candidates
-  spider_gold_sql_status: not_read
+  training_data_status: external_train_only_candidates_split_and_used_for_smoke
+  spider_train_target_sql_status: used_external_only_for_sft_smoke
+  spider_dev_gold_sql_status: not_read
   protected_holdout_manifest: evals/manifests/post_training_holdout_v1.yaml
   production_runtime: PostgreSQL/Vanna unchanged
 
@@ -40,6 +42,7 @@ subsequent_artifacts:
     external_dir: /disk2/gengnan/data-analysis-agent-data/models/qwen2.5-coder-1.5b-base-df3ce67c0e24480f20468b6ef2894622d69eb73b
   candidates_manifest: evals/manifests/post_training_candidates_v1.yaml
   forward_smoke_manifest: evals/manifests/post_training_forward_smoke_v1.yaml
+  sft_smoke_manifest: evals/manifests/post_training_sft_smoke_v1.yaml
 
 validation_plan:
   - conda_prefix_uses_python_3_11
@@ -47,9 +50,11 @@ validation_plan:
   - pip_check_passes
   - torch_reports_cuda_available_when_device_is_free
   - CUDA_VISIBLE_DEVICES_1_resolves_to_physical_gpu_3
+  - qlora_smoke_tests_run_under_normal_pytest_configuration
 
 validation_result:
-  verified_at: "2026-08-24"
+  bootstrap_verified_at: "2026-08-24"
+  sft_smoke_verified_at: "2026-08-25"
   python_version: "3.11.15"
   torch_version: 2.5.1+cu121
   torch_cuda_runtime: "12.1"
@@ -58,6 +63,8 @@ validation_result:
     bitsandbytes: "0.45.1"
     datasets: "3.2.0"
     peft: "0.14.0"
+    pytest: "9.1.1"
+    pytest_asyncio: "1.4.0"
     transformers: "4.48.3"
     trl: "0.15.2"
   pip_check: passed
@@ -67,9 +74,10 @@ validation_result:
     process_local_device: 0
     resolved_gpu_uuid: GPU-10863af0-8588-7625-5609-640ba794f64b
   constraints:
-    - no_base_model_downloaded
-    - no_training_data_created
-    - no_training_started
+    - base_model_and_raw_training_rows_remain_outside_git
+    - spider_dev_gold_sql_not_read_for_sft_smoke
+    - protected_v2_holdout_not_used
+    - production_postgres_and_vanna_unchanged
 
 manifest_version: "1"
 created_at: "2026-08-24"
