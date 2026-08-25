@@ -1,5 +1,5 @@
 manifest_id: post_training_base_adapter_evaluation_v1
-status: prepared_two_case_smoke_verified_not_full_run
+status: base_generation_complete_recovery_pending
 purpose: >-
   Compare the frozen Qwen/Qwen2.5-Coder-1.5B base and the first SFT LoRA adapter
   under identical Spider dev inputs, schema/question serialization and greedy
@@ -60,6 +60,31 @@ preflight:
     - no_current_official_Spider_leaderboard_claim
     - no_business_semantic_accuracy_claim_without_manual_review
     - no_production_PostgreSQL_or_Vanna_replacement
+execution_state:
+  base_generation:
+    status: completed_before_diagnostics
+    completed_cases: 1034
+    prediction_jsonl_sha256: 8978b8ab0734069f4975810ba19e6221db4cfeb2545e357778f12cfcca29cc0e
+    generated_tokens: 128957
+    generation_elapsed_ms: 4631685
+    recovery_required: true
+    recovery_reason: >-
+      SQLite diagnostics stopped on a malformed model candidate because the
+      policy only caught ParseError and not sqlglot TokenError. The diagnostic
+      now maps all sqlglot parser/tokenizer failures to policy_rejected and
+      continues the batch.
+  adapter_generation:
+    status: not_started
+  official_test_suite:
+    base_status: not_started
+    adapter_status: not_started
+recovery_contract:
+  opt_in_environment_variable: BASE_REUSE_GENERATION=1
+  requires_existing_base_artifacts:
+    - generation_evidence.json
+    - predictions.jsonl
+  rejects_existing_official_evaluator_evidence: true
+  raw_artifacts_remain_outside_git: true
 boundaries:
   raw_predictions_sql_and_reports_in_git: false
   adapter_checkpoint_and_weights_in_git: false

@@ -9,6 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 QLORA_PYTHON="${QLORA_PYTHON:-/disk2/gengnan/conda_envs/data-analysis-agent-qlora/bin/python}"
 EVAL_PYTHON="${EVAL_PYTHON:-/disk2/gengnan/conda_envs/data-analysis-agent/bin/python}"
 RUN_LABEL="${RUN_LABEL:?set RUN_LABEL=base or RUN_LABEL=adapter}"
+REUSE_GENERATION="${REUSE_GENERATION:-0}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}"
 export CUDA_VISIBLE_DEVICES
 export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
@@ -41,8 +42,23 @@ if [[ "${RUN_LABEL}" == "adapter" && ! -f "${ADAPTER_DIR}/adapter_model.safetens
   echo "[error] adapter run needs adapter_model.safetensors: ${ADAPTER_DIR}" >&2
   exit 2
 fi
-if [[ -e "${RUN_DIRECTORY}/generation_evidence.json" || -e "${RUN_DIRECTORY}/official-evaluator-evidence.json" ]]; then
-  echo "[error] run directory already contains final artifacts; choose a new RUN_DIRECTORY" >&2
+if [[ "${REUSE_GENERATION}" != "0" && "${REUSE_GENERATION}" != "1" ]]; then
+  echo "[error] REUSE_GENERATION must be 0 or 1" >&2
+  exit 2
+fi
+if [[ -e "${RUN_DIRECTORY}/official-evaluator-evidence.json" ]]; then
+  echo "[error] run directory already contains official evaluator evidence; choose a new RUN_DIRECTORY" >&2
+  exit 2
+fi
+if [[ "${REUSE_GENERATION}" == "1" ]]; then
+  for required_artifact in "${RUN_DIRECTORY}/generation_evidence.json" "${RUN_DIRECTORY}/predictions.jsonl"; do
+    if [[ ! -f "${required_artifact}" ]]; then
+      echo "[error] REUSE_GENERATION=1 requires ${required_artifact}" >&2
+      exit 2
+    fi
+  done
+elif [[ -e "${RUN_DIRECTORY}/generation_evidence.json" || -e "${RUN_DIRECTORY}/predictions.jsonl" ]]; then
+  echo "[error] run directory already contains generation artifacts; set REUSE_GENERATION=1 or choose a new RUN_DIRECTORY" >&2
   exit 2
 fi
 
@@ -52,6 +68,7 @@ exec > >(tee -a "${LOG_FILE}") 2>&1
 echo "[start] $(date --iso-8601=seconds)"
 echo "[run_label] ${RUN_LABEL}"
 echo "[run_directory] ${RUN_DIRECTORY}"
+echo "[reuse_generation] ${REUSE_GENERATION}"
 echo "[cuda_visible_devices] ${CUDA_VISIBLE_DEVICES}"
 echo "[model_dir] ${MODEL_DIR}"
 echo "[adapter_dir] ${ADAPTER_DIR}"
@@ -71,7 +88,11 @@ generation_args=(
 if [[ "${RUN_LABEL}" == "adapter" ]]; then
   generation_args+=(--adapter-dir "${ADAPTER_DIR}")
 fi
-"${generation_args[@]}"
+if [[ "${REUSE_GENERATION}" == "1" ]]; then
+  echo "[generation] reusing existing prediction JSONL and generation evidence"
+else
+  "${generation_args[@]}"
+fi
 
 "${EVAL_PYTHON}" "${ROOT}/scripts/run_sqlite_benchmark.py" \
   --dataset spider_dev \

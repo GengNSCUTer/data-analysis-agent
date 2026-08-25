@@ -16,7 +16,7 @@ from time import perf_counter
 from typing import Any, Final, Iterable, Mapping
 
 from sqlglot import exp, parse
-from sqlglot.errors import ParseError
+from sqlglot.errors import SqlglotError
 
 
 SQLITE_DIALECT: Final = "sqlite"
@@ -253,7 +253,7 @@ class SqliteBenchmarkPolicy:
             raise SqliteBenchmarkPolicyViolation("SQL must not be empty")
         try:
             statements = [statement for statement in parse(sql, read=SQLITE_DIALECT) if statement]
-        except ParseError as exc:
+        except SqlglotError as exc:
             raise SqliteBenchmarkPolicyViolation(f"SQL parse failed: {exc}") from exc
         if len(statements) != 1:
             raise SqliteBenchmarkPolicyViolation("exactly one SQL statement is allowed")

@@ -69,6 +69,30 @@ scripts record launch parameters and `nvidia-smi` summary in external logs; they
 reject output directories that already contain final evidence, preventing an
 accidental blend of two runs.
 
+### Recovery After Generation
+
+`generation_evidence.json` and the complete prediction JSONL are immutable
+inputs once a member's generation has completed. If an interruption occurs
+after those two artifacts exist but before SQLite diagnostics or the Test Suite
+bridge finishes, do not regenerate the member. Resume the pair explicitly with
+`BASE_REUSE_GENERATION=1`; the base member verifies that both artifacts exist,
+records the reuse decision in its external log, then reruns diagnostics and the
+official bridge before the adapter member begins.
+
+```bash
+cd /disk2/gengnan/data-analysis-agent
+BASE_REUSE_GENERATION=1 screen -dmS daa-qwen15b-base-adapter-recovery-v1 \
+  bash scripts/start_post_training_base_adapter_comparison_pair_screen.sh
+```
+
+The recovery mode is deliberately opt-in. It rejects a missing generation
+artifact, an invalid reuse flag, or a directory that already has official
+evaluator evidence. This preserves the original base/adapter comparison
+contract and avoids treating a partially written run as complete. A malformed
+model SQL candidate is a policy-rejected data point, not a batch-level server
+failure: the SQLite diagnostic runner records it and continues evaluating later
+cases.
+
 ## Preflight Result
 
 The 1,034 native dev prompts were tokenized with the frozen Qwen tokenizer

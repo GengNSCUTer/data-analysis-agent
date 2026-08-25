@@ -98,6 +98,64 @@ def test_read_only_sqlite_executor_keeps_database_unchanged(
         connection.close()
 
 
+def test_sqlite_benchmark_malformed_candidate_is_rejected_and_batch_continues(
+    tmp_path: Path, benchmark_database: Path
+) -> None:
+    database_root = tmp_path / "databases"
+    target_directory = database_root / "sample"
+    target_directory.mkdir(parents=True)
+    benchmark_database.replace(target_directory / "sample.sqlite")
+    cases = load_normalized_cases(
+        [
+            {
+                "case_id": "spider_dev:00000",
+                "database_id": "sample",
+                "database_path": "sample/sample.sqlite",
+            },
+            {
+                "case_id": "spider_dev:00001",
+                "database_id": "sample",
+                "database_path": "sample/sample.sqlite",
+            },
+        ]
+    )
+    predictions = load_predictions(
+        [
+            {
+                "case_id": "spider_dev:00000",
+                "candidate_sql": "SELECT 'unterminated FROM metrics",
+            },
+            {
+                "case_id": "spider_dev:00001",
+                "candidate_sql": "SELECT value FROM metrics ORDER BY value",
+            },
+        ]
+    )
+
+    report = run_sqlite_benchmark(
+        cases=cases,
+        predictions=predictions,
+        metadata=BenchmarkRunMetadata(
+            dataset_id="spider_dev",
+            dataset_version="test",
+            model_id="test-model",
+            model_version="base",
+            prompt_version="prompt-v1",
+        ),
+        database_root=database_root,
+        settings=SqliteBenchmarkSettings(max_rows=2),
+    )
+
+    malformed, valid = report["records"]
+    assert malformed["execution"]["status"] == "policy_rejected"
+    assert malformed["execution"]["error_type"] == "policy"
+    assert "SQL parse failed" in malformed["execution"]["error_message"]
+    assert valid["execution"]["status"] == "executed"
+    assert valid["execution"]["row_count"] == 2
+    assert report["summary"]["policy_rejected_candidates"] == 1
+    assert report["summary"]["executed_candidates"] == 1
+
+
 def test_read_only_sqlite_executor_reports_sql_errors(benchmark_database: Path) -> None:
     outcome = ReadOnlySqliteExecutor().execute(
         benchmark_database, "SELECT missing_column FROM metrics"
