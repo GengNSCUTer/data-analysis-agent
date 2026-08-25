@@ -2,7 +2,9 @@
 
 ## 结论
 
-当前服务器直连 Spider Test Suite 所需的 Google Drive 资产不可达；用户通过本地 VPN 建立 SSH 反向代理后，已将官方链接提供的 `testsuitedatabases.zip` 下载并解压到仓库外。我们仍没有把它直接当作可发布的官方分数来源，因为独立资产条款和与当前 2020-01 镜像的官方 release 可比性尚未单独证明。
+2026-08-25，用户通过本地 VPN 的临时代理使服务器能够直接下载官方 Spider `spider_data.zip`。该包已通过 ZIP 与路径安全校验，保存在仓库外的 `spider-1.0-official-v1-20260825/`；其 `dev.json`、`tables.json` 和 SQLite tree 哈希已记录。历史 Kaggle 2020-01 镜像及其已完成的 Qwen/LoRA/QLoRA 实验仍原样保留，但不再可被描述为官方当前 release 的结果。
+
+用户此前已用同一方式将官方链接提供的 `testsuitedatabases.zip` 下载并解压到仓库外。官方 `dev.json` 的 20 个数据库在该 Test Suite 资产中均存在，逐表/列/类型比较为零 mismatch。即便结构兼容，也不能把旧镜像上的预测或分数迁移成官方包分数；任何对官方包的报告都必须从官方包重新全覆盖生成、运行固定 evaluator，并单独保留输入/输出证据。Test Suite 独立资产的条款仍须在公开声明前核验。
 
 Spider 1.0 的普通 JSON、SQLite 数据库和 Test Suite 数据库是不同资产，不能因为一个镜像包含 `train_spider.json` 就推断它包含 Test Suite。`taoyds/test-suite-sql-eval` 的 evaluator 代码可复现，但其 README 仍要求单独下载 Test Suite 数据库；`ruiqi-zhong/TestSuiteEval` 也指向 Google Drive，并只包含少量示例库；其他 fork 主要是 Python/LLM 时代的 evaluator 改造，没有证据表明重新发布了完整官方数据库。
 
@@ -11,6 +13,7 @@ Spider 1.0 的普通 JSON、SQLite 数据库和 Test Suite 数据库是不同资
 | 来源 | 能否用于当前项目 | 事实与限制 |
 | --- | --- | --- |
 | Spider 官方页面 | 作为版本与论文入口 | 说明 Spider 许可和官方评测边界；不解决本机下载问题。 |
+| 官方 Spider `spider_data.zip` | 官方数据输入 | 2026-08-25 通过临时 VPN 代理直接下载；归档 SHA-256 为 `00636695...5b121b`，外部 manifest 已记录完整哈希、布局和 Test Suite 结构兼容性。 |
 | `taoyds/test-suite-sql-eval`，commit `e97acc546ecbee8fa27fa8dbf025ef61493a876c` | evaluator 可用 | 官方代码；配套 Test Suite DB 已下载到仓库外，但官方分数仍未运行。 |
 | Kaggle Spider 1.0 镜像 | 普通 SQLite 诊断可用 | 已冻结 1,034 条本地基线；镜像 metadata 许可为 unknown、版本早于官方修订，不能用于官方排行榜比较。 |
 | `ruiqi-zhong/TestSuiteEval` | 仅作获取线索 | README 仍要求另一个 Google Drive 文件；仓库中的数据库是示例，不是完整 release。 |

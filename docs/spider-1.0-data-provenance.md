@@ -2,10 +2,11 @@
 
 ## Purpose and Scope
 
-This record governs the one Spider 1.0 development mirror used by the offline
-Text-to-SQL frozen-baseline experiment. It does not add SQLite to the product
-runtime, modify the PostgreSQL/Vanna service, or authorize committing any raw
-benchmark artifact to Git.
+This record governs the historical Kaggle mirror used by completed offline
+experiments and the separately stored official Spider 1.0 package acquired on
+2026-08-25. It does not add SQLite to the product runtime, modify the
+PostgreSQL/Vanna service, or authorize committing any raw benchmark artifact to
+Git.
 
 ## License Decision
 
@@ -16,8 +17,9 @@ That statement is the license evidence for the original raw data package. The
 repository at `taoyds/spider` is separately Apache-2.0 and provides code only;
 its license is not used to justify dataset use.
 
-The official Google Drive package is not reachable from the current server
-network. The actual download is therefore Kaggle dataset
+When the frozen baseline was established on 2026-08-24, the official Google
+Drive package was not reachable from the server network. The historical
+baseline therefore used Kaggle dataset
 `jeromeblanchet/yale-universitys-spider-10-nlp-dataset`, version 1, published
 2020-01-27. Its description identifies `https://yale-lily.github.io/spider` as
 the data source and its file list exposes the native `spider/dev.json` and
@@ -30,14 +32,52 @@ will retain the required citation and CC BY-SA attribution. Raw data, SQLite
 databases, database contents, gold SQL, model predictions and reports remain
 outside this Git repository.
 
-## Frozen Acquisition Record
+## Official Package Acquisition
+
+On 2026-08-25, the user provided a temporary local-VPN proxy path and the
+server downloaded the official Google Drive archive directly. `unzip -tq`
+passed, the member list contained no absolute or parent-traversal path, and only
+the `spider_data/` members were extracted to a new external directory. The old
+Kaggle mirror remains intact and remains the input for all existing historical
+base/adapter reports.
+
+| Field | Value |
+| --- | --- |
+| Dataset | Spider 1.0 official data package |
+| Release ID | `spider-1.0-official-v1-20260825` |
+| Official archive page | <https://drive.google.com/file/d/1403EGqzIDoHMdQF4c9Bkyl7dZLZ5Wt6J/view?usp=sharing> |
+| Retrieved | 2026-08-25 via temporary user-provided VPN proxy |
+| Storage | `/disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/spider-1.0-official-v1-20260825/spider_data` |
+| Archive | `spider_data.zip`, 205,800,266 bytes, SHA-256 `00636695dabed6b5f4b8328a16b13e069a2f16591d5efcce57660669c85b121b` |
+| Archive validation | `unzip -tq` passed; 2,625 members had no absolute or `..` paths; 1,313 `spider_data/` members retained |
+| `train_spider.json` | 7,000 cases, SHA-256 `c43d0d72e59e1a9e1a60837da9bf70d5a6277226bdb7f634d544f380646f527a` |
+| `dev.json` | 1,034 cases, SHA-256 `30d64a3fccde493226df79687aed9e4a1c0129525baf44f29c0573d914d758a4` |
+| `tables.json` | 166 schemas, SHA-256 `61bb20aa401f03164e2d7f3b16509b7b5f79cc9c943ca7bd159046df1159e2ed` |
+| `database/` | 166 SQLite files, tree SHA-256 `67d29c2285095e39c15d08632605bb0b94945aac5aef38fca2e15540548a5aba` |
+| Development databases | 20 SQLite files, tree SHA-256 `deef29d6daa75a5fd184d5e7b196bea149b7e52f329feced25d68c2819d175ca` |
+
+The external acquisition manifest at
+`/disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/spider-1.0-official-v1-20260825/acquisition-manifest.json`
+contains the full source, hash and compatibility record. The 20 databases used
+by official `dev.json` all exist in the downloaded Test Suite asset and a
+table/column/type comparison found zero mismatches. This establishes structural
+compatibility, not a completed score.
+
+The official and historical package have identical train/dev case counts but
+different contents: 933 of 1,034 ordered dev records and 6,327 of 7,000 ordered
+train records are identical. All existing candidate generations, diagnostics,
+Test Suite outputs and paired results remain historical-mirror evidence. A new
+official-package result requires new full-coverage generation and evaluation;
+it must not reuse an old prediction file or score.
+
+## Historical Mirror Acquisition Record
 
 | Field | Value |
 | --- | --- |
 | Dataset | Spider 1.0 development data mirror |
 | Release ID | `spider-1.0-kaggle-mirror-v1-2020-01-27` |
 | Official task page | <https://yale-lily.github.io/spider> |
-| Official archive page | <https://drive.google.com/file/d/1403EGqzIDoHMdQF4c9Bkyl7dZLZ5Wt6J/view?usp=sharing> (unreachable from this server) |
+| Official archive page | <https://drive.google.com/file/d/1403EGqzIDoHMdQF4c9Bkyl7dZLZ5Wt6J/view?usp=sharing> (unreachable when this mirror was acquired) |
 | Actual distributor | Kaggle v1 mirror: <https://www.kaggle.com/datasets/jeromeblanchet/yale-universitys-spider-10-nlp-dataset> |
 | Distributor release date | 2020-01-27T20:22:40Z |
 | Raw-data license | CC BY-SA 4.0 from original official Spider source; Kaggle mirror metadata = `unknown` |

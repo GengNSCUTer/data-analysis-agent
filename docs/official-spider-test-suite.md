@@ -17,20 +17,26 @@ from Google Drive. The source-code license does not automatically cover those
 database assets. The package is now stored and hashed outside Git; its terms
 and official-release comparability remain separate publication gates.
 
-The current Spider data is a 2020-01 Kaggle mirror which predates the official
-August 2020 correction release. The official Test Suite package was downloaded
-through a temporary local-VPN SSH reverse proxy on 2026-08-24 and extracted
-outside Git. Its archive SHA-256 is
+The historical experiments in this repository use a 2020-01 Kaggle mirror,
+which predates the official August 2020 correction release. The official Spider
+data package was subsequently downloaded directly from the task-page Google
+Drive source on 2026-08-25, verified, and stored separately outside Git. Its
+official `dev.json` differs from the historical mirror in 101 ordered records,
+so the historical predictions and results cannot be reused for this official
+package.
+
+The official Test Suite package was downloaded through a temporary local-VPN
+SSH reverse proxy on 2026-08-24 and extracted outside Git. Its archive SHA-256 is
 `9ec24ea8debc6bd04abfe137b5f1a739b5a8836f32c0464e4dfc94eb7f41da96`, its
 extracted SQLite tree SHA-256 is
 `c9529ce837eeb68a7eb98af9dfa1caf721ff566ebb871835a9910e96b3d963bd`, and its
 layout contains 3,194 SQLite files in 28 task directories. All 20 database IDs
-used by the current 1,034-case dev mirror are present. A table/column/type
-comparison against the current mirror found no mismatch for those 20 databases.
-These checks establish structural compatibility only. The independent asset
-license/terms are not separately verified, and this older mirror is still not
-proven comparable to the current official leaderboard release, so no official
-evaluator score has been run or published.
+used by the official 1,034-case dev package are present. A table/column/type
+comparison against the official package found no mismatch for those 20
+databases. These checks establish structural compatibility only. The independent
+asset license/terms are not separately verified, and no fresh full-coverage run
+has used the official package, so no official-package evaluator score has been
+run or published.
 
 An internal full-coverage run was subsequently completed with the unmodified
 evaluator at the pinned commit. It evaluated all 1,034 cases and returned the
@@ -38,8 +44,8 @@ following execution diagnostic: easy `0.820`, medium `0.620`, hard `0.437`,
 extra `0.300`, all `0.585`. The run is stored outside Git at
 `/disk2/gengnan/data-analysis-agent-data/experiments/spider-qwen25coder3b-test-suite-v3-20260824/`;
 its gold/prediction/raw-output hashes are recorded in the manifest and evidence
-file. These numbers are an internal reference for the selected mirror and
-asset, not a current official leaderboard claim.
+file. These numbers are an internal reference for the selected historical mirror
+and asset, not an official-package or current official leaderboard claim.
 
 ## Bridge Contract
 

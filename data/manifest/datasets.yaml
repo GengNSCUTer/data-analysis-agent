@@ -194,12 +194,60 @@ datasets:
       commit: e97acc546ecbee8fa27fa8dbf025ef61493a876c
       code_license: Apache-2.0
     license: pending explicit verification of the separately distributed test-suite database assets
-    status: code_verified_assets_not_downloaded
-    planned_storage_location: /disk2/gengnan/data-analysis-agent-data/text-to-sql/test-suite-sql-eval/<release>/database
+    status: acquired_structurally_compatible_terms_pending
+    storage_location: /disk2/gengnan/data-analysis-agent-data/text-to-sql/test-suite-databases-official-2020-12-27/database
+    acquisition:
+      retrieved_at: "2026-08-24"
+      archive_name: testsuitedatabases.zip
+      archive_bytes: 1269456098
+      archive_sha256: 9ec24ea8debc6bd04abfe137b5f1a739b5a8836f32c0464e4dfc94eb7f41da96
+      extracted_sqlite_count: 3194
+      extracted_database_directory_count: 28
+      extracted_sqlite_tree_sha256: c9529ce837eeb68a7eb98af9dfa1caf721ff566ebb871835a9910e96b3d963bd
     notes: >-
       The official evaluator README requires a separately downloaded Google Drive
       database package. Its Apache-2.0 code license is not a license for those
-      assets. Do not download or run until the asset terms, release identity,
-      archive/extracted hashes and compatibility with the selected Spider mirror
-      are recorded. The project bridge refuses partial predictions because the
-      upstream evaluator silently zips a short prediction file with gold cases.
+      assets. The package is stored outside Git and its hashes are recorded, but
+      public official-score claims remain blocked on independent asset terms and
+      a fresh full-coverage run using the official Spider data package. The project
+      bridge refuses partial predictions because the upstream evaluator silently
+      zips a short prediction file with gold cases.
+
+  - id: spider_dev_official
+    name: Spider Official Development Benchmark
+    role: text_to_sql_offline_benchmark
+    source_urls:
+      - https://yale-lily.github.io/spider
+      - https://drive.google.com/file/d/1403EGqzIDoHMdQF4c9Bkyl7dZLZ5Wt6J/view?usp=sharing
+      - https://github.com/taoyds/spider
+    native_dialect: sqlite
+    release_id: spider-1.0-official-v1-20260825
+    license: CC BY-SA 4.0 (official Spider task-page data license)
+    license_evidence_url: https://yale-lily.github.io/spider
+    terms_verified_at: "2026-08-25"
+    status: acquired_verified
+    storage_location: /disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/spider-1.0-official-v1-20260825
+    acquisition:
+      retrieved_at: "2026-08-25T23:12:17+08:00"
+      archive_name: spider_data.zip
+      archive_bytes: 205800266
+      archive_sha256: 00636695dabed6b5f4b8328a16b13e069a2f16591d5efcce57660669c85b121b
+      extracted_root: spider_data
+      dev_json_sha256: 30d64a3fccde493226df79687aed9e4a1c0129525baf44f29c0573d914d758a4
+      tables_json_sha256: 61bb20aa401f03164e2d7f3b16509b7b5f79cc9c943ca7bd159046df1159e2ed
+      database_tree_sha256: 67d29c2285095e39c15d08632605bb0b94945aac5aef38fca2e15540548a5aba
+      dev_database_tree_sha256: deef29d6daa75a5fd184d5e7b196bea149b7e52f329feced25d68c2819d175ca
+      dev_case_count: 1034
+      dev_database_count: 20
+      sqlite_database_count: 166
+      archive_member_count: 2625
+      native_layout_validated: true
+    expected_layout:
+      cases: spider_data/dev.json
+      databases: spider_data/database/<db_id>/<db_id>.sqlite
+    notes: >-
+      This is a separate official source artifact. Existing historical Kaggle-mirror
+      predictions, adapter reports and Test Suite outputs must not be reused for it.
+      Before reporting any evaluation, regenerate complete predictions from this
+      exact package and preserve the evaluator, prediction and output evidence
+      outside Git.
