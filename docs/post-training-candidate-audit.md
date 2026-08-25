@@ -1,6 +1,8 @@
 # 后训练候选审计清单
 
-本文件描述 `post_training_candidates_v1.yaml` 从模板变成实际数据集前的准入检查。当前状态是 `template_only`，没有任何训练样本。
+本文件描述 `post_training_candidates_v1.yaml` 从模板变成实际数据集前的准入检查。
+截至 2026-08-25，清单状态为 `prepared_external_only`：已从 Spider `train_spider.json`
+确定性抽取 128 条候选，产物位于仓库外，Git 只保留脚本、manifest 和审计规则。
 
 ## 每条样本必须回答的问题
 
@@ -46,3 +48,12 @@
 
 示例中的 SQL 仅为结构占位，不应直接复制到训练文件。真实业务问题和结果行必须继续留在受控外部存储。
 
+## 2026-08-25 候选构造结果
+
+- 来源：Spider 1.0 Kaggle v1 镜像的 `train_spider.json`，共 7,000 条；没有读取 dev/test gold SQL。
+- 选择：按 `db_id + 归一化 SQL shape` 分组，使用固定 seed `20260825` 排序后轮询抽取 128 条。
+- 执行检查：128/128 通过只读 SQLite `EXPLAIN QUERY PLAN`；脚本不物化或保存结果行。
+- holdout：与 v2 永久隔离清单的 60 个 case ID 碰撞数为 0。
+- 外部产物：`/disk2/gengnan/data-analysis-agent-data/experiments/spider-sft-candidates-v1-20260825/`。
+- 产物 hash：以 `evals/manifests/post_training_candidates_v1.yaml` 中的 SHA-256 为准。
+- 训练边界：这批样本是“可用于下一步 tokenizer/forward smoke”的候选，不等于已经完成人工复核、SFT 或模型效果提升证明；正式训练前仍需 tokenizer 检查、训练/验证分组和小批量 SFT smoke。

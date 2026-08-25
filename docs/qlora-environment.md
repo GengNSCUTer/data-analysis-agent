@@ -71,3 +71,27 @@ training corpus following
 [`evals/manifests/post_training_holdout_v1.yaml`](../evals/manifests/post_training_holdout_v1.yaml)
 remain permanently excluded from SFT, LoRA, preference optimization, prompt
 examples and synthetic rewrites.
+
+## First QLoRA Forward Smoke
+
+On 2026-08-25, the environment completed a **forward-only** smoke using the
+Apache-2.0 `Qwen/Qwen2.5-Coder-1.5B` revision
+`df3ce67c0e24480f20468b6ef2894622d69eb73b`. The model and its per-file SHA-256
+manifest remain outside Git under
+`/disk2/gengnan/data-analysis-agent-data/models/`; the 128 Spider train-only
+candidates and their hash remain under the external experiments directory.
+
+The smoke selected one execution-checked train candidate, tokenized its schema,
+question and target SQL into 172 tokens, masked all 125 prompt tokens, and kept
+47 SQL/EOS tokens supervised. It loaded frozen base weights in 4-bit NF4 with
+double quantization and bf16 compute, then attached LoRA (`r=16`, `alpha=32`,
+dropout `0.05`) to attention and MLP projections. The adapter exposed
+18,464,768 of 907,081,216 parameters (2.035625%). The forward loss was finite
+at `0.884486`; peak allocated GPU memory was 2,085,800,448 bytes on logical
+CUDA `1` / physical GPU `3` (RTX 4090).
+
+No `backward()`, optimizer update, checkpoint write or adapter save occurred.
+The reproducible contract is
+[`evals/manifests/post_training_forward_smoke_v1.yaml`](../evals/manifests/post_training_forward_smoke_v1.yaml).
+This validates loading, label masking and memory feasibility for a minimal
+batch; it does not establish training quality or a post-training improvement.

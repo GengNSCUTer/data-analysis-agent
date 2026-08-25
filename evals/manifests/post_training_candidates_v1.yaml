@@ -1,7 +1,22 @@
 manifest_id: post_training_candidates_v1
 manifest_version: "1"
-status: template_only
-purpose: "Template for auditable, redacted post-training candidates; no training rows are included."
+status: prepared_external_only
+purpose: "Audited Spider train-only SFT candidates; rows remain outside Git."
+prepared_at: "2026-08-25T01:36:04Z"
+generator:
+  script: scripts/build_spider_sft_candidates.py
+  version: "1"
+  seed: 20260825
+  requested_count: 128
+  selected_count: 128
+  strategy: "sorted db_id/sql_shape groups with deterministic round-robin"
+external_artifact:
+  experiment_dir: /disk2/gengnan/data-analysis-agent-data/experiments/spider-sft-candidates-v1-20260825
+  candidates_jsonl: candidates.jsonl
+  candidates_sha256: 8a7ba490ad2a2ded779f0d425262d47586be3819172d1a524d46a8719574c9bb
+  training_text_jsonl: training_text.jsonl
+  training_text_sha256: aa1d581354e6a17a9dc5ca14ebfc78bbcaa3dbcdace16e464a8d28871706a0e1
+  audit_json: audit.json
 source_policy:
   allowed:
     - deterministic_goldens_not_in_holdout
@@ -49,3 +64,23 @@ forbidden_fields:
   - user_id
   - order_id
 candidate_ids: []
+source_snapshot:
+  train_json: /disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/spider-1.0-kaggle-mirror-v1-2020-01-27/extracted/spider/train_spider.json
+  train_json_sha256: 9f6ad0e3922c7c1707836be3dcdc983c0a262dc3ec82bbdb7fe67a486369d034
+  tables_json: /disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/spider-1.0-kaggle-mirror-v1-2020-01-27/extracted/spider/tables.json
+  tables_json_sha256: b68de9166952871d64554486fca4b25ff88509e983857a6af428250ffd58b67f
+  license: "CC BY-SA 4.0 (original Spider release; see docs/spider-1.0-data-provenance.md)"
+holdout_check:
+  manifest: evals/manifests/post_training_holdout_v1.yaml
+  forbidden_case_count: 60
+  collisions: 0
+  status: pass
+execution_check:
+  readonly_explain: pass
+  pass_count: 128
+  error_count: 0
+training_boundary:
+  raw_data_in_git: false
+  gold_dev_or_test_used: false
+  v2_holdout_used: false
+  production_postgres_modified: false

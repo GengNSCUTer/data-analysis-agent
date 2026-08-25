@@ -1,0 +1,73 @@
+manifest_id: post_training_forward_smoke_v1
+status: passed_no_training
+purpose: >-
+  Reproducible QLoRA loader, tokenizer and finite-loss smoke. It performs no
+  backward pass, optimizer update, adapter save or production runtime change.
+executed_at: "2026-08-25T01:55:18+00:00"
+model:
+  id: Qwen/Qwen2.5-Coder-1.5B
+  revision: df3ce67c0e24480f20468b6ef2894622d69eb73b
+  license: Apache-2.0
+  external_dir: /disk2/gengnan/data-analysis-agent-data/models/qwen2.5-coder-1.5b-base-df3ce67c0e24480f20468b6ef2894622d69eb73b
+  download_manifest_sha256: 484d1e01b35f19c6c764d2801239c20ca17da4270a76869825bffc08022829c1
+  model_safetensors_sha256: 535485b26038ac24f4e8a86e1a73ed417d8992e3192f6305b7fcc4fb92efa210
+dataset:
+  candidates_manifest: evals/manifests/post_training_candidates_v1.yaml
+  candidates_jsonl_sha256: 8a7ba490ad2a2ded779f0d425262d47586be3819172d1a524d46a8719574c9bb
+  sample_id: spider_train:02077
+  split: train
+  holdout_used: false
+tokenizer_and_labels:
+  prompt_tokens: 125
+  supervised_target_tokens: 47
+  sequence_tokens: 172
+  max_seq_length: 1536
+  masked_prompt_tokens: 125
+  label_mask_status: passed
+qlora:
+  load_in_4bit: true
+  quant_type: nf4
+  double_quant: true
+  compute_dtype: bfloat16
+  gradient_checkpointing_configured: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+  trainable_parameters: 18464768
+  total_parameters: 907081216
+  trainable_percent: 2.035625
+result:
+  finite_loss: true
+  loss: 0.8844860792160034
+  forward_elapsed_seconds: 0.673109
+  backward_run: false
+  optimizer_step_run: false
+gpu:
+  cuda_visible_devices: "1"
+  process_local_device: 0
+  nvidia_smi_physical_device: 3
+  name: NVIDIA GeForce RTX 4090
+  uuid: GPU-10863af0-8588-7625-5609-640ba794f64b
+  peak_allocated_bytes: 2085800448
+  peak_reserved_bytes: 2185232384
+versions:
+  torch: 2.5.1+cu121
+  transformers: 4.48.3
+  peft: 0.14.0
+  bitsandbytes: 0.45.1
+external_evidence:
+  path: /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-forward-smoke-v1-20260825/forward_smoke.json
+  sha256: 6b088d211cae041e4ad170db74bf3625bdeb1b5e51f597eac2b4d47edcffbff0
+boundaries:
+  raw_training_rows_in_git: false
+  v2_holdout_used: false
+  adapter_saved: false
+  production_postgres_or_vanna_modified: false

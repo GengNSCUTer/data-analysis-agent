@@ -27,11 +27,19 @@ device_policy:
     not authorize stopping, restarting or competing with other projects.
 
 data_and_model_boundary:
-  base_model_status: not_downloaded
-  training_data_status: not_created
+  base_model_status: downloaded_frozen_external_only
+  training_data_status: prepared_external_train_only_candidates
   spider_gold_sql_status: not_read
   protected_holdout_manifest: evals/manifests/post_training_holdout_v1.yaml
   production_runtime: PostgreSQL/Vanna unchanged
+
+subsequent_artifacts:
+  model:
+    id: Qwen/Qwen2.5-Coder-1.5B
+    revision: df3ce67c0e24480f20468b6ef2894622d69eb73b
+    external_dir: /disk2/gengnan/data-analysis-agent-data/models/qwen2.5-coder-1.5b-base-df3ce67c0e24480f20468b6ef2894622d69eb73b
+  candidates_manifest: evals/manifests/post_training_candidates_v1.yaml
+  forward_smoke_manifest: evals/manifests/post_training_forward_smoke_v1.yaml
 
 validation_plan:
   - conda_prefix_uses_python_3_11
