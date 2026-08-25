@@ -60,6 +60,13 @@ is started:
 5. Gold SQL, prediction SQL, unmodified evaluator stdout/stderr and the evidence
    JSON are written only outside this Git worktree. The evidence JSON contains
    hashes and run configuration, not SQL text or a locally parsed score.
+6. The raw model completion remains in its external prediction JSONL. Before
+   the bridge writes its one-line prediction file, it applies the shared
+   Text-to-SQL candidate normalizer used by the SQLite diagnostic: only an SQL
+   code fence, `SQLQuery:`/`SQL:` prefix, or `### Answer`/`### Explanation`
+   presentation tail may be removed. It never repairs SQL. A genuine SQL `--`
+   line comment is converted to an equivalent block comment before physical
+   newlines are folded, preserving its scope.
 
 The upstream evaluator contains a silent partial-run trap: for Spider, it reads
 the complete gold file and a prediction file as single sessions, then loops over

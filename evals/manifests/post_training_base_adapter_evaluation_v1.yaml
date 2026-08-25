@@ -26,6 +26,20 @@ comparison_contract:
     seed: 42
     max_input_tokens: 1536
     max_new_tokens: 256
+  candidate_normalization:
+    implementation: src/data_analysis_agent/text_to_sql_output.py
+    applies_to:
+      - SQLite_diagnostic
+      - official_Test_Suite_bridge
+    allowed_wrapper_removals:
+      - opening_SQL_code_fence
+      - SQLQuery_or_SQL_prefix
+      - answer_or_explanation_Markdown_heading_and_later_content
+    prohibited_behavior:
+      - SQL_syntax_repair
+      - schema_or_identifier_repair
+      - join_predicate_or_aggregation_repair
+      - gold_SQL_access
   invariant_between_runs:
     - base_model_revision
     - model_loading_quantization
@@ -72,7 +86,9 @@ execution_state:
       SQLite diagnostics stopped on a malformed model candidate because the
       policy only caught ParseError and not sqlglot TokenError. The diagnostic
       now maps all sqlglot parser/tokenizer failures to policy_rejected and
-      continues the batch.
+      continues the batch. A subsequent bridge recovery exposed Markdown answer
+      sections in raw completions; the shared normalizer removes only those
+      presentation wrappers for both members before either evaluator.
   adapter_generation:
     status: not_started
   official_test_suite:

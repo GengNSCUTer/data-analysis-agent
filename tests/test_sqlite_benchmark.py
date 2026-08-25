@@ -98,6 +98,23 @@ def test_read_only_sqlite_executor_keeps_database_unchanged(
         connection.close()
 
 
+def test_read_only_sqlite_executor_uses_shared_model_output_normalization(
+    benchmark_database: Path,
+) -> None:
+    outcome = ReadOnlySqliteExecutor(
+        settings=SqliteBenchmarkSettings(max_rows=2)
+    ).execute(
+        benchmark_database,
+        "SELECT value FROM metrics ORDER BY value;\n\n### Answer\n| value |\n| --- |",
+    )
+
+    assert outcome.status == "executed"
+    assert outcome.original_sql.endswith("| --- |")
+    assert outcome.final_sql is not None
+    assert "###" not in outcome.final_sql
+    assert outcome.row_count == 2
+
+
 def test_sqlite_benchmark_malformed_candidate_is_rejected_and_batch_continues(
     tmp_path: Path, benchmark_database: Path
 ) -> None:

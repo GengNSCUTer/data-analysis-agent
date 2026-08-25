@@ -35,6 +35,26 @@ after all predictions are complete, inside the existing official evaluator
 bridge, where it is written outside Git and represented in evidence only by
 hashes.
 
+### Candidate Normalization
+
+The generated JSONL retains the raw completion for audit. Before either the
+read-only SQLite diagnostic or the official bridge consumes it, both runs apply
+the same conservative candidate normalizer. It removes only unambiguous
+presentation wrappers: an opening SQL code fence, `SQLQuery:`/`SQL:` prefix,
+and a later Markdown heading such as `### Answer` or `### Explanation`. It does
+not repair SQL syntax, table or column names, joins, predicates, literals, or
+aggregation semantics. A malformed normalized candidate is still recorded as a
+policy rejection or evaluator error.
+
+This is part of the fixed evaluation input contract, not a post-hoc quality
+repair. The already generated Base raw JSONL and the future Adapter raw JSONL
+are normalized by exactly the same code immediately before their two
+evaluators. For the official evaluator's one-line input format, legitimate SQL
+`--` line comments are converted to equivalent block comments before newline
+folding, so their comment scope is not broadened. Model answer tables and
+explanations are removed before this step rather than misclassified as SQL
+comments.
+
 ## Why This Is Fair
 
 The SFT candidate builder and the inference runner call the same

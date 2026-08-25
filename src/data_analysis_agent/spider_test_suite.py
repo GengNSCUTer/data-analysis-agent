@@ -19,6 +19,7 @@ import sys
 from typing import Any, Iterable, Mapping, Sequence
 
 from data_analysis_agent.sqlite_benchmark import BenchmarkInputError, SqlPrediction
+from data_analysis_agent.text_to_sql_output import normalize_text_to_sql_candidate
 
 
 class OfficialSpiderTestSuiteError(ValueError):
@@ -90,7 +91,7 @@ def prepare_complete_spider_test_suite_inputs(
     gold_lines: list[str] = []
     prediction_lines: list[str] = []
     for case_id, database_id, gold_sql in normalized_cases:
-        candidate_sql = prediction_by_case[case_id]
+        candidate_sql = normalize_text_to_sql_candidate(prediction_by_case[case_id])
         candidate_sql = _serialize_single_line_sql(candidate_sql, "candidate SQL")
         gold_sql = _serialize_single_line_sql(gold_sql, "gold SQL")
         if "\t" in database_id or "\n" in database_id or "\r" in database_id:
@@ -316,8 +317,8 @@ def _serialize_single_line_sql(sql: str, field_name: str) -> str:
 
     The upstream evaluator consumes one SQL statement per physical line. Model
     formatting commonly emits newlines between clauses, which are equivalent
-    whitespace outside literals. A line comment is rejected because folding its
-    newline would change the meaning of the following SQL text.
+    whitespace outside literals. SQL line comments are converted to equivalent
+    block comments before folding so their newline scope is preserved.
     """
 
     output: list[str] = []
@@ -354,9 +355,17 @@ def _serialize_single_line_sql(sql: str, field_name: str) -> str:
             index += 1
             continue
         if character == "-" and index + 1 < len(sql) and sql[index + 1] == "-":
-            raise OfficialSpiderTestSuiteError(
-                f"{field_name} contains a line comment that cannot be folded safely"
-            )
+            comment_end = index + 2
+            while comment_end < len(sql) and sql[comment_end] not in "\r\n":
+                comment_end += 1
+            if pending_space and output and output[-1] != " ":
+                output.append(" ")
+            pending_space = True
+            output.extend(("/", "*"))
+            output.extend(sql[index + 2 : comment_end])
+            output.extend(("*", "/"))
+            index = comment_end
+            continue
         if character.isspace():
             pending_space = True
             index += 1

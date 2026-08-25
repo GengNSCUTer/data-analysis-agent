@@ -154,22 +154,50 @@ def test_prepare_folds_formatting_whitespace_but_preserves_literals(tmp_path: Pa
     assert inputs.prediction_path.read_text(encoding="utf-8") == "SELECT 'a  b' FROM items\n"
 
 
-def test_prepare_rejects_line_comments_when_folding_sql(tmp_path: Path) -> None:
+def test_prepare_folds_line_comments_without_changing_their_scope(tmp_path: Path) -> None:
     repository_root = tmp_path / "repository"
     repository_root.mkdir()
-    with pytest.raises(OfficialSpiderTestSuiteError, match="line comment"):
-        prepare_complete_spider_test_suite_inputs(
-            native_cases=_native_cases(),
-            predictions=[
-                SqlPrediction(
-                    case_id="spider_dev:00000",
-                    candidate_sql="SELECT value FROM items -- keep\nWHERE value IS NOT NULL",
+    inputs = prepare_complete_spider_test_suite_inputs(
+        native_cases=_native_cases(),
+        predictions=[
+            SqlPrediction(
+                case_id="spider_dev:00000",
+                candidate_sql="SELECT value FROM items -- keep\nWHERE value IS NOT NULL",
+            ),
+            _complete_predictions()[1],
+        ],
+        output_directory=tmp_path / "external-comments",
+        repository_root=repository_root,
+    )
+
+    assert inputs.prediction_path.read_text(encoding="utf-8").splitlines()[0] == (
+        "SELECT value FROM items /* keep*/ WHERE value IS NOT NULL"
+    )
+
+
+def test_prepare_removes_model_answer_section_before_official_evaluation(
+    tmp_path: Path,
+) -> None:
+    repository_root = tmp_path / "repository"
+    repository_root.mkdir()
+    inputs = prepare_complete_spider_test_suite_inputs(
+        native_cases=_native_cases(),
+        predictions=[
+            SqlPrediction(
+                case_id="spider_dev:00000",
+                candidate_sql=(
+                    "SELECT value FROM items;\n\n### Answer\n| value |\n| --- |\n| demo |"
                 ),
-                _complete_predictions()[1],
-            ],
-            output_directory=tmp_path / "external-comments",
-            repository_root=repository_root,
-        )
+            ),
+            _complete_predictions()[1],
+        ],
+        output_directory=tmp_path / "external-answer-section",
+        repository_root=repository_root,
+    )
+
+    assert inputs.prediction_path.read_text(encoding="utf-8").splitlines()[0] == (
+        "SELECT value FROM items;"
+    )
 
 
 def test_verify_official_evaluator_rejects_dirty_worktree(tmp_path: Path) -> None:
