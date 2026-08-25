@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 from typing import Any, Mapping
 
-from data_analysis_agent.frozen_sqlite_baseline import ensure_path_outside_repository
+from data_analysis_agent.external_artifacts import ensure_path_outside_repository
 from data_analysis_agent.spider_test_suite import (
     OfficialSpiderTestSuiteError,
     prepare_complete_spider_test_suite_inputs,

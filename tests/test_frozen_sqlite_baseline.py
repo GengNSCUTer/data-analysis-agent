@@ -9,13 +9,16 @@ import pytest
 from data_analysis_agent.frozen_sqlite_baseline import (
     BaselineGenerationError,
     ModelCompletion,
-    ensure_path_outside_repository,
     extract_sql_candidate,
     generate_predictions,
     load_existing_prediction_case_ids,
     load_native_generation_cases,
     render_sql_prompt,
     render_sqlite_schema,
+)
+from data_analysis_agent.external_artifacts import (
+    ExternalArtifactPathError,
+    ensure_path_outside_repository,
 )
 from data_analysis_agent.sqlite_benchmark import (
     BenchmarkRunMetadata,
@@ -252,7 +255,7 @@ def test_prediction_output_must_stay_outside_repository(tmp_path: Path) -> None:
     repository_root = tmp_path / "repo"
     repository_root.mkdir()
 
-    with pytest.raises(BaselineGenerationError, match="outside the repository"):
+    with pytest.raises(ExternalArtifactPathError, match="outside the repository"):
         ensure_path_outside_repository(repository_root / "predictions.jsonl", repository_root)
 
 

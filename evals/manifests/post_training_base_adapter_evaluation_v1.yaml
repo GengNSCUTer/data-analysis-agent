@@ -1,0 +1,67 @@
+manifest_id: post_training_base_adapter_evaluation_v1
+status: prepared_two_case_smoke_verified_not_full_run
+purpose: >-
+  Compare the frozen Qwen/Qwen2.5-Coder-1.5B base and the first SFT LoRA adapter
+  under identical Spider dev inputs, schema/question serialization and greedy
+  decoding. This is an internal research comparison, not a production release
+  or current official Spider leaderboard claim.
+comparison_contract:
+  base_model:
+    id: Qwen/Qwen2.5-Coder-1.5B
+    revision: df3ce67c0e24480f20468b6ef2894622d69eb73b
+    download_manifest_sha256: 484d1e01b35f19c6c764d2801239c20ca17da4270a76869825bffc08022829c1
+  adapter_source_manifest: evals/manifests/post_training_sft_smoke_v1.yaml
+  prompt_format_version: spider-sft-schema-question-sql-v1
+  inference_script: scripts/generate_post_training_text_to_sql.py
+  orchestration_script: scripts/start_post_training_base_adapter_comparison_pair_screen.sh
+  dataset:
+    id: spider_dev
+    release: spider-1.0-kaggle-mirror-v1-2020-01-27
+    native_case_count: 1034
+    raw_inputs_outside_git: true
+    spider_dev_gold_sql_read_for_generation: false
+  decode:
+    do_sample: false
+    num_beams: 1
+    seed: 42
+    max_input_tokens: 1536
+    max_new_tokens: 256
+  invariant_between_runs:
+    - base_model_revision
+    - model_loading_quantization
+    - schema_question_serialization
+    - native_case_order
+    - greedy_decode_parameters
+    - SQLite diagnostic settings
+    - Test Suite bridge and evaluator commit
+  intended_observations:
+    - complete_prediction_coverage
+    - SQLite_policy_and_execution_diagnostics
+    - unmodified_Test_Suite_output
+    - generation_latency_and_token_counts
+    - error_category_deltas
+preflight:
+  native_dev_prompt_max_tokens: 365
+  native_dev_prompts_over_max_input_tokens: 0
+  two_case_smoke:
+    base:
+      generated_tokens: 512
+      sqlite_executed_candidates: 0
+      sqlite_policy_rejected_candidates: 2
+    adapter:
+      generated_tokens: 12
+      sqlite_executed_candidates: 2
+      sqlite_policy_rejected_candidates: 0
+  interpretation: >-
+    The smoke proves both controlled paths generate external candidates and
+    reach the same SQLite diagnostic runner. It is too small to establish a
+    Text-to-SQL quality delta.
+  prohibited_interpretations:
+    - no_current_official_Spider_leaderboard_claim
+    - no_business_semantic_accuracy_claim_without_manual_review
+    - no_production_PostgreSQL_or_Vanna_replacement
+boundaries:
+  raw_predictions_sql_and_reports_in_git: false
+  adapter_checkpoint_and_weights_in_git: false
+  v2_project_holdout_used: false
+  production_postgres_or_vanna_modified: false

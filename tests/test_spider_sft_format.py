@@ -1,0 +1,47 @@
+from __future__ import annotations
+
+import pytest
+
+from data_analysis_agent.spider_sft_format import (
+    PROMPT_FORMAT_VERSION,
+    SpiderSftFormatError,
+    render_sft_prompt,
+    render_sft_training_text,
+    serialize_spider_schema,
+)
+
+
+def table_metadata() -> dict[str, object]:
+    return {
+        "table_names_original": ["customers", "orders"],
+        "column_names_original": [
+            [-1, "*"],
+            [0, "customer_id"],
+            [0, "name"],
+            [1, "order_id"],
+            [1, "customer_id"],
+        ],
+        "foreign_keys": [[4, 1]],
+    }
+
+
+def test_training_and_inference_share_exact_schema_question_prefix() -> None:
+    schema = serialize_spider_schema(table_metadata())
+    question = "  List\nall customer names.  "
+    training_text = render_sft_training_text(question, schema, "SELECT name FROM customers")
+
+    assert PROMPT_FORMAT_VERSION == "spider-sft-schema-question-sql-v1"
+    assert training_text == render_sft_prompt(question, schema) + "SELECT name FROM customers"
+    assert schema == (
+        "TABLE customers: customer_id, name\n"
+        "TABLE orders: order_id, customer_id\n"
+        "FOREIGN_KEYS: customer_id -> customer_id"
+    )
+
+
+def test_schema_serializer_rejects_foreign_key_with_unknown_column() -> None:
+    malformed = table_metadata()
+    malformed["foreign_keys"] = [[7, 1]]
+
+    with pytest.raises(SpiderSftFormatError, match="unknown column"):
+        serialize_spider_schema(malformed)

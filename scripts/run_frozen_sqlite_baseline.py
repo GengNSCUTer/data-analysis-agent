@@ -18,10 +18,13 @@ from data_analysis_agent.frozen_sqlite_baseline import (
     BaselineGenerationError,
     OllamaChatClient,
     append_predictions,
-    ensure_path_outside_repository,
     generate_predictions,
     load_existing_prediction_case_ids,
     load_native_generation_cases,
+)
+from data_analysis_agent.external_artifacts import (
+    ExternalArtifactPathError,
+    ensure_path_outside_repository,
 )
 
 
@@ -105,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
             max_schema_characters=args.max_schema_characters,
             on_prediction=lambda prediction: append_predictions(output_path, [prediction]),
         )
-    except (BaselineGenerationError, ValueError) as exc:
+    except (BaselineGenerationError, ExternalArtifactPathError, ValueError) as exc:
         print(f"baseline input error: {exc}", file=sys.stderr)
         return 2
 

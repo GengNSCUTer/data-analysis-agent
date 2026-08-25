@@ -331,16 +331,6 @@ def append_predictions(path: Path, predictions: Iterable[SqlPrediction]) -> None
             os.fsync(stream.fileno())
 
 
-def ensure_path_outside_repository(path: Path, repository_root: Path) -> Path:
-    """Keep raw model predictions out of the Git worktree by construction."""
-
-    resolved_path = path.resolve()
-    resolved_repository = repository_root.resolve()
-    if resolved_path.is_relative_to(resolved_repository):
-        raise BaselineGenerationError("prediction output must stay outside the repository")
-    return resolved_path
-
-
 def _required_string(raw: Mapping[str, Any], key: str) -> str:
     value = raw.get(key)
     if not isinstance(value, str) or not value.strip():

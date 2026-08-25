@@ -19,6 +19,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from data_analysis_agent.spider_sft_format import (
+    normalize_question,
+    render_sft_training_text,
+    serialize_spider_schema,
+)
+
 
 VALUE_RE = re.compile(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|\b\d+(?:\.\d+)?\b")
 SPACE_RE = re.compile(r"\s+")
@@ -75,42 +81,6 @@ def normalized_sql_shape(sql: str) -> str:
 
     normalized = VALUE_RE.sub("<value>", sql.lower())
     return SPACE_RE.sub(" ", normalized).strip()
-
-
-def redacted_question(question: str) -> str:
-    """Keep public benchmark semantics while removing formatting noise."""
-
-    return SPACE_RE.sub(" ", question.replace("\x00", " ")).strip()
-
-
-def schema_text(table: dict[str, Any]) -> str:
-    names = table["table_names_original"]
-    columns = table["column_names_original"]
-    grouped: dict[int, list[str]] = defaultdict(list)
-    for table_index, column_name in columns:
-        if table_index >= 0:
-            grouped[table_index].append(column_name)
-    lines: list[str] = []
-    for index, table_name in enumerate(names):
-        cols = ", ".join(grouped.get(index, [])) or "<no_columns>"
-        lines.append(f"TABLE {table_name}: {cols}")
-    if table.get("foreign_keys"):
-        lines.append("FOREIGN_KEYS: " + "; ".join(
-            f"{columns[left][1]} -> {columns[right][1]}"
-            for left, right in table["foreign_keys"]
-        ))
-    return "\n".join(lines)
-
-
-def training_text(question: str, schema: str, sql: str) -> str:
-    return (
-        "### SQLite schema\n"
-        f"{schema}\n\n"
-        "### Question\n"
-        f"{question}\n\n"
-        "### SQL\n"
-        f"{sql}"
-    )
 
 
 def read_only_explain(database_path: Path, sql: str) -> dict[str, Any]:
@@ -200,8 +170,8 @@ def main() -> int:
         index = selected_row["index"]
         item = selected_row["item"]
         db_id = item["db_id"]
-        schema = schema_text(tables[db_id])
-        question = redacted_question(item["question"])
+        schema = serialize_spider_schema(tables[db_id])
+        question = normalize_question(item["question"])
         sql = item["query"].strip()
         database_path = args.database_root / db_id / f"{db_id}.sqlite"
         if not database_path.is_file():
@@ -233,7 +203,7 @@ def main() -> int:
                 "group": f"{db_id}:{hashlib.sha1(selected_row['shape'].encode()).hexdigest()[:12]}",
             },
             "schema_text": schema,
-            "training_text": training_text(question, schema, sql),
+            "training_text": render_sft_training_text(question, schema, sql),
         }
         rows.append(row)
 
