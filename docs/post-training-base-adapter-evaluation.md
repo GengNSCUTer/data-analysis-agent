@@ -106,13 +106,16 @@ mirror as its default for reproducibility:
 | Dataset version | `spider-1.0-official-v1-20260826-dev` |
 | Base run | `daa-qwen15b-base-official-v1` |
 | External output | `/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-base-spider-official-v1-20260826` |
-| Status | Full Base generation/rerun in progress; no Adapter or score yet |
+| Status | Base and 26-step QLoRA Adapter generation in progress on separate 4090 cards; no score yet |
 
 The official package and historical mirror have different ordered records, so no
 historical prediction, diagnostic or Test Suite output may be copied into this
-directory. Once the Base evidence is complete, an Adapter must use the same
-official cases, schema metadata, model revision, decode parameters, SQLite
-diagnostic and pinned evaluator contract.
+directory. The Base and 26-step QLoRA Adapter are now running in separate screen
+sessions and on separate 4090 cards. The Adapter was fresh-reload validated before
+launch; both runs use the same official cases, schema metadata, model revision,
+decode parameters, SQLite diagnostic and pinned evaluator contract. Completion
+still requires full prediction coverage, diagnostics, evaluator evidence and
+paired analysis before any quality conclusion.
 
 ### Recovery After Generation
 
