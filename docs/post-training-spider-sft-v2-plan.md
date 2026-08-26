@@ -78,6 +78,21 @@ Base 与 Adapter 均已在冻结的 164 条、17 个此前未观察 schema 上�
 
 2026-08-26 15:00 CST，两个完整评测任务已分别在 `daa-qwen15b-v2-full-base` 与 `daa-qwen15b-v2-full-adapter` 启动，并通过 UUID/资产预检开始逐条将候选 `fsync` 到仓库外目录。此时尚未完成任何一条 SQLite/Test Suite 报告，不能从首批候选数量、显存或生成速度推断质量。
 
+## 2026-08-26：完整 1,034-case 评测结论
+
+两个完整任务均已正常退出，Base 与 Adapter 各完成 `1,034/1,034` 生成、只读 SQLite diagnostics、固定 Test Suite bridge，以及生成冻结后的全量 bounded denotation audit。完整的合同、聚合结果、changed-case 审核方法、证据哈希和限制见 [`post-training-spider-sft-v2-full-analysis.md`](post-training-spider-sft-v2-full-analysis.md)；原始问题、SQL、预测、数据库、结果行、权重与日志继续只留在仓库外。
+
+| 证据层 | Base | Adapter | 变化 |
+| --- | ---: | ---: | ---: |
+| SQLite executed | 950 | 961 | +11 |
+| Fixed Test Suite internal `all` | 0.507 | 0.667 | +0.160 |
+| bounded denotation exact-or-bag match | 570 | 708 | +138 |
+| denotation match -> non-match | - | 75 cases | 仍需处理的回退 |
+
+Test Suite 的 easy/medium/hard/extra 四个桶均上升，且 denotation 全量净增与之同方向；这足以让本轮规模化 bf16 LoRA 通过**离线候选生成**质量门。它仍不是公开 Spider leaderboard 成绩或生产业务语义准确率：SQLite executed 不等于正确 SQL，denotation 只对当前数据快照成立，人工审核仍发现多余 join、`DISTINCT`/分组/集合重复度和投影顺序方面的回退。
+
+因此决策是 `offline_candidate_generator_quality_gate_passed_runtime_integration_deferred`：可以开始设计可开关、可回退的 runtime candidate generator 接口和独立业务 workspace 评测，但不替换 Vanna 线上模型，不移除 `QuestionRouter`、Semantic Catalog/QueryPlan、`sqlglot` AST Policy、PostgreSQL reader role、`ResultValidator`、`ResultContract` 或 `ChartContract`，也不进入 DPO/GRPO。
+
 ## 明确不做
 
 - 不直接进入 DPO、GRPO、多候选自一致性或执行反馈 RL；

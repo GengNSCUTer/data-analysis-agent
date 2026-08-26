@@ -26,9 +26,19 @@ SQLite executed 为 `829 -> 671`，execution error 为 `201 -> 360`，policy rej
 
 为避免按前缀选择的 3 个 schema 造成误判，独立复验以固定 seed 排除前 100 条及其出现的全部 schema，从 17 个未观察 schema 选择 164 条。生成输入不含 gold SQL，gold 仅在 Base/Adapter 输出冻结后用于仓库外 bounded denotation audit。复验结果为 denotation match `97 -> 122`、SQLite executed `153 -> 155`、`no_such_column` `9 -> 8`，所有预冻结质量门通过。它允许进入完整 1,034-case 对照，但不是官方 Spider 分数，也不允许 production 接入。完整合同、哈希与限制见 [`post-training-spider-sft-v2-plan.md`](post-training-spider-sft-v2-plan.md)。
 
+## 最近完成：Spider SFT v2 bf16 LoRA 全量对照
+
+2026-08-26，规模化 bf16 LoRA 的 matching Base/Adapter 均完成官方 Spider 1.0 dev 的 `1,034/1,034` 候选生成。两者使用同一 Qwen2.5-Coder-1.5B revision、v2 schema prompt、greedy decode、case 顺序、SQLite policy 和固定 Test Suite bridge；模型生成阶段均不读取 dev gold SQL 或数据库行。Base 使用 logical CUDA `0` -> physical GPU `2` 的 RTX 4090，Adapter 使用 logical CUDA `1` -> physical GPU `3` 的 RTX 4090，screen 均正常退出。
+
+SQLite diagnostics 为 executed `950 -> 961`、execution error `81 -> 73`、policy rejected `3 -> 0`。固定 Test Suite 的内部 all 输出为 `0.507 -> 0.667`，easy/medium/hard/extra 四个桶同方向上升。候选冻结后运行的全量 bounded denotation audit 为 exact-or-bag match `570 -> 708`，其中 213 条非匹配变匹配、75 条匹配变非匹配，净增 138。该审计不保存问题、SQL、数据库标识或结果行，且只说明当前 SQLite 快照上的执行结果关系。
+
+Adapter 的输出形态也更稳定：direct SQL-shaped completion `370 -> 1,034`，generation-cap hit `264 -> 1`，总生成 token `114,159 -> 31,027`。这不是生产延迟/吞吐量结论。changed-case 审核显示，改善通常是多余投影/连接消失和标量聚合或 top-selection 形状恢复；回退仍包括无谓 join、表列混淆、`DISTINCT`/分组/集合重复度、投影顺序和函数形状问题。完整分析见 [`post-training-spider-sft-v2-full-analysis.md`](post-training-spider-sft-v2-full-analysis.md)。
+
+本轮状态为“离线候选生成质量门通过，运行时接入延后”。不把内部 Test Suite 写为官方榜单，不将 SQLite/denotation 写为生产业务正确率，不移除运行时的安全和结果合同，也不进入 DPO/GRPO。
+
 ## 当前运行
 
-2026-08-26 12:12 CST 启动的 Spider SFT v2 训练、前缀 Base/Adapter smoke 与独立 164-case 复验均已完成。主训练使用 logic CUDA `1` -> physical GPU `3` 的 RTX 4090；前缀 Base 使用 logic CUDA `0` -> physical GPU `2`，独立复验使用两张空闲 4090，均通过进程内 UUID guard。前缀对照的执行护栏失败，但独立复验的语义主判据及两项执行护栏均通过。下一项待启动任务是完整官方 dev 1,034-case 的 bf16 Base/Adapter 对照与其后的固定 Test Suite bridge。
+Spider SFT v2 训练、前缀 Base/Adapter smoke、独立 164-case 复验和完整 1,034-case 对照均已完成。完整结果为 SQLite executed `950 -> 961`、fixed Test Suite internal all `0.507 -> 0.667`、bounded denotation `570 -> 708`；该 Adapter 已通过离线候选生成质量门，但尚未也不会直接替换生产运行时。下一项是设计可开关、可回退的 candidate generator 接口，并在独立业务 workspace 上评测候选质量和完整可信链路。
 
 2026-08-25 18:06 CST 启动的两条独立完整质量评测已经完成；以下历史启动表保留用于追溯，不再表示任务仍在运行。
 

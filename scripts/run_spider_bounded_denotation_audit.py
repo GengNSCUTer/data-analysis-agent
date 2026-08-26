@@ -105,6 +105,10 @@ def paired_records(
         if not isinstance(base_execution, Mapping) or not isinstance(adapter_execution, Mapping):
             raise DenotationAuditError("diagnostic record lacks execution evidence")
         with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+            # Spider SQLite files can contain TEXT values that are not valid UTF-8.
+            # Compare their original bytes so result decoding cannot abort an
+            # otherwise read-only denotation audit or alter equality semantics.
+            connection.text_factory = bytes
             base_state = execution_state(connection, gold_sql, base_execution)
             adapter_state = execution_state(connection, gold_sql, adapter_execution)
         records.append(

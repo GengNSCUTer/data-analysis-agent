@@ -74,6 +74,14 @@
 
 ## 8. 最近一次同步记录
 
+### 2026-08-26：Spider SFT v2 全量质量诊断闭环
+
+- 目标：完成 3k 级 bf16 LoRA Adapter 与 matching bf16 Base 的完整 1,034-case Spider dev 对照，并避免把离线生成质量误写为生产能力或官方榜单。
+- 证据：Base/Adapter 均完成生成、只读 SQLite diagnostics、固定 commit Test Suite bridge 和生成冻结后全量 bounded denotation audit。SQLite executed 为 `950 -> 961`；fixed Test Suite internal all 为 `0.507 -> 0.667`，四个难度桶均提升；denotation exact-or-bag match 为 `570 -> 708`，净增 138（213 non-match -> match、75 match -> non-match）。原始问题、gold/candidate SQL、数据库行、模型、预测与日志均留在仓库外。
+- 诊断：Adapter 的 direct SQL-shaped completion `370 -> 1,034`、generation-cap hit `264 -> 1`，但仍有多余 join、表列混淆、`DISTINCT`/分组/集合重复度、投影顺序和函数形状回退。SQLite snapshot denotation 不足以证明所有可能数据实例的等价性，固定 Test Suite 仅是当前固定资产组合的内部输出。
+- 修复与验证：denotation audit 对 Spider SQLite 中非 UTF-8 TEXT 以原始 bytes 比较，避免只读结果比较中断且不改变 SQL、数据库或报告脱敏边界；新增对应回归测试。完整结论见 `docs/post-training-spider-sft-v2-full-analysis.md` 与冻结 manifest。
+- 决策：`offline_candidate_generator_quality_gate_passed_runtime_integration_deferred`。下一步只设计可开关、可回退的 runtime candidate generator，并在独立业务 workspace 评测；不得移除 `QuestionRouter`、Catalog/QueryPlan、AST Policy、PostgreSQL reader role、Result/Chart Contract，不进入 DPO/GRPO。
+
 ### 2026-08-25：后训练材料重组与 26-step LoRA/QLoRA 覆盖度实验
 
 - 目标：将概念学习、实时项目状态和实验结论拆开，验证首轮 8-step 负向 ablation 是否至少受训练覆盖度或 4-bit 基座加载方式影响。

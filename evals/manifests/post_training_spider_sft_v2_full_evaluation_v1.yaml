@@ -1,6 +1,6 @@
 manifest_id: post_training_spider_sft_v2_full_evaluation_v1
 manifest_version: "1"
-status: running_external_only
+status: completed_external_only
 purpose: >-
   Full controlled Base/Adapter evaluation for the scaled Spider SFT v2 bf16 LoRA
   adapter after the independent bounded smoke quality gate passed.
@@ -39,7 +39,8 @@ launch:
   started_at: "2026-08-26T15:00:31+08:00"
   base_screen_session: daa-qwen15b-v2-full-base
   adapter_screen_session: daa-qwen15b-v2-full-adapter
-  evidence_complete: false
+  completed_at: "2026-08-26T16:18:00+08:00"
+  evidence_complete: true
 gpu:
   base:
     logical_cuda_device: 0
@@ -70,4 +71,114 @@ quality_gate:
     - official_spider_leaderboard_score
     - production_readiness
     - replacement_of_runtime_trust_boundaries
-  promotion_decision: pending_full_evaluation_evidence
+  promotion_decision: offline_candidate_generator_quality_gate_passed_runtime_integration_deferred
+result:
+  generation:
+    base_cases_completed: 1034
+    adapter_cases_completed: 1034
+    base_direct_sql_shaped_completions: 370
+    adapter_direct_sql_shaped_completions: 1034
+    base_generated_tokens: 114159
+    adapter_generated_tokens: 31027
+    base_generation_cap_hits: 264
+    adapter_generation_cap_hits: 1
+  sqlite_diagnostics:
+    base:
+      executed: 950
+      execution_error: 81
+      policy_rejected: 3
+      timeout: 0
+    adapter:
+      executed: 961
+      execution_error: 73
+      policy_rejected: 0
+      timeout: 0
+    paired_status_migration:
+      executed_to_executed: 898
+      executed_to_execution_error: 52
+      execution_error_to_executed: 61
+      execution_error_to_execution_error: 20
+      policy_rejected_to_executed: 2
+      policy_rejected_to_execution_error: 1
+    per_database_execution_delta:
+      database_count: 20
+      improved: 7
+      regressed: 6
+      unchanged: 7
+      total_delta: 11
+      min_delta: -5
+      max_delta: 10
+  fixed_test_suite_internal_output:
+    evaluator_commit: e97acc546ecbee8fa27fa8dbf025ef61493a876c
+    evaluated_cases: 1034
+    official_leaderboard_claim: false
+    base:
+      easy: 0.750
+      medium: 0.556
+      hard: 0.293
+      extra: 0.235
+      all: 0.507
+    adapter:
+      easy: 0.887
+      medium: 0.706
+      hard: 0.557
+      extra: 0.349
+      all: 0.667
+  bounded_denotation_audit:
+    official_metric: false
+    gold_read_only_after_generation: true
+    total_cases: 1034
+    base_exact_or_bag_matches: 570
+    adapter_exact_or_bag_matches: 708
+    base_exact_ordered_matches: 541
+    adapter_exact_ordered_matches: 694
+    base_bag_order_differs: 29
+    adapter_bag_order_differs: 14
+    base_mismatch: 380
+    adapter_mismatch: 253
+    base_not_executable: 84
+    adapter_not_executable: 73
+    both_match: 495
+    nonmatch_to_match: 213
+    match_to_nonmatch: 75
+    net_match_delta: 138
+  changed_case_review:
+    method: deterministic_source_order_quantiles_after_generation
+    improvement_case_ids:
+      - spider_dev:00004
+      - spider_dev:00242
+      - spider_dev:00462
+      - spider_dev:00627
+      - spider_dev:00815
+      - spider_dev:01033
+    regression_case_ids:
+      - spider_dev:00008
+      - spider_dev:00124
+      - spider_dev:00302
+      - spider_dev:00546
+      - spider_dev:00844
+      - spider_dev:01025
+    findings:
+      - improvements_include_cleaner_projection_scalar_aggregate_and_top_selection_shapes
+      - regressions_include_unnecessary_joins_distinct_grouping_set_multiplicity_and_projection_order
+      - denotation_equivalence_is_snapshot_bounded_and_not_a_production_semantic_claim
+  evidence_sha256:
+    base_generation: c0bb9f596bbc87bf0f6ab3ebc18016053fb31540985b33de4998240529325451
+    adapter_generation: 704968b33355bcccbd2f1b9eaeb59666d88539209cea085e8c5171ff4f11d62f
+    base_sqlite_diagnostic: c9713f92bceafe3d5bddb122e3067669574f8485cb74dbc6c2defc0fa5383fce
+    adapter_sqlite_diagnostic: 90349e989e05f17129ca9256a40330adbc210b544f6bc2e84adb56979f035aff
+    base_test_suite: b43e202714b64c91da0f59d20a56cddf13876ce686b67c56eed25e9bcbe2c3f8
+    adapter_test_suite: c8c1312bdcc81a92076479afa0e1a85f3e613db3473841610518548cb57eccdf
+    paired_sqlite_analysis: 943c1a8c9ac1f32d56d04df7d1265da3675e6a8a3e4c50f661fb00465c208c81
+    bounded_denotation_audit: c6226d3792e723e703303361e265f460536466fa5465ffb6100c06e760105c6e
+decision:
+  status: offline_candidate_generator_quality_gate_passed_runtime_integration_deferred
+  rationale: >-
+    SQLite diagnostics, fixed Test Suite internal outputs, and full bounded denotation
+    audit all improve under the frozen Base/Adapter contract. Remaining changed-case
+    regressions require runtime guardrails and independent business-workspace evaluation.
+  prohibited_next_steps:
+    - direct_production_model_replacement
+    - removal_of_runtime_trust_boundaries
+    - official_spider_leaderboard_claim
+    - dpo_grpo_or_execution_feedback_rl_before_controlled_runtime_evaluation

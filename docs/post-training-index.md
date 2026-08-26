@@ -9,8 +9,8 @@
 | 项目主体是什么？ | 一个可嵌入业务网页的可信数据分析 Agent：自然语言问题经过路由、Catalog、QueryPlan、SQL AST Policy、只读 PostgreSQL、ResultContract/ResultValidator 后，返回表格、图表和证据。 |
 | 后训练在解决什么？ | 提升离线模型从“问题 + 数据库 schema”生成 SQL 候选时的 schema linking、SQL 结构和格式稳定性。它不负责权限和业务口径的最终裁决。 |
 | 为什么改用 Spider？ | Olist 是产品演示案例；Spider 是公开、结构化的跨 schema Text-to-SQL 研究数据，适合做可复现的候选生成和执行诊断。两者不混为一个数据集或一个指标。 |
-| 现在处于哪一阶段？ | 已完成官方 train-only 数据扩展、Schema prompt v2、3k 级 bf16 LoRA 训练/reload 与独立 schema-stratified bounded smoke。164 条、17 个未观察 schema 的 denotation 为 `97 -> 122`，SQLite executed 为 `153 -> 155`，已获得完整 1,034-case 对照资格；尚未运行这次完整 Test Suite，也没有生产接入。 |
-| 当前最重要的结论？ | 首轮小数据 QLoRA 在固定 Spider dev 协议上回退；规模化 v2 bf16 LoRA 在独立 bounded smoke 上通过预冻结质量门。这支持进行完整对照，但不能把小样本 denotation 当官方分数、业务正确率或生产可用性。 |
+| 现在处于哪一阶段？ | 已完成官方 train-only 数据扩展、Schema prompt v2、3k 级 bf16 LoRA 训练/reload 和完整 1,034-case Base/Adapter 对照。SQLite executed `950 -> 961`，fixed Test Suite internal `all` `0.507 -> 0.667`，全量 bounded denotation `570 -> 708`；离线候选质量门通过，但尚未进行生产接入。 |
+| 当前最重要的结论？ | 首轮小数据 QLoRA 在固定 Spider dev 协议上回退；规模化 v2 bf16 LoRA 的三层离线证据均正向。它支持进入受控候选生成接口和独立业务 workspace 评测，不能写成官方分数、业务正确率或生产可用性。 |
 
 ## 两条链路，不要混淆
 
@@ -32,7 +32,7 @@
 | R0 数据与隔离 | 可训练数据、许可证、哈希与 holdout 边界 | 已完成 | 历史 128 条 v1 与当前 3,600 条 v2 train-only 候选均有 schema-disjoint 边界；项目 v2 60 条 golden 永久隔离。 |
 | R1 环境与工程 | 单卡可加载、可训练、可恢复 | 已完成 | Qwen2.5-Coder-1.5B，Python 3.11/CUDA 12.1，QLoRA forward 和 8-step SFT smoke 通过。 |
 | R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 已完成但失败 | 官方 release 上 matching Base/26-step QLoRA Adapter 均 1,034/1,034；SQLite executed `829 -> 671`，Test Suite internal all `0.433 -> 0.376`，限定列错误 `15 -> 296`。详见官方专属分析。 |
-| R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 进行中 | 已完成 3,600 条 official train-only v2 corpus、2 epoch bf16 LoRA 和 164-case/17-schema 独立 smoke；其质量门通过，下一步是完整 1,034-case Base/Adapter 对照、固定 Test Suite 与 changed-case 审核。 |
+| R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 本轮完成 | 3,600 条 official train-only v2 corpus、2 epoch bf16 LoRA、164-case/17-schema 独立 smoke 和完整 1,034-case 对照均完成；SQLite `950 -> 961`、Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`。 |
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
 | R5 受控接入 | 将候选模型作为运行时可选生成器 | 未开始 | 前提是独立质量门通过；安全、权限、结果与图表合同仍在服务器端执行。 |
 
@@ -46,6 +46,7 @@
 | 8-step Base vs Adapter | 这个 adapter 是否比同一基座更好 | SQLite executed 831 -> 666；Test Suite internal all 0.427 -> 0.215 | 一个有效的负向 ablation，说明不能只看 validation loss 或 SQL 外观。 |
 | changed-case diagnosis | 回退是否是个别 schema 或包装问题 | 20 个开发库中 17 回退；新 alias/schema-linking 错误增加 | 当前不能归因到单一因素；先做覆盖度/量化控制实验。 |
 | SFT v2 independent smoke | 规模化 SFT 是否有资格完整评测 | 164 条/17 个前缀未覆盖 schema 的 denotation `97 -> 122`，SQLite `153 -> 155`，`no_such_column` `9 -> 8` | 通过 bounded 质量门，允许运行完整对照；不是 Test Suite 或生产结论。 |
+| SFT v2 full evaluation | 规模化 bf16 LoRA 是否在完整冻结合同下超过 matching Base | SQLite `950 -> 961`、fixed Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`；仍有 75 条 denotation 回退 | 通过离线候选生成质量门；保留运行时边界，下一步是受控接口和独立业务评测。 |
 
 ## 本轮最小对照：官方 release 质量评测已完成
 
@@ -70,7 +71,8 @@
 2. [实验台账](post-training-experiment-log.md)：再看每次实验为何运行、配置是否可比、结果如何解读。
 3. [数据协议](post-training-data-protocol.md)：理解训练数据、脱敏、切分与永久 holdout。
 4. [Spider SFT v2 规模化计划](post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
-5. [Base/Adapter 评测协议](post-training-base-adapter-evaluation.md)、[首轮负向诊断](post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](post-training-official-base-adapter-analysis-v1.md)：查看评测合同、历史失败与本轮质量门结论。
+5. [SFT v2 全量评测分析](post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
+6. [Base/Adapter 评测协议](post-training-base-adapter-evaluation.md)、[首轮负向诊断](post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
 
 ## 看日志与停止任务
 
