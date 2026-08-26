@@ -89,6 +89,31 @@ scripts record launch parameters and `nvidia-smi` summary in external logs; they
 reject output directories that already contain final evidence, preventing an
 accidental blend of two runs.
 
+## Official Release Rebaseline
+
+The historical comparison above uses the 2020-01 Kaggle mirror. After acquiring
+the official Spider package, the same contract is being rerun in a separate
+external directory rather than reusing historical predictions. The launcher now
+accepts `DATASET_VERSION` and `MODEL_ID` explicitly while retaining the old
+mirror as its default for reproducibility:
+
+| Field | Official rebaseline value |
+| --- | --- |
+| Release | `spider-1.0-official-v1-20260825` |
+| Cases | `/disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/spider-1.0-official-v1-20260825/spider_data/dev.json` |
+| Tables | `/disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/spider-1.0-official-v1-20260825/spider_data/tables.json` |
+| Database root | `/disk2/gengnan/data-analysis-agent-data/text-to-sql/spider/spider-1.0-official-v1-20260825/spider_data/database` |
+| Dataset version | `spider-1.0-official-v1-20260826-dev` |
+| Base run | `daa-qwen15b-base-official-v1` |
+| External output | `/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-base-spider-official-v1-20260826` |
+| Status | Full Base generation/rerun in progress; no Adapter or score yet |
+
+The official package and historical mirror have different ordered records, so no
+historical prediction, diagnostic or Test Suite output may be copied into this
+directory. Once the Base evidence is complete, an Adapter must use the same
+official cases, schema metadata, model revision, decode parameters, SQLite
+diagnostic and pinned evaluator contract.
+
 ### Recovery After Generation
 
 `generation_evidence.json` and the complete prediction JSONL are immutable

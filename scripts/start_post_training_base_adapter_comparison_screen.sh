@@ -26,6 +26,8 @@ DATABASE_ROOT="${DATABASE_ROOT:-/disk2/gengnan/data-analysis-agent-data/text-to-
 EVALUATOR_ROOT="${EVALUATOR_ROOT:-/disk2/gengnan/data-analysis-agent-data/text-to-sql/sources/test-suite-sql-eval}"
 EVALUATOR_COMMIT="${EVALUATOR_COMMIT:-e97acc546ecbee8fa27fa8dbf025ef61493a876c}"
 TEST_SUITE_DATABASE_ROOT="${TEST_SUITE_DATABASE_ROOT:-/disk2/gengnan/data-analysis-agent-data/text-to-sql/test-suite-databases-official-2020-12-27/database}"
+DATASET_VERSION="${DATASET_VERSION:-spider-spider-1.0-kaggle-mirror-v1-2020-01-27-dev}"
+MODEL_ID="${MODEL_ID:-qwen2.5-coder-1.5b-adapter-comparison}"
 RUN_DIRECTORY="${RUN_DIRECTORY:-/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-${RUN_LABEL}-spider-dev-v1-20260825}"
 PHYSICAL_NVIDIA_SMI_DEVICE="${PHYSICAL_NVIDIA_SMI_DEVICE:-}"
 EXPECTED_GPU_UUID="${EXPECTED_GPU_UUID:-}"
@@ -82,6 +84,8 @@ echo "[physical_nvidia_smi_device] ${PHYSICAL_NVIDIA_SMI_DEVICE:-unrecorded}"
 echo "[expected_gpu_uuid] ${EXPECTED_GPU_UUID:-unguarded}"
 echo "[model_dir] ${MODEL_DIR}"
 echo "[adapter_dir] ${ADAPTER_DIR}"
+echo "[dataset_version] ${DATASET_VERSION}"
+echo "[model_id] ${MODEL_ID}"
 nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total --format=csv,noheader
 
 generation_args=(
@@ -116,8 +120,8 @@ fi
   --cases "${CASES}" \
   --database-root "${DATABASE_ROOT}" \
   --predictions "${RUN_DIRECTORY}/predictions.jsonl" \
-  --dataset-version spider-spider-1.0-kaggle-mirror-v1-2020-01-27-dev \
-  --model-id qwen2.5-coder-1.5b-adapter-comparison \
+  --dataset-version "${DATASET_VERSION}" \
+  --model-id "${MODEL_ID}" \
   --model-version "${BASE_WEIGHT_MODE}-${RUN_LABEL}" \
   --prompt-version spider-sft-schema-question-sql-v1 \
   --output "${RUN_DIRECTORY}/sqlite-diagnostics.json"
