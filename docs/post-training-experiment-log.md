@@ -18,6 +18,12 @@ SQLite executed 为 `829 -> 671`，execution error 为 `201 -> 360`，policy rej
 
 本轮结论是该 26-step Adapter 质量门失败。该结果只说明当前小数据、prompt 和超参组合回退，不归因于 QLoRA 本身；下一步转入官方 train-only 数据扩展与 Schema prompt v2，不进入 DPO/GRPO。完整报告见 [`post-training-official-base-adapter-analysis-v1.md`](post-training-official-base-adapter-analysis-v1.md)。
 
+## 已准备：Spider SFT v2 规模化数据与训练合同
+
+官方 `train_spider.json` 已构造为 3,600 条可训练候选：全量覆盖 139 个可满足 token 预算的 Spider schema，使用 `spider-sft-schema-question-sql-v2`，每个列以 `table.column` 形式序列化，并保留列类型、PK 和 fully-qualified FK。构造阶段通过对应 SQLite 的只读 `EXPLAIN`，排除 3 条执行不兼容样本；随后用 Qwen tokenizer 的 1,536 token 硬预算排除 29 条过长样本，最大保留序列为 1,443 token，不发生静默截断。
+
+最终 split 为 3,048 train / 552 validation，分别来自 118 / 21 个不重叠 schema。跨 schema 的通用 SQL text shape 有 6 个重叠，作为计数证据保留但不阻断，因为 `COUNT`、`GROUP BY` 等结构重叠不等于 schema 泄漏；所有表、列、外键 identity 仍被 schema-disjoint 边界隔离。下一步在物理 GPU 3 的 RTX 4090 启动 2 epoch bf16 LoRA，完成 reload 后先做 100-case SQLite smoke，再决定是否投入完整 1,034-case 评测。完整合同与哈希见 [`post-training-spider-sft-v2-plan.md`](post-training-spider-sft-v2-plan.md) 及 `evals/manifests/post_training_candidates_v2.yaml`。
+
 ## 当前运行
 
 2026-08-25 18:06 CST 启动的两条独立完整质量评测已经完成；以下历史启动表保留用于追溯，不再表示任务仍在运行。

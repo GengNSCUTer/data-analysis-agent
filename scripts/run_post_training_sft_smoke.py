@@ -31,6 +31,8 @@ from transformers import (
     set_seed,
 )
 
+from data_analysis_agent.spider_sft_format import PROMPT_FORMAT_VERSION
+
 
 SQL_MARKER = "\n\n### SQL\n"
 
@@ -50,9 +52,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-seq-length", type=int, default=1536)
     parser.add_argument("--max-steps", type=int, default=8)
+    parser.add_argument(
+        "--num-train-epochs",
+        type=float,
+        default=None,
+        help="Use complete dataset passes instead of --max-steps for a scaled experiment.",
+    )
     parser.add_argument("--seed", type=int, default=20260825)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
+    parser.add_argument("--per-device-eval-batch-size", type=int, default=1)
+    parser.add_argument("--evaluation-steps", type=int, default=4)
+    parser.add_argument("--save-steps", type=int, default=4)
+    parser.add_argument("--logging-steps", type=int, default=1)
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
@@ -105,6 +117,15 @@ def load_rows(path: Path, expected_split: str) -> list[dict[str, Any]]:
         if row.get("execution_outcome", {}).get("sqlite_readonly_explain") != "pass":
             raise ValueError(f"{row['sample_id']} lacks execution evidence")
     return rows
+
+
+def prompt_format_version(rows: list[dict[str, Any]]) -> str:
+    """Require one explicit prompt contract across a training split."""
+
+    versions = {str(row.get("prompt_format_version", PROMPT_FORMAT_VERSION)) for row in rows}
+    if len(versions) != 1:
+        raise ValueError("training split mixes prompt format versions")
+    return versions.pop()
 
 
 def split_prompt_and_target(row: dict[str, Any]) -> tuple[str, str]:
@@ -205,8 +226,20 @@ def main() -> int:
     os.environ.setdefault("NCCL_IB_DISABLE", "1")
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for SFT smoke")
-    if args.max_steps <= 0 or args.max_seq_length <= 0:
-        raise ValueError("max steps and max sequence length must be positive")
+    if args.max_seq_length <= 0:
+        raise ValueError("max sequence length must be positive")
+    if args.num_train_epochs is None and args.max_steps <= 0:
+        raise ValueError("max steps must be positive when epochs are not configured")
+    if args.num_train_epochs is not None and args.num_train_epochs <= 0:
+        raise ValueError("num train epochs must be positive")
+    if min(
+        args.gradient_accumulation_steps,
+        args.per_device_eval_batch_size,
+        args.evaluation_steps,
+        args.save_steps,
+        args.logging_steps,
+    ) <= 0:
+        raise ValueError("batch and step interval arguments must be positive")
     repository_root = Path(__file__).resolve().parents[1]
     if args.output_dir.resolve().is_relative_to(repository_root):
         raise ValueError("output directory must be outside the Git working tree")
@@ -218,6 +251,10 @@ def main() -> int:
 
     train_rows = load_rows(args.train_jsonl, "train")
     validation_rows = load_rows(args.validation_jsonl, "validation")
+    train_prompt_format = prompt_format_version(train_rows)
+    validation_prompt_format = prompt_format_version(validation_rows)
+    if train_prompt_format != validation_prompt_format:
+        raise ValueError("train and validation splits use different prompt formats")
     split_audit = json.loads(args.split_audit.read_text(encoding="utf-8"))
     if split_audit.get("checks", {}).get("status") != "pass":
         raise ValueError("split audit did not pass")
@@ -270,25 +307,27 @@ def main() -> int:
         ),
     )
     trainable, total = count_parameters(model)
+    planned_max_steps = -1 if args.num_train_epochs is not None else args.max_steps
     training_args = TrainingArguments(
         output_dir=str(checkpoint_dir),
         overwrite_output_dir=args.resume_from_checkpoint is None,
         do_train=True,
         do_eval=True,
         eval_strategy="steps",
-        eval_steps=4,
+        eval_steps=args.evaluation_steps,
         per_device_train_batch_size=1,
-        per_device_eval_batch_size=1,
+        per_device_eval_batch_size=args.per_device_eval_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
-        max_steps=args.max_steps,
+        max_steps=planned_max_steps,
+        num_train_epochs=args.num_train_epochs if args.num_train_epochs is not None else 3.0,
         lr_scheduler_type="constant",
         logging_strategy="steps",
-        logging_steps=1,
+        logging_steps=args.logging_steps,
         logging_first_step=True,
         save_strategy="steps",
-        save_steps=4,
-        save_total_limit=1,
+        save_steps=args.save_steps,
+        save_total_limit=2,
         bf16=True,
         tf32=True,
         optim="paged_adamw_8bit",
@@ -341,6 +380,7 @@ def main() -> int:
             "split_audit_sha256": sha256_file(args.split_audit),
             "train": train_dataset.stats,
             "validation": validation_dataset.stats,
+            "prompt_format_version": train_prompt_format,
             "raw_question_or_sql_saved": False,
             "v2_holdout_used": False,
         },
@@ -348,9 +388,14 @@ def main() -> int:
             "seed": args.seed,
             "max_seq_length": args.max_seq_length,
             "per_device_train_batch_size": 1,
+            "per_device_eval_batch_size": args.per_device_eval_batch_size,
             "gradient_accumulation_steps": args.gradient_accumulation_steps,
             "global_batch_size": args.gradient_accumulation_steps,
-            "max_steps": args.max_steps,
+            "max_steps": planned_max_steps,
+            "num_train_epochs": args.num_train_epochs,
+            "evaluation_steps": args.evaluation_steps,
+            "save_steps": args.save_steps,
+            "logging_steps": args.logging_steps,
             "resumed_from_checkpoint": (
                 str(args.resume_from_checkpoint) if args.resume_from_checkpoint else None
             ),

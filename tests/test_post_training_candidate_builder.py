@@ -39,6 +39,8 @@ def test_candidate_builder_keeps_train_only_rows_external_and_checked(
                     "db_id": "shop",
                     "table_names_original": ["products"],
                     "column_names_original": [[-1, "*"], [0, "name"]],
+                    "column_types": ["text", "text"],
+                    "primary_keys": [],
                     "foreign_keys": [],
                 }
             ]
@@ -95,4 +97,102 @@ def test_candidate_builder_keeps_train_only_rows_external_and_checked(
         "forbidden_case_count": 1,
         "manifest": str(holdout_path),
         "status": "pass",
+    }
+
+
+def test_candidate_builder_v2_records_schema_prompt_and_shape_coverage(
+    monkeypatch, tmp_path: Path
+) -> None:
+    train_path = tmp_path / "train_spider.json"
+    tables_path = tmp_path / "tables.json"
+    holdout_path = tmp_path / "holdout.yaml"
+    database_root = tmp_path / "database"
+    output_dir = tmp_path / "external-output"
+    db_dir = database_root / "shop"
+    db_dir.mkdir(parents=True)
+    with sqlite3.connect(db_dir / "shop.sqlite") as connection:
+        connection.execute("CREATE TABLE products (product_id INTEGER PRIMARY KEY, name TEXT)")
+        connection.execute("CREATE TABLE sales (sale_id INTEGER PRIMARY KEY, product_id INTEGER)")
+
+    train_path.write_text(
+        json.dumps(
+            [
+                {
+                    "db_id": "shop",
+                    "question": "Count sales by product.",
+                    "query": (
+                        "SELECT products.name, COUNT(*) FROM products "
+                        "JOIN sales ON sales.product_id = products.product_id "
+                        "GROUP BY products.name"
+                    ),
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    tables_path.write_text(
+        json.dumps(
+            [
+                {
+                    "db_id": "shop",
+                    "table_names_original": ["products", "sales"],
+                    "column_names_original": [
+                        [-1, "*"],
+                        [0, "product_id"],
+                        [0, "name"],
+                        [1, "sale_id"],
+                        [1, "product_id"],
+                    ],
+                    "column_types": ["text", "number", "text", "number", "number"],
+                    "primary_keys": [1, 3],
+                    "foreign_keys": [[4, 1]],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    holdout_path.write_text(
+        "cases:\n  - case_id: data_001\n    forbidden_for_training: true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "build_spider_sft_candidates.py",
+            "--train-json",
+            str(train_path),
+            "--tables-json",
+            str(tables_path),
+            "--database-root",
+            str(database_root),
+            "--holdout-manifest",
+            str(holdout_path),
+            "--output-dir",
+            str(output_dir),
+            "--limit",
+            "1",
+            "--prompt-format-version",
+            "spider-sft-schema-question-sql-v2",
+            "--selection-strategy",
+            "schema_stratified_v2",
+            "--generated-at",
+            "2026-08-26T00:00:00Z",
+        ],
+    )
+
+    assert main() == 0
+
+    candidate = json.loads((output_dir / "candidates.jsonl").read_text(encoding="utf-8"))
+    assert candidate["prompt_format_version"] == "spider-sft-schema-question-sql-v2"
+    assert "sales.product_id -> products.product_id" in candidate["schema_text"]
+    assert candidate["query_plan"]["sql_features"] == {
+        "aggregate": True,
+        "group_by": True,
+        "having": False,
+        "join": True,
+        "limit": False,
+        "order_by": False,
+        "qualified_reference": True,
+        "set_operation": False,
+        "subquery": False,
     }

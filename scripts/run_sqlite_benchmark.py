@@ -108,6 +108,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-id", required=True)
     parser.add_argument("--model-version", required=True)
     parser.add_argument("--prompt-version", required=True)
+    parser.add_argument(
+        "--max-cases",
+        type=int,
+        default=None,
+        help="Evaluate the first N native cases for a bounded smoke; never an official metric.",
+    )
     parser.add_argument("--statement-timeout-ms", type=int, default=5_000)
     parser.add_argument("--max-rows", type=int, default=1_000)
     parser.add_argument(
@@ -123,6 +129,10 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         cases = CASE_NORMALIZERS[args.dataset](_load_json_list(args.cases))
+        if args.max_cases is not None:
+            if args.max_cases <= 0:
+                raise BenchmarkInputError("max cases must be positive")
+            cases = cases[: args.max_cases]
         predictions = load_predictions(_load_jsonl(args.predictions))
         report = run_sqlite_benchmark(
             cases=cases,

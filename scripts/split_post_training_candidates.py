@@ -25,6 +25,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--validation-ratio", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=20260825)
+    parser.add_argument(
+        "--allow-sql-shape-overlap",
+        action="store_true",
+        help=(
+            "Keep schema-disjoint validation while recording, rather than rejecting, "
+            "generic SQL-shape overlap across different databases."
+        ),
+    )
     parser.add_argument("--generated-at", default=None)
     return parser.parse_args()
 
@@ -130,7 +138,8 @@ def main() -> int:
     validation_shapes = {row["query_plan"].get("sql_shape") for row in validation_rows}
     if train_db_ids.intersection(validation_db_ids):
         raise AssertionError("schema/db groups overlap between train and validation")
-    if train_shapes.intersection(validation_shapes):
+    shape_overlap = train_shapes.intersection(validation_shapes)
+    if shape_overlap and not args.allow_sql_shape_overlap:
         raise AssertionError("SQL shapes overlap between train and validation")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -153,7 +162,11 @@ def main() -> int:
             "seed": args.seed,
             "validation_ratio_requested": args.validation_ratio,
             "primary_group": "spider_db_id",
-            "secondary_overlap_check": "normalized_sql_shape",
+            "secondary_overlap_check": (
+                "normalized_sql_shape_recorded_not_blocking"
+                if args.allow_sql_shape_overlap
+                else "normalized_sql_shape_required_disjoint"
+            ),
             "v2_holdout_case_collisions": collisions,
         },
         "splits": {
@@ -170,7 +183,9 @@ def main() -> int:
         },
         "checks": {
             "train_validation_database_overlap": [],
-            "train_validation_sql_shape_overlap": [],
+            "train_validation_sql_shape_overlap": [] if not shape_overlap else None,
+            "train_validation_sql_shape_overlap_count": len(shape_overlap),
+            "sql_shape_overlap_allowed": args.allow_sql_shape_overlap,
             "v2_holdout_used": False,
             "raw_data_in_git": False,
             "status": "pass",

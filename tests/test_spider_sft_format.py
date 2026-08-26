@@ -4,10 +4,12 @@ import pytest
 
 from data_analysis_agent.spider_sft_format import (
     PROMPT_FORMAT_VERSION,
+    PROMPT_FORMAT_VERSION_V2,
     SpiderSftFormatError,
     render_sft_prompt,
     render_sft_training_text,
     serialize_spider_schema,
+    serialize_spider_schema_for_version,
 )
 
 
@@ -45,3 +47,25 @@ def test_schema_serializer_rejects_foreign_key_with_unknown_column() -> None:
 
     with pytest.raises(SpiderSftFormatError, match="unknown column"):
         serialize_spider_schema(malformed)
+
+
+def test_v2_schema_serializer_preserves_qualified_pk_and_fk_identity() -> None:
+    metadata = table_metadata()
+    metadata["column_types"] = ["text", "number", "text", "number", "number"]
+    metadata["primary_keys"] = [1, 3]
+
+    schema = serialize_spider_schema_for_version(metadata, PROMPT_FORMAT_VERSION_V2)
+
+    assert schema == (
+        "TABLE customers\n"
+        "  customers.customer_id: number [PRIMARY KEY]\n"
+        "  customers.name: text\n"
+        "TABLE orders\n"
+        "  orders.order_id: number [PRIMARY KEY]\n"
+        "  orders.customer_id: number\n"
+        "FOREIGN_KEYS\n"
+        "  orders.customer_id -> customers.customer_id"
+    )
+    assert render_sft_prompt("List customer names.", schema, PROMPT_FORMAT_VERSION_V2).endswith(
+        "\n\n### SQL\n"
+    )

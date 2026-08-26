@@ -11,6 +11,9 @@ EVAL_PYTHON="${EVAL_PYTHON:-/disk2/gengnan/conda_envs/data-analysis-agent/bin/py
 RUN_LABEL="${RUN_LABEL:?set RUN_LABEL=base or RUN_LABEL=adapter}"
 REUSE_GENERATION="${REUSE_GENERATION:-0}"
 BASE_WEIGHT_MODE="${BASE_WEIGHT_MODE:-qlora_4bit}"
+PROMPT_FORMAT_VERSION="${PROMPT_FORMAT_VERSION:-spider-sft-schema-question-sql-v1}"
+CASE_LIMIT="${CASE_LIMIT:-}"
+SKIP_TEST_SUITE="${SKIP_TEST_SUITE:-0}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}"
 export CUDA_VISIBLE_DEVICES
 export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
@@ -39,6 +42,18 @@ if [[ "${RUN_LABEL}" != "base" && "${RUN_LABEL}" != "adapter" ]]; then
 fi
 if [[ "${BASE_WEIGHT_MODE}" != "qlora_4bit" && "${BASE_WEIGHT_MODE}" != "bf16_lora" ]]; then
   echo "[error] BASE_WEIGHT_MODE must be qlora_4bit or bf16_lora" >&2
+  exit 2
+fi
+if [[ "${PROMPT_FORMAT_VERSION}" != "spider-sft-schema-question-sql-v1" && "${PROMPT_FORMAT_VERSION}" != "spider-sft-schema-question-sql-v2" ]]; then
+  echo "[error] unsupported PROMPT_FORMAT_VERSION: ${PROMPT_FORMAT_VERSION}" >&2
+  exit 2
+fi
+if [[ -n "${CASE_LIMIT}" && ! "${CASE_LIMIT}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[error] CASE_LIMIT must be a positive integer when set" >&2
+  exit 2
+fi
+if [[ "${SKIP_TEST_SUITE}" != "0" && "${SKIP_TEST_SUITE}" != "1" ]]; then
+  echo "[error] SKIP_TEST_SUITE must be 0 or 1" >&2
   exit 2
 fi
 for required_path in "${QLORA_PYTHON}" "${EVAL_PYTHON}" "${MODEL_DIR}" "${CASES}" "${TABLES_JSON}" "${DATABASE_ROOT}" "${EVALUATOR_ROOT}" "${TEST_SUITE_DATABASE_ROOT}"; do
@@ -79,6 +94,9 @@ echo "[run_label] ${RUN_LABEL}"
 echo "[run_directory] ${RUN_DIRECTORY}"
 echo "[reuse_generation] ${REUSE_GENERATION}"
 echo "[base_weight_mode] ${BASE_WEIGHT_MODE}"
+echo "[prompt_format_version] ${PROMPT_FORMAT_VERSION}"
+echo "[case_limit] ${CASE_LIMIT:-full}"
+echo "[skip_test_suite] ${SKIP_TEST_SUITE}"
 echo "[cuda_visible_devices] ${CUDA_VISIBLE_DEVICES}"
 echo "[physical_nvidia_smi_device] ${PHYSICAL_NVIDIA_SMI_DEVICE:-unrecorded}"
 echo "[expected_gpu_uuid] ${EXPECTED_GPU_UUID:-unguarded}"
@@ -99,7 +117,11 @@ generation_args=(
   --max-new-tokens 256
   --seed 42
   --base-weight-mode "${BASE_WEIGHT_MODE}"
+  --prompt-format-version "${PROMPT_FORMAT_VERSION}"
 )
+if [[ -n "${CASE_LIMIT}" ]]; then
+  generation_args+=(--max-cases "${CASE_LIMIT}")
+fi
 if [[ -n "${PHYSICAL_NVIDIA_SMI_DEVICE}" ]]; then
   generation_args+=(--physical-nvidia-smi-device "${PHYSICAL_NVIDIA_SMI_DEVICE}")
 fi
@@ -115,24 +137,34 @@ else
   "${generation_args[@]}"
 fi
 
-"${EVAL_PYTHON}" "${ROOT}/scripts/run_sqlite_benchmark.py" \
-  --dataset spider_dev \
-  --cases "${CASES}" \
-  --database-root "${DATABASE_ROOT}" \
-  --predictions "${RUN_DIRECTORY}/predictions.jsonl" \
-  --dataset-version "${DATASET_VERSION}" \
-  --model-id "${MODEL_ID}" \
-  --model-version "${BASE_WEIGHT_MODE}-${RUN_LABEL}" \
-  --prompt-version spider-sft-schema-question-sql-v1 \
+benchmark_args=(
+  "${EVAL_PYTHON}" "${ROOT}/scripts/run_sqlite_benchmark.py"
+  --dataset spider_dev
+  --cases "${CASES}"
+  --database-root "${DATABASE_ROOT}"
+  --predictions "${RUN_DIRECTORY}/predictions.jsonl"
+  --dataset-version "${DATASET_VERSION}"
+  --model-id "${MODEL_ID}"
+  --model-version "${BASE_WEIGHT_MODE}-${RUN_LABEL}"
+  --prompt-version "${PROMPT_FORMAT_VERSION}"
   --output "${RUN_DIRECTORY}/sqlite-diagnostics.json"
+)
+if [[ -n "${CASE_LIMIT}" ]]; then
+  benchmark_args+=(--max-cases "${CASE_LIMIT}")
+fi
+"${benchmark_args[@]}"
 
-"${EVAL_PYTHON}" "${ROOT}/scripts/run_official_spider_test_suite.py" \
-  --cases "${CASES}" \
-  --predictions "${RUN_DIRECTORY}/predictions.jsonl" \
-  --evaluator-root "${EVALUATOR_ROOT}" \
-  --evaluator-commit "${EVALUATOR_COMMIT}" \
-  --test-suite-database-root "${TEST_SUITE_DATABASE_ROOT}" \
-  --output-directory "${RUN_DIRECTORY}/official-test-suite"
+if [[ "${SKIP_TEST_SUITE}" == "0" ]]; then
+  "${EVAL_PYTHON}" "${ROOT}/scripts/run_official_spider_test_suite.py" \
+    --cases "${CASES}" \
+    --predictions "${RUN_DIRECTORY}/predictions.jsonl" \
+    --evaluator-root "${EVALUATOR_ROOT}" \
+    --evaluator-commit "${EVALUATOR_COMMIT}" \
+    --test-suite-database-root "${TEST_SUITE_DATABASE_ROOT}" \
+    --output-directory "${RUN_DIRECTORY}/official-test-suite"
+else
+  echo "[test_suite] skipped for bounded smoke; no official metric is produced"
+fi
 
 echo "[exit_code] 0"
 echo "[finish] $(date --iso-8601=seconds)"

@@ -68,7 +68,8 @@
 1. [学习指南](post-training-learning-guide.md)：先理解 Token/SFT/LoRA/QLoRA/评测，不夹杂实时实验数字。
 2. [实验台账](post-training-experiment-log.md)：再看每次实验为何运行、配置是否可比、结果如何解读。
 3. [数据协议](post-training-data-protocol.md)：理解训练数据、脱敏、切分与永久 holdout。
-4. [Base/Adapter 评测协议](post-training-base-adapter-evaluation.md)、[首轮负向诊断](post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](post-training-official-base-adapter-analysis-v1.md)：查看评测合同、历史失败与本轮质量门结论。
+4. [Spider SFT v2 规模化计划](post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
+5. [Base/Adapter 评测协议](post-training-base-adapter-evaluation.md)、[首轮负向诊断](post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](post-training-official-base-adapter-analysis-v1.md)：查看评测合同、历史失败与本轮质量门结论。
 
 ## 看日志与停止任务
 

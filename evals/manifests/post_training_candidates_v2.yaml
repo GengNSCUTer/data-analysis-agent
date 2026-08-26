@@ -1,0 +1,66 @@
+manifest_id: post_training_candidates_v2
+manifest_version: "2"
+status: prepared_external_only
+purpose: >-
+  Official Spider train-only, token-budgeted SFT v2 corpus for the candidate
+  SQL generator. Raw rows, SQL and model artifacts remain outside Git.
+generator:
+  script: scripts/build_spider_sft_candidates.py
+  version: "2"
+  prompt_format_version: spider-sft-schema-question-sql-v2
+  selection_strategy: schema_stratified_v2
+  seed: 20260826
+  requested_count: 3600
+  selection_overfetch: 250
+  max_training_sequence_tokens: 1536
+external_artifact:
+  candidates_dir: /disk2/gengnan/data-analysis-agent-data/experiments/spider-sft-v2-candidates-3600-r1-20260826
+  candidates_jsonl: candidates.jsonl
+  candidates_sha256: 217b63c52870f3c4362d7f383b6417d9a7bd8a35ae01fc789b3d38a7699cad54
+  training_text_jsonl: training_text.jsonl
+  training_text_sha256: 025783ae9456cc49503f016774ab28338b8e02789ba4bf08cbca54903dfe5f52
+  audit_json: audit.json
+  split_dir: /disk2/gengnan/data-analysis-agent-data/experiments/spider-sft-v2-split-3600-20260826
+  split_audit_json: split_audit.json
+  split_audit_sha256: 47db0d99722186b91180994a447e024bbe3d9580874c2975a5f307cd5ad90108
+source_snapshot:
+  release: spider-1.0-official-v1-20260825
+  train_json_sha256: c43d0d72e59e1a9e1a60837da9bf70d5a6277226bdb7f634d544f380646f527a
+  tables_json_sha256: 61bb20aa401f03164e2d7f3b16509b7b5f79cc9c943ca7bd159046df1159e2ed
+  license: "CC BY-SA 4.0 (original Spider release; see docs/spider-1.0-data-provenance.md)"
+data_quality:
+  readonly_explain:
+    accepted_count: 3600
+    execution_errors_excluded: 3
+  token_budget:
+    over_budget_candidates_excluded: 29
+    max_accepted_sequence_tokens: 1443
+  selection:
+    schema_count: 139
+    aggregate: 1618
+    join: 1336
+    subquery: 519
+    set_operation: 266
+    qualified_reference: 1345
+split_policy:
+  primary_group: db_id
+  train:
+    rows: 3048
+    database_groups: 118
+    sha256: bd4786dd256ec2dd011127b721895f0b3417dacfef29e98177c85d0d7f61aa64
+  validation:
+    rows: 552
+    database_groups: 21
+    sha256: ba569e265e9c0a4ccc047f22c1b3a893618e348926c806dbcfc5822bdd56e301
+  schema_overlap: 0
+  normalized_sql_shape_overlap_count: 6
+  normalized_sql_shape_overlap_allowed: true
+  rationale: >-
+    Generic SQL structures may repeat across different schemas; schema identity
+    remains disjoint, while generic shape overlap is counted but never treated
+    as schema leakage.
+training_boundary:
+  raw_data_in_git: false
+  gold_dev_or_test_used: false
+  v2_holdout_used: false
+  production_postgres_modified: false

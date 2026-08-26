@@ -26,8 +26,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from data_analysis_agent.external_artifacts import ensure_path_outside_repository
 from data_analysis_agent.spider_sft_format import (
     PROMPT_FORMAT_VERSION,
+    PROMPT_FORMAT_VERSION_V2,
     render_sft_prompt,
-    serialize_spider_schema,
+    serialize_spider_schema_for_version,
 )
 
 
@@ -59,6 +60,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-cases", type=int)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--prompt-format-version",
+        choices=(PROMPT_FORMAT_VERSION, PROMPT_FORMAT_VERSION_V2),
+        default=PROMPT_FORMAT_VERSION,
+        help="Schema serialization version; must match the adapter's SFT corpus.",
+    )
     parser.add_argument(
         "--base-weight-mode",
         choices=("qlora_4bit", "bf16_lora"),
@@ -267,7 +274,8 @@ def main() -> int:
         table = tables.get(database_id)
         if table is None:
             raise GenerationInputError(f"case {case_id} refers to missing table metadata: {database_id}")
-        prompt = render_sft_prompt(question, serialize_spider_schema(table))
+        schema = serialize_spider_schema_for_version(table, args.prompt_format_version)
+        prompt = render_sft_prompt(question, schema, args.prompt_format_version)
         encoded = tokenizer(prompt, add_special_tokens=False, return_tensors="pt")
         input_ids = encoded["input_ids"]
         if input_ids.shape[-1] > args.max_input_tokens:
@@ -322,7 +330,7 @@ def main() -> int:
         },
         "adapter": adapter_metadata,
         "comparison_contract": {
-            "prompt_format_version": PROMPT_FORMAT_VERSION,
+            "prompt_format_version": args.prompt_format_version,
             "dataset": "spider_dev",
             "cases_sha256": sha256_file(args.cases),
             "tables_sha256": sha256_file(args.tables_json),
