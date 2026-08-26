@@ -74,6 +74,14 @@
 
 ## 8. 最近一次同步记录
 
+### 2026-08-26：Olist PostgreSQL 业务迁移候选 SQL 质量门
+
+- 目标：在不改变 Vanna/SiliconFlow 默认模型、不开启 SQL repair 的前提下，验证已通过 Spider SQLite 离线质量门的 bf16 LoRA Adapter 是否能迁移到当前中文 Olist PostgreSQL 工作区。
+- 实现：新增 `olist-candidate-sql-v1` SQL-only prompt、12 条永久 holdout manifest、Base/Adapter runner、脱敏 paired analyzer 和顺序 `screen` launcher。每条候选仍复用 QuestionRouter、Catalog、QueryPlan、ResultContract、SqlPolicy、reader role 和 ResultValidator；候选 SQL、问题、数据库行、模型和 Adapter 一律留在仓库外。
+- 证据：最终 v2 对照的 Base/Adapter 均为 12/12 generation、SqlPolicy `6 -> 6`、PostgreSQL executed `4 -> 2`、ResultContract valid `2 -> 0`；没有 `non_valid -> valid`，有 2 条 `valid -> non-valid`。Base 有 5/12 触达 256 token 生成上限；Adapter 更短但未得到有效业务合同结果。
+- 决策：Spider 离线候选质量门仍为通过，但 Olist 业务迁移子门为未通过；不得把 Adapter 接入生产默认模型，也不因本结果盲目扩大通用 Spider。下一实验先构建与 v2 60 条 holdout 及其改写严格隔离的领域对齐 Olist/PostgreSQL train/validation 数据，再按同一业务合同复测。
+- 健壮性：截断 SQL 的 `sqlglot.TokenError` 现与 `ParseError` 同样归一为可审计 `PolicyViolation`；`WorkspaceProfile` 与 `MetricDefinition` 的不可变映射默认值改为 `default_factory`，使 QLoRA Python 3.11 环境可加载项目可信链路。专项 68 passed、项目 PostgreSQL runner 5 passed、ruff/compileall/shell/CLI smoke/diff check 通过。
+
 ### 2026-08-26：Spider SFT v2 全量质量诊断闭环
 
 - 目标：完成 3k 级 bf16 LoRA Adapter 与 matching bf16 Base 的完整 1,034-case Spider dev 对照，并避免把离线生成质量误写为生产能力或官方榜单。

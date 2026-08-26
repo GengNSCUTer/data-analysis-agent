@@ -8,7 +8,7 @@ while the current Olist catalog remains an adapter in ``metric_context`` and
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import re
 from types import MappingProxyType
@@ -32,7 +32,9 @@ class WorkspaceProfile:
     analytics_schema: str = "analytics"
     reader_role: str = "daa_analytics_reader"
     writer_role: str = "daa_app_writer"
-    allowed_columns: Mapping[str, frozenset[str]] = MappingProxyType({})
+    allowed_columns: Mapping[str, frozenset[str]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     analyst_tables: frozenset[str] = frozenset()
     sensitive_projection_columns: frozenset[str] = frozenset()
     catalog_path: Path | None = None

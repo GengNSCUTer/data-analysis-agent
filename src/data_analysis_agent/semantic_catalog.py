@@ -8,7 +8,7 @@ table or metric was selected.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import re
 from pathlib import Path
@@ -115,7 +115,9 @@ class MetricDefinition:
     allowed_dimensions: tuple[str, ...]
     recommended_chart: str
     role_visibility: frozenset[str]
-    dimension_policies: Mapping[str, DimensionPolicy] = MappingProxyType({})
+    dimension_policies: Mapping[str, DimensionPolicy] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
 
 @dataclass(frozen=True)

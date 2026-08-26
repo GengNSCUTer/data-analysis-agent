@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from sqlglot import exp, parse
-from sqlglot.errors import ParseError
+from sqlglot.errors import ParseError, TokenError
 
 from .workspace import WorkspaceProfile
 
@@ -130,7 +130,7 @@ class SqlPolicy:
             raise PolicyViolation("SQL must not be empty")
         try:
             statements = [statement for statement in parse(sql, read="postgres") if statement]
-        except ParseError as exc:
+        except (ParseError, TokenError) as exc:
             raise PolicyViolation(f"SQL parse failed: {exc}") from exc
         if len(statements) != 1:
             raise PolicyViolation("exactly one SQL statement is allowed")

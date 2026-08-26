@@ -29,6 +29,21 @@ def test_policy_rejects_unsafe_or_unbounded_queries(policy: SqlPolicy, sql: str)
         policy.evaluate(sql, role="analyst")
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 'unterminated FROM fact_orders",
+        "SELECT /* unterminated FROM fact_orders",
+    ],
+)
+def test_policy_normalizes_tokenization_failures_to_policy_violations(
+    policy: SqlPolicy, sql: str
+) -> None:
+    """Truncated model output must be rejected and audited as a policy failure."""
+    with pytest.raises(PolicyViolation, match="SQL parse failed"):
+        policy.evaluate(sql, role="analyst")
+
+
 def test_policy_qualifies_tables_and_adds_analyst_limit(policy: SqlPolicy) -> None:
     decision = policy.evaluate(
         "SELECT customer_state, COUNT(order_id) AS orders "

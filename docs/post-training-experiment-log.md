@@ -10,6 +10,14 @@
 - 永久隔离：项目的 60 条 v2 golden 不进入训练、偏好数据、示例或改写。
 - 运行时隔离：生产 Vanna/FastAPI/PostgreSQL 代码不被离线训练改写；模型候选仍需通过服务器安全和结果合同。
 
+## 最近完成：Olist PostgreSQL 业务迁移 Base/Adapter 对照
+
+2026-08-26，Spider SFT v2 的 bf16 Base/Adapter 在当前 Olist 工作区完成 12 条受保护、`answerable` 数据库 holdout 的离线候选 SQL 对照。每条均先经 QuestionRouter、Catalog、QueryPlan 和 ResultContract 构造 PostgreSQL SQL-only prompt，再经 SqlPolicy、项目 PostgreSQL reader role 和 ResultValidator 执行；未调用 SiliconFlow、Vanna agent loop、图表或 SQL repair，生产默认模型未改动。12 条均属于 `post_training_holdout_v1.yaml`，永久禁止训练、改写和提示样例使用。
+
+Base/Adapter 都 12/12 生成，SqlPolicy 为 `6 -> 6`、PostgreSQL executed 为 `4 -> 2`、ResultContract valid 为 `2 -> 0`。状态迁移无 `non_valid -> valid`，有两条 `valid -> non-valid`。Base 总生成 token `2,481`（5 条达到 256 上限），Adapter 为 `801`（0 条达到上限）；更短的输出没有转化为业务候选质量。受控人工复核确认 Base 的两条合同有效样本符合当前平均履约天数口径，但不能由两条样本外推业务准确率。
+
+失败模式是 SQLite/英文 schema 训练格式和当前中文业务 Catalog、QueryPlan、PostgreSQL、结果别名合同之间的迁移差异：Adapter 常遗漏 metric alias、把派生指标作为物理列、丢失 Join 路径或多指标事实粒度。结论为业务迁移子门未通过，不将 Adapter 接入运行时，也不直接扩大通用 Spider 数据；下一步先构造与 60 条 holdout 严格隔离的 Olist PostgreSQL 领域训练/验证资产。详见 [`post-training-olist-business-transfer-evaluation-v1.md`](post-training-olist-business-transfer-evaluation-v1.md)。
+
 ## 最近完成：官方 Spider release Base/Adapter 成对质量评测
 
 2026-08-26，官方 Spider release 的 Base 与 26-step QLoRA Adapter 均完成 1,034/1,034 候选生成、只读 SQLite 诊断、固定 Test Suite bridge 和脱敏 paired analysis。Base 使用 logical CUDA `1` -> physical GPU `3` 的 RTX 4090；Adapter 使用 logical CUDA `0` -> physical GPU `2` 的 RTX 4090。两条 `screen` 已正常退出。
@@ -38,7 +46,7 @@ Adapter 的输出形态也更稳定：direct SQL-shaped completion `370 -> 1,034
 
 ## 当前运行
 
-Spider SFT v2 训练、前缀 Base/Adapter smoke、独立 164-case 复验和完整 1,034-case 对照均已完成。完整结果为 SQLite executed `950 -> 961`、fixed Test Suite internal all `0.507 -> 0.667`、bounded denotation `570 -> 708`；该 Adapter 已通过离线候选生成质量门，但尚未也不会直接替换生产运行时。下一项是设计可开关、可回退的 candidate generator 接口，并在独立业务 workspace 上评测候选质量和完整可信链路。
+Spider SFT v2 训练、前缀 Base/Adapter smoke、独立 164-case 复验和完整 1,034-case 对照均已完成，SQLite executed `950 -> 961`、fixed Test Suite internal all `0.507 -> 0.667`、bounded denotation `570 -> 708`。其后 12 条 Olist PostgreSQL 业务迁移评测显示 Adapter 的 ResultContract valid `2 -> 0`，因此仍不会替换生产运行时。下一项是先构建领域对齐、与当前 Catalog/QueryPlan/PostgreSQL 合同一致的 train/validation 数据，并以同一业务 holdout 重新验证，而不是直接开始 runtime 接入、DPO/GRPO 或扩大通用 Spider 样本。
 
 2026-08-25 18:06 CST 启动的两条独立完整质量评测已经完成；以下历史启动表保留用于追溯，不再表示任务仍在运行。
 
