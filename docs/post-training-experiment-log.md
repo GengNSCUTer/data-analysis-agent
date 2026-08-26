@@ -10,16 +10,23 @@
 - 永久隔离：项目的 60 条 v2 golden 不进入训练、偏好数据、示例或改写。
 - 运行时隔离：生产 Vanna/FastAPI/PostgreSQL 代码不被离线训练改写；模型候选仍需通过服务器安全和结果合同。
 
+## 最近完成：官方 Spider release Base/Adapter 成对质量评测
+
+2026-08-26，官方 Spider release 的 Base 与 26-step QLoRA Adapter 均完成 1,034/1,034 候选生成、只读 SQLite 诊断、固定 Test Suite bridge 和脱敏 paired analysis。Base 使用 logical CUDA `1` -> physical GPU `3` 的 RTX 4090；Adapter 使用 logical CUDA `0` -> physical GPU `2` 的 RTX 4090。两条 `screen` 已正常退出。
+
+SQLite executed 为 `829 -> 671`，execution error 为 `201 -> 360`，policy rejected 为 `4 -> 3`；Test Suite internal all 为 `0.433 -> 0.376`。状态迁移显示 240 条 Base 可执行候选在 Adapter 中退化，81 条错误候选恢复为可执行，净损失 158 条 executed。`no_such_column` 为 `182 -> 322`，其中限定列引用为 `15 -> 296`。Adapter 平均生成 token 从 `123.86` 降至 `36.9`，但规范化 SQL 中位长度从 `86` 增至 `121`，说明“更早停止”不是质量提升。
+
+本轮结论是该 26-step Adapter 质量门失败。该结果只说明当前小数据、prompt 和超参组合回退，不归因于 QLoRA 本身；下一步转入官方 train-only 数据扩展与 Schema prompt v2，不进入 DPO/GRPO。完整报告见 [`post-training-official-base-adapter-analysis-v1.md`](post-training-official-base-adapter-analysis-v1.md)。
+
 ## 当前运行
 
-2026-08-25 18:06 CST 已启动两条独立的完整质量评测。启动前，bf16 Base/Adapter 和 QLoRA Adapter 都完成了 2-case 模型加载冒烟验证；适配器存在、加载精度与声明一致，且进程内 CUDA UUID 与 launcher 声明的物理 4090 一致。冒烟只验证加载路径，不参与质量统计。
+2026-08-25 18:06 CST 启动的两条独立完整质量评测已经完成；以下历史启动表保留用于追溯，不再表示任务仍在运行。
 
-| ID | `screen` 会话 | 当前阶段 | 对照合同 | 结果尚未产生 |
+| ID | `screen` 会话 | 当前阶段 | 对照合同 | 状态 |
 | --- | --- | --- | --- | --- |
-| `qlora_coverage26_pair_v1` | `daa-qwen15b-qlora26-eval-v1` | 生成 26-step QLoRA adapter 的 1,034 条候选 | 使用已冻结的 matching 4-bit Base；同 prompt、greedy decode、normalizer、SQLite diagnostics、pinned Test Suite | 运行结束后才读取 adapter SQLite/Test Suite evidence 与 paired report。 |
-| `bf16_lora_coverage26_pair_v1` | `daa-qwen15b-bf16lora26-eval-v1` | 先生成 bf16 Base 的 1,034 条候选，随后同卡生成 bf16 adapter | Base 和 adapter 均以 bf16 加载；其余合同与 QLoRA 线相同 | 运行结束后才比较 bf16 Base 与 bf16 adapter；不得与 4-bit Base 直接比较。 |
+| `official_base_adapter_pair_v1` | `daa-qwen15b-base-official-v1` / `daa-qwen15b-adapter-official-v1` | 官方 release Base 与 26-step QLoRA Adapter | 同 prompt、greedy decode、normalizer、SQLite diagnostics、pinned Test Suite | 已完成；质量门失败，详见官方专属分析。 |
 
-两条任务分别使用 logic `0` -> physical `2` / logic `1` -> physical `3` 的 RTX 4090。脚本会在进程内核验 UUID；它们不抢占、停止或重启其他用户的 GPU 进程。每条任务生成后会顺序执行 SQLite 诊断、未修改的官方 Test Suite bridge 和仅汇总安全元数据的 paired analysis。若任一阶段失败，脚本不会创建 pair 的 `completed` 标识，因此“已启动”不能被误写为“已完成”。
+本轮的两个 screen 已正常退出。脚本在进程内核验 UUID，未抢占或停止其他用户 GPU 进程；原始证据与聚合报告均保留在仓库外。
 
 ## 已完成
 

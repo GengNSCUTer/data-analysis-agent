@@ -9,7 +9,7 @@
 | 项目主体是什么？ | 一个可嵌入业务网页的可信数据分析 Agent：自然语言问题经过路由、Catalog、QueryPlan、SQL AST Policy、只读 PostgreSQL、ResultContract/ResultValidator 后，返回表格、图表和证据。 |
 | 后训练在解决什么？ | 提升离线模型从“问题 + 数据库 schema”生成 SQL 候选时的 schema linking、SQL 结构和格式稳定性。它不负责权限和业务口径的最终裁决。 |
 | 为什么改用 Spider？ | Olist 是产品演示案例；Spider 是公开、结构化的跨 schema Text-to-SQL 研究数据，适合做可复现的候选生成和执行诊断。两者不混为一个数据集或一个指标。 |
-| 现在处于哪一阶段？ | 已完成数据/环境/8-step QLoRA SFT/完整 Base-Adapter 评测和失败诊断，以及两条 26-step 受控训练与 adapter reload；自 2026-08-25 18:06 CST 起，matching base/adapter 的完整质量评测正在两个独立 `screen` 会话中运行。 |
+| 现在处于哪一阶段？ | 已完成数据/环境/8-step QLoRA SFT/完整 Base-Adapter 评测和失败诊断，以及两条 26-step 受控训练、adapter reload 和官方 Spider release 的 1,034-case 成对质量评测。当前质量门失败，进入官方 train-only 数据扩展与 Schema prompt v2 设计。 |
 | 当前最重要的结论？ | 首轮 8-step QLoRA 在固定 Spider dev 协议上回退。原因尚未被单点证实，但它只覆盖约 0.31 个 epoch，因此下一步先控制变量验证训练覆盖度与 4-bit 量化的影响，而不是盲目加数据或做 GRPO。 |
 
 ## 两条链路，不要混淆
@@ -31,8 +31,8 @@
 | --- | --- | --- | --- |
 | R0 数据与隔离 | 可训练数据、许可证、哈希与 holdout 边界 | 已完成 | Spider train-only 候选 128 条；102/26 schema-disjoint 切分；项目 v2 60 条 golden 永久隔离。 |
 | R1 环境与工程 | 单卡可加载、可训练、可恢复 | 已完成 | Qwen2.5-Coder-1.5B，Python 3.11/CUDA 12.1，QLoRA forward 和 8-step SFT smoke 通过。 |
-| R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 运行中 | 8-step adapter 的全量对照已是负向结果；26-step QLoRA/bf16 LoRA 训练和 reload 已完成，matching base/adapter 的 1,034-case 质量评测正在运行。 |
-| R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 未开始 | 前提是 R2 完成各自 base/adapter 成对评测和人工 changed-case 审核。 |
+| R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 已完成但失败 | 官方 release 上 matching Base/26-step QLoRA Adapter 均 1,034/1,034；SQLite executed `829 -> 671`，Test Suite internal all `0.433 -> 0.376`，限定列错误 `15 -> 296`。详见官方专属分析。 |
+| R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 下一步 | 使用官方 `train_spider.json` 做 1,000--3,000 条 schema-stratified train-only 数据扩展，并先升级 fully-qualified Schema prompt v2；保持 v2 60 条 holdout 隔离。 |
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
 | R5 受控接入 | 将候选模型作为运行时可选生成器 | 未开始 | 前提是独立质量门通过；安全、权限、结果与图表合同仍在服务器端执行。 |
 
@@ -46,18 +46,17 @@
 | 8-step Base vs Adapter | 这个 adapter 是否比同一基座更好 | SQLite executed 831 -> 666；Test Suite internal all 0.427 -> 0.215 | 一个有效的负向 ablation，说明不能只看 validation loss 或 SQL 外观。 |
 | changed-case diagnosis | 回退是否是个别 schema 或包装问题 | 20 个开发库中 17 回退；新 alias/schema-linking 错误增加 | 当前不能归因到单一因素；先做覆盖度/量化控制实验。 |
 
-## 本轮最小对照：质量评测运行中
+## 本轮最小对照：官方 release 质量评测已完成
 
 两个训练任务使用相同的模型 revision、102/26 split、prompt、26 optimizer steps、seed、learning rate、batch/accumulation 和 LoRA `r=16, alpha=32, dropout=0.05`。唯一训练变量是冻结基座的存储方式。
 
 | 任务 | 基座权重 | GPU | 已完成的工程证据 | 要回答的问题 |
 | --- | --- | --- | --- | --- |
-| `qlora_coverage26_v1` | 4-bit NF4 + double quant，训练 LoRA adapter | `CUDA_VISIBLE_DEVICES=0`，物理 GPU 2，RTX 4090 | 26/26 steps，reload finite loss；peak allocated 4.35 GiB | 在约一轮覆盖后，QLoRA 是否仍回退？显存是否继续有优势？ |
-| `bf16_lora_coverage26_v1` | bf16 冻结基座，训练相同 LoRA adapter | `CUDA_VISIBLE_DEVICES=1`，物理 GPU 3，RTX 4090 | 26/26 steps，reload finite loss；peak allocated 5.19 GiB | 量化本身是否可能是回退来源；全精度 adapter 的显存成本是多少？ |
+| `official_base_adapter_pair_v1` | 4-bit NF4 Base 与 26-step QLoRA Adapter | Base logic `1` -> physical `3`；Adapter logic `0` -> physical `2`，均 RTX 4090 | 两者均 1,034/1,034；SQLite `829 -> 671`；Test Suite all `0.433 -> 0.376` | 26-step 覆盖仍未消除回退，且限定列/别名错误显著增加。 |
 
-训练完成不等于得到质量结论。每个 adapter 都必须和**相同加载精度的 base**按固定 Spider dev、greedy decode、SQLite diagnostics 和 pinned Test Suite 评测成对比较；之后还要抽检 changed cases 的指标/Join/结果语义。
+训练完成不等于得到质量结论。每个 adapter 都必须和**相同加载精度的 base**按固定 Spider dev、greedy decode、SQLite diagnostics 和 pinned Test Suite 评测成对比较；之后还要抽检 changed cases 的指标/Join/结果语义。本轮已完成该流程，结论是 26-step Adapter 回退，不能进入下一训练范式。
 
-本轮的启动状态如下。所有 prediction、SQLite/Test Suite 原始输出和完整日志均保留在仓库外；在 `completed` 文件和聚合报告产生前，不把进程启动或显存占用当成质量结果。
+本轮的完成状态如下。所有 prediction、SQLite/Test Suite 原始输出和完整日志均保留在仓库外；只将 release 指纹、聚合结果和边界写入 Git。
 
 | 对照 | `screen` 会话 | 运行顺序 | GPU 守卫 | 外部聚合目录 |
 | --- | --- | --- | --- | --- |
@@ -69,7 +68,7 @@
 1. [学习指南](post-training-learning-guide.md)：先理解 Token/SFT/LoRA/QLoRA/评测，不夹杂实时实验数字。
 2. [实验台账](post-training-experiment-log.md)：再看每次实验为何运行、配置是否可比、结果如何解读。
 3. [数据协议](post-training-data-protocol.md)：理解训练数据、脱敏、切分与永久 holdout。
-4. [Base/Adapter 评测协议](post-training-base-adapter-evaluation.md) 和 [负向诊断](post-training-base-adapter-analysis-v1.md)：查看首轮失败的完整证据边界。
+4. [Base/Adapter 评测协议](post-training-base-adapter-evaluation.md)、[首轮负向诊断](post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](post-training-official-base-adapter-analysis-v1.md)：查看评测合同、历史失败与本轮质量门结论。
 
 ## 看日志与停止任务
 
@@ -82,10 +81,10 @@ tail -f /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-bf16-
 
 这两个 `screen` 会话已在脚本正常退出后自动关闭。后续完整评测会使用新的、命名不同的会话；不要通过终止其他用户的 GPU 进程腾卡。
 
-本轮完整评测的实时日志为：
+本轮完整评测的外部日志和聚合报告为：
 
 ```bash
-tail -f /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-qlora-coverage26-pair-v1-20260825/screen-run.log
-tail -f /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-bf16-lora-coverage26-pair-v1-20260825/screen-run.log
-screen -ls
+tail -40 /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-base-spider-official-v1-20260826/screen-run.log
+tail -40 /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-adapter-spider-official-v1-20260826/screen-run.log
+cat /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-official-base-adapter-pair-v1-20260826/analysis-v1/safe-comparison.json
 ```

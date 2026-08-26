@@ -92,8 +92,8 @@ accidental blend of two runs.
 ## Official Release Rebaseline
 
 The historical comparison above uses the 2020-01 Kaggle mirror. After acquiring
-the official Spider package, the same contract is being rerun in a separate
-external directory rather than reusing historical predictions. The launcher now
+the official Spider package, the same contract was rerun in a separate external
+directory rather than reusing historical predictions. The launcher now
 accepts `DATASET_VERSION` and `MODEL_ID` explicitly while retaining the old
 mirror as its default for reproducibility:
 
@@ -106,16 +106,17 @@ mirror as its default for reproducibility:
 | Dataset version | `spider-1.0-official-v1-20260826-dev` |
 | Base run | `daa-qwen15b-base-official-v1` |
 | External output | `/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-base-spider-official-v1-20260826` |
-| Status | Base and 26-step QLoRA Adapter generation in progress on separate 4090 cards; no score yet |
+| Status | Completed: Base and 26-step QLoRA Adapter each covered 1,034/1,034 cases; paired quality gate failed |
 
 The official package and historical mirror have different ordered records, so no
 historical prediction, diagnostic or Test Suite output may be copied into this
-directory. The Base and 26-step QLoRA Adapter are now running in separate screen
-sessions and on separate 4090 cards. The Adapter was fresh-reload validated before
-launch; both runs use the same official cases, schema metadata, model revision,
-decode parameters, SQLite diagnostic and pinned evaluator contract. Completion
-still requires full prediction coverage, diagnostics, evaluator evidence and
-paired analysis before any quality conclusion.
+directory. The Base and 26-step QLoRA Adapter completed in separate screen
+sessions on separate 4090 cards. The Adapter was fresh-reload validated before
+launch; both runs used the same official cases, schema metadata, model revision,
+decode parameters, SQLite diagnostic and pinned evaluator contract. Full
+prediction coverage, diagnostics, evaluator evidence and paired analysis are
+now complete. The negative result and bounded error analysis are recorded in
+[`post-training-official-base-adapter-analysis-v1.md`](post-training-official-base-adapter-analysis-v1.md).
 
 ### Recovery After Generation
 
