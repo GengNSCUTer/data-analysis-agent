@@ -76,6 +76,8 @@ Base 与 Adapter 均已在冻结的 164 条、17 个此前未观察 schema 上�
 
 两条生成均完成后，各自运行只读 SQLite diagnostics 和固定 commit `e97acc546ecbee8fa27fa8dbf025ef61493a876c` 的未修改 Test Suite bridge；随后才生成配对状态迁移、错误类别、bounded denotation 和 changed-case 审核证据。完整合同记录在 [`evals/manifests/post_training_spider_sft_v2_full_evaluation_v1.yaml`](../evals/manifests/post_training_spider_sft_v2_full_evaluation_v1.yaml)。在两条完整生成、两层评测和人工语义审核均完成前，不对 Test Suite、业务语义、生产接入或候选模型提升作结论。
 
+2026-08-26 15:00 CST，两个完整评测任务已分别在 `daa-qwen15b-v2-full-base` 与 `daa-qwen15b-v2-full-adapter` 启动，并通过 UUID/资产预检开始逐条将候选 `fsync` 到仓库外目录。此时尚未完成任何一条 SQLite/Test Suite 报告，不能从首批候选数量、显存或生成速度推断质量。
+
 ## 明确不做
 
 - 不直接进入 DPO、GRPO、多候选自一致性或执行反馈 RL；

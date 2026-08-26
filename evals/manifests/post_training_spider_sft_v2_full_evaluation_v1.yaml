@@ -1,6 +1,6 @@
 manifest_id: post_training_spider_sft_v2_full_evaluation_v1
 manifest_version: "1"
-status: prepared_external_only
+status: running_external_only
 purpose: >-
   Full controlled Base/Adapter evaluation for the scaled Spider SFT v2 bf16 LoRA
   adapter after the independent bounded smoke quality gate passed.
@@ -35,6 +35,11 @@ external_artifacts:
   raw_predictions_in_git: false
   raw_gold_sql_in_git: false
   model_and_logs_in_git: false
+launch:
+  started_at: "2026-08-26T15:00:31+08:00"
+  base_screen_session: daa-qwen15b-v2-full-base
+  adapter_screen_session: daa-qwen15b-v2-full-adapter
+  evidence_complete: false
 gpu:
   base:
     logical_cuda_device: 0
