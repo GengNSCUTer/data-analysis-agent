@@ -9,7 +9,7 @@
 | 项目主体是什么？ | 一个可嵌入业务网页的可信数据分析 Agent：自然语言问题经过路由、Catalog、QueryPlan、SQL AST Policy、只读 PostgreSQL、ResultContract/ResultValidator 后，返回表格、图表和证据。 |
 | 后训练在解决什么？ | 提升离线模型从“问题 + 数据库 schema”生成 SQL 候选时的 schema linking、SQL 结构和格式稳定性。它不负责权限和业务口径的最终裁决。 |
 | 为什么改用 Spider？ | Olist 是产品演示案例；Spider 是公开、结构化的跨 schema Text-to-SQL 研究数据，适合做可复现的候选生成和执行诊断。两者不混为一个数据集或一个指标。 |
-| 现在处于哪一阶段？ | 已完成数据/环境/8-step QLoRA SFT/完整 Base-Adapter 评测和失败诊断，以及两条 26-step 受控训练、adapter reload 和官方 Spider release 的 1,034-case 成对质量评测。当前质量门失败，进入官方 train-only 数据扩展与 Schema prompt v2 设计。 |
+| 现在处于哪一阶段？ | 已完成官方 train-only 数据扩展、Schema prompt v2、3k 级 bf16 LoRA 训练/reload 与前缀 100-case Base/Adapter smoke。SQLite executed 回退但 bounded denotation audit 提升，当前正以独立 schema-stratified smoke 复验两项指标，尚未进入完整 Test Suite 或生产接入。 |
 | 当前最重要的结论？ | 首轮 8-step QLoRA 在固定 Spider dev 协议上回退。原因尚未被单点证实，但它只覆盖约 0.31 个 epoch，因此下一步先控制变量验证训练覆盖度与 4-bit 量化的影响，而不是盲目加数据或做 GRPO。 |
 
 ## 两条链路，不要混淆
@@ -32,7 +32,7 @@
 | R0 数据与隔离 | 可训练数据、许可证、哈希与 holdout 边界 | 已完成 | Spider train-only 候选 128 条；102/26 schema-disjoint 切分；项目 v2 60 条 golden 永久隔离。 |
 | R1 环境与工程 | 单卡可加载、可训练、可恢复 | 已完成 | Qwen2.5-Coder-1.5B，Python 3.11/CUDA 12.1，QLoRA forward 和 8-step SFT smoke 通过。 |
 | R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 已完成但失败 | 官方 release 上 matching Base/26-step QLoRA Adapter 均 1,034/1,034；SQLite executed `829 -> 671`，Test Suite internal all `0.433 -> 0.376`，限定列错误 `15 -> 296`。详见官方专属分析。 |
-| R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 下一步 | 使用官方 `train_spider.json` 做 1,000--3,000 条 schema-stratified train-only 数据扩展，并先升级 fully-qualified Schema prompt v2；保持 v2 60 条 holdout 隔离。 |
+| R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 进行中 | 已完成 3,600 条 official train-only v2 corpus 和 2 epoch bf16 LoRA；先完成不重叠 164-case schema-stratified semantic/execution 复验，再决定 identifier repair、数据/目标调整或完整评测。 |
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
 | R5 受控接入 | 将候选模型作为运行时可选生成器 | 未开始 | 前提是独立质量门通过；安全、权限、结果与图表合同仍在服务器端执行。 |
 

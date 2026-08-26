@@ -22,18 +22,19 @@ SQLite executed 为 `829 -> 671`，execution error 为 `201 -> 360`，policy rej
 
 官方 `train_spider.json` 已构造为 3,600 条可训练候选：全量覆盖 139 个可满足 token 预算的 Spider schema，使用 `spider-sft-schema-question-sql-v2`，每个列以 `table.column` 形式序列化，并保留列类型、PK 和 fully-qualified FK。构造阶段通过对应 SQLite 的只读 `EXPLAIN`，排除 3 条执行不兼容样本；随后用 Qwen tokenizer 的 1,536 token 硬预算排除 29 条过长样本，最大保留序列为 1,443 token，不发生静默截断。
 
-最终 split 为 3,048 train / 552 validation，分别来自 118 / 21 个不重叠 schema。跨 schema 的通用 SQL text shape 有 6 个重叠，作为计数证据保留但不阻断，因为 `COUNT`、`GROUP BY` 等结构重叠不等于 schema 泄漏；所有表、列、外键 identity 仍被 schema-disjoint 边界隔离。下一步在物理 GPU 3 的 RTX 4090 启动 2 epoch bf16 LoRA，完成 reload 后先做 100-case SQLite smoke，再决定是否投入完整 1,034-case 评测。完整合同与哈希见 [`post-training-spider-sft-v2-plan.md`](post-training-spider-sft-v2-plan.md) 及 `evals/manifests/post_training_candidates_v2.yaml`。
+最终 split 为 3,048 train / 552 validation，分别来自 118 / 21 个不重叠 schema。跨 schema 的通用 SQL text shape 有 6 个重叠，作为计数证据保留但不阻断，因为 `COUNT`、`GROUP BY` 等结构重叠不等于 schema 泄漏；所有表、列、外键 identity 仍被 schema-disjoint 边界隔离。2 epoch bf16 LoRA 已在物理 GPU 3 的 RTX 4090 完成并 fresh reload；前缀 100-case smoke 的 SQLite executed 为 `94 -> 89`，但 post-generation bounded denotation audit 为 `56 -> 69`。该冲突不能由单个前缀子集解决，因此不进入完整 Test Suite，改在排除前缀 schema 的 17 个未观察 dev schema 上执行预先固定的 164-case schema-stratified 独立复验。完整合同、资产哈希和停止条件见 [`post-training-spider-sft-v2-plan.md`](post-training-spider-sft-v2-plan.md)。
 
 ## 当前运行
 
-2026-08-26 12:12 CST 已启动 Spider SFT v2 的两个相互隔离任务。训练使用 logic CUDA `1` -> physical GPU `3` 的 RTX 4090，运行 2 epoch bf16 LoRA（3,048 train / 552 validation、effective batch 4、1,524 optimizer steps、`lr=1e-4`、LoRA `r=16/alpha=32/dropout=0.05`），并将在结束后 fresh PEFT reload。Base smoke 使用 logic CUDA `0` -> physical GPU `2` 的 RTX 4090，在相同 `spider-sft-schema-question-sql-v2` prompt 下对官方 dev 前 100 条做 greedy generation 和只读 SQLite diagnostics，明确跳过 Test Suite。两个启动脚本均已通过进程内 UUID guard；启动时训练已进入 optimizer steps、Base 已完成模型加载。当前只记录运行事实，不产生执行率、语义或 non-regression 结论。
+2026-08-26 12:12 CST 启动的 Spider SFT v2 训练与前缀 Base/Adapter smoke 均已完成。主训练使用 logic CUDA `1` -> physical GPU `3` 的 RTX 4090；100-case 对照使用 logic CUDA `0` -> physical GPU `2` 的 RTX 4090，均通过进程内 UUID guard。前缀对照的执行护栏失败，但 post-generation denotation audit 提示语义候选有提升，因此不把任何一个单指标当作全量放行依据。当前待运行任务为排除前缀及其 schema 的 164-case schema-stratified 独立复验，运行前已冻结语义主判据与执行/列名错误护栏。
 
 2026-08-25 18:06 CST 启动的两条独立完整质量评测已经完成；以下历史启动表保留用于追溯，不再表示任务仍在运行。
 
 | ID | `screen` 会话 | 当前阶段 | 对照合同 | 状态 |
 | --- | --- | --- | --- | --- |
-| `spider_sft_v2_bf16_lora` | `daa-qwen15b-spider-sft-v2-train` | 2 epoch SFT + fresh reload | official train-only、v2 prompt、schema-disjoint split | 运行中；外部目录 `qwen25coder15b-bf16-lora-spider-sft-v2-20260826`。 |
-| `spider_sft_v2_base_smoke100` | `daa-qwen15b-spider-sft-v2-base-smoke` | 100-case Base generation + SQLite diagnostics | official dev、v2 prompt、greedy decode、跳过 Test Suite | 运行中；外部目录 `qwen25coder15b-bf16-base-spider-sft-v2-smoke100-20260826`。 |
+| `spider_sft_v2_bf16_lora` | `daa-qwen15b-spider-sft-v2-train` | 2 epoch SFT + fresh reload | official train-only、v2 prompt、schema-disjoint split | 已完成；训练/reload 工程通过，尚无独立质量结论。 |
+| `spider_sft_v2_prefix_smoke100` | `daa-qwen15b-spider-sft-v2-base-smoke` / `daa-qwen15b-spider-sft-v2-adapter-smoke` | 100-case Base/Adapter diagnostics + denotation audit | official dev 前缀、v2 prompt、greedy decode、跳过 Test Suite | 已完成；SQLite `94 -> 89`、denotation `56 -> 69`，不作全量放行结论。 |
+| `spider_sft_v2_independent_smoke164` | 待启动 | 164-case Base/Adapter diagnostics + denotation audit | 排除前缀 schema、schema-stratified、v2 prompt、greedy decode、跳过 Test Suite | 待运行；任一执行/列名护栏失败即停止全量。 |
 | `official_base_adapter_pair_v1` | `daa-qwen15b-base-official-v1` / `daa-qwen15b-adapter-official-v1` | 官方 release Base 与 26-step QLoRA Adapter | 同 prompt、greedy decode、normalizer、SQLite diagnostics、pinned Test Suite | 已完成；质量门失败，详见官方专属分析。 |
 
 本轮的两个 screen 已正常退出。脚本在进程内核验 UUID，未抢占或停止其他用户 GPU 进程；原始证据与聚合报告均保留在仓库外。

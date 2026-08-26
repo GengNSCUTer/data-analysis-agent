@@ -34,6 +34,24 @@ bf16 LoRA 是本轮主路径：此前 1.5B 的 bf16 LoRA 在 24 GB RTX 4090 上�
 
 成功不等于训练 loss 下降。最低要求是 Adapter 不相对 matching bf16 Base 出现明显 SQLite/Test Suite 回退；SQLite executed 也不能被表述为语义准确率。只有通过完整质量门，Adapter 才能作为 Agent 的可选候选 SQL 生成器接入，且仍必须经过服务器拥有的安全、权限和结果合同。
 
+## 2026-08-26：训练完成与前缀 Smoke 诊断
+
+主训练已完成 2 epoch / 1,524 optimizer steps；训练 loss 为 `0.141485`、validation loss 为 `0.222317`，74 MB LoRA adapter 的 fresh PEFT reload 得到有限 validation loss `0.235857`。这些只闭合训练工程和 artifact reload，不构成 Text-to-SQL 效果结论。
+
+第一轮官方 dev 前 100 条 smoke 使用相同 bf16 base、v2 prompt、greedy decode 和 SQLite policy。SQLite diagnostics 为 Base `94 executed / 5 execution_error / 1 policy_rejected`，Adapter `89 / 11 / 0`；限定列 `no_such_column` 从 3 增至 4，因此按原始“执行不回退”护栏不通过，不能直接进入完整 Test Suite。配对诊断中 Adapter 从 Base 的 42/100 direct-query 输出提升到 100/100，生成 token 均值从 114.93 降至 36.86，但格式稳定性不能代替 schema linking。
+
+生成结束后，另做了不回流训练的 bounded denotation audit：gold SQL 仅在模型输出冻结后于本地只读执行，输出报告不保存问题、SQL、数据库标识或结果行。该审计在相同 100 条上得到 Base 56、Adapter 69 条 exact-or-bag denotation match；16 个状态变化 case 中，Adapter 新增 2 条精确匹配但使 6 条 Base 精确匹配变为不可执行。该结果说明 SQLite 可执行性不足以单独判断候选质量，但前 100 条只覆盖 3 个 dev schema，不能据此宣布 v2 通过。
+
+## 独立 Schema-Stratified 复验合同
+
+在看到前缀 smoke 的结果前，不再选择或剔除样本。复验集由固定 seed `20260826`、`per_schema=10`、排除前 100 个 source index 及其出现的全部 schema 的确定性选择器构造；得到 164 条、17 个此前未观察的 Spider dev schema。模型输入文件只含 `db_id` 和 question；gold query 只位于仓库外 audit 文件，并且只允许在 Base/Adapter 生成完毕后读取。
+
+复验在运行前冻结以下判据：
+
+1. 主判据：Adapter 的 exact-or-bag denotation match 必须高于 Base，并报告所有配对语义状态迁移；这不是官方 Spider 分数。
+2. 护栏：Adapter 的 SQLite executed 不能比 Base 低超过总 case 的 5%，且 `no_such_column` 数量不能超过 Base 的两倍。
+3. 决策：主判据与两项护栏都通过，才有资格讨论完整 1,034-case Base/Adapter 评测；任一护栏失败则停止，不跑完整 Test Suite，优先评测通用 schema-identifier repair 或调整训练数据/目标，绝不针对某个 schema 硬编码。
+
 ## 明确不做
 
 - 不直接进入 DPO、GRPO、多候选自一致性或执行反馈 RL；

@@ -1,0 +1,36 @@
+manifest_id: post_training_spider_independent_smoke_v1
+manifest_version: "1"
+status: prepared_external_only
+purpose: >-
+  Independent Spider dev smoke for paired base/adapter diagnosis after the
+  prefix smoke. Model-facing cases never contain gold SQL.
+source_snapshot:
+  release: spider-1.0-official-v1-20260825
+  dev_json_sha256: 30d64a3fccde493226df79687aed9e4a1c0129525baf44f29c0573d914d758a4
+external_artifact:
+  subset_dir: /disk2/gengnan/data-analysis-agent-data/experiments/spider-dev-schema-stratified-independent-smoke-v1-r1-20260826
+  generation_cases: generation_cases.json
+  generation_cases_sha256: 23ad1816c724f6d11628b0b5d8e5f2a7bba8630c8732560f12615240ed961b08
+  audit_cases: audit_cases.json
+  audit_cases_sha256: 8b3e973c82296409d4a30b0b49c9142e11448a9f9e7657f16f103f5dc0782f8e
+selection:
+  strategy: schema_stratified_independent_smoke
+  seed: 20260826
+  exclude_prefix: 100
+  exclude_prefix_schemas: true
+  per_schema_requested: 10
+  selected_cases: 164
+  selected_schemas: 17
+  first_prefix_schema_overlap: 0
+model_generation_boundary:
+  generation_cases_contains_gold_sql: false
+  audit_gold_used_only_after_base_and_adapter_generation: true
+  raw_data_in_git: false
+  production_postgres_modified: false
+evaluation_contract:
+  primary_metric: paired_exact_or_bag_denotation_match
+  secondary_guards:
+    max_adapter_executed_decline_fraction: 0.05
+    max_adapter_no_such_column_multiple_of_base: 2
+  official_test_suite_for_smoke: false
+  official_leaderboard_claim: false
