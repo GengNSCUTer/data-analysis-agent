@@ -52,6 +52,24 @@ bf16 LoRA 是本轮主路径：此前 1.5B 的 bf16 LoRA 在 24 GB RTX 4090 上�
 2. 护栏：Adapter 的 SQLite executed 不能比 Base 低超过总 case 的 5%，且 `no_such_column` 数量不能超过 Base 的两倍。
 3. 决策：主判据与两项护栏都通过，才有资格讨论完整 1,034-case Base/Adapter 评测；任一护栏失败则停止，不跑完整 Test Suite，优先评测通用 schema-identifier repair 或调整训练数据/目标，绝不针对某个 schema 硬编码。
 
+## 2026-08-26：独立复验结果与放行决策
+
+Base 与 Adapter 均已在冻结的 164 条、17 个此前未观察 schema 上完成生成和只读 SQLite diagnostics；两条 `screen` 正常退出。Base 使用 logical CUDA `0` -> physical GPU `2` 的 RTX 4090，Adapter 使用 logical CUDA `1` -> physical GPU `3` 的 RTX 4090。两者的模型 revision、bf16 基座、v2 prompt、greedy decode、case 顺序与 SQLite policy 相同，模型侧均未读取 dev gold SQL。
+
+| 指标 | Base | Adapter | 解读 |
+| --- | ---: | ---: | --- |
+| exact-or-bag denotation match | 97 | 122 | bounded audit 的主判据，提升 25 条 |
+| mismatch | 56 | 33 | 与 gold 的执行结果不一致；不是官方 Test Suite 分类 |
+| not executable | 11 | 9 | 生成或 gold-side bounded audit 无法比较 |
+| SQLite executed | 153 | 155 | 没有发生执行回退 |
+| SQLite execution error | 10 | 9 | 仅是单库诊断错误 |
+| SQLite policy rejected | 1 | 0 | 只读 policy 拒绝数 |
+| `no_such_column` | 9 | 8 | 未超过 Base 的两倍护栏 |
+
+三个预先冻结的条件均满足：Adapter denotation match 高于 Base，SQLite executed 未超过 5% 的允许回退，并且 `no_such_column` 未恶化。因此 v2 SFT 获得进入完整 1,034-case Base/Adapter 对照的资格。这个结论只适用于独立的 bounded smoke，既不是 Spider 官方分数，也不说明可以接入生产 Vanna/PostgreSQL；完整评测仍需运行只读 SQLite diagnostics、固定 Test Suite bridge、状态迁移和有限 changed-case 审核。
+
+复验 generation cases SHA-256 为 `23ad1816c724f6d11628b0b5d8e5f2a7bba8630c8732560f12615240ed961b08`，仅在生成完成后读取的 audit cases SHA-256 为 `8b3e973c82296409d4a30b0b49c9142e11448a9f9e7657f16f103f5dc0782f8e`；聚合 denotation audit SHA-256 为 `76f3e0db946dc57ada7d30e8a9ff94bd649ca121f0cbb6602942499eae0d06e7`。所有预测、gold SQL、数据库、结果行、模型与原始日志均保持在 Git 外。
+
 ## 明确不做
 
 - 不直接进入 DPO、GRPO、多候选自一致性或执行反馈 RL；

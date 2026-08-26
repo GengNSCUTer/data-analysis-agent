@@ -9,8 +9,8 @@
 | 项目主体是什么？ | 一个可嵌入业务网页的可信数据分析 Agent：自然语言问题经过路由、Catalog、QueryPlan、SQL AST Policy、只读 PostgreSQL、ResultContract/ResultValidator 后，返回表格、图表和证据。 |
 | 后训练在解决什么？ | 提升离线模型从“问题 + 数据库 schema”生成 SQL 候选时的 schema linking、SQL 结构和格式稳定性。它不负责权限和业务口径的最终裁决。 |
 | 为什么改用 Spider？ | Olist 是产品演示案例；Spider 是公开、结构化的跨 schema Text-to-SQL 研究数据，适合做可复现的候选生成和执行诊断。两者不混为一个数据集或一个指标。 |
-| 现在处于哪一阶段？ | 已完成官方 train-only 数据扩展、Schema prompt v2、3k 级 bf16 LoRA 训练/reload 与前缀 100-case Base/Adapter smoke。SQLite executed 回退但 bounded denotation audit 提升，当前正以独立 schema-stratified smoke 复验两项指标，尚未进入完整 Test Suite 或生产接入。 |
-| 当前最重要的结论？ | 首轮 8-step QLoRA 在固定 Spider dev 协议上回退。原因尚未被单点证实，但它只覆盖约 0.31 个 epoch，因此下一步先控制变量验证训练覆盖度与 4-bit 量化的影响，而不是盲目加数据或做 GRPO。 |
+| 现在处于哪一阶段？ | 已完成官方 train-only 数据扩展、Schema prompt v2、3k 级 bf16 LoRA 训练/reload 与独立 schema-stratified bounded smoke。164 条、17 个未观察 schema 的 denotation 为 `97 -> 122`，SQLite executed 为 `153 -> 155`，已获得完整 1,034-case 对照资格；尚未运行这次完整 Test Suite，也没有生产接入。 |
+| 当前最重要的结论？ | 首轮小数据 QLoRA 在固定 Spider dev 协议上回退；规模化 v2 bf16 LoRA 在独立 bounded smoke 上通过预冻结质量门。这支持进行完整对照，但不能把小样本 denotation 当官方分数、业务正确率或生产可用性。 |
 
 ## 两条链路，不要混淆
 
@@ -29,10 +29,10 @@
 
 | 阶段 | 目标 | 状态 | 已有证据 / 退出条件 |
 | --- | --- | --- | --- |
-| R0 数据与隔离 | 可训练数据、许可证、哈希与 holdout 边界 | 已完成 | Spider train-only 候选 128 条；102/26 schema-disjoint 切分；项目 v2 60 条 golden 永久隔离。 |
+| R0 数据与隔离 | 可训练数据、许可证、哈希与 holdout 边界 | 已完成 | 历史 128 条 v1 与当前 3,600 条 v2 train-only 候选均有 schema-disjoint 边界；项目 v2 60 条 golden 永久隔离。 |
 | R1 环境与工程 | 单卡可加载、可训练、可恢复 | 已完成 | Qwen2.5-Coder-1.5B，Python 3.11/CUDA 12.1，QLoRA forward 和 8-step SFT smoke 通过。 |
 | R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 已完成但失败 | 官方 release 上 matching Base/26-step QLoRA Adapter 均 1,034/1,034；SQLite executed `829 -> 671`，Test Suite internal all `0.433 -> 0.376`，限定列错误 `15 -> 296`。详见官方专属分析。 |
-| R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 进行中 | 已完成 3,600 条 official train-only v2 corpus 和 2 epoch bf16 LoRA；先完成不重叠 164-case schema-stratified semantic/execution 复验，再决定 identifier repair、数据/目标调整或完整评测。 |
+| R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 进行中 | 已完成 3,600 条 official train-only v2 corpus、2 epoch bf16 LoRA 和 164-case/17-schema 独立 smoke；其质量门通过，下一步是完整 1,034-case Base/Adapter 对照、固定 Test Suite 与 changed-case 审核。 |
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
 | R5 受控接入 | 将候选模型作为运行时可选生成器 | 未开始 | 前提是独立质量门通过；安全、权限、结果与图表合同仍在服务器端执行。 |
 
@@ -45,6 +45,7 @@
 | 8-step QLoRA SFT smoke | 训练、checkpoint、adapter reload 能否跑通 | 102 train / 26 validation，adapter 74 MB | 只验证工程；8 steps 只产生最多 32 次样本暴露。 |
 | 8-step Base vs Adapter | 这个 adapter 是否比同一基座更好 | SQLite executed 831 -> 666；Test Suite internal all 0.427 -> 0.215 | 一个有效的负向 ablation，说明不能只看 validation loss 或 SQL 外观。 |
 | changed-case diagnosis | 回退是否是个别 schema 或包装问题 | 20 个开发库中 17 回退；新 alias/schema-linking 错误增加 | 当前不能归因到单一因素；先做覆盖度/量化控制实验。 |
+| SFT v2 independent smoke | 规模化 SFT 是否有资格完整评测 | 164 条/17 个前缀未覆盖 schema 的 denotation `97 -> 122`，SQLite `153 -> 155`，`no_such_column` `9 -> 8` | 通过 bounded 质量门，允许运行完整对照；不是 Test Suite 或生产结论。 |
 
 ## 本轮最小对照：官方 release 质量评测已完成
 
