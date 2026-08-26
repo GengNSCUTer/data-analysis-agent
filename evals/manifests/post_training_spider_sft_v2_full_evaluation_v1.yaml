@@ -1,0 +1,68 @@
+manifest_id: post_training_spider_sft_v2_full_evaluation_v1
+manifest_version: "1"
+status: prepared_external_only
+purpose: >-
+  Full controlled Base/Adapter evaluation for the scaled Spider SFT v2 bf16 LoRA
+  adapter after the independent bounded smoke quality gate passed.
+source_snapshot:
+  release: spider-1.0-official-v1-20260825
+  dev_json_sha256: 30d64a3fccde493226df79687aed9e4a1c0129525baf44f29c0573d914d758a4
+  tables_json_sha256: 61bb20aa401f03164e2d7f3b16509b7b5f79cc9c943ca7bd159046df1159e2ed
+  case_count: 1034
+model:
+  id: Qwen/Qwen2.5-Coder-1.5B
+  revision: df3ce67c0e24480f20468b6ef2894622d69eb73b
+  base_weight_mode: bf16_lora
+  adapter_dir: /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-bf16-lora-spider-sft-v2-20260826/adapter_final
+  adapter_model_sha256: 0285771bfe20bcf6dace3572ea84743a30f5cecc184855a186e8b957186910eb
+comparison_contract:
+  prompt_format_version: spider-sft-schema-question-sql-v2
+  decode:
+    seed: 42
+    do_sample: false
+    num_beams: 1
+    max_input_tokens: 1536
+    max_new_tokens: 256
+  base_and_adapter_case_order_identical: true
+  model_facing_input: db_id_and_question_only
+  dev_gold_sql_read_for_generation: false
+  raw_database_rows_read_for_generation: false
+  production_postgres_or_vanna_modified: false
+external_artifacts:
+  base_run_dir: /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-bf16-base-spider-sft-v2-full-dev1034-20260826
+  adapter_run_dir: /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-bf16-adapter-spider-sft-v2-full-dev1034-20260826
+  pair_analysis_dir: /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-bf16-spider-sft-v2-full-dev1034-pair-20260826
+  raw_predictions_in_git: false
+  raw_gold_sql_in_git: false
+  model_and_logs_in_git: false
+gpu:
+  base:
+    logical_cuda_device: 0
+    physical_nvidia_smi_device: 2
+    expected_uuid: GPU-129ba5d7-5a0a-745d-5a49-11dc7967bb52
+  adapter:
+    logical_cuda_device: 1
+    physical_nvidia_smi_device: 3
+    expected_uuid: GPU-10863af0-8588-7625-5609-640ba794f64b
+evaluation:
+  sqlite_diagnostics: true
+  official_test_suite:
+    enabled: true
+    evaluator_commit: e97acc546ecbee8fa27fa8dbf025ef61493a876c
+    official_leaderboard_claim: false
+  post_generation_analysis:
+    paired_status_migration: true
+    bounded_denotation_audit: true
+    changed_case_semantic_review: required_before_promotion
+quality_gate:
+  prerequisites:
+    - base_and_adapter_generate_all_1034_cases
+    - matching_bf16_base_and_adapter_contract
+    - sqlite_diagnostics_and_pinned_test_suite_complete
+    - paired_status_and_error_migration_reported
+    - bounded_denotation_and_changed_case_review_complete
+  prohibited_claims_before_completion:
+    - official_spider_leaderboard_score
+    - production_readiness
+    - replacement_of_runtime_trust_boundaries
+  promotion_decision: pending_full_evaluation_evidence

@@ -70,6 +70,12 @@ Base 与 Adapter 均已在冻结的 164 条、17 个此前未观察 schema 上�
 
 复验 generation cases SHA-256 为 `23ad1816c724f6d11628b0b5d8e5f2a7bba8630c8732560f12615240ed961b08`，仅在生成完成后读取的 audit cases SHA-256 为 `8b3e973c82296409d4a30b0b49c9142e11448a9f9e7657f16f103f5dc0782f8e`；聚合 denotation audit SHA-256 为 `76f3e0db946dc57ada7d30e8a9ff94bd649ca121f0cbb6602942499eae0d06e7`。所有预测、gold SQL、数据库、结果行、模型与原始日志均保持在 Git 外。
 
+## 完整评测合同
+
+完整评测固定使用官方 Spider 1.0 release 的 1,034 条 dev case、`spider-sft-schema-question-sql-v2`、bf16 Base/Adapter、greedy decode（seed 42，`max_input_tokens=1536`，`max_new_tokens=256`）和相同的 case 顺序。Base 在 logical CUDA `0` -> physical GPU `2` 的 RTX 4090 上运行，Adapter 在 logical CUDA `1` -> physical GPU `3` 的 RTX 4090 上运行；启动器在进程内核验 UUID，且使用互不重叠的仓库外目录。
+
+两条生成均完成后，各自运行只读 SQLite diagnostics 和固定 commit `e97acc546ecbee8fa27fa8dbf025ef61493a876c` 的未修改 Test Suite bridge；随后才生成配对状态迁移、错误类别、bounded denotation 和 changed-case 审核证据。完整合同记录在 [`evals/manifests/post_training_spider_sft_v2_full_evaluation_v1.yaml`](../evals/manifests/post_training_spider_sft_v2_full_evaluation_v1.yaml)。在两条完整生成、两层评测和人工语义审核均完成前，不对 Test Suite、业务语义、生产接入或候选模型提升作结论。
+
 ## 明确不做
 
 - 不直接进入 DPO、GRPO、多候选自一致性或执行反馈 RL；
