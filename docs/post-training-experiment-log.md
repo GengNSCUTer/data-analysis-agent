@@ -26,10 +26,14 @@ SQLite executed 为 `829 -> 671`，execution error 为 `201 -> 360`，policy rej
 
 ## 当前运行
 
+2026-08-26 12:12 CST 已启动 Spider SFT v2 的两个相互隔离任务。训练使用 logic CUDA `1` -> physical GPU `3` 的 RTX 4090，运行 2 epoch bf16 LoRA（3,048 train / 552 validation、effective batch 4、1,524 optimizer steps、`lr=1e-4`、LoRA `r=16/alpha=32/dropout=0.05`），并将在结束后 fresh PEFT reload。Base smoke 使用 logic CUDA `0` -> physical GPU `2` 的 RTX 4090，在相同 `spider-sft-schema-question-sql-v2` prompt 下对官方 dev 前 100 条做 greedy generation 和只读 SQLite diagnostics，明确跳过 Test Suite。两个启动脚本均已通过进程内 UUID guard；启动时训练已进入 optimizer steps、Base 已完成模型加载。当前只记录运行事实，不产生执行率、语义或 non-regression 结论。
+
 2026-08-25 18:06 CST 启动的两条独立完整质量评测已经完成；以下历史启动表保留用于追溯，不再表示任务仍在运行。
 
 | ID | `screen` 会话 | 当前阶段 | 对照合同 | 状态 |
 | --- | --- | --- | --- | --- |
+| `spider_sft_v2_bf16_lora` | `daa-qwen15b-spider-sft-v2-train` | 2 epoch SFT + fresh reload | official train-only、v2 prompt、schema-disjoint split | 运行中；外部目录 `qwen25coder15b-bf16-lora-spider-sft-v2-20260826`。 |
+| `spider_sft_v2_base_smoke100` | `daa-qwen15b-spider-sft-v2-base-smoke` | 100-case Base generation + SQLite diagnostics | official dev、v2 prompt、greedy decode、跳过 Test Suite | 运行中；外部目录 `qwen25coder15b-bf16-base-spider-sft-v2-smoke100-20260826`。 |
 | `official_base_adapter_pair_v1` | `daa-qwen15b-base-official-v1` / `daa-qwen15b-adapter-official-v1` | 官方 release Base 与 26-step QLoRA Adapter | 同 prompt、greedy decode、normalizer、SQLite diagnostics、pinned Test Suite | 已完成；质量门失败，详见官方专属分析。 |
 
 本轮的两个 screen 已正常退出。脚本在进程内核验 UUID，未抢占或停止其他用户 GPU 进程；原始证据与聚合报告均保留在仓库外。
