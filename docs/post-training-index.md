@@ -2,6 +2,8 @@
 
 这份文档是后训练分支的唯一入口。它把“数据分析 Agent 产品本身”和“离线 Text-to-SQL 后训练研究”分开：前者继续使用 Vanna、FastAPI、PostgreSQL 和服务器拥有的安全/结果合同；后者只在仓库外的 Spider SQLite 实验资产上训练和评测一个候选生成模型。研究模型不能直接获得生产数据库权限，也不能替代 SQL Policy、PostgreSQL reader role、ResultValidator 或 ChartContract。
 
+学习顺序从现在开始以 [`post-training-learning-walkthrough-v1.md`](post-training-learning-walkthrough-v1.md) 为主。每次只审查一个小节，先理解输入、输出、函数和质量门，再由用户确认后进入下一步；不再自动连续启动训练或完整评测。
+
 ## 先看这一页
 
 | 问题 | 结论 |
@@ -68,13 +70,14 @@
 
 ## 阅读顺序
 
-1. [学习指南](post-training-learning-guide.md)：先理解 Token/SFT/LoRA/QLoRA/评测，不夹杂实时实验数字。
-2. [实验台账](post-training-experiment-log.md)：再看每次实验为何运行、配置是否可比、结果如何解读。
-3. [数据协议](post-training-data-protocol.md)：理解训练数据、脱敏、切分与永久 holdout。
-4. [Spider SFT v2 规模化计划](post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
-5. [SFT v2 全量评测分析](post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
-6. [Olist 业务迁移评测](post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
-7. [Base/Adapter 评测协议](post-training-base-adapter-evaluation.md)、[首轮负向诊断](post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
+1. [逐步学习审查手册](post-training-learning-walkthrough-v1.md)：按真实代码从环境、数据构建、prompt、labels、LoRA/QLoRA、SFT 到评测逐节学习。
+2. [学习指南](post-training-learning-guide.md)：理解不夹杂实时实验数字的 Token/SFT/LoRA/QLoRA 基础。
+3. [实验台账](post-training-experiment-log.md)：查看每次实验为何运行、配置是否可比、结果如何解读。
+4. [数据协议](post-training-data-protocol.md)：理解训练数据、脱敏、切分与永久 holdout。
+5. [Spider SFT v2 规模化计划](post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
+6. [SFT v2 全量评测分析](post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
+7. [Olist 业务迁移评测](post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
+8. [Base/Adapter 评测协议](post-training-base-adapter-evaluation.md)、[首轮负向诊断](post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
 
 ## 看日志与停止任务
 
