@@ -97,7 +97,7 @@
 
 ### 当前暂停点
 
-2026-08-27 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA 与 validation/test 边界；记录见 `docs/post-training/learning/review-2026-08-28.md`。下一学习单元是领域对齐 Olist/PostgreSQL 数据合同，先审查 holdout 隔离、Catalog/QueryPlan/ResultContract 监督上下文和领域 train/validation/test 切分，再决定是否创建数据模板或启动实验。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
+2026-08-27 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，以及 Olist/PostgreSQL 领域数据合同；记录见 `docs/post-training/learning/review-2026-08-28.md`。下一学习单元是先共同设计领域样本覆盖矩阵，明确指标/维度/时间/去重/Join/归因/别名/路由的独立语义族和切分方式，再决定是否创建数据模板或启动小型 pilot。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
 
 ## 9. 最近一次同步记录
 
@@ -105,8 +105,9 @@
 
 - 目标：停止“只运行实验、不理解过程”的协作方式，将本轮已经共同审查的 Text-to-SQL SFT、LoRA 和评测知识沉淀为可持续学习材料，同时清理后训练代码与文档的平铺目录。
 - 实现：新增 `docs/post-training/` 分类入口和 `learning/review-2026-08-28.md`，覆盖候选 SQL 边界、gold SQL 泄漏、schema-disjoint、SQLite EXPLAIN、labels/EOS、forward smoke、梯度累积、AdamW、validation/test、LoRA A/B、rank、bf16 LoRA/QLoRA 与 PEFT 生命周期。后训练真实实现移动至 `scripts/post_training/` 的 data/training/inference/evaluation/launchers 分类目录，根目录同名脚本保留兼容入口。
-- 决策：生产 `src/data_analysis_agent/` 运行时模块不做为了目录美观的全量迁移，以免引入大范围导入风险；原始数据、模型、Adapter、checkpoint 和日志仍不进入 Git。新训练、数据扩充、完整评测和运行时接入仍暂停。
-- 验证：需通过兼容 CLI、后训练单元测试、shell syntax、静态检查和 Markdown 链接检查后，才提交、推送并同步飞书。
+- 学习：已补充 Olist/PostgreSQL 领域数据合同，明确 60 条 v2 holdout 及其派生表达永久隔离；领域 SFT 输入需要 QuestionRouter、Catalog slice、QueryPlan 和结果列合同，不能只用问题到 SQL；候选 SQL Adapter 只训练可回答数据库路由。规模先做数据合同，之后最多从约 300--500 条语义独立 pilot 开始，不将“凑到几千条”当作前置条件。
+- 决策：生产 `src/data_analysis_agent/` 运行时模块不做为了目录美观的全量迁移，以免引入大范围导入风险；原始数据、模型、Adapter、checkpoint 和日志仍不进入 Git。新训练、数据构造、完整评测和运行时接入仍暂停，下一步先审查领域样本覆盖矩阵。
+- 验证：后训练运行时回归 `54 passed, 1 skipped`、QLoRA dataset/label 回归 `2 passed`、ruff、兼容 CLI、shell syntax、Markdown 链接与 diff check 已通过；本单元只阅读现有可信链路，没有启动 GPU 或修改生产运行时。
 
 ### 2026-08-26：Olist PostgreSQL 业务迁移候选 SQL 质量门
 
