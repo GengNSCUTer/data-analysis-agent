@@ -87,16 +87,26 @@
 
 ### 后训练教学材料约定
 
-- `docs/post-training-learning-walkthrough-v1.md` 是从环境、数据、prompt、tokenizer、LoRA/QLoRA、SFT、重载到评测的逐步审查主手册；
-- `docs/post-training-learning-notes-v1.md` 只作概念和历史参考，不作为当前实验状态的唯一来源；
-- `docs/post-training-experiment-log.md` 只记录已完成实验和证据，不把计划写成结果；
+- `docs/post-training/README.md` 是后训练文档唯一规范入口，按 learning/data/experiments/archive 分类；根目录旧路径只作兼容跳转，不继续承载新内容；
+- `docs/post-training/learning/walkthrough-v1.md` 是从环境、数据、prompt、tokenizer、LoRA/QLoRA、SFT、重载到评测的逐步审查主手册；
+- `docs/post-training/learning/review-2026-08-28.md` 记录每轮已讨论的问答、代码入口、已纠正概念与下一学习单元；
+- `docs/post-training/learning/fundamentals.md` 只讲原理和面试表达，`docs/post-training/archive/learning-notes-v1.md` 只作历史参考；
+- `docs/post-training/experiments/log.md` 只记录已完成实验和证据，不把计划写成结果；
+- 后训练脚本的规范实现位置是 `scripts/post_training/{data,training,inference,evaluation,launchers}/`；`scripts/` 下同名文件仅保留为兼容入口，新增代码和文档使用规范路径。
 - 每次新实验都必须新增或更新：假设、matching Base、唯一变量、数据/模型 hash、质量门、失败停止条件和面试表达。
 
 ### 当前暂停点
 
-2026-08-27 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。先完成 `post-training-learning-walkthrough-v1.md` 第 1--6 节的共同审查，再决定是否设计 Olist 领域数据。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
+2026-08-27 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA 与 validation/test 边界；记录见 `docs/post-training/learning/review-2026-08-28.md`。下一学习单元是领域对齐 Olist/PostgreSQL 数据合同，先审查 holdout 隔离、Catalog/QueryPlan/ResultContract 监督上下文和领域 train/validation/test 切分，再决定是否创建数据模板或启动实验。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
 
 ## 9. 最近一次同步记录
+
+### 2026-08-28：后训练学习问答沉淀与脚本/文档分层
+
+- 目标：停止“只运行实验、不理解过程”的协作方式，将本轮已经共同审查的 Text-to-SQL SFT、LoRA 和评测知识沉淀为可持续学习材料，同时清理后训练代码与文档的平铺目录。
+- 实现：新增 `docs/post-training/` 分类入口和 `learning/review-2026-08-28.md`，覆盖候选 SQL 边界、gold SQL 泄漏、schema-disjoint、SQLite EXPLAIN、labels/EOS、forward smoke、梯度累积、AdamW、validation/test、LoRA A/B、rank、bf16 LoRA/QLoRA 与 PEFT 生命周期。后训练真实实现移动至 `scripts/post_training/` 的 data/training/inference/evaluation/launchers 分类目录，根目录同名脚本保留兼容入口。
+- 决策：生产 `src/data_analysis_agent/` 运行时模块不做为了目录美观的全量迁移，以免引入大范围导入风险；原始数据、模型、Adapter、checkpoint 和日志仍不进入 Git。新训练、数据扩充、完整评测和运行时接入仍暂停。
+- 验证：需通过兼容 CLI、后训练单元测试、shell syntax、静态检查和 Markdown 链接检查后，才提交、推送并同步飞书。
 
 ### 2026-08-26：Olist PostgreSQL 业务迁移候选 SQL 质量门
 
