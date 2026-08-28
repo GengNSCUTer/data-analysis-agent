@@ -97,7 +97,7 @@
 
 ### 当前暂停点
 
-2026-08-27 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，以及 Olist/PostgreSQL 领域数据合同；记录见 `docs/post-training/learning/review-2026-08-28.md`。下一学习单元是先共同设计领域样本覆盖矩阵，明确指标/维度/时间/去重/Join/归因/别名/路由的独立语义族和切分方式，再决定是否创建数据模板或启动小型 pilot。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
+2026-08-27 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界、Olist/PostgreSQL 领域数据合同，以及基础领域样本覆盖矩阵；记录见 `docs/post-training/learning/review-2026-08-28.md` 和 `docs/post-training/data/olist-pilot-coverage-v0.1.md`。下一学习单元是用户复述 v0.1 的安全维度、指标时间字段和 family 隔离；确认后才创建数据模板或 coverage seed，仍不得直接启动训练。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
 
 ## 9. 最近一次同步记录
 
