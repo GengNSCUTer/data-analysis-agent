@@ -304,7 +304,11 @@ def main() -> int:
         selected = schema_stratified_round_robin(groups, selection_limit, args.seed)
     else:
         selected = round_robin(groups, selection_limit, args.seed)
-    expected_attempts = min(selection_limit, len(train_rows))
+    # Only rows that passed the required field/schema checks can be selected.
+    # Counting every source row here made overfetch fail when malformed rows
+    # were intentionally skipped before grouping.
+    available_candidates = sum(len(group) for group in groups.values())
+    expected_attempts = min(selection_limit, available_candidates)
     if len(selected) != expected_attempts:
         raise RuntimeError(f"selected {len(selected)} candidates, expected {expected_attempts}")
 

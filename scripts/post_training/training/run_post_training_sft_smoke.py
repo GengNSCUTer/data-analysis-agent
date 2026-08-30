@@ -128,6 +128,46 @@ def prompt_format_version(rows: list[dict[str, Any]]) -> str:
     return versions.pop()
 
 
+def validate_split_audit(
+    audit: dict[str, Any], train_path: Path, validation_path: Path
+) -> None:
+    """Verify split artifacts still match the audit used to create them."""
+
+    checks = audit.get("checks")
+    if not isinstance(checks, dict) or checks.get("status") != "pass":
+        raise ValueError("split audit did not pass")
+    if checks.get("v2_holdout_used") is not False:
+        raise ValueError("split audit does not prove v2 holdout isolation")
+
+    policy = audit.get("policy")
+    if not isinstance(policy, dict) or policy.get("primary_group") != "spider_db_id":
+        raise ValueError("split audit does not prove database-grouped validation")
+
+    split_metadata = audit.get("splits")
+    if not isinstance(split_metadata, dict):
+        raise ValueError("split audit has no split metadata")
+    for split_name, path in (("train", train_path), ("validation", validation_path)):
+        metadata = split_metadata.get(split_name)
+        if not isinstance(metadata, dict):
+            raise ValueError(f"split audit has no {split_name} metadata")
+        expected_hash = metadata.get("sha256")
+        if not isinstance(expected_hash, str) or not expected_hash:
+            raise ValueError(f"split audit has no {split_name} hash")
+        actual_hash = sha256_file(path)
+        if actual_hash != expected_hash:
+            raise ValueError(
+                f"{split_name} file does not match split audit: "
+                f"expected {expected_hash}, got {actual_hash}"
+            )
+        expected_rows = metadata.get("rows")
+        actual_rows = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line)
+        if expected_rows != actual_rows:
+            raise ValueError(
+                f"{split_name} row count does not match split audit: "
+                f"expected {expected_rows}, got {actual_rows}"
+            )
+
+
 def split_prompt_and_target(row: dict[str, Any]) -> tuple[str, str]:
     training_text = row.get("training_text")
     candidate_sql = row.get("candidate_sql")
@@ -256,10 +296,7 @@ def main() -> int:
     if train_prompt_format != validation_prompt_format:
         raise ValueError("train and validation splits use different prompt formats")
     split_audit = json.loads(args.split_audit.read_text(encoding="utf-8"))
-    if split_audit.get("checks", {}).get("status") != "pass":
-        raise ValueError("split audit did not pass")
-    if split_audit.get("checks", {}).get("v2_holdout_used") is not False:
-        raise ValueError("split audit does not prove v2 holdout isolation")
+    validate_split_audit(split_audit, args.train_jsonl, args.validation_jsonl)
 
     random.seed(args.seed)
     np.random.seed(args.seed)

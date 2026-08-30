@@ -4,7 +4,12 @@ import pytest
 
 pytest.importorskip("torch", reason="SFT dataset tests run in the isolated QLoRA environment")
 
-from scripts.run_post_training_sft_smoke import CausalSqlDataset, CausalSqlCollator
+from scripts.run_post_training_sft_smoke import (
+    CausalSqlCollator,
+    CausalSqlDataset,
+    sha256_file,
+    validate_split_audit,
+)
 
 
 class TinyTokenizer:
@@ -54,3 +59,24 @@ def test_sft_dataset_rejects_mismatched_target_or_silent_truncation() -> None:
 
     with pytest.raises(ValueError, match="refuse to truncate target SQL"):
         CausalSqlDataset([row()], tokenizer, max_seq_length=10)
+
+
+def test_split_audit_must_match_current_split_files(tmp_path) -> None:
+    train_path = tmp_path / "train.jsonl"
+    validation_path = tmp_path / "validation.jsonl"
+    train_path.write_text("train-row\n", encoding="utf-8")
+    validation_path.write_text("validation-row\n", encoding="utf-8")
+    audit = {
+        "checks": {"status": "pass", "v2_holdout_used": False},
+        "policy": {"primary_group": "spider_db_id"},
+        "splits": {
+            "train": {"rows": 1, "sha256": sha256_file(train_path)},
+            "validation": {"rows": 1, "sha256": sha256_file(validation_path)},
+        },
+    }
+
+    validate_split_audit(audit, train_path, validation_path)
+
+    train_path.write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="train file does not match split audit"):
+        validate_split_audit(audit, train_path, validation_path)
