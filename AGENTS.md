@@ -95,11 +95,26 @@
 - 后训练脚本的规范实现位置是 `scripts/post_training/{data,training,inference,evaluation,launchers}/`；`scripts/` 下同名文件仅保留为兼容入口，新增代码和文档使用规范路径。
 - 每次新实验都必须新增或更新：假设、matching Base、唯一变量、数据/模型 hash、质量门、失败停止条件和面试表达。
 
+### 后训练代码审阅门
+
+- 讲解概念、阅读 Markdown 或看到测试通过，均不等于用户已经理解或审阅了实现；在进入新的数据构造、训练、完整评测、运行时接入或后训练算法前，必须先共同阅读该阶段的规范代码、配套测试和输入/输出契约。
+- 规范审阅路线记录在 `docs/post-training/learning/code-review-guide-v1.md`。每次只读其中一个单元：用户先在 IDE 打开主文件与测试，说明输入、输出、不变量、失败保护和仍不能保证的结论；随后才讨论代码审查发现或低成本验证。
+- 代码审查结论必须以文件/函数/行号和相应测试为证据，区分“已验证行为”“测试空白”“待确认设计”；禁止只根据文档叙述或 loss/单次运行给出质量结论。
+- 审阅期间优先记录重构候选，不为目录美观移动生产模块、上游 Vanna、兼容入口或测试。只有接口、依赖和回归范围已共同审查且用户确认时，才拆分/迁移代码。
+- 每个审阅单元在本地学习记录中补充已读文件、用户复述、发现、测试证据和下一单元；形成项目决策后仍按飞书、GitHub 同步闭环执行。
+
 ### 当前暂停点
 
-2026-08-27 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界、Olist/PostgreSQL 领域数据合同，以及基础领域样本覆盖矩阵；记录见 `docs/post-training/learning/review-2026-08-28.md` 和 `docs/post-training/data/olist-pilot-coverage-v0.1.md`。下一学习单元是用户复述 v0.1 的安全维度、指标时间字段和 family 隔离；确认后才创建数据模板或 coverage seed，仍不得直接启动训练。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
+2026-08-27 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界、Olist/PostgreSQL 领域数据合同，以及基础领域样本覆盖矩阵；记录见 `docs/post-training/learning/review-2026-08-28.md` 和 `docs/post-training/data/olist-pilot-coverage-v0.1.md`。在用户请求下，下一步先执行 `docs/post-training/learning/code-review-guide-v1.md` 的真实代码审阅，从 Spider prompt/候选构建/切分开始；未完成相应代码与测试审阅、用户复述和明确确认前，仍不得创建数据模板、coverage seed 或启动训练。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
 
 ## 9. 最近一次同步记录
+
+### 2026-08-30：项目目录地图与后训练代码审阅门
+
+- 目标：让后训练学习从“理解原理和实验结论”转为“用户亲自审阅真实代码与测试”，并明确上游 Vanna、项目运行时、离线研究脚本和本地研究产物的目录边界。
+- 实现：新增 `docs/architecture/repository-map.md` 和 `docs/post-training/learning/code-review-guide-v1.md`，按 prompt/数据、token/训练、生成、SQLite/Test Suite/denotation、Olist 业务迁移和启动器划分审阅单元，列出规范文件、关键函数、配套测试、审阅问题和结束标准。
+- 决策：在任一后训练新阶段前，用户必须先阅读相关实现和测试、复述输入输出与失败保护；讲解或测试通过不能代替代码审阅。审阅期间只记录重构候选，不移动生产模块、上游 Vanna、兼容入口或测试目录。`github-research-output/` 是 Git 忽略的大型调研产物，后续经确认后可迁出仓库根目录；本轮不移动、不删除。
+- 验证：本轮只做目录/依赖审计和文档更新；未读取密钥、未启动 GPU、未构造领域数据、未改变 Vanna/SiliconFlow/PostgreSQL 生产运行时。
 
 ### 2026-08-28：后训练学习问答沉淀与脚本/文档分层
 
