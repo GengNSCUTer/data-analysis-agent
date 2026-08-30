@@ -33,6 +33,14 @@
 - 测试通过只证明被覆盖的行为。单元、集成、端到端、离线评测和人工业务核验分别提供不同层级的证据，不能互相替代；不得由 loss 下降、单次成功、单测通过或 AI 总结直接推出语义正确、泛化有效或可上线。
 - 每次审阅或实施结束时，明确记录“已验证行为”“测试空白”“待确认设计”和“下一步是否获准”。发现重构机会先记录，不为视觉整齐贸然移动高耦合模块；只有接口、依赖和回归范围已审查并经用户确认后才实施迁移。
 
+### 2026-08-30：SFT 入口代码审阅回归
+
+- 目标：修复用户中文注释改动覆盖的两个训练入口行为契约，并恢复 GPU 审计字段的正确读取；本轮不启动训练、不构造数据、不修改生产运行时。
+- 实现：恢复 `CausalSqlCollator.__call__()` 对 `batch.items()` 的遍历；恢复 `validate_split_audit()` 及其入口调用，核对 split 状态、holdout 隔离、`spider_db_id` 分组、train/validation 行数与 SHA-256；修正 `CUDA_VISIBLE_DEVICES` 环境变量拼写。用户已有中文注释和其他工作区修改保持不回退。
+- 验证：数据格式/候选构建/切分 `7 passed`；SFT Dataset、labels、动态 padding、collator、split audit `3 passed`；ruff、compileall、`git diff --check` 通过。
+- 代码审阅结论：padding 位置使用 `pad_token`、`attention_mask=0`、`labels=-100`；真实 EOS 保持可关注并参与 SQL 目标 loss。测试只证明确定性输入/输出契约，不证明模型生成的 SQL 业务正确或泛化有效。
+- 下一步：继续按“每次一个学习单元”的规则审阅模型加载、`prepare_model_for_kbit_training()` 和 `get_peft_model()`；用户确认理解和测试证据前，不进入 Trainer、GPU 实验或新数据构造。
+
 ## 3. 安全、数据与开源边界
 
 - 永远不要提交 API Key、数据库密码、访问令牌、`.env`、模型密钥或含敏感信息的日志；提供 `.env.example` 代替。
