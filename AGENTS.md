@@ -119,6 +119,14 @@
 
 ## 9. 最近一次同步记录
 
+### 2026-08-30：后训练数据边界与 SFT 入口加固
+
+- 目标：修复已审阅的两个会影响后续训练可信度的边界问题，不扩充数据、不调整模型或超参数。
+- 实现：`build_spider_sft_candidates.py` 的 overfetch 预期数量改为只统计通过字段/schema 校验、实际可进入分组的候选；`run_post_training_sft_smoke.py` 新增 `validate_split_audit()`，在模型加载前核对 train/validation 当前文件的行数和 SHA-256、`spider_db_id` 分组策略、`status=pass` 与 holdout 标记，任何审计缺失或文件替换都 fail closed。
+- 验证：`data-analysis-agent` 环境的数据格式/候选构建/切分专项 **7 passed**；`data-analysis-agent-qlora` 环境的 Dataset/label/collator/审计专项 **3 passed**；ruff、compileall、`git diff --check` 通过。验证覆盖了“坏行 + overfetch 不误报”和“split 文件篡改被拒绝”两个回归路径。
+- 边界：`assert_train_only()` 仍是路径防呆而非完整 provenance 证明；`read_only_explain()` 仍只证明 SQLite 解析/名称解析，不证明业务语义；`question_redacted` 命名和 Prompt 版本/调用方一致性仍是后续审阅项。本轮未启动 GPU、未构造数据、未训练、未评测、未改变生产运行时。
+- 提交：`329ccb8 fix(post-training): verify split artifacts before sft`，已推送 `origin/main`。用户此前在三个数据构建文件中的中文注释改动保持工作区未提交。
+
 ### 2026-08-30：AI 协作与工程主导权规则
 
 - 决策：AI 是实现、测试、调研和审查的加速器；用户保留问题定义、非目标、架构取舍、数据/安全边界和验收结论的主导权。每个实质任务先明确“目标、非目标、输入、输出/接口影响、不变量、验收证据”，避免 AI 以默认假设扩大范围。
