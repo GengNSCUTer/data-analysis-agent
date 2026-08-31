@@ -52,7 +52,7 @@
 
 后训练文档已经完成目录化，唯一规范入口是 [`post-training/README.md`](post-training/README.md)：
 
-- `post-training/learning/`：概念、代码审阅和用户问答；当前重点是逐小单元审查真实训练代码。
+- `post-training/learning/`：概念、代码审阅和用户问答；当前重点是逐小单元审查真实训练代码。项目进度和实验状态不放入学习笔记，统一看 `PROJECT.md` 及飞书项目文档。
 - `post-training/data/`：数据协议、holdout 隔离和领域覆盖矩阵。
 - `post-training/experiments/`：实验台账，只记录配置、聚合结果和结论。
 - `post-training/archive/`：不再作为实时状态依据的旧路线和旧笔记。
@@ -80,4 +80,4 @@
 
 本轮只做导航和入口治理，不批量移动长文档。原因是已有文档包含相对链接、飞书同步记录和历史实验路径；物理迁移应单独建立任务，迁移后执行本地 Markdown 链接检查和脚本入口回归。`github-research-output/` 是 Git 忽略的调研中间产物，不属于源码或规范文档，暂不纳入本文档树。
 
-今后的规则是：实时项目事实更新 `PROJECT.md`；后训练实时状态更新 `post-training/README.md` 和 `post-training/experiments/log.md`；学习问答更新 `post-training/learning/review-*.md`；历史实验只追加新的版本报告，不覆盖旧结论。
+今后的规则是：实时项目事实更新 `PROJECT.md` 和飞书项目文档；后训练本地阶段地图更新 `post-training/README.md`，实验聚合事实更新 `post-training/experiments/log.md`；学习问答更新 `post-training/learning/review-*.md` 和飞书学习笔记；历史实验只追加新的版本报告，不覆盖旧结论。

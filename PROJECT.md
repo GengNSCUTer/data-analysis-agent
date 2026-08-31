@@ -450,6 +450,7 @@ v1 不引入 Redis。
 
 | 日期 | 事项 | 结论 |
 | --- | --- | --- |
+| 2026-08-31 | 项目进度与后训练学习文档职责分离 | 明确项目微调/后训练阶段、训练数据、GPU 任务、实验配置、评测结果、风险和下一步统一记录在本项目文档及 `PROJECT.md`；飞书《数据分析 Agent｜微调与后训练学习笔记》只记录后训练原理、代码审阅、用户问答和面试知识。同步更新 `AGENTS.md`、`docs/README.md` 与 `docs/post-training/README.md`，本轮不启动训练、不修改生产运行时。 |
 | 2026-08-31 | 文档导航与后训练学习材料重组 | 新增 [`docs/README.md`](docs/README.md) 作为项目文档总导航，明确项目方案、运行时、评测证据、后训练学习/数据/实验和根目录兼容入口的职责。保留历史评测报告与旧链接，不为减少文件数批量移动长文；物理迁移须单独立项并做链接检查。飞书《数据分析 Agent｜微调与后训练学习笔记》重写为“项目进度”和“后训练学习”两部分，同步当前 Spider/Olist 结论、LoRA/PEFT 学习记录和 `forward -> loss` 的下一道审阅题。后续项目事实写入本文，后训练阶段写入 `docs/post-training/README.md`，学习问答写入 `learning/`，实验事实写入 `experiments/`。 |
 | 2026-08-30 | 后训练数据边界与 SFT 入口加固 | 修复候选构建在 `selection-overfetch` 遇到被跳过的坏行时错误计算预期候选数的问题；SFT 入口新增 `validate_split_audit()`，在加载模型前核对 train/validation 文件的行数、SHA-256、`spider_db_id` 分组策略、通过状态和 holdout 标记，文件被替换或审计字段缺失时 fail closed。新增 2 个回归测试；数据/格式/切分专项 `7 passed`，SFT Dataset/审计专项 `3 passed`，ruff 与 compileall 通过。本轮不启动 GPU、不构造数据、不改变模型或生产运行时。 |
 | 2026-08-30 | SFT 入口代码审阅回归 | 用户注释改动覆盖了 collator 的 `batch.items()` 和 split audit 完整校验；恢复两处行为契约，并修正 `CUDA_VISIBLE_DEVICES` 审计字段拼写。`7 + 3` 项后训练专项通过，ruff、compileall、diff check 通过。确认 padding 使用 `attention_mask=0`、`labels=-100`，EOS 是 SQL 目标结束并参与监督。本轮未启动 GPU、未构造数据、未训练或评测；下一步只审阅模型加载与 PEFT 生命周期。 |

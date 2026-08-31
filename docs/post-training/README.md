@@ -11,7 +11,7 @@
 - `experiments/` 只记录已运行实验的配置、聚合结果和结论；
 - `archive/` 保存历史路线和旧笔记，不作为当前状态依据。
 
-项目当前状态以本页“当前阶段地图”为准，学习问答以 `learning/review-*.md` 为准。根目录兼容入口只用于保持旧链接有效，不再追加内容。
+本地后训练阶段地图和实验索引以本页为准；学习问答以 `learning/review-*.md` 为准。项目的对外进度、微调实验状态、结果、风险和下一步统一同步到飞书项目文档，不写入飞书学习笔记。根目录兼容入口只用于保持旧链接有效，不再追加内容。
 
 这份文档是后训练分支的唯一入口。它把“数据分析 Agent 产品本身”和“离线 Text-to-SQL 后训练研究”分开：前者继续使用 Vanna、FastAPI、PostgreSQL 和服务器拥有的安全/结果合同；后者只在仓库外的 Spider SQLite 实验资产上训练和评测一个候选生成模型。研究模型不能直接获得生产数据库权限，也不能替代 SQL Policy、PostgreSQL reader role、ResultValidator 或 ChartContract。
 
