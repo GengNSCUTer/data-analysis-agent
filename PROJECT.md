@@ -1,5 +1,7 @@
 # Data Analysis Agent（可信业务数据分析智能体）
 
+> 文档导航：先看 [`docs/README.md`](docs/README.md)。本文是项目需求、架构、技术决策和当前阶段的本地基线；后训练学习材料统一从 [`docs/post-training/README.md`](docs/post-training/README.md) 进入。
+
 ## 1. 项目定位
 
 本项目面向企业内部的运营与业务分析人员。用户以自然语言提出经营分析问题，系统在受控的数据访问范围内生成并执行只读 SQL，流式返回结论、图表、数据表、指标口径和 SQL 证据。
@@ -448,8 +450,10 @@ v1 不引入 Redis。
 
 | 日期 | 事项 | 结论 |
 | --- | --- | --- |
+| 2026-08-31 | 文档导航与后训练学习材料重组 | 新增 [`docs/README.md`](docs/README.md) 作为项目文档总导航，明确项目方案、运行时、评测证据、后训练学习/数据/实验和根目录兼容入口的职责。保留历史评测报告与旧链接，不为减少文件数批量移动长文；物理迁移须单独立项并做链接检查。飞书《数据分析 Agent｜微调与后训练学习笔记》重写为“项目进度”和“后训练学习”两部分，同步当前 Spider/Olist 结论、LoRA/PEFT 学习记录和 `forward -> loss` 的下一道审阅题。后续项目事实写入本文，后训练阶段写入 `docs/post-training/README.md`，学习问答写入 `learning/`，实验事实写入 `experiments/`。 |
 | 2026-08-30 | 后训练数据边界与 SFT 入口加固 | 修复候选构建在 `selection-overfetch` 遇到被跳过的坏行时错误计算预期候选数的问题；SFT 入口新增 `validate_split_audit()`，在加载模型前核对 train/validation 文件的行数、SHA-256、`spider_db_id` 分组策略、通过状态和 holdout 标记，文件被替换或审计字段缺失时 fail closed。新增 2 个回归测试；数据/格式/切分专项 `7 passed`，SFT Dataset/审计专项 `3 passed`，ruff 与 compileall 通过。本轮不启动 GPU、不构造数据、不改变模型或生产运行时。 |
 | 2026-08-30 | SFT 入口代码审阅回归 | 用户注释改动覆盖了 collator 的 `batch.items()` 和 split audit 完整校验；恢复两处行为契约，并修正 `CUDA_VISIBLE_DEVICES` 审计字段拼写。`7 + 3` 项后训练专项通过，ruff、compileall、diff check 通过。确认 padding 使用 `attention_mask=0`、`labels=-100`，EOS 是 SQL 目标结束并参与监督。本轮未启动 GPU、未构造数据、未训练或评测；下一步只审阅模型加载与 PEFT 生命周期。 |
+| 2026-08-31 | 后训练代码问答同步与 LoRA 注入审阅 | 用户完成 `get_peft_model`/LoRA 配置复述：A/B 参数量为 `r * d_in + d_out * r`；`r` 控制 adapter 容量，`lora_alpha` 控制增量缩放，学习率控制更新步长；`target_modules` 命名不匹配可能造成未注入或部分注入。新增规则：每次学习问答同步本地学习记录和飞书，并保留用户复述、纠正点、代码入口与证据边界。本轮未修改训练逻辑、未启动 GPU。 |
 | 2026-08-30 | AI 协作与工程主导权规则 | `AGENTS.md` 新增通用 AI 协作规则：用户负责问题定义、非目标、架构/数据/安全边界和验收结论；每项实质变更先写目标、非目标、输入、输出/接口影响、不变量、验收证据的最小任务卡；代码按模块地图、契约、风险升级逐层审阅，不要求无差别逐行通读。AI 的实质变更必须交付可审计变更包（影响、测试空白、失败/回滚条件），测试/loss/单次成功不替代业务语义、泛化或上线结论。本轮只更新协作规则，不运行训练、评测或生产链路。 |
 | 2026-08-30 | 项目目录地图与后训练代码审阅门 | 新增 [`docs/architecture/repository-map.md`](docs/architecture/repository-map.md) 区分上游 Vanna、本项目 `data_analysis_agent`、Web Component、数据/评测/基础设施、离线后训练脚本和 Git 忽略调研产物；新增 [`docs/post-training/learning/code-review-guide-v1.md`](docs/post-training/learning/code-review-guide-v1.md)，要求后训练从 Spider prompt/候选构建/切分开始按“真实文件 + 配套测试 + 用户复述 + 审阅证据”推进。`AGENTS.md` 增加代码审阅门：概念讲解或测试通过不等于理解/审阅，不在共同审查接口、依赖与回归范围前为了目录美观迁移模块。本轮不构造领域数据、不训练、不评测、不改变生产运行时；`github-research-output/` 是 Git 忽略的大型本地调研产物，后续另行确认是否迁出仓库根目录。 |
 | 2026-08-28 | 后训练学习问答、目录分层、领域数据合同与基础覆盖矩阵 | 将截至本轮的共同学习整理为 [`docs/post-training/learning/review-2026-08-28.md`](docs/post-training/learning/review-2026-08-28.md)：明确候选 SQL 与执行边界、gold SQL/holdout 隔离、schema-disjoint、labels/EOS、forward smoke、梯度累积、validation/test、LoRA/QLoRA、PEFT 生命周期及 Olist/PostgreSQL 领域数据合同。后训练文档以 [`docs/post-training/README.md`](docs/post-training/README.md) 为规范入口，按 learning/data/experiments/archive 分类；旧根目录路径保留兼容页。离线后训练脚本的实现归入 `scripts/post_training/{data,training,inference,evaluation,launchers}`，根目录保留兼容入口；生产运行时模块、原始数据、模型、Adapter 和实验产物不迁移、不提交。新增 [`docs/post-training/data/olist-pilot-coverage-v0.1.md`](docs/post-training/data/olist-pilot-coverage-v0.1.md) 作为待确认设计：v0.1 只做四个核心指标的单指标、安全维度、单轮显式时间覆盖，排除多指标、排名、多轮、支付归因和按品类的履约/好评率。先用 18 个覆盖单元和约 120--160 个 materialized rows 审查数据合同；用户确认后才考虑扩到约 300--500 条基础 pilot。新数据构造、新训练、完整评测与运行时接入继续暂停。 |
