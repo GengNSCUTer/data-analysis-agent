@@ -8,6 +8,8 @@
 
 外部数据根按职责分为 `text-to-sql/`（公开 Text-to-SQL 基准及其版本化 release）、`olist-v2-2026-08-03/`（展示案例原始与分析数据）、`models/`、`experiments/` 和 `evals/`。新增基准必须使用 `text-to-sql/<dataset>/<release>/`，原始压缩包置于该 release 的 `archives/`，并在同目录或仓库 manifest 中记录来源、许可证和 SHA-256。此边界避免仓库内 `data/` 与仓库外数据根被误解为两份同类数据。
 
+2026-09-01 已完成 CSpider full release 的获取预检：原始 archive、解压结果和 acquisition manifest 位于 `text-to-sql/cspider/cspider-1.0-official-2026-09-01/`。官方 train/dev/test 分别为 8,659/1,034/2,147 条，涉及 146/20/40 个互不重叠的数据库 schema；166 个 train/dev SQLite 与 40 个 test SQLite 已通过只读打开检查。此事实只证明数据资产布局与隔离成立，不构成模型训练、验证、测试或中文 SQL 质量结论。
+
 ## 1. 项目定位
 
 本项目面向企业内部的运营与业务分析人员。用户以自然语言提出经营分析问题，系统在受控的数据访问范围内生成并执行只读 SQL，流式返回结论、图表、数据表、指标口径和 SQL 证据。

@@ -90,6 +90,7 @@
 4. [原理与面试指南](learning/fundamentals.md)：理解不夹杂实时实验数字的 Token/SFT/LoRA/QLoRA 基础。
 5. [实验台账](experiments/log.md)：查看每次实验为何运行、配置是否可比、结果如何解读。
 6. [数据协议](data/protocol.md)：理解训练数据、脱敏、切分与永久 holdout。
+7. [CSpider 获取与预检](data/cspider-acquisition.md)：查看中文 CSpider full release 的来源、三切分、SQLite 资源和训练隔离边界。
 7. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：审查只含单指标、安全维度和单轮显式时间的领域 pilot 范围；尚未构造数据。
 8. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
 9. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。

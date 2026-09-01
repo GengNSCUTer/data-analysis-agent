@@ -134,6 +134,14 @@
 
 ## 9. 最近一次同步记录
 
+### 2026-09-01：CSpider 官方资产获取与三切分预检
+
+- 目标：仅安全解压并核验 CSpider full release，为后续中文 Text-to-SQL 数据构建建立可追溯输入；不构造 SFT 样本、不加载 tokenizer/模型、不启动 GPU。
+- 实现：新增 `scripts/post_training/data/acquire_cspider.py`。脚本拒绝路径穿越、反斜杠路径、符号链接、重复成员、缺失官方文件、缺失 `db_id/question/query`、跨 train/dev/test schema 重叠、表元数据缺失和 SQLite 只读打开失败；只在完整验证通过后原子写入外部 `extracted/` 及其 acquisition manifest。新增 `tests/test_acquire_cspider.py` 覆盖成功、路径穿越拒绝与 schema 重叠拒绝。
+- 验证：真实 full release 预检为 train 8,659 条/146 个 schema、dev 1,034 条/20 个 schema、test 2,147 条/40 个 schema；166 个 train/dev SQLite 和 40 个 test SQLite 均以只读模式打开，三切分 schema 无交集。专项测试 `3 passed`，ruff、py_compile、`git diff --check` 通过。
+- 边界：test JSON 和 test gold SQL 仅保留为最终评测资产，禁止作为训练样本、few-shot、prompt 上下文或数据合成输入。尚未生成 JSONL、token 统计、训练配置、LoRA adapter 或任何质量指标。
+- 下一步：在用户确认后，仅构建 train/dev/test 的 CSpider SFT 输入 JSONL 与 split audit，不启动训练。
+
 ### 2026-08-30：后训练数据边界与 SFT 入口加固
 
 - 目标：修复已审阅的两个会影响后续训练可信度的边界问题，不扩充数据、不调整模型或超参数。
