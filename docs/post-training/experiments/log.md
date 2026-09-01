@@ -10,6 +10,12 @@
 - 永久隔离：项目的 60 条 v2 golden 不进入训练、偏好数据、示例或改写。
 - 运行时隔离：生产 Vanna/FastAPI/PostgreSQL 代码不被离线训练改写；模型候选仍需通过服务器安全和结果合同。
 
+## 最近完成：Olist 候选 SQL 英文 prompt 隔离对照
+
+2026-09-01，以当前代码、当前 PostgreSQL 工作区和同一物理 RTX 4090 刷新 12 条受保护 Olist case 的中文 Base/Adapter，再仅将候选生成器看到的自然语言问题替换为外部、哈希固定的英文 overlay。中文原问题继续独占 Catalog、QuestionRouter、QueryPlan、ResultContract 和审计上下文，因此实验只测 candidate generator 的 prompt-language sensitivity，不把中文 workspace 的英文语义层缺口误归因给 LoRA。
+
+自然英文直接进入当前 Catalog/Router 的预检为：12 条中 8 条可回答数据库路由、4 条保留与中文 grounding 相同的指标集合、8 条保持维度数一致，说明现有中文 alias/规则尚非端到端英文工作区。隔离生成对照中，Base 从中文 `12/12 generated, 6 policy accepted, 4 executed, 2 contract-valid` 变为英文 `12/12, 6, 2, 1`；Adapter 从中文 `12/12, 6, 2, 0` 变为英文 `12/12, 4, 2, 0`。Adapter 在两种语言下均未通过业务迁移子门，继续不接入生产默认路径。完整合同、哈希和限制见 [`olist-english-prompt-transfer-v1.md`](olist-english-prompt-transfer-v1.md)。
+
 ## 最近完成：Olist PostgreSQL 业务迁移 Base/Adapter 对照
 
 2026-08-26，Spider SFT v2 的 bf16 Base/Adapter 在当前 Olist 工作区完成 12 条受保护、`answerable` 数据库 holdout 的离线候选 SQL 对照。每条均先经 QuestionRouter、Catalog、QueryPlan 和 ResultContract 构造 PostgreSQL SQL-only prompt，再经 SqlPolicy、项目 PostgreSQL reader role 和 ResultValidator 执行；未调用 SiliconFlow、Vanna agent loop、图表或 SQL repair，生产默认模型未改动。12 条均属于 `post_training_holdout_v1.yaml`，永久禁止训练、改写和提示样例使用。

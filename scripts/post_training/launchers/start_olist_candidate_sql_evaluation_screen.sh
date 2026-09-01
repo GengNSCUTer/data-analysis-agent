@@ -9,6 +9,7 @@ RUN_DIRECTORY="${RUN_DIRECTORY:-/disk2/gengnan/data-analysis-agent-data/experime
 MODEL_DIR="${MODEL_DIR:-/disk2/gengnan/data-analysis-agent-data/models/qwen2.5-coder-1.5b-base-df3ce67c0e24480f20468b6ef2894622d69eb73b}"
 ADAPTER_DIR="${ADAPTER_DIR:-/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-bf16-lora-spider-sft-v2-20260826/adapter_final}"
 MANIFEST="${MANIFEST:-${ROOT}/evals/manifests/post_training_olist_business_adapter_evaluation_v1.yaml}"
+CANDIDATE_QUESTION_OVERRIDES="${CANDIDATE_QUESTION_OVERRIDES:-}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}"
 PHYSICAL_NVIDIA_SMI_DEVICE="${PHYSICAL_NVIDIA_SMI_DEVICE:-3}"
 EXPECTED_GPU_UUID="${EXPECTED_GPU_UUID:-GPU-10863af0-8588-7625-5609-640ba794f64b}"
@@ -36,6 +37,10 @@ for required_path in "${QLORA_PYTHON}" "${MODEL_DIR}" "${ADAPTER_DIR}" "${MANIFE
     exit 2
   fi
 done
+if [[ -n "${CANDIDATE_QUESTION_OVERRIDES}" && ! -f "${CANDIDATE_QUESTION_OVERRIDES}" ]]; then
+  echo "[error] candidate question overlay does not exist: ${CANDIDATE_QUESTION_OVERRIDES}" >&2
+  exit 2
+fi
 if [[ ! -f "${ADAPTER_DIR}/adapter_model.safetensors" ]]; then
   echo "[error] adapter directory lacks adapter_model.safetensors: ${ADAPTER_DIR}" >&2
   exit 2
@@ -52,33 +57,35 @@ export PYTHONPATH="${ROOT}/src:${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 echo "[start] $(date --iso-8601=seconds)"
 echo "[run_directory] ${RUN_DIRECTORY}"
 echo "[manifest] ${MANIFEST}"
+echo "[candidate_question_overrides] ${CANDIDATE_QUESTION_OVERRIDES:-none}"
 echo "[cuda_visible_devices] ${CUDA_VISIBLE_DEVICES}"
 echo "[physical_nvidia_smi_device] ${PHYSICAL_NVIDIA_SMI_DEVICE}"
 echo "[expected_gpu_uuid] ${EXPECTED_GPU_UUID}"
 nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total --format=csv,noheader
 
-"${QLORA_PYTHON}" "${ROOT}/scripts/run_olist_candidate_sql_evaluation.py" \
-  --manifest "${MANIFEST}" \
-  --model-dir "${MODEL_DIR}" \
-  --run-label base \
-  --output-dir "${RUN_DIRECTORY}/base" \
-  --max-input-tokens 4096 \
-  --max-new-tokens 256 \
-  --seed 42 \
-  --physical-nvidia-smi-device "${PHYSICAL_NVIDIA_SMI_DEVICE}" \
+COMMON_ARGS=(
+  --manifest "${MANIFEST}"
+  --model-dir "${MODEL_DIR}"
+  --max-input-tokens 4096
+  --max-new-tokens 256
+  --seed 42
+  --physical-nvidia-smi-device "${PHYSICAL_NVIDIA_SMI_DEVICE}"
   --expected-gpu-uuid "${EXPECTED_GPU_UUID}"
+)
+if [[ -n "${CANDIDATE_QUESTION_OVERRIDES}" ]]; then
+  COMMON_ARGS+=(--candidate-question-overrides "${CANDIDATE_QUESTION_OVERRIDES}")
+fi
 
 "${QLORA_PYTHON}" "${ROOT}/scripts/run_olist_candidate_sql_evaluation.py" \
-  --manifest "${MANIFEST}" \
-  --model-dir "${MODEL_DIR}" \
+  --run-label base \
+  --output-dir "${RUN_DIRECTORY}/base" \
+  "${COMMON_ARGS[@]}"
+
+"${QLORA_PYTHON}" "${ROOT}/scripts/run_olist_candidate_sql_evaluation.py" \
   --run-label adapter \
   --adapter-dir "${ADAPTER_DIR}" \
   --output-dir "${RUN_DIRECTORY}/adapter" \
-  --max-input-tokens 4096 \
-  --max-new-tokens 256 \
-  --seed 42 \
-  --physical-nvidia-smi-device "${PHYSICAL_NVIDIA_SMI_DEVICE}" \
-  --expected-gpu-uuid "${EXPECTED_GPU_UUID}"
+  "${COMMON_ARGS[@]}"
 
 "${QLORA_PYTHON}" "${ROOT}/scripts/analyze_olist_candidate_sql_evaluation.py" \
   --base-report "${RUN_DIRECTORY}/base/safe-report.json" \

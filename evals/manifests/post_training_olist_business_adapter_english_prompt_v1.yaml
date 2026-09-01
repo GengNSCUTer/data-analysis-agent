@@ -1,0 +1,73 @@
+manifest_id: post_training_olist_business_adapter_english_prompt_v1
+manifest_version: "1"
+purpose: >
+  Offline prompt-language sensitivity evaluation of the frozen Spider SFT v2
+  bf16 LoRA adapter in the current Olist PostgreSQL workspace. Chinese source
+  questions remain the server-owned grounding input for Catalog, routing,
+  QueryPlan, ResultContract and audit context. An external English overlay is
+  used only as the candidate SQL generator's natural-language question field.
+source_suite: ../cases/text_to_sql_v2.yaml
+protected_holdout_manifest: post_training_holdout_v1.yaml
+forbidden_for_training: true
+production_default_unchanged: true
+source_ids:
+  - data_001
+  - data_003
+  - data_005
+  - data_007
+  - data_009
+  - data_013
+  - data_014
+  - data_016
+  - multi_001
+  - multi_002
+  - multi_004
+  - multi_008
+candidate_question_overlay:
+  mode: prompt_only
+  language: en
+  external_only: true
+  expected_sha256: e36539fa3999a2c28d3054690156e77f37c2a9e127c3036ea161a30f073333fd
+model:
+  id: Qwen/Qwen2.5-Coder-1.5B
+  revision: df3ce67c0e24480f20468b6ef2894622d69eb73b
+  base_weight_mode: bf16_lora
+  adapter_experiment: qwen25coder15b-bf16-lora-spider-sft-v2-20260826
+generation:
+  prompt_version: olist-candidate-sql-v1
+  decode:
+    do_sample: false
+    num_beams: 1
+    max_new_tokens: 256
+    seed: 42
+execution:
+  sql_dialect: postgres
+  repair_enabled: false
+  required_boundaries:
+    - QuestionRouter
+    - SemanticCatalog
+    - QueryPlan
+    - SqlPolicy
+    - PostgreSQL reader role
+    - ResultValidator
+    - ResultContract
+report_boundary:
+  raw_candidates_outside_git: true
+  raw_questions_outside_git: true
+  raw_result_rows_outside_git: true
+  forbidden_report_fields:
+    - question
+    - raw_question
+    - candidate_sql
+    - final_sql
+    - result_rows
+    - connection_string
+    - password
+    - api_key
+    - access_token
+    - cookie
+conclusion_boundary:
+  - This experiment isolates candidate prompt language; it is not end-to-end English workspace support.
+  - PostgreSQL execution and ResultContract validity are not business semantic accuracy.
+  - Contract-valid candidates require controlled manual semantic review before runtime integration.
+  - This evaluation must not change the production Vanna/SiliconFlow default model.

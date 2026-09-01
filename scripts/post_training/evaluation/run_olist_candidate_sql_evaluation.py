@@ -18,7 +18,6 @@ import argparse
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -33,10 +32,6 @@ SOURCE_ROOT = ROOT / "src"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-import numpy as np
-from peft import PeftModel
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 import yaml
 
 from data_analysis_agent.candidate_sql_generator import (
@@ -79,7 +74,8 @@ class EvaluationInputError(ValueError):
 @dataclass(frozen=True)
 class SelectedCase:
     source_id: str
-    question: str
+    grounding_question: str
+    candidate_question: str
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -88,6 +84,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model-dir", type=Path, required=True)
     parser.add_argument("--run-label", choices=("base", "adapter"), required=True)
     parser.add_argument("--adapter-dir", type=Path)
+    parser.add_argument(
+        "--candidate-question-overrides",
+        type=Path,
+        help=(
+            "External JSON prompt-only question overlay. The source-suite question "
+            "continues to own Catalog, routing, planning, contracts, and audit context."
+        ),
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--max-input-tokens", type=int, default=4_096)
     parser.add_argument("--max-new-tokens", type=int, default=256)
@@ -109,7 +113,57 @@ def load_yaml_mapping(path: Path, label: str) -> dict[str, Any]:
     return value
 
 
-def load_selected_cases(manifest_path: Path) -> tuple[dict[str, Any], tuple[SelectedCase, ...]]:
+def load_candidate_question_overrides(
+    path: Path,
+    *,
+    source_ids: Sequence[str],
+    overlay_contract: Mapping[str, Any],
+) -> dict[str, str]:
+    """Load an external prompt-only question overlay with an exact ID contract."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise EvaluationInputError("candidate question overlay does not exist") from exc
+    except json.JSONDecodeError as exc:
+        raise EvaluationInputError("candidate question overlay is not valid JSON") from exc
+    if not isinstance(raw, Mapping):
+        raise EvaluationInputError("candidate question overlay must be a JSON object")
+    if raw.get("schema_version") != "1":
+        raise EvaluationInputError("candidate question overlay schema_version must be '1'")
+    if raw.get("language") != overlay_contract.get("language"):
+        raise EvaluationInputError("candidate question overlay language differs from manifest")
+    raw_cases = raw.get("cases")
+    if not isinstance(raw_cases, list):
+        raise EvaluationInputError("candidate question overlay cases must be a list")
+
+    overrides: dict[str, str] = {}
+    for raw_case in raw_cases:
+        if not isinstance(raw_case, Mapping) or set(raw_case) != {
+            "source_id",
+            "candidate_question",
+        }:
+            raise EvaluationInputError(
+                "every candidate question overlay case requires only source_id and candidate_question"
+            )
+        source_id = raw_case.get("source_id")
+        question = raw_case.get("candidate_question")
+        if not isinstance(source_id, str) or not source_id:
+            raise EvaluationInputError("candidate question overlay source_id must be non-empty")
+        if not isinstance(question, str) or not question.strip():
+            raise EvaluationInputError("candidate question overlay must contain non-empty text")
+        if source_id in overrides:
+            raise EvaluationInputError("candidate question overlay contains duplicate source_id")
+        overrides[source_id] = question.strip()
+    if set(overrides) != set(source_ids):
+        raise EvaluationInputError("candidate question overlay IDs must exactly match manifest source_ids")
+    return overrides
+
+
+def load_selected_cases(
+    manifest_path: Path,
+    *,
+    candidate_question_overrides: Mapping[str, str] | None = None,
+) -> tuple[dict[str, Any], tuple[SelectedCase, ...]]:
     manifest = load_yaml_mapping(manifest_path, "evaluation manifest")
     source_path = (manifest_path.parent / str(manifest.get("source_suite", ""))).resolve()
     holdout_path = (
@@ -131,13 +185,29 @@ def load_selected_cases(manifest_path: Path) -> tuple[dict[str, Any], tuple[Sele
         question = cases_by_id[source_id].get("question")
         if not isinstance(question, str) or not question.strip():
             raise EvaluationInputError(f"source case has no usable question: {source_id}")
-        selected.append(SelectedCase(source_id=source_id, question=question.strip()))
+        grounding_question = question.strip()
+        selected.append(
+            SelectedCase(
+                source_id=source_id,
+                grounding_question=grounding_question,
+                candidate_question=(
+                    candidate_question_overrides.get(source_id, grounding_question)
+                    if candidate_question_overrides is not None
+                    else grounding_question
+                ),
+            )
+        )
     return manifest, tuple(selected)
 
 
 def load_model(
     model_dir: Path, *, run_label: str, adapter_dir: Path | None
 ) -> tuple[Any, Any, dict[str, Any], Mapping[str, Any]]:
+    # Keep CPU-side manifest/context tests independent of the QLoRA environment.
+    from peft import PeftModel
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
     manifest_path = model_dir / "download_manifest.json"
     if not manifest_path.is_file():
         raise EvaluationInputError("model directory lacks download_manifest.json")
@@ -187,21 +257,23 @@ def prepare_case_context(
     run_label: str,
 ) -> tuple[CandidateSqlContext, ToolContext, str]:
     """Rebuild exactly the server-owned SQL context used by the trusted runtime."""
-    selection = retriever.retrieve(case.question, user)
-    route = router.classify(case.question, user=user, selection=selection)
+    selection = retriever.retrieve(case.grounding_question, user)
+    route = router.classify(case.grounding_question, user=user, selection=selection)
     require_database_route(route)
-    memory = WorkingMemory().apply(case.question, route)
-    plan = QueryPlan.from_selection(selection, case.question, route, memory.as_dict())
+    memory = WorkingMemory().apply(case.grounding_question, route)
+    plan = QueryPlan.from_selection(
+        selection, case.grounding_question, route, memory.as_dict()
+    )
     contract = ResultContract.from_selection(
         selection,
-        case.question,
+        case.grounding_question,
         memory.time_range,
         catalog=retriever.catalog,
         required_result_columns=plan.required_result_columns,
         requested_dimensions=plan.dimensions,
     )
     candidate_context = CandidateSqlContext(
-        question=case.question,
+        question=case.candidate_question,
         catalog_prompt=selection.prompt,
         query_plan_prompt=plan.prompt_context(),
         required_result_columns=contract.required_result_columns,
@@ -214,7 +286,7 @@ def prepare_case_context(
         request_id=f"post-training-olist-{run_label}-{case.source_id}-{request_suffix}",
         agent_memory=DemoAgentMemory(),
         metadata={
-            "question": case.question,
+            "question": case.grounding_question,
             "evaluation_purpose": "offline_olist_candidate_sql",
             "prompt_version": OLIST_CANDIDATE_SQL_PROMPT_VERSION,
             "query_plan": plan.as_dict(),
@@ -232,6 +304,8 @@ def generate_completion(
     max_input_tokens: int,
     max_new_tokens: int,
 ) -> tuple[str, int, int]:
+    import torch
+
     encoded = tokenizer(prompt, add_special_tokens=False, return_tensors="pt")
     input_ids = encoded["input_ids"]
     if input_ids.shape[-1] > max_input_tokens:
@@ -293,6 +367,10 @@ def append_raw_candidate(path: Path, *, source_id: str, candidate_sql: str) -> N
 
 
 def main(argv: list[str] | None = None) -> int:
+    import numpy as np
+    import torch
+    from transformers import set_seed
+
     args = parse_args(argv)
     os.environ.setdefault("NCCL_P2P_DISABLE", "1")
     os.environ.setdefault("NCCL_IB_DISABLE", "1")
@@ -314,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
     if output_dir.exists() and any(output_dir.iterdir()):
         raise EvaluationInputError("output directory must be new and empty")
 
-    manifest, cases = load_selected_cases(manifest_path)
+    manifest = load_yaml_mapping(manifest_path, "evaluation manifest")
     frozen_model = manifest.get("model")
     if not isinstance(frozen_model, Mapping):
         raise EvaluationInputError("manifest model contract is missing")
@@ -330,6 +408,48 @@ def main(argv: list[str] | None = None) -> int:
         raise EvaluationInputError("manifest decode contract is missing")
     if args.seed != decode.get("seed") or args.max_new_tokens != decode.get("max_new_tokens"):
         raise EvaluationInputError("CLI generation settings differ from the frozen manifest")
+
+    overlay_contract = manifest.get("candidate_question_overlay")
+    if overlay_contract is None:
+        if args.candidate_question_overrides is not None:
+            raise EvaluationInputError(
+                "candidate question overrides require a manifest candidate_question_overlay contract"
+            )
+        candidate_question_overrides = None
+        overlay_metadata: dict[str, Any] = {
+            "mode": "source_question",
+            "language": "zh",
+            "overlay_sha256": None,
+        }
+    else:
+        if not isinstance(overlay_contract, Mapping):
+            raise EvaluationInputError("candidate_question_overlay must be a mapping")
+        if overlay_contract.get("mode") != "prompt_only":
+            raise EvaluationInputError("candidate question overlay mode must be prompt_only")
+        if overlay_contract.get("external_only") is not True:
+            raise EvaluationInputError("candidate question overlay must remain external")
+        expected_overlay_hash = overlay_contract.get("expected_sha256")
+        if not isinstance(expected_overlay_hash, str) or len(expected_overlay_hash) != 64:
+            raise EvaluationInputError("candidate question overlay requires an expected SHA-256")
+        if args.candidate_question_overrides is None:
+            raise EvaluationInputError("manifest requires --candidate-question-overrides")
+        overlay_path = ensure_path_outside_repository(args.candidate_question_overrides, ROOT)
+        actual_overlay_hash = sha256_file(overlay_path)
+        if actual_overlay_hash != expected_overlay_hash:
+            raise EvaluationInputError("candidate question overlay SHA-256 differs from manifest")
+        candidate_question_overrides = load_candidate_question_overrides(
+            overlay_path,
+            source_ids=tuple(str(value) for value in manifest.get("source_ids", ())),
+            overlay_contract=overlay_contract,
+        )
+        overlay_metadata = {
+            "mode": "prompt_only",
+            "language": overlay_contract.get("language"),
+            "overlay_sha256": actual_overlay_hash,
+        }
+    _, cases = load_selected_cases(
+        manifest_path, candidate_question_overrides=candidate_question_overrides
+    )
 
     output_dir.mkdir(parents=True, exist_ok=False)
     raw_candidates_path = output_dir / "raw-candidates.jsonl"
@@ -457,6 +577,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "sql_dialect": "postgres",
         "repair_enabled": False,
+        "candidate_question_overlay": overlay_metadata,
     }
     report = build_safe_report(
         report_metadata={
@@ -493,6 +614,8 @@ def main(argv: list[str] | None = None) -> int:
                 "raw_questions_in_repository": False,
                 "raw_candidate_sql_in_repository": False,
                 "raw_result_rows_in_repository": False,
+                "candidate_question_mode": overlay_metadata["mode"],
+                "candidate_question_language": overlay_metadata["language"],
             },
         },
         records=records,

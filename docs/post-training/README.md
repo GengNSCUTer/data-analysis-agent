@@ -63,6 +63,7 @@
 | SFT v2 independent smoke | 规模化 SFT 是否有资格完整评测 | 164 条/17 个前缀未覆盖 schema 的 denotation `97 -> 122`，SQLite `153 -> 155`，`no_such_column` `9 -> 8` | 通过 bounded 质量门，允许运行完整对照；不是 Test Suite 或生产结论。 |
 | SFT v2 full evaluation | 规模化 bf16 LoRA 是否在完整冻结合同下超过 matching Base | SQLite `950 -> 961`、fixed Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`；仍有 75 条 denotation 回退 | 通过离线候选生成质量门；保留运行时边界，下一步是受控接口和独立业务评测。 |
 | Olist business transfer v1 | Spider Adapter 能否迁移到当前中文 PostgreSQL 业务上下文 | 12 条 protected holdout：Policy `6 -> 6`、PostgreSQL executed `4 -> 2`、ResultContract valid `2 -> 0`，0 条无效变有效、2 条有效变无效 | 业务迁移子门未通过；不接入默认运行时，不盲目扩大 Spider，先做领域对齐训练/验证。 |
+| Olist English prompt transfer v1 | 仅改变候选生成器看到的问题语言是否会改变业务迁移结果 | fresh 中文/英文对照中 Base contract-valid `2 -> 1`，Adapter `0 -> 0`；英文直入中文 Catalog/Router 仅 8/12 可查库 | 英文 workspace 支持与 LoRA 语言敏感性必须分开评测，Adapter 仍不接入默认运行时。 |
 
 ## 本轮最小对照：官方 release 质量评测已完成
 
@@ -93,6 +94,7 @@
 8. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
 9. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
 10. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
+11. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
 11. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
 
 ## 看日志与停止任务

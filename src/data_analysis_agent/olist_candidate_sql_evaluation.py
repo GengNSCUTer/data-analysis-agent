@@ -192,6 +192,59 @@ def build_safe_comparison(
     }
 
 
+def build_safe_locale_comparison(
+    source_report: Mapping[str, Any], target_report: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Compare one model across prompt-language overlays without raw artifacts.
+
+    This is intentionally separate from :func:`build_safe_comparison`: Base vs
+    Adapter requires identical contracts, while a locale experiment must differ
+    only in the candidate-question overlay contract.
+    """
+    _validate_safe_value(source_report)
+    _validate_safe_value(target_report)
+    if source_report.get("run_label") != target_report.get("run_label"):
+        raise OlistCandidateEvaluationError("locale reports must use the same run_label")
+    source_contract = _locale_comparison_contract(source_report)
+    target_contract = _locale_comparison_contract(target_report)
+    if source_contract["invariant"] != target_contract["invariant"]:
+        raise OlistCandidateEvaluationError("locale reports differ beyond their question overlay")
+    source_records = _records_by_source_id(source_report)
+    target_records = _records_by_source_id(target_report)
+    if source_records.keys() != target_records.keys():
+        raise OlistCandidateEvaluationError("locale reports select different source IDs")
+
+    transitions: Counter[str] = Counter()
+    for source_id in sorted(source_records):
+        transitions[
+            f"{_outcome(source_records[source_id])} -> {_outcome(target_records[source_id])}"
+        ] += 1
+    metrics = (
+        "generation_success",
+        "policy_accepted",
+        "postgres_executed",
+        "result_contract_valid",
+    )
+    source_summary = _summary(source_report)
+    target_summary = _summary(target_report)
+    return {
+        "locale_comparison_schema_version": "1",
+        "run_label": source_report["run_label"],
+        "invariant_contract": source_contract["invariant"],
+        "source_question_condition": source_contract["overlay"],
+        "target_question_condition": target_contract["overlay"],
+        "case_count": len(source_records),
+        "source_summary": {metric: int(source_summary[metric]) for metric in metrics},
+        "target_summary": {metric: int(target_summary[metric]) for metric in metrics},
+        "target_minus_source": {
+            metric: int(target_summary[metric]) - int(source_summary[metric])
+            for metric in metrics
+        },
+        "outcome_transitions": dict(sorted(transitions.items())),
+        "source_ids": sorted(source_records),
+    }
+
+
 def _validate_safe_value(value: Any) -> None:
     if isinstance(value, Mapping):
         forbidden = FORBIDDEN_REPORT_FIELDS.intersection(value)
@@ -215,6 +268,22 @@ def _require_matching_contract(base: Mapping[str, Any], adapter: Mapping[str, An
         raise OlistCandidateEvaluationError("base and adapter comparison contracts differ")
     if base.get("run_label") != "base" or adapter.get("run_label") != "adapter":
         raise OlistCandidateEvaluationError("reports must be labeled base and adapter")
+
+
+def _locale_comparison_contract(report: Mapping[str, Any]) -> dict[str, Any]:
+    contract = report.get("comparison_contract")
+    if not isinstance(contract, Mapping):
+        raise OlistCandidateEvaluationError("locale report requires a comparison_contract")
+    invariant = dict(contract)
+    overlay = invariant.pop("candidate_question_overlay", None)
+    # The pre-overlay Chinese transfer report predates this explicit field.
+    if overlay is None:
+        overlay = {"mode": "source_question", "language": "zh", "overlay_sha256": None}
+    if not isinstance(overlay, Mapping):
+        raise OlistCandidateEvaluationError("candidate question overlay must be a mapping")
+    invariant.pop("manifest_id", None)
+    invariant.pop("manifest_sha256", None)
+    return {"invariant": invariant, "overlay": dict(overlay)}
 
 
 def _records_by_source_id(report: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:

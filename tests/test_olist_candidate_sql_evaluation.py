@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 from pathlib import Path
 
 import pytest
@@ -18,11 +19,18 @@ from data_analysis_agent.olist_candidate_sql_evaluation import (
     CandidateEvaluationRecord,
     OlistCandidateEvaluationError,
     build_safe_comparison,
+    build_safe_locale_comparison,
     build_safe_report,
     validate_manifest_cases,
 )
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
+from scripts.post_training.evaluation.run_olist_candidate_sql_evaluation import (
+    EvaluationInputError,
+    load_candidate_question_overrides,
+    load_selected_cases,
+    prepare_case_context,
+)
 from vanna.core.user import User
 
 
@@ -133,6 +141,65 @@ def test_manifest_validation_rejects_non_database_source_case() -> None:
         validate_manifest_cases(invalid, source["cases"], holdout)
 
 
+def test_external_candidate_question_overlay_requires_exact_non_empty_case_set(
+    tmp_path: Path,
+) -> None:
+    overlay_path = tmp_path / "english-overlay.json"
+    overlay_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "language": "en",
+                "cases": [
+                    {"source_id": "data_001", "candidate_question": "Calculate GMV."},
+                    {"source_id": "data_003", "candidate_question": "Calculate delivery days."},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    overrides = load_candidate_question_overrides(
+        overlay_path,
+        source_ids=("data_001", "data_003"),
+        overlay_contract={"language": "en"},
+    )
+
+    assert overrides["data_001"] == "Calculate GMV."
+    with pytest.raises(EvaluationInputError, match="exactly match"):
+        load_candidate_question_overrides(
+            overlay_path,
+            source_ids=("data_001", "data_005"),
+            overlay_contract={"language": "en"},
+        )
+
+
+def test_prompt_only_overlay_preserves_chinese_server_grounding() -> None:
+    manifest, selected = load_selected_cases(
+        MANIFEST,
+        candidate_question_overrides={
+            source_id: f"English candidate question for {source_id}."
+            for source_id in yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))["source_ids"]
+        },
+    )
+    assert manifest["manifest_id"] == "post_training_olist_business_adapter_evaluation_v1"
+    case = next(item for item in selected if item.source_id == "data_001")
+    assert case.grounding_question != case.candidate_question
+
+    retriever = CatalogRetriever(CatalogLoader().load())
+    candidate_context, tool_context, route_state = prepare_case_context(
+        case,
+        retriever=retriever,
+        router=QuestionRouter(retriever),
+        user=User(id="candidate-overlay-test", group_memberships=["analyst"]),
+        run_label="base",
+    )
+
+    assert route_state == "answerable"
+    assert candidate_context.question == case.candidate_question
+    assert tool_context.metadata["question"] == case.grounding_question
+
+
 def test_safe_pair_comparison_tracks_only_aggregate_status_transitions() -> None:
     base = _report(
         "base",
@@ -156,6 +223,29 @@ def test_safe_pair_comparison_tracks_only_aggregate_status_transitions() -> None
     assert comparison["adapter_minus_base"]["result_contract_valid"] == 0
     assert "candidate_sql" not in repr(comparison)
     assert "result_rows" not in repr(comparison)
+
+
+def test_locale_comparison_requires_same_model_contract_but_allows_overlay_change() -> None:
+    chinese = _report("base", [_record("data_001", valid=True)])
+    english = _report("base", [_record("data_001", valid=False, failure="policy_rejected")])
+    english["comparison_contract"] = {
+        **english["comparison_contract"],
+        "manifest_id": "english-overlay",
+        "manifest_sha256": "different",
+        "candidate_question_overlay": {
+            "mode": "prompt_only",
+            "language": "en",
+            "overlay_sha256": "overlay-hash",
+        },
+    }
+
+    comparison = build_safe_locale_comparison(chinese, english)
+
+    assert comparison["run_label"] == "base"
+    assert comparison["source_question_condition"]["language"] == "zh"
+    assert comparison["target_question_condition"]["language"] == "en"
+    assert comparison["target_minus_source"]["result_contract_valid"] == -1
+    assert "candidate_sql" not in repr(comparison)
 
 
 def test_safe_report_rejects_raw_sql_or_question_fields() -> None:
