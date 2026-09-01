@@ -2,6 +2,12 @@
 
 > 文档导航：先看 [`docs/README.md`](docs/README.md)。本文是项目需求、架构、技术决策和当前阶段的本地基线；后训练学习材料统一从 [`docs/post-training/README.md`](docs/post-training/README.md) 进入。
 
+## 0. 本地数据边界
+
+仓库内的 `data/` 只保存可提交、可审查的小型资产：指标 Catalog、数据 manifest、DDL/转换定义和合成 fixture。原始第三方数据、SQLite 数据库、模型权重、Adapter/checkpoint、预测和实验日志统一保存在仓库外的 `/disk2/gengnan/data-analysis-agent-data/`，这是本项目唯一的大型本地数据根，不进入 Git。
+
+外部数据根按职责分为 `text-to-sql/`（公开 Text-to-SQL 基准及其版本化 release）、`olist-v2-2026-08-03/`（展示案例原始与分析数据）、`models/`、`experiments/` 和 `evals/`。新增基准必须使用 `text-to-sql/<dataset>/<release>/`，原始压缩包置于该 release 的 `archives/`，并在同目录或仓库 manifest 中记录来源、许可证和 SHA-256。此边界避免仓库内 `data/` 与仓库外数据根被误解为两份同类数据。
+
 ## 1. 项目定位
 
 本项目面向企业内部的运营与业务分析人员。用户以自然语言提出经营分析问题，系统在受控的数据访问范围内生成并执行只读 SQL，流式返回结论、图表、数据表、指标口径和 SQL 证据。
