@@ -13,7 +13,7 @@
 
 本地后训练阶段地图和实验索引以本页为准；学习问答以 `learning/review-*.md` 为准。项目的对外进度、微调实验状态、结果、风险和下一步统一同步到飞书项目文档，不写入飞书学习笔记。根目录兼容入口只用于保持旧链接有效，不再追加内容。
 
-这份文档是后训练分支的唯一入口。它把“数据分析 Agent 产品本身”和“离线 Text-to-SQL 后训练研究”分开：前者继续使用 Vanna、FastAPI、PostgreSQL 和服务器拥有的安全/结果合同；后者只在仓库外的 Spider SQLite 实验资产上训练和评测一个候选生成模型。研究模型不能直接获得生产数据库权限，也不能替代 SQL Policy、PostgreSQL reader role、ResultValidator 或 ChartContract。
+这份文档是后训练分支的唯一入口。它把“数据分析 Agent 产品本身”和“离线 Text-to-SQL 后训练研究”分开：前者继续使用 Vanna、FastAPI、PostgreSQL 和服务器拥有的安全/结果合同；后者只在仓库外的 Spider/CSpider SQLite 实验资产上训练和评测一个候选生成模型。研究模型不能直接获得生产数据库权限，也不能替代 SQL Policy、PostgreSQL reader role、ResultValidator 或 ChartContract。
 
 学习顺序从现在开始以 [`learning/code-review-guide-v1.md`](learning/code-review-guide-v1.md) 和 [`learning/walkthrough-v1.md`](learning/walkthrough-v1.md) 为主。先亲自审阅真实代码、测试与边界，再由用户确认后进入下一步；不再自动连续启动训练或完整评测。
 
@@ -44,7 +44,7 @@
 
 | 阶段 | 目标 | 状态 | 已有证据 / 退出条件 |
 | --- | --- | --- | --- |
-| R0 数据与隔离 | 可训练数据、许可证、哈希与 holdout 边界 | 已完成 | 历史 128 条 v1 与当前 3,600 条 v2 train-only 候选均有 schema-disjoint 边界；项目 v2 60 条 golden 永久隔离。 |
+| R0 数据与隔离 | 可训练数据、许可证、哈希与 holdout 边界 | 已完成 | 历史 128 条 v1 与当前 3,600 条 v2 train-only Spider 候选均有 schema-disjoint 边界；CSpider 官方三切分输入已独立构造并隔离 test，项目 v2 60 条 golden 永久隔离。 |
 | R1 环境与工程 | 单卡可加载、可训练、可恢复 | 已完成 | Qwen2.5-Coder-1.5B，Python 3.11/CUDA 12.1，QLoRA forward 和 8-step SFT smoke 通过。 |
 | R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 已完成但失败 | 官方 release 上 matching Base/26-step QLoRA Adapter 均 1,034/1,034；SQLite executed `829 -> 671`，Test Suite internal all `0.433 -> 0.376`，限定列错误 `15 -> 296`。详见官方专属分析。 |
 | R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 本轮完成 | 3,600 条 official train-only v2 corpus、2 epoch bf16 LoRA、164-case/17-schema 独立 smoke 和完整 1,034-case 对照均完成；SQLite `950 -> 961`、Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`。 |
@@ -91,12 +91,13 @@
 5. [实验台账](experiments/log.md)：查看每次实验为何运行、配置是否可比、结果如何解读。
 6. [数据协议](data/protocol.md)：理解训练数据、脱敏、切分与永久 holdout。
 7. [CSpider 获取与预检](data/cspider-acquisition.md)：查看中文 CSpider full release 的来源、三切分、SQLite 资源和训练隔离边界。
-7. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：审查只含单指标、安全维度和单轮显式时间的领域 pilot 范围；尚未构造数据。
-8. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
-9. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
-10. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
-11. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
-11. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
+8. [CSpider 官方三切分 SFT 输入](data/cspider-prepared-splits.md)：查看 JSONL 构造、哈希、三条来源质量排除项和 Trainer 接入前提。
+9. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：审查只含单指标、安全维度和单轮显式时间的领域 pilot 范围；尚未构造数据。
+10. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
+11. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
+12. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
+13. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
+14. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
 
 ## 看日志与停止任务
 

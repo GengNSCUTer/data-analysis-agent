@@ -134,6 +134,14 @@
 
 ## 9. 最近一次同步记录
 
+### 2026-09-01：CSpider 官方三切分 SFT 输入构造
+
+- 目标：仅从已核验的 CSpider full release 构造中文 Text-to-SQL 的官方 train/dev/test JSONL 与 split audit；不加载 tokenizer/模型、不启动 GPU、不训练、不评测、不接入生产运行时。
+- 实现：新增 `scripts/post_training/data/build_cspider_sft_splits.py` 与 `tests/test_build_cspider_sft_splits.py`。构造器复用版本化 Spider schema/prompt 格式，核验 acquisition manifest、源文件和解压树 hash、官方角色/数量、字段/表元数据及 schema 无交集；官方 dev 映射为 validation，test 物理写入 `final_evaluation_only/`，并以真实 `cspider_db_id` 写入 audit。
+- 数据质量决策：真实 SQLite 逐条只读 `EXPLAIN` 发现官方 train 有 3/8,659 条 gold 与随 release SQLite/schema 不一致。它们以错误证据隔离到外部 `source_quality_exclusions/train.jsonl`，不进入参数更新；其余输出为 train 8,656、validation 1,034、test 2,147。不得修补、猜测或把 test 转为训练样本。
+- 验证：专项 `3 passed`；ruff、py_compile、`git diff --check` 通过；实际 JSONL 行数与 audit SHA-256 一致，train/validation/test schema 交集为空。测试覆盖角色映射、中文 prompt、test 隔离、源树漂移 fail closed 与无效 SQL 隔离。
+- 边界与下一步：`EXPLAIN` 只证明 SQLite 解析/对象解析，不证明 SQL 业务语义或模型质量。现有 Trainer 的 audit 校验仍硬编码 Spider 的 `spider_db_id` 和两切分假设；下一项必须单独审阅并改造该契约，保持 `final_evaluation_only/test.jsonl` 永不作为训练输入。
+
 ### 2026-09-01：CSpider 官方资产获取与三切分预检
 
 - 目标：仅安全解压并核验 CSpider full release，为后续中文 Text-to-SQL 数据构建建立可追溯输入；不构造 SFT 样本、不加载 tokenizer/模型、不启动 GPU。

@@ -8,7 +8,7 @@
 
 外部数据根按职责分为 `text-to-sql/`（公开 Text-to-SQL 基准及其版本化 release）、`olist-v2-2026-08-03/`（展示案例原始与分析数据）、`models/`、`experiments/` 和 `evals/`。新增基准必须使用 `text-to-sql/<dataset>/<release>/`，原始压缩包置于该 release 的 `archives/`，并在同目录或仓库 manifest 中记录来源、许可证和 SHA-256。此边界避免仓库内 `data/` 与仓库外数据根被误解为两份同类数据。
 
-2026-09-01 已完成 CSpider full release 的获取预检：原始 archive、解压结果和 acquisition manifest 位于 `text-to-sql/cspider/cspider-1.0-official-2026-09-01/`。官方 train/dev/test 分别为 8,659/1,034/2,147 条，涉及 146/20/40 个互不重叠的数据库 schema；166 个 train/dev SQLite 与 40 个 test SQLite 已通过只读打开检查。此事实只证明数据资产布局与隔离成立，不构成模型训练、验证、测试或中文 SQL 质量结论。
+2026-09-01 已完成 CSpider full release 的获取预检和官方三切分 SFT 输入构造：原始 archive、解压结果和 acquisition manifest 位于 `text-to-sql/cspider/cspider-1.0-official-2026-09-01/`，准备后的 JSONL 与 audit 位于同一 release 的 `prepared/official-splits-v1/`。官方 train/dev/test 原始记录数为 8,659/1,034/2,147，涉及 146/20/40 个互不重叠的数据库 schema；SFT 输出为 8,656 train、1,034 validation、2,147 final-evaluation-only test。train 有 3 条公开 gold SQL 无法在随 release SQLite/schema 上通过只读 `EXPLAIN`，已保留来源证据并隔离，不参与参数更新；dev/test 全量保留且 test 物理隔离。此事实只证明数据资产与输入审计成立，不构成模型训练、验证、测试或中文 SQL 质量结论；现有 Spider-only Trainer 尚未适配 `cspider_db_id` audit。
 
 ## 1. 项目定位
 
@@ -458,6 +458,7 @@ v1 不引入 Redis。
 
 | 日期 | 事项 | 结论 |
 | --- | --- | --- |
+| 2026-09-01 | CSpider 官方三切分 SFT 输入构造 | 新增可直接执行的 CSpider JSONL 构造器，核验 acquisition manifest、源文件/解压树 hash、官方角色/数量、字段/表元数据、schema 无交集，并对每条 gold SQL 只读 `EXPLAIN`。外部输出为 train `8,656`、validation `1,034`、final-evaluation-only test `2,147`，三份文件 hash 均与 audit 一致；官方 train 的 3 条 SQLite/schema 不一致 gold 被写入可审计 exclusion，不静默混入参数更新。专项测试 `3 passed`、ruff、py_compile 和 diff check 通过；未加载 tokenizer/模型、未使用 GPU、未训练或评测。下一步需单独审阅并适配 Spider-only Trainer 的 `cspider_db_id`/官方 test 隔离契约。 |
 | 2026-08-31 | 项目进度与后训练学习文档职责分离 | 明确项目微调/后训练阶段、训练数据、GPU 任务、实验配置、评测结果、风险和下一步统一记录在本项目文档及 `PROJECT.md`；飞书《数据分析 Agent｜微调与后训练学习笔记》只记录后训练原理、代码审阅、用户问答和面试知识。同步更新 `AGENTS.md`、`docs/README.md` 与 `docs/post-training/README.md`，本轮不启动训练、不修改生产运行时。 |
 | 2026-08-31 | 文档导航与后训练学习材料重组 | 新增 [`docs/README.md`](docs/README.md) 作为项目文档总导航，明确项目方案、运行时、评测证据、后训练学习/数据/实验和根目录兼容入口的职责。保留历史评测报告与旧链接，不为减少文件数批量移动长文；物理迁移须单独立项并做链接检查。飞书《数据分析 Agent｜微调与后训练学习笔记》重写为“项目进度”和“后训练学习”两部分，同步当前 Spider/Olist 结论、LoRA/PEFT 学习记录和 `forward -> loss` 的下一道审阅题。后续项目事实写入本文，后训练阶段写入 `docs/post-training/README.md`，学习问答写入 `learning/`，实验事实写入 `experiments/`。 |
 | 2026-08-30 | 后训练数据边界与 SFT 入口加固 | 修复候选构建在 `selection-overfetch` 遇到被跳过的坏行时错误计算预期候选数的问题；SFT 入口新增 `validate_split_audit()`，在加载模型前核对 train/validation 文件的行数、SHA-256、`spider_db_id` 分组策略、通过状态和 holdout 标记，文件被替换或审计字段缺失时 fail closed。新增 2 个回归测试；数据/格式/切分专项 `7 passed`，SFT Dataset/审计专项 `3 passed`，ruff 与 compileall 通过。本轮不启动 GPU、不构造数据、不改变模型或生产运行时。 |
