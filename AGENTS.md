@@ -134,6 +134,15 @@
 
 ## 9. 最近一次同步记录
 
+### 2026-09-02：CSpider 正式长度物化与 bf16 batch 配置审阅
+
+- 目标：按已冻结的 `cspider-token-length-v1` 物化正式 train/validation/test；审阅训练入口并确定不量化的 bf16 LoRA 与真实 batch 配置。本轮不启动训练。
+- 实现：新增 `materialize_cspider_sft_splits.py` 与回归测试；仓库外 `official-splits-length1536-v1` 保留 train `8,574`、validation `1,034`、完整 final test `2,147`，82 条 train 超长样本进入不含问题/SQL 的 exclusion manifest。test 最大 996 token，若未来超长则 fail closed，不过滤官方最终评测总体。新增 CSpider bf16 launcher 仅供后续确认后启动。
+- 入口决策：`bf16_lora` 默认加载未量化 bf16 基座，默认 `adamw_torch` + `weight_decay=0.01`；`per_device_train_batch_size=4`、`gradient_accumulation_steps=1`，一次 forward/backward 真正并行四条样本，effective batch 为 4。QLoRA 与 8-bit optimizer 仅保留历史兼容模式，不与正式结果混比。
+- 加固：Trainer 在加载模型前校验 materialized length contract、外部 exclusion manifest 的 hash/计数/脱敏状态和 train/validation 最大长度；训练 evidence 记录实际 batch、累积步数、effective batch、optimizer 与 weight decay。
+- 验证：物化器实际输出数量和 hash 已核对；专项数据、SFT Dataset/collator、split audit、长度物化共 `16 passed`，ruff、py_compile、bash -n 和 diff check 通过。未加载模型权重、使用 GPU、训练或读取 test 正文。
+- 下一步：用户确认后只做一次 batch-4 bf16 forward/backward smoke，先测显存与 OOM 边界，再决定是否完整两 epoch；不得把配置审阅结果写成训练效果。
+
 ### 2026-09-02：CSpider token 长度审计与训练长度合同
 
 - 目标：只审计 CSpider 官方 `train`/`validation` 的实际 SFT token 长度，并冻结不可静默截断的训练长度合同；不读取 final test、不加载权重、不用 GPU、不训练、不评测或物化过滤数据。

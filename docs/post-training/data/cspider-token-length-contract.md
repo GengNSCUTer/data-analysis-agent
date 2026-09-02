@@ -47,12 +47,33 @@
 4. 保持官方 split 角色、`cspider_db_id` 无交集和 `final_evaluation_only` test 隔离；
 5. 训练入口继续先验证 split audit，再验证派生输入与该 manifest，任何 hash、角色、长度或计数不一致均拒绝训练。
 
-这一步尚未获准执行。因此当前状态是“训练长度已定义且有审计证据”，不是“CSpider 训练集已经物化”或“训练已经开始”。
+## 正式物化结果
+
+已按本合同生成仓库外派生目录：
+`/disk2/gengnan/data-analysis-agent-data/text-to-sql/cspider/cspider-1.0-official-2026-09-01/prepared/official-splits-length1536-v1/`。
+物化器为 [`materialize_cspider_sft_splits.py`](../../../scripts/post_training/data/materialize_cspider_sft_splits.py)，不改写
+`official-splits-v1` 官方源目录。
+
+| 输出 | 源行数 | 保留 | 排除 | 最大保留长度 |
+| --- | ---: | ---: | ---: | ---: |
+| train | 8,656 | 8,574 | 82 | 1,474 |
+| validation（官方 dev） | 1,034 | 1,034 | 0 | 850 |
+| final-evaluation-only/test | 2,147 | 2,147 | 0 | 996 |
+
+train/validation 的 82 条超长样本进入外部 `exclusions/train-validation-length.jsonl`，清单只记录
+stable sample ID、长度和排除原因，不包含问题、schema 或 SQL。test 完整保留；若未来 test 出现超长行，
+物化器会直接失败，不会改变官方最终评测总体。
+
+物化目录的 `split_audit.json` 同时记录源文件 hash、tokenizer 资产 hash、合同版本、输出 hash、
+排除清单 hash、官方角色和 test 隔离证据。训练入口会在加载模型前校验这些证据。
+
+因此当前状态是“正式 train/validation/test 派生资产已经物化并通过合同校验”，不是“训练已经开始”。
 
 ## 验证与空白
 
 - 真实审计成功读取且只读取 train/validation；报告显式记录 `final_test_read=false`、`model_weights_loaded=false`、`gpu_used=false` 和 `truncation_performed=false`。
 - `tests/test_audit_cspider_sft_token_lengths.py` 覆盖独立 prompt/SQL/EOS 计数、超长统计、无静默截断字段和小样本 percentile。
-- 与 CSpider split audit、SFT Dataset/collator 契约和 CSpider 构造器的组合专项测试共 `12 passed`。
+- 与 CSpider split audit、SFT Dataset/collator 契约、构造器和物化器的组合专项测试共 `16 passed`。
 
-本合同尚未覆盖未来物化器的 exclusion manifest、Trainer 对该 manifest 的输入校验、训练稳定性、验证集指标或最终 test 评测；它们必须按单一任务分别实现和验证。
+本合同已覆盖物化器的 exclusion manifest 及 Trainer 对其路径、hash、计数和长度的输入校验；
+仍未覆盖训练稳定性、验证集指标或最终 test 评测，它们必须按单一任务分别实现和验证。

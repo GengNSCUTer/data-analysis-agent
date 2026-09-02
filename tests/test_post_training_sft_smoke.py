@@ -85,6 +85,57 @@ def test_split_audit_must_match_current_split_files(tmp_path) -> None:
         validate_split_audit(audit, train_path, validation_path)
 
 
+def test_materialized_length_contract_checks_external_exclusion_manifest(tmp_path) -> None:
+    train_path = tmp_path / "train.jsonl"
+    validation_path = tmp_path / "validation.jsonl"
+    train_path.write_text("train-row\n", encoding="utf-8")
+    validation_path.write_text("validation-row\n", encoding="utf-8")
+    exclusion_path = tmp_path / "exclusions.jsonl"
+    exclusion_path.write_text(
+        '{"sample_id":"excluded","sequence_tokens":1600}\n', encoding="utf-8"
+    )
+    audit = {
+        "checks": {
+            "status": "pass",
+            "v2_holdout_used": False,
+            "length_contract": {
+                "version": "cspider-token-length-v1",
+                "max_seq_length": 1536,
+                "train_excluded": 1,
+                "validation_excluded": 0,
+                "test_excluded": 0,
+            },
+        },
+        "policy": {"primary_group": "spider_db_id"},
+        "splits": {
+            "train": {
+                "rows": 1,
+                "sha256": sha256_file(train_path),
+                "excluded_rows": 1,
+                "max_sequence_tokens": 1400,
+            },
+            "validation": {
+                "rows": 1,
+                "sha256": sha256_file(validation_path),
+                "excluded_rows": 0,
+                "max_sequence_tokens": 1200,
+            },
+            "test": {"excluded_rows": 0, "max_sequence_tokens": 1300},
+        },
+        "exclusions": {
+            "path": str(exclusion_path),
+            "sha256": sha256_file(exclusion_path),
+            "rows": 1,
+            "contains_question_or_sql": False,
+        },
+    }
+
+    validate_split_audit(audit, train_path, validation_path)
+    exclusion_path.write_text(exclusion_path.read_text() + "tampered\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="length exclusion manifest hash mismatch"):
+        validate_split_audit(audit, train_path, validation_path)
+
+
 def cspider_audit(train_path: Path, validation_path: Path, test_path: Path) -> dict[str, object]:
     return {
         "source": {"dataset": {"id": "cspider", "release": "full-2024-03-01"}},

@@ -94,4 +94,7 @@ exclusion reason。该文件 SHA-256 为
 train/validation，未读取 test；`max_seq_length=1536` 下 train 有 8,574/8,656 条可入选、
 validation 有 1,034/1,034 条可入选。官方源 JSONL 尚未被改写或过滤，模型训练、验证集模型
 选择和 test 评测均未执行。下一项工作必须经用户单独确认，且只能是按该合同物化派生的
-train/validation 输入与 exclusion manifest，test 继续不参与该过程。
+train/validation 输入与 exclusion manifest，test 继续不参与该过程。正式物化结果位于仓库外的
+`prepared/official-splits-length1536-v1/`：train 保留 8,574 条、validation 保留 1,034 条，
+final-evaluation-only/test 完整保留 2,147 条；82 条 train 超长样本进入独立 exclusion manifest。
+训练入口会在加载模型前校验该物化 audit、长度上限和 exclusion manifest hash。

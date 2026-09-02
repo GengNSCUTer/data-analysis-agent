@@ -265,16 +265,17 @@ QLoRA 在此基础上把冻结基座以 4-bit NF4 保存，计算时用 bf16；`
 
 | 参数 | 当前解释 |
 | --- | --- |
-| `per_device_train_batch_size=1` | 每次显卡前向只放一个样本。 |
-| `gradient_accumulation_steps=4` | 累积 4 个 micro-batch 后再更新一次，effective batch size 为 4。 |
-| `num_train_epochs=2` | 完整遍历 3,048 条 train 两次；v1 smoke 曾使用 `max_steps=8`。 |
+| `per_device_train_batch_size=4` | 一次显卡前向/反向真正并行处理 4 个样本；动态 collator 将它们 stack 成一个 batch。 |
+| `gradient_accumulation_steps=1` | 不再把 4 个样本拆成 4 次 micro-batch；每个 batch 完成后立即进行一次 optimizer update，effective batch size 为 4。 |
+| `num_train_epochs=2` | 完整遍历正式物化的 8,574 条 train 两次；短 smoke 仍可显式使用 `--max-steps`。 |
 | `learning_rate=1e-4` | LoRA 参数每次 optimizer update 的步长尺度。 |
 | `bf16=True` | 训练计算使用 bfloat16，降低显存并保留较好数值范围。 |
-| `optim=paged_adamw_8bit` | optimizer state 使用 8-bit paged 实现，降低显存压力。 |
+| `optim=adamw_torch` | bf16 LoRA 默认使用未量化的普通 AdamW；QLoRA 历史模式才使用 `paged_adamw_8bit`。 |
+| `weight_decay=0.01` | 显式启用 AdamW 解耦权重衰减；它不进入梯度历史 `m/v`。 |
 | `gradient_checkpointing=True` | 用额外前向计算换显存。 |
 | `max_seq_length=1536` | 序列上限；目标 SQL 不允许被静默截断。 |
 
-一次 optimizer step 不是一次样本。当前 batch 为 1、梯度累积为 4，所以 4 个样本才产生一次参数更新。v2 3,048 条、2 epoch 最终是 1,524 个 optimizer steps。训练 loss 下降只说明目标 token 的平均负对数似然下降，不等于 SQL 正确率。
+一次 optimizer step 取决于“实际 batch × 梯度累积”。当前正式配置是 batch 为 4、梯度累积为 1，因此一次 forward/backward 处理 4 个样本后就产生一次参数更新；如果显存不足，可退回 batch 1、累积 4，但那会重新变成四次串行 micro-batch。正式 8,574 条、2 epoch 约为 4,288 个 optimizer steps。训练 loss 下降只说明目标 token 的平均负对数似然下降，不等于 SQL 正确率。
 
 ## 7. Adapter 重载和 artifact 验证
 
