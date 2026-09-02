@@ -140,7 +140,8 @@
 - 冻结训练：CSpider `official-splits-length1536-v1` 的 train/validation 为 `8,574/1,034`；final test `2,147` 不被读取。`batch=4`、`accumulation=1`、2 epoch、预期 `4,288` optimizer steps、`adamw_torch`、`lr=1e-4`、`weight_decay=0.01`、bf16 LoRA `r=16/alpha=32/dropout=0.05`；每 `536` step 验证/保存。
 - 匹配评测：Base 与 Adapter 只以“是否加载 adapter”为变量，使用相同 validation schema/question、基座 revision、bf16、tokenizer/prompt、greedy decode、seed 和 token 上限。生成阶段禁止读取 gold SQL、数据库行、final test 和业务运行时；两侧输出冻结后才允许 readonly SQLite/denotation、状态迁移和有限 changed-case 审查。
 - 资源/停止条件：启动器默认 logical CUDA `1` -> physical GPU `3`，强制 UUID `GPU-10863af0-8588-7625-5609-640ba794f64b`；设备映射、数据/长度合同、有限 loss、OOM 和 adapter reload 任一失败即停止。YAML 解析、训练 CLI（启动器环境）、shell syntax 与 13 项数据/训练回归通过。
-- 当前空白：现有自由生成器是 Spider 专用，CSpider 成对生成/评测入口尚需独立适配和回归，不能把历史 Spider 的结果冒充为 CSpider。用户已批准先按本合同启动训练；训练完成后先核验 artifact，再将 CSpider 评测入口作为下一件独立任务。
+- 当前状态：用户已批准并在 `daa-cspider-bf16-lora-full2epoch-v1` 启动训练；启动后已观察到真实 step `42/4,288`、约 16.3 GiB 显存与 83% GPU 利用率，未见 UUID、合同或 OOM 失败。运行中不改变超参、不读取 test、不启动评测。
+- 当前空白：现有自由生成器是 Spider 专用，CSpider 成对生成/评测入口尚需独立适配和回归，不能把历史 Spider 的结果冒充为 CSpider。训练完成后先核验 artifact，再将 CSpider 评测入口作为下一件独立任务。
 
 ### 2026-09-02：CSpider bf16 LoRA batch-4 冒烟
 
