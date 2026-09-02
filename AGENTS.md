@@ -137,7 +137,7 @@
 
 ### 当前暂停点
 
-2026-09-02 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并已冻结 Olist/PostgreSQL 领域数据接口合同、v1 coverage 历史快照和 10 指标 v2 Catalog 合同；规范入口为 `docs/post-training/data/olist-domain-sft-data-contract-v1.md`、`docs/metric-contracts/olist-metrics-v2.md` 与 `data/catalog/olist_catalog.yaml`。下一项仅可修订领域 SFT coverage matrix，使其基于这 10 个指标重新列出安全范围、归属澄清和排除项；在该矩阵和后续代码/测试审阅、用户确认完成前，仍不得设计 QuerySpec/renderer、创建数据模板/coverage seed/训练数据，或启动 token 审计、GPU 训练和评测。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
+2026-09-02 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并已冻结 Olist/PostgreSQL 领域数据接口合同、四指标 v1 历史 coverage 快照、十指标 v2 Catalog 合同和十指标 coverage matrix；规范入口为 `docs/post-training/data/olist-domain-sft-data-contract-v1.md`、`docs/metric-contracts/olist-metrics-v2.md`、`docs/post-training/data/olist-domain-sft-coverage-matrix-v2.md` 与 `data/catalog/olist_catalog.yaml`。下一项仅可设计并审阅 QuerySpec schema 与 deterministic PostgreSQL Gold renderer 的职责边界；在该设计、后续代码/测试审阅和用户确认完成前，仍不得创建数据模板/coverage seed/训练数据，或启动 token 审计、GPU 训练和评测。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
 
 ## 9. 最近一次同步记录
 
