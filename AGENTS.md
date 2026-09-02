@@ -137,7 +137,7 @@
 
 ### 当前暂停点
 
-2026-08-27 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界、Olist/PostgreSQL 领域数据合同，以及基础领域样本覆盖矩阵；记录见 `docs/post-training/learning/review-2026-08-28.md` 和 `docs/post-training/data/olist-pilot-coverage-v0.1.md`。在用户请求下，下一步先执行 `docs/post-training/learning/code-review-guide-v1.md` 的真实代码审阅，从 Spider prompt/候选构建/切分开始；未完成相应代码与测试审阅、用户复述和明确确认前，仍不得创建数据模板、coverage seed 或启动训练。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
+2026-08-27 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并已冻结 Olist/PostgreSQL 领域数据合同和 v1 coverage matrix；规范入口为 `docs/post-training/data/olist-domain-sft-data-contract-v1.md` 与 `docs/post-training/data/olist-domain-sft-coverage-matrix-v1.md`。用户已授权的下一项仅是设计并审阅 `QuerySpec` schema 与 deterministic PostgreSQL Gold renderer 的职责边界；在该设计和后续代码/测试审阅、用户确认完成前，仍不得创建数据模板、coverage seed、训练数据或启动训练。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
 
 ## 9. 最近一次同步记录
 

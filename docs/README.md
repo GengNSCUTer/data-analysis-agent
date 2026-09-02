@@ -53,7 +53,7 @@
 后训练文档已经完成目录化，唯一规范入口是 [`post-training/README.md`](post-training/README.md)：
 
 - `post-training/learning/`：概念、代码审阅和用户问答；当前重点是逐小单元审查真实训练代码。项目进度和实验状态不放入学习笔记，统一看 `PROJECT.md` 及飞书项目文档。
-- `post-training/data/`：数据协议、holdout 隔离、领域训练合同和覆盖矩阵；当前 Olist 领域训练以 [`post-training/data/olist-domain-sft-data-contract-v1.md`](post-training/data/olist-domain-sft-data-contract-v1.md) 为唯一规范入口。
+- `post-training/data/`：数据协议、holdout 隔离、领域训练合同和覆盖矩阵；当前 Olist 领域训练以 [数据合同](post-training/data/olist-domain-sft-data-contract-v1.md) 和 [v1 覆盖矩阵](post-training/data/olist-domain-sft-coverage-matrix-v1.md) 为规范入口。
 - `post-training/experiments/`：实验台账，只记录配置、聚合结果和结论。
 - `post-training/archive/`：不再作为实时状态依据的旧路线和旧笔记。
 

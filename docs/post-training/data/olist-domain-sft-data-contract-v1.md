@@ -239,13 +239,13 @@ Gold 的 canonical form 必须是单条 PostgreSQL read-only SQL，并稳定使�
 
 ## 9. 后续单一任务顺序
 
-本合同之后，只按以下顺序逐项推进，每项需要单独审查与用户确认：
+已完成：盘点当前 Catalog 中可训练的指标、维度、Join、时间与归因边界，并冻结
+[`olist-domain-sft-coverage-matrix-v1.md`](olist-domain-sft-coverage-matrix-v1.md)。之后只按以下顺序逐项推进，每项需要单独审查与用户确认：
 
-1. 盘点当前 Catalog 中可训练的指标、维度、Join、时间与归因边界，产出 v1 coverage matrix 和目标分布；
-2. 设计并审阅 `QuerySpec` schema 与 deterministic PostgreSQL Gold SQL renderer 的职责边界；
-3. 实现 split / holdout / near-duplicate audit，不生成正式训练行；
-4. 进行 token-length audit，证明 `1536` 的真实覆盖率；
-5. 仅物化小批人工审阅样本，先验证 Prompt、Gold、执行、合同和审计；
-6. 用户审阅通过后才物化完整数据、训练和 matching 评测。
+1. 设计并审阅 `QuerySpec` schema 与 deterministic PostgreSQL Gold SQL renderer 的职责边界；
+2. 实现 split / holdout / near-duplicate audit，不生成正式训练行；
+3. 进行 token-length audit，证明 `1536` 的真实覆盖率；
+4. 仅物化小批人工审阅样本，先验证 Prompt、Gold、执行、合同和审计；
+5. 用户审阅通过后才物化完整数据、训练和 matching 评测。
 
 任何步骤都不能顺带推进下一项。

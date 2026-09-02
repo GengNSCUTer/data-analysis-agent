@@ -49,7 +49,7 @@
 | R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 已完成但失败 | 官方 release 上 matching Base/26-step QLoRA Adapter 均 1,034/1,034；SQLite executed `829 -> 671`，Test Suite internal all `0.433 -> 0.376`，限定列错误 `15 -> 296`。详见官方专属分析。 |
 | R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 本轮完成 | 3,600 条 official train-only v2 corpus、2 epoch bf16 LoRA、164-case/17-schema 独立 smoke 和完整 1,034-case 对照均完成；SQLite `950 -> 961`、Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`。 |
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
-| R5 领域数据与受控接入 | 构建运行时 Prompt 对齐的 Olist 领域资产，并在通过质量门后再讨论候选接入 | 数据合同已冻结，尚未物化 | Spider 与 CSpider 两个 Adapter 的 12 条 Olist 业务迁移子门均未通过；最新 CSpider Adapter 的 ResultContract valid 为 Base `2`、Adapter `0`。`olist-domain-sft-data-contract-v1` 已固定真实 Prompt、Gold、语义族切分、长度和 holdout 门；下一项只盘点 v1 coverage matrix。安全、权限、结果与图表合同仍在服务器端执行。 |
+| R5 领域数据与受控接入 | 构建运行时 Prompt 对齐的 Olist 领域资产，并在通过质量门后再讨论候选接入 | 数据合同与 coverage 已冻结，尚未物化 | Spider 与 CSpider 两个 Adapter 的 12 条 Olist 业务迁移子门均未通过；v1 仅纳入 4 核心指标的标量、确认时窗、时间序列、客户地域，以及受控的多指标 CTE 形状。归因、Top-N、自由筛选和未建模排序继续排除。下一项只设计 QuerySpec 和 Gold renderer 边界；安全、权限、结果与图表合同仍在服务器端执行。 |
 
 ## CSpider 当前检查点
 
@@ -117,13 +117,14 @@ PostgreSQL executed / ResultContract valid 为 `2/1/0`，Base 为 `6/4/2`；不�
 11. [CSpider 训练入口配置审阅](data/cspider-training-entry-review-v1.md)：核对 bf16 LoRA、普通 AdamW、weight decay、batch/gradient accumulation 与 test 隔离。
 12. [CSpider 两 Epoch 训练与成对评测合同](data/cspider-sft-2epoch-evaluation-contract-v1.md)：查看 4,288-step 训练、GPU UUID guard、Base/Adapter 唯一变量与生成后评测边界；当前只冻结，尚未启动。
 13. [Olist 领域 Candidate SQL SFT 数据合同 v1](data/olist-domain-sft-data-contract-v1.md)：当前领域训练的唯一规范，固定真实运行时 Prompt、Gold SQL、split、长度、holdout 和停止门；尚未构造数据。
-14. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：历史单指标 pilot 参考，不是当前 v1 训练数据或覆盖承诺。
-15. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
-16. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
-17. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
-18. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
-19. [CSpider 两 Epoch 实验与 Olist 迁移结果](experiments/cspider-bf16-lora-2epoch-v1.md)：查看 CSpider SQLite 对照，以及最终 Adapter 在受保护 Olist 工作区的独立迁移结果。
-20. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
+14. [Olist 领域 Candidate SQL SFT 覆盖矩阵 v1](data/olist-domain-sft-coverage-matrix-v1.md)：冻结可训练指标/维度/时间/Join、多指标 CTE 形状、配额和排除项；尚未构造数据。
+15. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：历史单指标 pilot 参考，不是当前 v1 训练数据或覆盖承诺。
+16. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
+17. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
+18. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
+19. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
+20. [CSpider 两 Epoch 实验与 Olist 迁移结果](experiments/cspider-bf16-lora-2epoch-v1.md)：查看 CSpider SQLite 对照，以及最终 Adapter 在受保护 Olist 工作区的独立迁移结果。
+21. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
 
 ## 看日志与停止任务
 
