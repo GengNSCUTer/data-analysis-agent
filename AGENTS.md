@@ -134,6 +134,13 @@
 
 ## 9. 最近一次同步记录
 
+### 2026-09-02：CSpider split-audit 契约适配
+
+- 目标：只让 Trainer 在加载 tokenizer/模型前可信地接受 CSpider 的官方 train/dev/test audit；不改变 dataset、collator、模型加载、优化器、训练参数、GPU 分配或运行时链路。
+- 实现：`validate_split_audit()` 改为显式协议分派。历史 Spider candidate audit 继续要求 `spider_db_id` 与 `v2_holdout_used=false`；CSpider 只接受 `official_cspider_train_dev_test`，并校验 `cspider_db_id`、官方角色、raw data 在 Git 外、三组数据库无交集、test 双重禁训标记、`final_evaluation_only` 物理路径、当前 train/validation 输出路径、SHA-256/行数和 SQLite explain 通过数。未知策略或证据缺失均 fail closed。
+- 验证：专用 `data-analysis-agent-qlora` 环境的 SFT 契约专项 `7 passed`，覆盖历史 Spider 兼容、CSpider 成功、test 禁训标记缺失、train/test schema overlap 和将 test 伪作 train 输出的拒绝；真实 CSpider `train.jsonl`/`validation.jsonl` 与 audit 成功验证，test 未加载。轻量环境静态 ruff、py_compile 和 diff check 通过。
+- 边界与下一步：audit 只能证明输入切分与来源证据，不能证明 token 长度、训练稳定性、SQL 业务语义或迁移效果。下一步经用户确认后，仅做 CSpider train/validation token 长度分布审计和训练长度合同，不读取或统计 test。
+
 ### 2026-09-01：CSpider 官方三切分 SFT 输入构造
 
 - 目标：仅从已核验的 CSpider full release 构造中文 Text-to-SQL 的官方 train/dev/test JSONL 与 split audit；不加载 tokenizer/模型、不启动 GPU、不训练、不评测、不接入生产运行时。

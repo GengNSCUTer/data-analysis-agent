@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("torch", reason="SFT dataset tests run in the isolated QLoRA environment")
@@ -79,4 +82,103 @@ def test_split_audit_must_match_current_split_files(tmp_path) -> None:
 
     train_path.write_text("tampered\n", encoding="utf-8")
     with pytest.raises(ValueError, match="train file does not match split audit"):
+        validate_split_audit(audit, train_path, validation_path)
+
+
+def cspider_audit(train_path: Path, validation_path: Path, test_path: Path) -> dict[str, object]:
+    return {
+        "source": {"dataset": {"id": "cspider", "release": "full-2024-03-01"}},
+        "policy": {
+            "split_strategy": "official_cspider_train_dev_test",
+            "primary_group": "cspider_db_id",
+            "test_storage": "final_evaluation_only",
+            "test_forbidden_for_training": True,
+        },
+        "splits": {
+            "train": {
+                "rows": 1,
+                "sha256": sha256_file(train_path),
+                "official_split": "train",
+                "role": "parameter_updates",
+            },
+            "validation": {
+                "rows": 1,
+                "sha256": sha256_file(validation_path),
+                "official_split": "dev",
+                "role": "validation_only",
+            },
+            "test": {
+                "rows": 1,
+                "sha256": sha256_file(test_path),
+                "official_split": "test",
+                "role": "final_evaluation_only",
+                "forbidden_for_training": True,
+            },
+        },
+        "checks": {
+            "status": "pass",
+            "raw_data_in_git": False,
+            "train_validation_database_overlap": [],
+            "train_test_database_overlap": [],
+            "validation_test_database_overlap": [],
+            "sqlite_readonly_explain": {
+                "train": {"pass": 1},
+                "dev": {"pass": 1},
+                "test": {"pass": 1},
+            },
+        },
+        "outputs": {
+            "train_jsonl": str(train_path),
+            "validation_jsonl": str(validation_path),
+            "test_jsonl": str(test_path),
+        },
+    }
+
+
+def test_cspider_audit_accepts_official_train_and_validation_only(tmp_path) -> None:
+    train_path = tmp_path / "train.jsonl"
+    validation_path = tmp_path / "validation.jsonl"
+    test_path = tmp_path / "final_evaluation_only" / "test.jsonl"
+    test_path.parent.mkdir()
+    for path, split_name in ((train_path, "train"), (validation_path, "validation"), (test_path, "test")):
+        path.write_text(json.dumps({"split": {"name": split_name}}) + "\n", encoding="utf-8")
+
+    validate_split_audit(cspider_audit(train_path, validation_path, test_path), train_path, validation_path)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda audit, _train, _validation, _test: audit["policy"].__setitem__(
+                "test_forbidden_for_training", False
+            ),
+            "does not forbid test training use",
+        ),
+        (
+            lambda audit, _train, _validation, _test: audit["checks"].__setitem__(
+                "train_test_database_overlap", ["leaked_db"]
+            ),
+            "non-empty train_test_database_overlap",
+        ),
+        (
+            lambda audit, _train, _validation, test: audit["outputs"].__setitem__(
+                "train_jsonl", str(test)
+            ),
+            "train_jsonl does not match the requested input",
+        ),
+    ],
+)
+def test_cspider_audit_rejects_missing_final_test_isolation(tmp_path, mutate, message) -> None:
+    train_path = tmp_path / "train.jsonl"
+    validation_path = tmp_path / "validation.jsonl"
+    test_path = tmp_path / "final_evaluation_only" / "test.jsonl"
+    test_path.parent.mkdir()
+    for path in (train_path, validation_path, test_path):
+        path.write_text("row\n", encoding="utf-8")
+    audit = cspider_audit(train_path, validation_path, test_path)
+
+    mutate(audit, train_path, validation_path, test_path)
+
+    with pytest.raises(ValueError, match=message):
         validate_split_audit(audit, train_path, validation_path)

@@ -131,17 +131,24 @@ def prompt_format_version(rows: list[dict[str, Any]]) -> str:
 def validate_split_audit(
     audit: dict[str, Any], train_path: Path, validation_path: Path
 ) -> None:
-    """Verify split artifacts still match the audit used to create them."""
-
+    """Verify known split-audit protocols against current training inputs."""
     checks = audit.get("checks")
     if not isinstance(checks, dict) or checks.get("status") != "pass":
         raise ValueError("split audit did not pass")
-    if checks.get("v2_holdout_used") is not False:
-        raise ValueError("split audit does not prove v2 holdout isolation")
 
     policy = audit.get("policy")
-    if not isinstance(policy, dict) or policy.get("primary_group") != "spider_db_id":
-        raise ValueError("split audit does not prove database-grouped validation")
+    if not isinstance(policy, dict):
+        raise ValueError("split audit has no policy")
+    if train_path.resolve() == validation_path.resolve():
+        raise ValueError("train and validation paths must be distinct")
+
+    split_strategy = policy.get("split_strategy")
+    if split_strategy is None:
+        validate_spider_candidate_audit(checks, policy)
+    elif split_strategy == "official_cspider_train_dev_test":
+        validate_cspider_official_audit(audit, checks, policy, train_path, validation_path)
+    else:
+        raise ValueError(f"unsupported split audit strategy: {split_strategy}")
 
     split_metadata = audit.get("splits")
     if not isinstance(split_metadata, dict):
@@ -166,6 +173,90 @@ def validate_split_audit(
                 f"{split_name} row count does not match split audit: "
                 f"expected {expected_rows}, got {actual_rows}"
             )
+
+
+def validate_spider_candidate_audit(checks: dict[str, Any], policy: dict[str, Any]) -> None:
+    """Keep the original Spider candidate audit contract explicit and stable."""
+    if checks.get("v2_holdout_used") is not False:
+        raise ValueError("split audit does not prove v2 holdout isolation")
+    if policy.get("primary_group") != "spider_db_id":
+        raise ValueError("split audit does not prove database-grouped validation")
+
+
+def validate_cspider_official_audit(
+    audit: dict[str, Any],
+    checks: dict[str, Any],
+    policy: dict[str, Any],
+    train_path: Path,
+    validation_path: Path,
+) -> None:
+    """Require the published CSpider train/dev/test isolation proof before SFT."""
+    if policy.get("primary_group") != "cspider_db_id":
+        raise ValueError("CSpider audit does not prove database-grouped validation")
+    if policy.get("test_storage") != "final_evaluation_only":
+        raise ValueError("CSpider audit does not isolate final evaluation storage")
+    if policy.get("test_forbidden_for_training") is not True:
+        raise ValueError("CSpider audit does not forbid test training use")
+    if checks.get("raw_data_in_git") is not False:
+        raise ValueError("CSpider audit does not prove raw data stays outside Git")
+    for check_name in (
+        "train_validation_database_overlap",
+        "train_test_database_overlap",
+        "validation_test_database_overlap",
+    ):
+        if checks.get(check_name) != []:
+            raise ValueError(f"CSpider audit has non-empty {check_name}")
+
+    source = audit.get("source")
+    dataset = source.get("dataset") if isinstance(source, dict) else None
+    if not isinstance(dataset, dict) or dataset.get("id") != "cspider":
+        raise ValueError("CSpider audit has no CSpider source identity")
+
+    splits = audit.get("splits")
+    if not isinstance(splits, dict):
+        raise ValueError("CSpider audit has no split metadata")
+    expected_roles = {
+        "train": ("train", "parameter_updates"),
+        "validation": ("dev", "validation_only"),
+        "test": ("test", "final_evaluation_only"),
+    }
+    for split_name, (official_name, role) in expected_roles.items():
+        metadata = splits.get(split_name)
+        if not isinstance(metadata, dict):
+            raise ValueError(f"CSpider audit has no {split_name} metadata")
+        if metadata.get("official_split") != official_name or metadata.get("role") != role:
+            raise ValueError(f"CSpider audit has invalid {split_name} role")
+    if splits["test"].get("forbidden_for_training") is not True:
+        raise ValueError("CSpider test metadata does not forbid training use")
+
+    outputs = audit.get("outputs")
+    if not isinstance(outputs, dict):
+        raise ValueError("CSpider audit has no output paths")
+    expected_outputs = {
+        "train_jsonl": train_path,
+        "validation_jsonl": validation_path,
+    }
+    for name, expected_path in expected_outputs.items():
+        recorded = outputs.get(name)
+        if not isinstance(recorded, str) or Path(recorded).resolve() != expected_path.resolve():
+            raise ValueError(f"CSpider audit {name} does not match the requested input")
+    test_output = outputs.get("test_jsonl")
+    if not isinstance(test_output, str):
+        raise ValueError("CSpider audit has no final test output path")
+    test_path = Path(test_output).resolve()
+    if test_path.parent.name != "final_evaluation_only":
+        raise ValueError("CSpider test output is not under final_evaluation_only")
+    if test_path in {train_path.resolve(), validation_path.resolve()}:
+        raise ValueError("CSpider final test cannot be a training input")
+
+    explain = checks.get("sqlite_readonly_explain")
+    if not isinstance(explain, dict):
+        raise ValueError("CSpider audit has no SQLite explain summary")
+    for source_split, audit_split in (("train", "train"), ("dev", "validation"), ("test", "test")):
+        summary = explain.get(source_split)
+        metadata = splits[audit_split]
+        if not isinstance(summary, dict) or summary.get("pass") != metadata.get("rows"):
+            raise ValueError(f"CSpider audit has inconsistent {source_split} execution evidence")
 
 
 def split_prompt_and_target(row: dict[str, Any]) -> tuple[str, str]:

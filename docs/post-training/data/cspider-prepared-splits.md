@@ -43,9 +43,11 @@ SFT 文本格式：
 | `test_data/test.json` | `test` | 最终一次性评测 | `final_evaluation_only/test.jsonl` |
 
 `test` 不得进入训练、few-shot、数据合成、模型选择或超参数决策。输出 audit 的
-`primary_group` 为真实的 `cspider_db_id`；现有 Spider-only Trainer 仍要求
-`spider_db_id`，因此在单独改造并审阅 Trainer 的输入审计前，不能把这份 CSpider
-资产直接交给它训练。
+`primary_group` 为真实的 `cspider_db_id`。Trainer 的输入审计已适配两种显式已知
+协议：历史 Spider 候选切分保持原有 `spider_db_id` 与 v2 holdout 校验；CSpider
+只接受 `official_cspider_train_dev_test`，并核验官方角色、三组零 schema 重叠、test
+元数据、`final_evaluation_only/` 路径、test 禁训标记、SQLite `EXPLAIN` 摘要及当前
+train/validation 文件的行数和 SHA-256。未知策略或任一证据缺失均拒绝。
 
 ## 产物与核验结果
 
@@ -87,7 +89,7 @@ exclusion reason。该文件 SHA-256 为
 - 真实构造完成；所有 11,840 条官方记录已被审计，`EXPLAIN` 结果为 train
   `8,656 pass + 3 error`、dev `1,034 pass`、test `2,147 pass`。
 
-尚未执行 token 长度统计、token 截断策略、CSpider Trainer 审计适配、模型训练、
-验证集模型选择或 test 评测。下一项工作只能在用户确认后单独进行，建议先审阅并
-改造 Trainer 的 split-audit 契约，使其能显式接受 `cspider_db_id` 和官方三切分，
-同时保持 test 路径不可作为训练输入。
+尚未执行 token 长度统计、token 截断策略、模型训练、验证集模型选择或 test 评测。
+下一项工作只能在用户确认后单独进行，建议先在加载 tokenizer 前对 CSpider 的全量
+train/validation 做 token 长度分布审计并定义“不截断、超长 fail closed”的训练长度
+合同；最终 test 继续不参与该过程。
