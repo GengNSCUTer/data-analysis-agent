@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generate deterministic Spider dev SQL with a Qwen base model or LoRA adapter.
+"""Generate deterministic Spider/CSpider validation SQL with a Qwen base or adapter.
 
 This offline research runner uses the same schema/question serialization as the
-SFT corpus, but never reads Spider dev gold SQL or database rows for inference.
+SFT corpus, but never reads benchmark gold SQL or database rows for inference.
 It emits only external candidate JSONL and a non-sensitive evidence summary.
 """
 
@@ -33,6 +33,10 @@ from data_analysis_agent.spider_sft_format import (
 
 
 ROOT = Path(__file__).resolve().parents[3]
+DATASET_CASE_PREFIXES = {
+    "spider_dev": "spider_dev",
+    "cspider_validation": "cspider_validation",
+}
 
 
 class GenerationInputError(ValueError):
@@ -52,8 +56,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-dir", type=Path, required=True)
     parser.add_argument("--adapter-dir", type=Path)
     parser.add_argument("--run-label", choices=("base", "adapter"), required=True)
+    parser.add_argument("--dataset", choices=tuple(DATASET_CASE_PREFIXES), default="spider_dev")
     parser.add_argument("--cases", type=Path, required=True)
     parser.add_argument("--tables-json", type=Path, required=True)
+    parser.add_argument(
+        "--cspider-acquisition-manifest",
+        type=Path,
+        help="Required for cspider_validation; verifies release identity, dev role and source hashes.",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--max-input-tokens", type=int, default=1536)
     parser.add_argument("--max-new-tokens", type=int, default=256)
@@ -115,6 +125,33 @@ def require_dev_cases_without_gold(cases: list[Mapping[str, Any]]) -> list[tuple
     return normalized
 
 
+def validate_cspider_validation_assets(
+    *, cases_path: Path, tables_path: Path, manifest_path: Path
+) -> None:
+    """Fail closed unless native CSpider dev assets match their acquisition record."""
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, Mapping):
+        raise GenerationInputError("CSpider acquisition manifest must be an object")
+    dataset = manifest.get("dataset")
+    if not isinstance(dataset, Mapping) or dataset.get("id") != "cspider":
+        raise GenerationInputError("acquisition manifest is not for CSpider")
+    splits = manifest.get("splits")
+    dev = splits.get("dev") if isinstance(splits, Mapping) else None
+    if not isinstance(dev, Mapping) or dev.get("role") != "validation_only":
+        raise GenerationInputError("CSpider manifest does not define dev as validation_only")
+    source_files = manifest.get("source_files")
+    if not isinstance(source_files, Mapping):
+        raise GenerationInputError("CSpider acquisition manifest lacks source file hashes")
+    for path, source_name in ((cases_path, "dev.json"), (tables_path, "tables.json")):
+        expected = source_files.get(source_name)
+        if not isinstance(expected, str) or sha256_file(path) != expected:
+            raise GenerationInputError(f"CSpider {source_name} does not match acquisition manifest")
+    native_cases = load_json_list(cases_path, "CSpider dev cases")
+    if dev.get("record_count") != len(native_cases):
+        raise GenerationInputError("CSpider dev count does not match acquisition manifest")
+
+
 def table_mapping(rows: list[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
     mapping: dict[str, Mapping[str, Any]] = {}
     for row in rows:
@@ -127,7 +164,7 @@ def table_mapping(rows: list[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]
     return mapping
 
 
-def load_existing_case_ids(path: Path) -> set[str]:
+def load_existing_case_ids(path: Path, case_id_prefix: str) -> set[str]:
     if not path.exists():
         return set()
     existing: set[str] = set()
@@ -141,7 +178,7 @@ def load_existing_case_ids(path: Path) -> set[str]:
         if not isinstance(row, Mapping):
             raise GenerationInputError(f"existing prediction JSONL line {line_number} is not an object")
         case_id = row.get("case_id")
-        if not isinstance(case_id, str) or not case_id.startswith("spider_dev:"):
+        if not isinstance(case_id, str) or not case_id.startswith(f"{case_id_prefix}:"):
             raise GenerationInputError("existing prediction JSONL has an invalid case ID")
         if row.get("candidate_index", 0) != 0:
             raise GenerationInputError("only candidate_index=0 is supported")
@@ -217,7 +254,19 @@ def main() -> int:
         raise GenerationInputError("--max-cases must be positive")
     output_dir = ensure_path_outside_repository(args.output_dir, ROOT)
     if args.cases.resolve().is_relative_to(ROOT) or args.tables_json.resolve().is_relative_to(ROOT):
-        raise GenerationInputError("Spider benchmark inputs must remain outside the repository")
+        raise GenerationInputError("benchmark inputs must remain outside the repository")
+    if args.dataset == "cspider_validation":
+        if args.cspider_acquisition_manifest is None:
+            raise GenerationInputError("cspider_validation requires --cspider-acquisition-manifest")
+        if args.cspider_acquisition_manifest.resolve().is_relative_to(ROOT):
+            raise GenerationInputError("CSpider acquisition manifest must remain outside the repository")
+        validate_cspider_validation_assets(
+            cases_path=args.cases,
+            tables_path=args.tables_json,
+            manifest_path=args.cspider_acquisition_manifest,
+        )
+    elif args.cspider_acquisition_manifest is not None:
+        raise GenerationInputError("--cspider-acquisition-manifest only applies to cspider_validation")
     if args.adapter_dir is not None:
         ensure_path_outside_repository(args.adapter_dir, ROOT)
     model_manifest_path = args.model_dir / "download_manifest.json"
@@ -233,13 +282,14 @@ def main() -> int:
     evidence_path = output_dir / "generation_evidence.json"
     if evidence_path.exists():
         raise GenerationInputError("generation evidence already exists; choose a new output directory")
-    existing_case_ids = load_existing_case_ids(predictions_path)
+    case_id_prefix = DATASET_CASE_PREFIXES[args.dataset]
+    existing_case_ids = load_existing_case_ids(predictions_path, case_id_prefix)
     if predictions_path.exists() and not args.resume:
         raise GenerationInputError("prediction output already exists; use --resume or choose a new directory")
 
-    cases = require_dev_cases_without_gold(load_json_list(args.cases, "Spider dev cases"))
-    tables = table_mapping(load_json_list(args.tables_json, "Spider tables metadata"))
-    expected_case_ids = [f"spider_dev:{index:05d}" for index in range(len(cases))]
+    cases = require_dev_cases_without_gold(load_json_list(args.cases, f"{args.dataset} cases"))
+    tables = table_mapping(load_json_list(args.tables_json, f"{args.dataset} tables metadata"))
+    expected_case_ids = [f"{case_id_prefix}:{index:05d}" for index in range(len(cases))]
     selected = [
         (case_id, database_id, question)
         for case_id, (database_id, question) in zip(expected_case_ids, cases, strict=True)
@@ -331,16 +381,23 @@ def main() -> int:
         "adapter": adapter_metadata,
         "comparison_contract": {
             "prompt_format_version": args.prompt_format_version,
-            "dataset": "spider_dev",
+            "dataset": args.dataset,
+            "case_id_prefix": case_id_prefix,
+            "max_input_tokens": args.max_input_tokens,
             "cases_sha256": sha256_file(args.cases),
             "tables_sha256": sha256_file(args.tables_json),
+            "cspider_acquisition_manifest_sha256": (
+                sha256_file(args.cspider_acquisition_manifest)
+                if args.cspider_acquisition_manifest is not None
+                else None
+            ),
             "decode": {
                 "do_sample": False,
                 "num_beams": 1,
                 "max_new_tokens": args.max_new_tokens,
                 "seed": args.seed,
             },
-            "spider_dev_gold_sql_read_for_generation": False,
+            "gold_sql_read_for_generation": False,
             "raw_questions_or_prompts_written": False,
             "raw_database_rows_read": False,
         },

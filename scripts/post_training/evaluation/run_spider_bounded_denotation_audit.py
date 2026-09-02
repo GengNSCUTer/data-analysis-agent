@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare paired Spider smoke candidates to gold denotations after generation.
+"""Compare paired Spider/CSpider candidates to gold denotations after generation.
 
 This is an external, bounded diagnostic. It is not the official Spider
 evaluator, does not produce an official metric, and never writes questions,
@@ -73,6 +73,7 @@ def paired_records(
     adapter_report: Mapping[str, Any],
     audit_cases: list[Mapping[str, Any]],
     database_root: Path,
+    case_id_prefix: str = "spider_dev",
 ) -> list[dict[str, str]]:
     base_records = base_report.get("records")
     adapter_records = adapter_report.get("records")
@@ -87,7 +88,7 @@ def paired_records(
     ):
         if not isinstance(base_record, Mapping) or not isinstance(adapter_record, Mapping):
             raise DenotationAuditError("diagnostic record must be an object")
-        expected_case_id = f"spider_dev:{index:05d}"
+        expected_case_id = f"{case_id_prefix}:{index:05d}"
         if base_record.get("case_id") != expected_case_id or adapter_record.get("case_id") != expected_case_id:
             raise DenotationAuditError("paired diagnostic case IDs do not match audit order")
         database_id = audit_case_row.get("db_id")
@@ -128,6 +129,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--audit-cases", type=Path, required=True)
     parser.add_argument("--database-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--dataset-id",
+        choices=("spider_dev", "cspider_validation"),
+        default="spider_dev",
+        help="Case-ID namespace; CSpider uses its official dev/validation split.",
+    )
     return parser.parse_args(argv)
 
 
@@ -149,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
             adapter_report=adapter_report,
             audit_cases=audit_cases,
             database_root=database_root,
+            case_id_prefix=args.dataset_id,
         )
     except (DenotationAuditError, ValueError, sqlite3.Error) as exc:
         print(f"Spider denotation audit error: {exc}", file=sys.stderr)
@@ -157,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         "report_version": "1",
         "scope": {
             "mode": "post_generation_bounded_denotation_audit",
+            "dataset": args.dataset_id,
             "case_limit": len(records),
             "gold_sql_read_only_after_generation": True,
             "gold_sql_used_for_training_or_prompt": False,

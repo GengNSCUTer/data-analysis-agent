@@ -1,6 +1,6 @@
 manifest_id: cspider_bf16_lora_2epoch_v1
 manifest_version: "1"
-status: frozen_not_started
+status: training_completed_evaluation_entry_implemented_not_run
 purpose: >-
   Train one CSpider bf16 LoRA adapter for exactly two complete passes over the
   length-bounded official train split, then compare it with the matching frozen
@@ -63,7 +63,13 @@ training:
     physical_nvidia_smi_device: 3
     expected_uuid: GPU-10863af0-8588-7625-5609-640ba794f64b
 matching_base_adapter_generation_contract:
-  status: implementation_required_before_generation
+  status: implemented_not_run
+  canonical_implementations:
+    generator: scripts/post_training/inference/generate_post_training_text_to_sql.py
+    matching_verifier: scripts/post_training/evaluation/verify_cspider_matching_generation.py
+    sqlite_diagnostics: scripts/post_training/evaluation/run_sqlite_benchmark.py
+    denotation_audit: scripts/post_training/evaluation/run_spider_bounded_denotation_audit.py
+    sequential_launcher: scripts/post_training/launchers/start_post_training_cspider_base_adapter_evaluation_screen.sh
   dataset: official_cspider_validation_only
   case_order: source_order_frozen_and_identical
   model_facing_inputs:
@@ -83,6 +89,16 @@ matching_base_adapter_generation_contract:
     - max_input_and_new_token_limits
     - sqlite_diagnostic_policy_and_timeout
   unique_variable: adapter_loaded
+  verifier:
+    required_before_sqlite_diagnostics: true
+    require_complete_fresh_coverage: 1034
+    reject_nonmatching_case_order_or_evidence: true
+    report_must_exclude:
+      - questions
+      - candidate_sql
+      - gold_sql
+      - database_identifiers
+      - result_rows
   decode:
     do_sample: false
     num_beams: 1

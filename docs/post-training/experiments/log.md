@@ -10,6 +10,20 @@
 - 永久隔离：项目的 60 条 v2 golden 不进入训练、偏好数据、示例或改写。
 - 运行时隔离：生产 Vanna/FastAPI/PostgreSQL 代码不被离线训练改写；模型候选仍需通过服务器安全和结果合同。
 
+## 最近完成：CSpider matching Base/Adapter 评测入口
+
+2026-09-02，CSpider 成对生成与评测的工程入口已实现并完成本地回归，尚未启动完整 Base/Adapter
+生成。生成器新增 `cspider_validation` namespace，运行前校验仓库外 acquisition manifest 的
+`dev=validation_only` 角色、1,034 行数和 `dev.json`/`tables.json` 哈希；模型生成阶段只读取相同
+顺序的 schema 和中文问题，禁止读取 gold SQL、SQLite 行、final test 或 Olist/PostgreSQL 上下文。
+
+新的 matching verifier 在 SQLite 前比对 Base/Adapter evidence 与 prediction case IDs：完整 1,034
+条 source order、模型 revision、bf16、prompt、token 上限、greedy decode 和数据 hash 必须相同，唯一
+允许差异是 adapter 从 disabled 到 enabled。安全报告不写问题、候选/Gold SQL、库标识或结果行；CSpider
+SQLite、paired analysis 与生成后 denotation 均只能在 verifier 成功后执行。专用 sequential launcher
+不调用 Spider Test Suite，也不引用 CSpider final test。15 项相关回归、ruff、CLI、shell 语法和 diff
+check 通过；这些只是入口正确性证据，不是 SQL 语义、可执行性或模型质量结果。
+
 ## 最近完成：CSpider bf16 LoRA 两 epoch 训练与 reload
 
 2026-09-02，CSpider 正式长度物化 train/validation `8,574/1,034` 在 logical CUDA `1` ->

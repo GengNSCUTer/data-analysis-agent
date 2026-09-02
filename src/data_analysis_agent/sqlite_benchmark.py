@@ -455,6 +455,17 @@ def normalize_spider_dev_cases(items: Iterable[Mapping[str, Any]]) -> list[Bench
     return _normalize_native_sqlite_cases(items, dataset_id="spider_dev")
 
 
+def normalize_cspider_validation_cases(items: Iterable[Mapping[str, Any]]) -> list[BenchmarkCase]:
+    """Build CSpider validation locators without reading questions or gold SQL.
+
+    CSpider's native ``dev.json`` also carries ``query`` gold labels. The SQLite
+    diagnostic needs only source order and ``db_id``; retaining nothing else
+    prevents its reports from becoming another copy of the benchmark labels.
+    """
+
+    return _normalize_native_sqlite_cases(items, dataset_id="cspider_validation")
+
+
 def run_sqlite_benchmark(
     *,
     cases: Iterable[BenchmarkCase],

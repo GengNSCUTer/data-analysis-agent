@@ -22,6 +22,7 @@ from data_analysis_agent.sqlite_benchmark import (
     SqliteBenchmarkSettings,
     load_predictions,
     normalize_bird_dev_cases,
+    normalize_cspider_validation_cases,
     normalize_spider_dev_cases,
     run_sqlite_benchmark,
 )
@@ -30,6 +31,7 @@ from data_analysis_agent.sqlite_benchmark import (
 ROOT = Path(__file__).resolve().parents[3]
 CASE_NORMALIZERS: dict[str, Callable[[Iterable[Mapping[str, Any]]], list]] = {
     "bird_dev": normalize_bird_dev_cases,
+    "cspider_validation": normalize_cspider_validation_cases,
     "spider_dev": normalize_spider_dev_cases,
 }
 
@@ -90,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--cases",
         type=Path,
         required=True,
-        help="Native BIRD/Spider dev.json path; it is read but never copied to reports.",
+        help="Native benchmark validation JSON path; it is read but never copied to reports.",
     )
     parser.add_argument(
         "--database-root",

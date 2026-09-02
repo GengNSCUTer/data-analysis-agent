@@ -9,8 +9,8 @@ production Vanna/PostgreSQL runtime in `src/data_analysis_agent/`.
 | `data/` | Build train-only Spider candidates and schema-disjoint splits. | `build_spider_sft_candidates.py`, `split_post_training_candidates.py` |
 | `training/` | Freeze a model, run SFT, validate an Adapter, verify artifacts. | `run_post_training_sft_smoke.py` |
 | `inference/` | Generate Base or Adapter SQL candidates without benchmark gold SQL. | `generate_post_training_text_to_sql.py` |
-| `evaluation/` | Run SQLite, Test Suite, denotation and protected Olist transfer diagnostics. | `run_sqlite_benchmark.py`, `run_olist_candidate_sql_evaluation.py` |
-| `launchers/` | Explicit `screen` launchers for approved long-running jobs. | `start_post_training_spider_sft_v2_screen.sh` |
+| `evaluation/` | Verify matching evidence, then run SQLite, Test Suite, denotation and protected Olist transfer diagnostics. | `verify_cspider_matching_generation.py`, `run_sqlite_benchmark.py` |
+| `launchers/` | Explicit `screen` launchers for approved long-running jobs. | `start_post_training_cspider_base_adapter_evaluation_screen.sh` |
 
 The root-level names in `scripts/` are compatibility entry points. New code,
 new documentation and new imports should use this capability-based layout. New

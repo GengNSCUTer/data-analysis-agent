@@ -51,6 +51,15 @@
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
 | R5 受控接入 | 将候选模型作为运行时可选生成器 | 未开始 | 12 条 Olist 业务迁移子门未通过（ResultContract valid `2 -> 0`）；先构建领域对齐训练资产，安全、权限、结果与图表合同仍在服务器端执行。 |
 
+## CSpider 当前检查点
+
+CSpider 官方 train/validation 的两 epoch bf16 LoRA 已完成，最终 adapter 已 fresh reload；这只闭合了训练
+与 artifact 链路。对应的 CSpider Base/Adapter 成对入口已实现并通过 15 项本地回归：生成阶段受
+acquisition manifest、source hash、validation-only、gold SQL 不读取和 final-test 不读取约束；完成两侧
+生成后，matching verifier 才允许 SQLite、paired analysis 和 bounded denotation。当前没有运行 1,034
+条完整生成，因此没有 CSpider SQL 质量、执行率或迁移结论。合同见
+[`data/cspider-sft-2epoch-evaluation-contract-v1.md`](data/cspider-sft-2epoch-evaluation-contract-v1.md)。
+
 ## 已完成实验，按目的理解
 
 | 实验 | 为了回答什么 | 结果 | 正确解读 |
