@@ -10,6 +10,20 @@
 - 永久隔离：项目的 60 条 v2 golden 不进入训练、偏好数据、示例或改写。
 - 运行时隔离：生产 Vanna/FastAPI/PostgreSQL 代码不被离线训练改写；模型候选仍需通过服务器安全和结果合同。
 
+## 当前运行：CSpider matching Base/Adapter 完整生成
+
+2026-09-02，用户明确批准后以两个独立 `screen` 启动 CSpider validation 的完整 Base/Adapter
+候选生成。Base 会话 `daa-cspider-base-eval-v1` 使用 logical CUDA `1` -> physical GPU `3` 的 RTX
+4090；Adapter 会话 `daa-cspider-adapter-eval-v1` 使用 logical CUDA `2` -> physical GPU `0` 的空闲
+RTX 3090。启动检查确认两个 UUID guard、外部 adapter、模型、CSpider acquisition manifest 与输入
+资产存在；随后 GPU 显存/利用率和 prediction JSONL 递增均正常。final test 未传给任一进程。
+
+两侧模型输入与生成合同相同：CSpider validation schema/question、基座 revision、bf16、prompt v2、
+greedy decode、seed 和 token 上限；唯一模型变量仍为 adapter 是否加载。不同 GPU 只影响墙钟时间，
+不进入 SQL 质量比较或延迟结论。当前仅为生成进行中状态，尚无 SQLite、denotation、可执行性、语义
+正确性、Base/Adapter 优劣或业务迁移结论。两侧完整输出冻结后必须先通过 matching verifier，再单独
+启动 SQLite diagnostics、paired analysis 和 bounded denotation。
+
 ## 最近完成：CSpider matching Base/Adapter 评测入口
 
 2026-09-02，CSpider 成对生成与评测的工程入口已实现并完成本地回归，尚未启动完整 Base/Adapter
