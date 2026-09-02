@@ -134,6 +134,13 @@
 
 ## 9. 最近一次同步记录
 
+### 2026-09-02：CSpider token 长度审计与训练长度合同
+
+- 目标：只审计 CSpider 官方 `train`/`validation` 的实际 SFT token 长度，并冻结不可静默截断的训练长度合同；不读取 final test、不加载权重、不用 GPU、不训练、不评测或物化过滤数据。
+- 实现：新增 `audit_cspider_sft_token_lengths.py`，精确复用 `split_prompt_and_target()` 与 Dataset 的 `prompt + SQL + EOS`、`add_special_tokens=false` 布局，使用本地冻结 tokenizer（指纹只覆盖 tokenizer 资产，不读取模型权重），写出仅含聚合统计和 hash 的外部报告。新增 `cspider-token-length-v1`：`max_seq_length=1536`、padding 排除、超长 fail closed；未来物化器必须独立记录源/tokenizer hash、排除计数与 stable ID，并保持官方角色和 test 隔离。
+- 验证：真实 train/validation 审计完成，1,536 下保留 train `8,574/8,656`（99.05%）与全部 validation `1,034/1,034`；`2048`/`3072` 不增加可入选行。专项 audit、Trainer split-audit 与 CSpider 构造测试共 `12 passed`，ruff、py_compile、diff check 通过。
+- 边界与下一步：82 条 train 超长记录仍留在未改写的官方源中，尚未生成派生训练输入。只有用户明确确认后，才能单独实现物化器与 exclusion manifest；test 继续不得读取或用于长度决策。
+
 ### 2026-09-02：CSpider split-audit 契约适配
 
 - 目标：只让 Trainer 在加载 tokenizer/模型前可信地接受 CSpider 的官方 train/dev/test audit；不改变 dataset、collator、模型加载、优化器、训练参数、GPU 分配或运行时链路。

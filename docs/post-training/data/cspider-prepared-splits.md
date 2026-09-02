@@ -89,7 +89,9 @@ exclusion reason。该文件 SHA-256 为
 - 真实构造完成；所有 11,840 条官方记录已被审计，`EXPLAIN` 结果为 train
   `8,656 pass + 3 error`、dev `1,034 pass`、test `2,147 pass`。
 
-尚未执行 token 长度统计、token 截断策略、模型训练、验证集模型选择或 test 评测。
-下一项工作只能在用户确认后单独进行，建议先在加载 tokenizer 前对 CSpider 的全量
-train/validation 做 token 长度分布审计并定义“不截断、超长 fail closed”的训练长度
-合同；最终 test 继续不参与该过程。
+已完成 train/validation 的 token 长度审计并冻结“不截断、超长 fail closed”的
+[`CSpider SFT 训练长度合同 v1`](cspider-token-length-contract.md)。该审计只读取
+train/validation，未读取 test；`max_seq_length=1536` 下 train 有 8,574/8,656 条可入选、
+validation 有 1,034/1,034 条可入选。官方源 JSONL 尚未被改写或过滤，模型训练、验证集模型
+选择和 test 评测均未执行。下一项工作必须经用户单独确认，且只能是按该合同物化派生的
+train/validation 输入与 exclusion manifest，test 继续不参与该过程。

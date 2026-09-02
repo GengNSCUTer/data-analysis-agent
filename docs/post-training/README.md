@@ -92,12 +92,13 @@
 6. [数据协议](data/protocol.md)：理解训练数据、脱敏、切分与永久 holdout。
 7. [CSpider 获取与预检](data/cspider-acquisition.md)：查看中文 CSpider full release 的来源、三切分、SQLite 资源和训练隔离边界。
 8. [CSpider 官方三切分 SFT 输入](data/cspider-prepared-splits.md)：查看 JSONL 构造、哈希、三条来源质量排除项和 Trainer 接入前提。
-9. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：审查只含单指标、安全维度和单轮显式时间的领域 pilot 范围；尚未构造数据。
-10. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
-11. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
-12. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
-13. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
-14. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
+9. [CSpider SFT 训练长度合同 v1](data/cspider-token-length-contract.md)：查看与真实 Dataset 一致的 token 计数、1,536 上限、超长样本门和 test 隔离。
+10. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：审查只含单指标、安全维度和单轮显式时间的领域 pilot 范围；尚未构造数据。
+11. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
+12. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
+13. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
+14. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
+15. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
 
 ## 看日志与停止任务
 
