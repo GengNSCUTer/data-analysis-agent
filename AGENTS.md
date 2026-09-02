@@ -143,6 +143,12 @@
 - 当前状态：用户已批准并在 `daa-cspider-bf16-lora-full2epoch-v1` 启动训练；启动后已观察到真实 step `42/4,288`、约 16.3 GiB 显存与 83% GPU 利用率，未见 UUID、合同或 OOM 失败。运行中不改变超参、不读取 test、不启动评测。
 - 当前空白：现有自由生成器是 Spider 专用，CSpider 成对生成/评测入口尚需独立适配和回归，不能把历史 Spider 的结果冒充为 CSpider。训练完成后先核验 artifact，再将 CSpider 评测入口作为下一件独立任务。
 
+### 2026-09-02：CSpider 两 epoch 训练完成与 fresh reload
+
+- 已验证：训练正常退出（`global_step=4,288`、`epoch=2.0`、`exit_code=0`），完成 8 次独立 full validation，最终 adapter、checkpoint `3752/4288`、训练 evidence 与日志均在仓库外保存。最终 adapter 以同一 bf16 基座在新进程 fresh reload 成功，PEFT/UUID guard 通过，validation sample 得到 finite loss。
+- 指标事实：最终 aggregate train loss `0.117384`、final validation loss `0.318318`，peak allocated/reserved 约 `15.35/23.16 GiB`，无 OOM；最低 validation loss 为 step `1,072` 的 `0.278697`，final 高 `14.22%`。loss 只能反映当前 SFT 目标和 validation 拟合，不能替代 SQL executable/denotation、业务语义、泛化或生产安全结论。
+- 下一项：单独适配、审阅和测试 CSpider matching Base/Adapter 生成/SQLite/生成后 denotation 入口。不得提前使用 final test，也不因为 final loss 非最优而事后替换合同的最终 adapter；是否将中期 checkpoint 纳入预注册对照，应作为另一个明确实验而非事后挑选。
+
 ### 2026-09-02：CSpider bf16 LoRA batch-4 冒烟
 
 - 目标：只验证正式长度物化输入在单张 RTX 4090 上的未量化 bf16 LoRA、真实 batch=4、普通 AdamW 工程链路和显存边界；不进行完整训练或 test 评测。

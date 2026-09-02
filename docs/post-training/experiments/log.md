@@ -10,6 +10,20 @@
 - 永久隔离：项目的 60 条 v2 golden 不进入训练、偏好数据、示例或改写。
 - 运行时隔离：生产 Vanna/FastAPI/PostgreSQL 代码不被离线训练改写；模型候选仍需通过服务器安全和结果合同。
 
+## 最近完成：CSpider bf16 LoRA 两 epoch 训练与 reload
+
+2026-09-02，CSpider 正式长度物化 train/validation `8,574/1,034` 在 logical CUDA `1` ->
+physical GPU `3` 的 RTX 4090 上完成 bf16 LoRA 两 epoch。实际 `4,288` optimizer steps、
+batch `4`、accumulation `1`、普通 AdamW `1e-4`、weight decay `0.01`；final test 未传给
+runner。训练正常退出，峰值 allocated/reserved 约 `15.35/23.16 GiB`，无 OOM；末尾 full
+validation loss 为 `0.318318`。最终 LoRA adapter 已在独立进程 fresh reload 并得到 finite
+validation forward loss `0.018230`。
+
+validation loss 最低值为 step `1,072` 的 `0.278697`，末尾比它高 `14.22%`，所以不能把完整
+两 epoch 自动叙述为更优模型，也不能从 loss 推导 SQL 语义能力。CSpider 成对 Base/Adapter
+生成、SQLite 诊断和生成后 denotation 尚未运行；历史 Spider 结论不能代入。详见
+[`cspider-bf16-lora-2epoch-v1.md`](cspider-bf16-lora-2epoch-v1.md)。
+
 ## 最近完成：Olist 候选 SQL 英文 prompt 隔离对照
 
 2026-09-01，以当前代码、当前 PostgreSQL 工作区和同一物理 RTX 4090 刷新 12 条受保护 Olist case 的中文 Base/Adapter，再仅将候选生成器看到的自然语言问题替换为外部、哈希固定的英文 overlay。中文原问题继续独占 Catalog、QuestionRouter、QueryPlan、ResultContract 和审计上下文，因此实验只测 candidate generator 的 prompt-language sensitivity，不把中文 workspace 的英文语义层缺口误归因给 LoRA。
@@ -75,6 +89,7 @@ Spider SFT v2 训练、前缀 Base/Adapter smoke、独立 164-case 复验和完�
 | `analysis-v1` | 确认回退模式 | 上述 pair 的聚合诊断与受限人工 changed-case 审核 | 253 条从 executed 变失败，88 条反向恢复；20 个库中 17 回退、3 不变；抽检的 4 条表面恢复均不满足语义 | 不能用执行 recovery 代替正确率；下一步先控制变量。 |
 | `qlora_coverage26_v1` | 验证约一轮训练覆盖后的 QLoRA 工程路径 | 4-bit NF4，26 steps，effective batch 4，LoRA r16/alpha32/dropout0.05 | train/eval loss 0.427482/0.290193；peak allocated 4.35 GiB；fresh reload finite loss 0.249638 | 训练和 reload 通过；尚未与对应 4-bit base 做全量质量对照。 |
 | `bf16_lora_coverage26_v1` | 在同配置下验证直接 bf16 LoRA 是否可行 | bf16 base，26 steps，其余与 QLoRA 相同 | train/eval loss 0.426504/0.309192；peak allocated 5.19 GiB；fresh reload finite loss 0.245578 | 1.5B 可在 24GB 卡做 bf16 LoRA；尚未与对应 bf16 base 做全量质量对照。 |
+| `cspider_bf16_lora_length1536_full2epoch_v1` | 验证正式中文 CSpider 的 bf16 LoRA 两 epoch 训练、显存与 artifact 链路 | 8,574/1,034、1536 上限、2 epoch/4,288 step、batch 4、AdamW、weight decay 0.01 | 完成、末尾 validation loss 0.318318、peak allocated/reserved 15.35/23.16 GiB、fresh reload finite；最低 validation loss 0.278697 出现在 step 1,072 | 工程和 artifact 通过；末尾非 validation-loss 最优，未执行 CSpider SQL 质量评测。 |
 | `cspider_bf16_lora_batch4_smoke_v1` | 验证正式 CSpider 长度物化输入能否使用真实 batch=4、未量化 bf16 LoRA 和普通 AdamW 跑通 | 8,574/1,034 CSpider train/validation，1536 上限，1 step，bf16 LoRA，batch=4，accumulation=1，AdamW `weight_decay=0.01` | 1 step 完成、全 validation finite loss、peak allocated 10.76 GiB、adapter fresh reload finite；无 OOM | 只闭合 batch-4 工程/显存/产物链路；不构成 SQL 质量或完整训练结论。详见 `cspider-bf16-batch4-smoke-v1.md`。 |
 | `spider_sft_v2_independent_smoke164` | 检验 v2 SFT 的独立非回退资格 | 164 条/17 未观察 schema，bf16 Base/Adapter、v2 prompt、greedy decode | denotation `97 -> 122`，SQLite `153 -> 155`，`no_such_column` `9 -> 8` | 通过预冻结 bounded smoke 门，进入完整 1,034-case 对照；不是官方分数。 |
 
