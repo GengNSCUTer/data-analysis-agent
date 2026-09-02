@@ -22,7 +22,7 @@
 | 问题 | 结论 |
 | --- | --- |
 | 项目主体是什么？ | 一个可嵌入业务网页的可信数据分析 Agent：自然语言问题经过路由、Catalog、QueryPlan、SQL AST Policy、只读 PostgreSQL、ResultContract/ResultValidator 后，返回表格、图表和证据。 |
-| 后训练在解决什么？ | 提升离线模型从“问题 + 数据库 schema”生成 SQL 候选时的 schema linking、SQL 结构和格式稳定性。它不负责权限和业务口径的最终裁决。 |
+| 后训练在解决什么？ | 提升离线模型从“受控问题 + 运行时提供的业务语义/Schema/结果合同”生成 SQL 候选时的 schema linking、指标编译、SQL 结构和格式稳定性。它不负责权限和业务口径的最终裁决。 |
 | 为什么改用 Spider？ | Olist 是产品演示案例；Spider 是公开、结构化的跨 schema Text-to-SQL 研究数据，适合做可复现的候选生成和执行诊断。两者不混为一个数据集或一个指标。 |
 | 现在处于哪一阶段？ | 已完成 Spider 3k 级 bf16 LoRA 的 1,034-case 离线对照，并完成 12 条 Olist PostgreSQL holdout 的独立业务迁移评测。Spider 证据正向，但 Olist 迁移为 ResultContract valid `2 -> 0`，因此 production integration 继续延后。 |
 | 当前最重要的结论？ | 跨 schema/SQLite 的离线提升不自动迁移到中文、Catalog/QueryPlan 驱动的 PostgreSQL 业务工作区。下一实验应优先增加受控、领域对齐的 Olist PostgreSQL 训练/验证数据，不是盲目扩大通用 Spider 样本；不能写成业务准确率或生产可用性。 |
@@ -49,7 +49,7 @@
 | R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 已完成但失败 | 官方 release 上 matching Base/26-step QLoRA Adapter 均 1,034/1,034；SQLite executed `829 -> 671`，Test Suite internal all `0.433 -> 0.376`，限定列错误 `15 -> 296`。详见官方专属分析。 |
 | R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 本轮完成 | 3,600 条 official train-only v2 corpus、2 epoch bf16 LoRA、164-case/17-schema 独立 smoke 和完整 1,034-case 对照均完成；SQLite `950 -> 961`、Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`。 |
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
-| R5 受控接入 | 将候选模型作为运行时可选生成器 | 未开始 | Spider 与 CSpider 两个 Adapter 的 12 条 Olist 业务迁移子门均未通过；最新 CSpider Adapter 的 ResultContract valid 为 Base `2`、Adapter `0`。先构建领域对齐训练资产，安全、权限、结果与图表合同仍在服务器端执行。 |
+| R5 领域数据与受控接入 | 构建运行时 Prompt 对齐的 Olist 领域资产，并在通过质量门后再讨论候选接入 | 数据合同已冻结，尚未物化 | Spider 与 CSpider 两个 Adapter 的 12 条 Olist 业务迁移子门均未通过；最新 CSpider Adapter 的 ResultContract valid 为 Base `2`、Adapter `0`。`olist-domain-sft-data-contract-v1` 已固定真实 Prompt、Gold、语义族切分、长度和 holdout 门；下一项只盘点 v1 coverage matrix。安全、权限、结果与图表合同仍在服务器端执行。 |
 
 ## CSpider 当前检查点
 
@@ -116,13 +116,14 @@ PostgreSQL executed / ResultContract valid 为 `2/1/0`，Base 为 `6/4/2`；不�
 10. [CSpider 正式长度物化结果](data/cspider-token-length-contract.md#正式物化结果)：查看 8,574 train、1,034 validation、2,147 final test 及 82 条外部排除清单。
 11. [CSpider 训练入口配置审阅](data/cspider-training-entry-review-v1.md)：核对 bf16 LoRA、普通 AdamW、weight decay、batch/gradient accumulation 与 test 隔离。
 12. [CSpider 两 Epoch 训练与成对评测合同](data/cspider-sft-2epoch-evaluation-contract-v1.md)：查看 4,288-step 训练、GPU UUID guard、Base/Adapter 唯一变量与生成后评测边界；当前只冻结，尚未启动。
-12. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：审查只含单指标、安全维度和单轮显式时间的领域 pilot 范围；尚未构造数据。
-13. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
-14. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
-15. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
-16. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
-17. [CSpider 两 Epoch 实验与 Olist 迁移结果](experiments/cspider-bf16-lora-2epoch-v1.md)：查看 CSpider SQLite 对照，以及最终 Adapter 在受保护 Olist 工作区的独立迁移结果。
-18. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
+13. [Olist 领域 Candidate SQL SFT 数据合同 v1](data/olist-domain-sft-data-contract-v1.md)：当前领域训练的唯一规范，固定真实运行时 Prompt、Gold SQL、split、长度、holdout 和停止门；尚未构造数据。
+14. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：历史单指标 pilot 参考，不是当前 v1 训练数据或覆盖承诺。
+15. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
+16. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
+17. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
+18. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
+19. [CSpider 两 Epoch 实验与 Olist 迁移结果](experiments/cspider-bf16-lora-2epoch-v1.md)：查看 CSpider SQLite 对照，以及最终 Adapter 在受保护 Olist 工作区的独立迁移结果。
+20. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
 
 ## 看日志与停止任务
 

@@ -120,6 +120,13 @@
 - 后训练脚本的规范实现位置是 `scripts/post_training/{data,training,inference,evaluation,launchers}/`；`scripts/` 下同名文件仅保留为兼容入口，新增代码和文档使用规范路径。
 - 每次新实验都必须新增或更新：假设、matching Base、唯一变量、数据/模型 hash、质量门、失败停止条件和面试表达。
 
+### Olist 领域 SFT 数据边界
+
+- 当前 Olist 领域 SQL SFT 的唯一数据合同是 `docs/post-training/data/olist-domain-sft-data-contract-v1.md`。训练输入必须是当前 `olist-candidate-sql-v1` 的真实运行时 Prompt，目标仅为 canonical PostgreSQL SQL 加 EOS；不得退化为 CSpider 的 SQLite Schema-only 模板。
+- Olist 的 `gmv`、`paid_order_count`、`average_delivery_days`、`positive_review_rate` 是业务指标 ID 与结果 alias，不是物理字段。领域 Gold 必须从 Catalog 的真实表/列、粒度、默认过滤和 Join 路径确定性构造，并通过 Policy、reader role、ResultContract 与人工语义审查。
+- 领域数据必须按 `family_id` / `sql_program_id` 整组切分；日期、阈值、措辞、别名或格式的表面改写仍属同族。`post_training_holdout_v1.yaml` 的 60 条 protected case（包括当前迁移评测边界）严禁被读取为构造输入、训练、验证、in-domain test、few-shot 或合成种子。
+- 用户要求后续每轮只处理一个具体事项：先完成覆盖矩阵，再设计 renderer，再审计 split，之后才做长度审计、小批审阅、正式物化、训练或评测。不得在任一项中顺带启动下一项。
+
 ### 后训练代码审阅门
 
 - 讲解概念、阅读 Markdown 或看到测试通过，均不等于用户已经理解或审阅了实现；在进入新的数据构造、训练、完整评测、运行时接入或后训练算法前，必须先共同阅读该阶段的规范代码、配套测试和输入/输出契约。
