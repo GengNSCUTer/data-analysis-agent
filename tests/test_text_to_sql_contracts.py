@@ -18,7 +18,7 @@ def test_catalog_trace_and_budget_evidence_are_redacted_contracts() -> None:
 
     assert question not in repr(selection.trace.as_dict())
     assert question not in repr(usage.as_dict())
-    assert usage.as_dict()["catalog_trace"]["catalog_version"] == "olist-catalog-v1"
+    assert usage.as_dict()["catalog_trace"]["catalog_version"] == "olist-catalog-v2"
 
 
 def test_router_states_are_stable_and_explicit() -> None:
@@ -44,9 +44,9 @@ def test_router_states_are_stable_and_explicit() -> None:
 def test_system_prompt_exposes_the_version_contract() -> None:
     for value in (
         "prompt_version=trusted-olist-prompt-v2",
-        "catalog_version=olist-catalog-v1",
+        "catalog_version=olist-catalog-v2",
         "dataset_version=olist-kaggle-v2-2026-08-03",
-        "metric_version=0.1-draft",
+        "metric_version=0.2-frozen",
         "policy_version=sql-policy-v1",
     ):
         assert value in SYSTEM_PROMPT

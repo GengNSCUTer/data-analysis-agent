@@ -122,8 +122,8 @@
 
 ### Olist 领域 SFT 数据边界
 
-- 当前 Olist 领域 SQL SFT 的唯一数据合同是 `docs/post-training/data/olist-domain-sft-data-contract-v1.md`。训练输入必须是当前 `olist-candidate-sql-v1` 的真实运行时 Prompt，目标仅为 canonical PostgreSQL SQL 加 EOS；不得退化为 CSpider 的 SQLite Schema-only 模板。
-- Olist 的 `gmv`、`paid_order_count`、`average_delivery_days`、`positive_review_rate` 是业务指标 ID 与结果 alias，不是物理字段。领域 Gold 必须从 Catalog 的真实表/列、粒度、默认过滤和 Join 路径确定性构造，并通过 Policy、reader role、ResultContract 与人工语义审查。
+- Olist 领域 SQL SFT 的接口合同仍是 `docs/post-training/data/olist-domain-sft-data-contract-v1.md`；当前指标快照以 `docs/metric-contracts/olist-metrics-v2.md` 和 `olist-catalog-v2` / `0.2-frozen` 为准。训练输入必须是当前 `olist-candidate-sql-v1` 的真实运行时 Prompt，目标仅为 canonical PostgreSQL SQL 加 EOS；不得退化为 CSpider 的 SQLite Schema-only 模板。
+- 十个 Olist 业务指标都是业务 ID 与结果 alias，不是物理字段。领域 Gold 必须从 Catalog 的真实表/列、粒度、默认过滤和 Join 路径确定性构造，并通过 Policy、reader role、ResultContract 与人工语义审查。
 - 领域数据必须按 `family_id` / `sql_program_id` 整组切分；日期、阈值、措辞、别名或格式的表面改写仍属同族。`post_training_holdout_v1.yaml` 的 60 条 protected case（包括当前迁移评测边界）严禁被读取为构造输入、训练、验证、in-domain test、few-shot 或合成种子。
 - 用户要求后续每轮只处理一个具体事项：先完成覆盖矩阵，再设计 renderer，再审计 split，之后才做长度审计、小批审阅、正式物化、训练或评测。不得在任一项中顺带启动下一项。
 
@@ -137,7 +137,7 @@
 
 ### 当前暂停点
 
-2026-08-27 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并已冻结 Olist/PostgreSQL 领域数据合同和 v1 coverage matrix；规范入口为 `docs/post-training/data/olist-domain-sft-data-contract-v1.md` 与 `docs/post-training/data/olist-domain-sft-coverage-matrix-v1.md`。用户已授权的下一项仅是设计并审阅 `QuerySpec` schema 与 deterministic PostgreSQL Gold renderer 的职责边界；在该设计和后续代码/测试审阅、用户确认完成前，仍不得创建数据模板、coverage seed、训练数据或启动训练。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
+2026-09-02 起暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并已冻结 Olist/PostgreSQL 领域数据接口合同、v1 coverage 历史快照和 10 指标 v2 Catalog 合同；规范入口为 `docs/post-training/data/olist-domain-sft-data-contract-v1.md`、`docs/metric-contracts/olist-metrics-v2.md` 与 `data/catalog/olist_catalog.yaml`。下一项仅可修订领域 SFT coverage matrix，使其基于这 10 个指标重新列出安全范围、归属澄清和排除项；在该矩阵和后续代码/测试审阅、用户确认完成前，仍不得设计 QuerySpec/renderer、创建数据模板/coverage seed/训练数据，或启动 token 审计、GPU 训练和评测。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
 
 ## 9. 最近一次同步记录
 

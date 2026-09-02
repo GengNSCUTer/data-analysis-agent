@@ -43,10 +43,11 @@ def _table(raw: dict, table_id: str) -> dict:
 
 
 def test_default_catalog_matches_policy_and_expected_versions(catalog) -> None:
-    assert catalog.catalog_version == "olist-catalog-v1"
+    assert catalog.catalog_version == "olist-catalog-v2"
+    assert catalog.metric_version == "0.2-frozen"
     assert catalog.policy_version == "sql-policy-v1"
     assert len(catalog.tables) == 9
-    assert len(catalog.metrics) == 4
+    assert len(catalog.metrics) == 10
     assert len(catalog.joins) == 7
 
     for table in catalog.tables:
@@ -62,7 +63,7 @@ def test_catalog_retrieval_selects_metric_tables_columns_and_join(catalog) -> No
 
     assert selection.trace.selected_metrics == ("gmv",)
     assert selection.trace.dataset_version == "olist-kaggle-v2-2026-08-03"
-    assert selection.trace.metric_version == "0.1-draft"
+    assert selection.trace.metric_version == "0.2-frozen"
     assert selection.trace.policy_version == "sql-policy-v1"
     assert selection.trace.selected_tables == (
         "dim_category_translation",
@@ -76,9 +77,9 @@ def test_catalog_retrieval_selects_metric_tables_columns_and_join(catalog) -> No
         "products_translation",
     )
     assert "不要猜测业务口径" not in selection.prompt
-    assert "catalog_version=olist-catalog-v1" in selection.prompt
+    assert "catalog_version=olist-catalog-v2" in selection.prompt
     assert "dataset_version=olist-kaggle-v2-2026-08-03" in selection.prompt
-    assert "metric_version=0.1-draft" in selection.prompt
+    assert "metric_version=0.2-frozen" in selection.prompt
     assert "policy_version=sql-policy-v1" in selection.prompt
     assert "metric_id 作为 SQL 别名" in selection.prompt
     assert "`analytics.fact_order_items`" in selection.prompt
@@ -105,6 +106,44 @@ def test_dimension_retrieval_closes_multi_hop_join_path(catalog) -> None:
         "orders_items",
         "items_products",
     }
+
+
+@pytest.mark.parametrize(
+    ("question", "metric_id", "time_field", "grain", "result_column"),
+    [
+        ("统计商品件数", "item_count", "fact_orders.order_purchase_timestamp", "order_item", "item_count"),
+        ("各州平均订单金额", "average_order_value", "fact_orders.order_purchase_timestamp", "order", "average_order_value"),
+        ("按月平均评分", "average_review_score", "fact_reviews.review_creation_date", "review", "average_review_score"),
+        ("各州准时送达率", "on_time_delivery_rate", "fact_orders.order_purchase_timestamp", "order", "on_time_delivery_rate"),
+        ("按月取消率", "cancellation_rate", "fact_orders.order_purchase_timestamp", "order", "cancellation_rate"),
+        ("按品类运费金额", "freight_amount", "fact_orders.order_purchase_timestamp", "order_item", "freight_amount"),
+    ],
+)
+def test_second_batch_metric_contracts_are_retrievable(
+    catalog, question, metric_id, time_field, grain, result_column
+) -> None:
+    selection = CatalogRetriever(catalog).retrieve(question, _user("analyst"))
+    metric = catalog.metrics_by_id[metric_id]
+    contract = ResultContract.from_selection(selection, question, catalog=catalog)
+
+    assert selection.trace.selected_metrics == (metric_id,)
+    assert metric.time_field == time_field
+    assert metric.grain == grain
+    assert contract.metric_result_columns == (result_column,)
+    assert contract.result_column_labels[result_column] == metric.name
+
+
+def test_dimension_detection_requires_a_direct_dimension_signal(catalog) -> None:
+    retriever = CatalogRetriever(catalog)
+    selection = retriever.retrieve(
+        "概览 GMV、有效订单数、平均履约天数和好评率，并说明统计口径",
+        _user("analyst"),
+    )
+
+    assert retriever.requested_dimensions(
+        "概览 GMV、有效订单数、平均履约天数和好评率，并说明统计口径",
+        selection.metrics,
+    ) == ()
 
 
 def test_result_contract_derives_display_labels_from_catalog(catalog) -> None:
@@ -246,9 +285,9 @@ async def test_catalog_enhancer_records_trace_without_raw_question(catalog) -> N
     assert "`gmv`" in prompt
     assert usage.catalog_trace is not None
     assert question not in repr(usage.catalog_trace)
-    assert usage.catalog_trace["catalog_version"] == "olist-catalog-v1"
+    assert usage.catalog_trace["catalog_version"] == "olist-catalog-v2"
     assert usage.catalog_trace["dataset_version"] == "olist-kaggle-v2-2026-08-03"
-    assert usage.catalog_trace["metric_version"] == "0.1-draft"
+    assert usage.catalog_trace["metric_version"] == "0.2-frozen"
     assert usage.catalog_trace["policy_version"] == "sql-policy-v1"
     assert usage.catalog_trace["prompt_version"] == "trusted-olist-prompt-v2"
 

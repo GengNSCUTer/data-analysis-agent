@@ -1,6 +1,6 @@
-catalog_version: "olist-catalog-v1"
+catalog_version: "olist-catalog-v2"
 dataset_version: "olist-kaggle-v2-2026-08-03"
-metric_version: "0.1-draft"
+metric_version: "0.2-frozen"
 policy_version: "sql-policy-v1"
 description: "Server-owned semantic catalog for the trusted Olist PostgreSQL analytics schema."
 currency_code: BRL
@@ -117,7 +117,7 @@ tables:
     context_columns: [product_id, product_category_name]
     columns:
       - {name: product_id, type: text, description: 商品标识，仅用于关联或聚合, aliases: [商品ID, 产品ID], sensitive: true}
-      - {name: product_category_name, type: text, description: 葡萄牙语商品品类, aliases: [商品品类, 产品品类, 类目], sensitive: false}
+      - {name: product_category_name, type: text, description: 葡萄牙语商品品类, aliases: [商品品类, 产品品类, 品类, 类目], sensitive: false}
       - {name: product_name_length, type: integer, description: 商品名称长度, aliases: [商品名称长度], sensitive: false}
       - {name: product_description_length, type: integer, description: 商品描述长度, aliases: [商品描述长度], sensitive: false}
       - {name: product_photos_qty, type: integer, description: 商品图片数量, aliases: [图片数量], sensitive: false}
@@ -187,6 +187,12 @@ metrics:
     default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
     allowed_dimensions: [date, customer_state, customer_city, seller_id, product_category_name, payment_type]
     dimension_policies:
+      product_category_name:
+        description: "一个订单可能包含多个品类；按品类计订单时必须先冻结订单归属、去重或分摊口径，禁止把含该品类的订单直接当作可跨品类相加的订单数。"
+        mode: requires_attribution
+      seller_id:
+        description: "一个订单可能包含多个卖家；按卖家计订单时必须先冻结订单归属、去重或分摊口径，禁止通过商品行直接重复订单计数。"
+        mode: requires_attribution
       payment_type:
         description: "一个订单可能对应多条支付记录；必须先明确订单归属支付方式的业务规则，禁止自行使用 payment_sequential=1 代替归属口径。"
         mode: requires_attribution
@@ -201,11 +207,14 @@ metrics:
     time_field: fact_orders.order_purchase_timestamp
     source_tables: [fact_orders]
     source_columns: [fact_orders.order_purchase_timestamp, fact_orders.order_delivered_customer_date]
-    default_filters: ["fact_orders.order_delivered_customer_date IS NOT NULL"]
+    default_filters: ["fact_orders.order_purchase_timestamp IS NOT NULL", "fact_orders.order_delivered_customer_date IS NOT NULL"]
     allowed_dimensions: [date, customer_state, customer_city, seller_id, product_category_name]
     dimension_policies:
       product_category_name:
         description: "一个订单可能包含多个品类；按品类汇总履约天数时，必须先明确是按订单归属、按商品行加权还是采用其他分摊规则，禁止直接通过订单商品行重复订单履约时长。"
+        mode: requires_attribution
+      seller_id:
+        description: "一个订单可能包含多个卖家；按卖家汇总履约天数时，必须先明确订单归属、商品行加权或分摊规则，禁止通过订单商品行重复订单履约时长。"
         mode: requires_attribution
     recommended_chart: line
     role_visibility: [analyst, admin]
@@ -223,6 +232,95 @@ metrics:
     dimension_policies:
       product_category_name:
         description: "一条订单评价可能关联多个品类；按品类汇总好评率时，必须先明确评价归属或分摊规则，禁止通过订单商品行复制评价后直接计算。"
+        mode: requires_attribution
+      seller_id:
+        description: "一条订单评价可能关联多个卖家；按卖家汇总好评率时，必须先明确评价归属或分摊规则，禁止通过订单商品行复制评价后直接计算。"
+        mode: requires_attribution
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+
+  - metric_id: item_count
+    name: 商品件数
+    description: "有效订单的商品行数；Olist 每个 (order_id, order_item_id) 为一件商品行，不按订单去重。"
+    aliases: [商品件数, 商品数量, 销售件数, 商品行数, item count]
+    grain: order_item
+    time_field: fact_orders.order_purchase_timestamp
+    source_tables: [fact_orders, fact_order_items]
+    source_columns: [fact_orders.order_status, fact_order_items.order_id, fact_order_items.order_item_id]
+    default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
+    allowed_dimensions: [date, customer_state, customer_city, product_category_name, seller_id, payment_type]
+    dimension_policies:
+      payment_type:
+        description: "一个订单可能对应多条支付记录；按支付方式统计商品件数必须先明确商品行的支付归属或分摊规则。"
+        mode: requires_attribution
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+
+  - metric_id: average_order_value
+    name: 平均订单商品金额
+    description: "有效订单商品金额之和除以有效订单数；先按订单聚合商品价格，再对订单金额取平均；不含运费、不是支付金额。"
+    aliases: [平均订单商品金额, 平均订单金额, 客单价, AOV, average order value]
+    grain: order
+    time_field: fact_orders.order_purchase_timestamp
+    source_tables: [fact_orders, fact_order_items]
+    source_columns: [fact_orders.order_id, fact_orders.order_status, fact_order_items.order_id, fact_order_items.price]
+    default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
+    allowed_dimensions: [date, customer_state, customer_city]
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+
+  - metric_id: average_review_score
+    name: 平均评价分
+    description: "有效评分评价行的平均 review_score，评分范围为 1--5；按评价行而非 review_id 去重计算。"
+    aliases: [平均评价分, 平均评分, 平均好评分, review score, average review score]
+    grain: review
+    time_field: fact_reviews.review_creation_date
+    source_tables: [fact_reviews]
+    source_columns: [fact_reviews.review_score]
+    default_filters: ["fact_reviews.review_score BETWEEN 1 AND 5"]
+    allowed_dimensions: [date, customer_state, customer_city]
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+
+  - metric_id: on_time_delivery_rate
+    name: 准时送达率
+    description: "已送达订单中，实际送达时间不晚于预计送达时间的订单占比；只纳入购买、实际送达和预计送达时间齐全的 delivered 订单。"
+    aliases: [准时送达率, 按时送达率, 准时率, 是否准时送达, on time delivery rate]
+    grain: order
+    time_field: fact_orders.order_purchase_timestamp
+    source_tables: [fact_orders]
+    source_columns: [fact_orders.order_status, fact_orders.order_purchase_timestamp, fact_orders.order_delivered_customer_date, fact_orders.order_estimated_delivery_date]
+    default_filters: ["fact_orders.order_status = 'delivered'", "fact_orders.order_purchase_timestamp IS NOT NULL", "fact_orders.order_delivered_customer_date IS NOT NULL", "fact_orders.order_estimated_delivery_date IS NOT NULL"]
+    allowed_dimensions: [date, customer_state, customer_city]
+    recommended_chart: line
+    role_visibility: [analyst, admin]
+
+  - metric_id: cancellation_rate
+    name: 取消率
+    description: "状态为 canceled 的订单数除以购买时间存在的全部订单数；unavailable 不计入取消订单。"
+    aliases: [取消率, 订单取消率, 取消订单占比, cancellation rate]
+    grain: order
+    time_field: fact_orders.order_purchase_timestamp
+    source_tables: [fact_orders]
+    source_columns: [fact_orders.order_id, fact_orders.order_status, fact_orders.order_purchase_timestamp]
+    default_filters: ["fact_orders.order_purchase_timestamp IS NOT NULL"]
+    allowed_dimensions: [date, customer_state, customer_city]
+    recommended_chart: line
+    role_visibility: [analyst, admin]
+
+  - metric_id: freight_amount
+    name: 运费金额
+    description: "有效订单商品行的 freight_value 之和；以 BRL 计，不是商品成交额也不是支付金额。"
+    aliases: [运费金额, 运费, 配送费, 物流费用, freight amount]
+    grain: order_item
+    time_field: fact_orders.order_purchase_timestamp
+    source_tables: [fact_orders, fact_order_items]
+    source_columns: [fact_orders.order_status, fact_order_items.freight_value]
+    default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
+    allowed_dimensions: [date, customer_state, customer_city, product_category_name, seller_id, payment_type]
+    dimension_policies:
+      payment_type:
+        description: "一个订单可能对应多条支付记录；按支付方式统计运费金额必须先明确运费的支付归属或分摊规则。"
         mode: requires_attribution
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]

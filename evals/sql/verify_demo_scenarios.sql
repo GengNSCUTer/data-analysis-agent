@@ -21,23 +21,23 @@ BEGIN
         RAISE EXCEPTION 'state top five drift: %', state_rows;
     END IF;
 
-    SELECT string_agg(category || ':' || paid_order_count, ',' ORDER BY rank)
+    SELECT category_count || ':' || gmv_sum
     INTO category_rows
     FROM (
-        SELECT COALESCE(t.product_category_name_english, p.product_category_name, 'uncategorized') AS category,
-               COUNT(DISTINCT o.order_id)::TEXT AS paid_order_count,
-               ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT o.order_id) DESC, COALESCE(t.product_category_name_english, p.product_category_name, 'uncategorized') ASC) AS rank
-        FROM analytics.fact_orders AS o
-        JOIN analytics.fact_order_items AS i USING (order_id)
-        JOIN analytics.dim_products AS p USING (product_id)
-        LEFT JOIN analytics.dim_category_translation AS t USING (product_category_name)
-        WHERE o.order_status NOT IN ('canceled', 'unavailable')
-        GROUP BY 1
-        ORDER BY COUNT(DISTINCT o.order_id) DESC, category ASC
-        LIMIT 10
-    ) AS ranked_categories;
-    IF category_rows <> 'bed_bath_table:9399,health_beauty:8800,sports_leisure:7673,computers_accessories:6654,furniture_decor:6425,housewares:5847,watches_gifts:5604,telephony:4183,auto:3872,toys:3855' THEN
-        RAISE EXCEPTION 'category top ten drift: %', category_rows;
+        SELECT COUNT(*)::TEXT AS category_count, SUM(gmv)::NUMERIC(14, 2)::TEXT AS gmv_sum
+        FROM (
+            SELECT COALESCE(t.product_category_name_english, p.product_category_name, 'uncategorized') AS category,
+                   SUM(i.price) AS gmv
+            FROM analytics.fact_orders AS o
+            JOIN analytics.fact_order_items AS i USING (order_id)
+            JOIN analytics.dim_products AS p USING (product_id)
+            LEFT JOIN analytics.dim_category_translation AS t USING (product_category_name)
+            WHERE o.order_status NOT IN ('canceled', 'unavailable')
+            GROUP BY 1
+        ) AS category_gmv
+    ) AS grouped_categories;
+    IF category_rows <> '74:13494400.74' THEN
+        RAISE EXCEPTION 'category GMV aggregate drift: %', category_rows;
     END IF;
 
     WITH gmv AS (

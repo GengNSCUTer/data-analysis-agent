@@ -1,7 +1,6 @@
-# 数据字典（Phase 2 草案）
+# 数据字典（Olist 运行时 v2）
 
-本字典定义主展示案例 Olist 的最小分析范围和字段语义。原始 CSV 已在仓库外完成
-checksum 核验和规范化转换，但尚未加载 PostgreSQL；分析层使用稳定的英文表名。
+本字典定义 Olist 展示工作区的最小分析范围和字段语义。原始 CSV 与派生资产保存在仓库外；分析层已加载到项目本地 PostgreSQL，并使用稳定的英文表名。
 
 ## 分析表和粒度
 
@@ -10,7 +9,7 @@ checksum 核验和规范化转换，但尚未加载 PostgreSQL；分析层使用
 | `fact_orders` | 一个订单 | `order_id` | `olist_orders_dataset` |
 | `fact_order_items` | 一个订单中的一个商品行 | `order_id`, `order_item_id` | `olist_order_items_dataset` |
 | `fact_payments` | 一个订单的一次支付序列 | `order_id`, `payment_sequential` | `olist_order_payments_dataset` |
-| `fact_reviews` | 一个订单的一条评价 | `review_id`, `order_id` | `olist_order_reviews_dataset` |
+| `fact_reviews` | 一条评价记录 | 无已验证的唯一单列主键；`review_id` 可重复 | `olist_order_reviews_dataset` |
 | `dim_customers` | 一个客户地址记录 | `customer_id` | `olist_customers_dataset` |
 | `dim_sellers` | 一个卖家 | `seller_id` | `olist_sellers_dataset` |
 | `dim_products` | 一个商品 | `product_id` | `olist_products_dataset` |
@@ -55,7 +54,7 @@ checksum 核验和规范化转换，但尚未加载 PostgreSQL；分析层使用
 
 | 字段 | 类型 | 含义 | 口径/限制 |
 | --- | --- | --- | --- |
-| `review_id` | string | 评价标识 | 与 `order_id` 组成复合主键；同一标识可关联不同订单 |
+| `review_id` | string | 评价标识 | 当前快照存在重复值；评价指标按有效评价行而非该字段去重计算 |
 | `order_id` | string | 订单标识 | 关联订单 |
 | `review_score` | integer | 1–5 分评价 | 好评默认定义为 `review_score >= 4` |
 | `review_creation_date` | timestamp | 评价创建时间 | 评价趋势的默认日期字段 |
@@ -68,7 +67,7 @@ checksum 核验和规范化转换，但尚未加载 PostgreSQL；分析层使用
 
 ## 数据质量规则（待加载时执行）
 
-1. 事实表主键不重复，订单项、支付、评价的外键均能关联到订单；无法关联的评价必须写入仓库外拒绝文件，不可静默删除。
+1. 订单、订单项和支付复合键保持不重复；评价记录的外键必须能关联到订单，但 `review_id` 重复需要显式保留并在评价指标口径中说明，不可静默去重。
 2. `price`、`freight_value`、`payment_value` 非负；`review_score` 在 1–5。
 3. 送达时间不早于下单时间；预计送达时间存在时才能参与准时率分母。
 4. 订单状态、支付类型和品类映射不出现未记录的新枚举；新增枚举必须更新字典版本。

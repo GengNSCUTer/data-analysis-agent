@@ -23,7 +23,7 @@ async def test_starter_ui_is_chinese_and_uses_safe_demo_questions() -> None:
     assert isinstance(actions, ButtonGroupComponent)
     assert [button["label"] for button in actions.data["buttons"]] == [
         "州前五",
-        "品类前十",
+        "品类 GMV",
         "指标概览",
     ]
     assert all(

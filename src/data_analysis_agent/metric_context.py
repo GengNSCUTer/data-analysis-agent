@@ -14,7 +14,7 @@ from .sql_policy import (
 )
 from .workspace import WorkspaceProfile
 
-METRIC_VERSION = "0.1-draft"
+METRIC_VERSION = "0.2-frozen"
 DATASET_VERSION = "olist-kaggle-v2-2026-08-03"
 PROMPT_VERSION = "trusted-olist-prompt-v2"
 
@@ -84,5 +84,11 @@ METRIC_EVIDENCE = {
         {"metric_id": "paid_order_count", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders"]},
         {"metric_id": "average_delivery_days", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders"]},
         {"metric_id": "positive_review_rate", "time_field": "review_creation_date", "source_tables": ["fact_reviews"]},
+        {"metric_id": "item_count", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders", "fact_order_items"]},
+        {"metric_id": "average_order_value", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders", "fact_order_items"]},
+        {"metric_id": "average_review_score", "time_field": "review_creation_date", "source_tables": ["fact_reviews"]},
+        {"metric_id": "on_time_delivery_rate", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders"]},
+        {"metric_id": "cancellation_rate", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders"]},
+        {"metric_id": "freight_amount", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders", "fact_order_items"]},
     ],
 }

@@ -20,7 +20,7 @@ class TrustedOlistWorkflowHandler(DefaultWorkflowHandler):
                 "Schema 内生成并执行只读 SQL，再返回结论、结果表、必要时的图表，以及可追溯的 SQL 与版本证据。\n\n"
                 "**适合直接问的问题**\n"
                 '- “按客户州统计有效订单数前五名，并生成柱状图”\n'
-                '- “统计有效订单数最多的前十个商品品类”\n'
+                '- “按商品品类统计 GMV”\n'
                 '- “对比各州的 GMV 和好评率，说明口径”\n'
                 '- “概览 GMV、有效订单数、平均履约天数和好评率”\n\n'
                 "**边界**\n"
@@ -57,8 +57,8 @@ class TrustedOlistWorkflowHandler(DefaultWorkflowHandler):
                     "size": "medium",
                 },
                 {
-                    "label": "品类前十",
-                    "action": "统计有效订单数最多的前十个商品品类",
+                    "label": "品类 GMV",
+                    "action": "按商品品类统计 GMV",
                     "variant": "secondary",
                     "size": "medium",
                 },

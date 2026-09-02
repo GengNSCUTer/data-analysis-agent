@@ -1,0 +1,33 @@
+result_version: "0.2"
+generated_at: "2026-09-02"
+dataset_version_id: olist-kaggle-v2-2026-08-03
+transform_version: olist-analytics-v1
+schema: analytics
+catalog_version: "olist-catalog-v2"
+metric_version: "0.2-frozen"
+database:
+  engine: PostgreSQL
+  version: "12.20"
+results:
+  gmv: {value: "13494400.74", type: decimal_brl}
+  paid_order_count: {value: 98207, type: integer}
+  average_delivery_days: {value: "12.558702", type: decimal_days_rounded_6}
+  positive_review_rate: {value: "0.770680", type: decimal_ratio_rounded_6}
+  item_count: {value: 112101, type: integer}
+  average_order_value: {value: "137.42", type: decimal_brl}
+  average_review_score: {value: "4.0864", type: decimal_score_rounded_4}
+  on_time_delivery_rate: {value: "0.918876", type: decimal_ratio_rounded_6}
+  cancellation_rate: {value: "0.006285", type: decimal_ratio_rounded_6}
+  freight_amount: {value: "2241126.29", type: decimal_brl}
+evidence:
+  valid_order_count: 98207
+  on_time_eligible_delivered_order_count: 96470
+  on_time_delivered_order_count: 88644
+  cancellation_denominator_order_count: 99441
+  canceled_order_count: 625
+  valid_review_row_count: 99224
+  distinct_valid_review_id_count: 98410
+notes:
+  - The values are a reproducible data/formula baseline, not an online Text-to-SQL accuracy result.
+  - Review metrics use valid review rows; they do not deduplicate review_id.
+  - historical olist-v2-golden.yaml remains pinned to metric_version 0.1-draft.

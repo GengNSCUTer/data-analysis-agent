@@ -357,9 +357,9 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
     assert "month" in agent.metadata["result_time_column_aliases"]
     assert agent.metadata["requested_start"] == "2017-01-01"
     assert agent.metadata["requested_end"] == "2017-12-31"
-    assert agent.metadata["catalog_version"] == "olist-catalog-v1"
+    assert agent.metadata["catalog_version"] == "olist-catalog-v2"
     assert agent.metadata["dataset_version_id"] == "olist-kaggle-v2-2026-08-03"
-    assert agent.metadata["metric_version"] == "0.1-draft"
+    assert agent.metadata["metric_version"] == "0.2-frozen"
     assert agent.metadata["policy_version"] == "sql-policy-v1"
     assert agent.metadata["prompt_version"] == "trusted-olist-prompt-v2"
     assert recorder.usage.catalog_trace["result_contract"]["metric_ids"] == ["gmv"]

@@ -30,7 +30,7 @@ from .sql_policy import (
 from .workspace import WorkspaceProfile
 
 
-CATALOG_VERSION = "olist-catalog-v1"
+CATALOG_VERSION = "olist-catalog-v2"
 POLICY_VERSION = "sql-policy-v1"
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "catalog" / "olist_catalog.yaml"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]+$")
@@ -1008,7 +1008,11 @@ class CatalogRetriever:
                         continue
                     score, _ = self._score(
                         question,
-                        (dimension, *column.aliases, *table.aliases, *table.semantic_tags),
+                        # Table-level aliases/tags describe the entire fact
+                        # table (for example, ``GMV`` for order items). They
+                        # cannot prove that a user explicitly requested this
+                        # particular dimension, such as ``seller_id``.
+                        (dimension, *column.aliases),
                     )
                     if score >= self.min_score:
                         candidates.append((score, table.table_id))

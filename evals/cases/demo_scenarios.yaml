@@ -1,7 +1,7 @@
-version: "1.0"
+version: "2.0"
 dataset: olist_brazilian_ecommerce
 dataset_version: olist-kaggle-v2-2026-08-03
-metric_version: "0.1-draft"
+metric_version: "0.2-frozen"
 scope_note: "These contracts verify fixed demo-question semantics and golden data results. They do not measure online LLM semantic accuracy."
 scenarios:
   - id: demo_state_top5_chart
@@ -28,31 +28,20 @@ scenarios:
       - "图表仅基于本查询返回的五行结果生成。"
 
   - id: demo_category_top10
-    label: "品类前十"
-    question: "统计有效订单数最多的前十个商品品类"
+    label: "品类 GMV"
+    question: "按商品品类统计 GMV"
     allowed_roles: [analyst, admin]
-    metrics: [paid_order_count]
+    metrics: [gmv]
     required_tables: [fact_orders, fact_order_items, dim_products, dim_category_translation]
-    expected_shape: ranked_table
+    expected_shape: grouped_table
     expected_chart: none
-    expected_row_limit: 10
-    ordering: "paid_order_count DESC, category ASC"
-    result_columns: [category, paid_order_count]
-    expected_rows:
-      - [bed_bath_table, 9399]
-      - [health_beauty, 8800]
-      - [sports_leisure, 7673]
-      - [computers_accessories, 6654]
-      - [furniture_decor, 6425]
-      - [housewares, 5847]
-      - [watches_gifts, 5604]
-      - [telephony, 4183]
-      - [auto, 3872]
-      - [toys, 3855]
+    expected_row_limit: 1000
+    result_columns: [category, gmv]
+    expected_aggregate: {category_count: 74, gmv_sum: 13494400.74}
     evidence: [metric_version, dataset_version, final_sql, result_table]
     semantics:
       - "排除 canceled 与 unavailable 订单。"
-      - "商品行与订单关联后按 DISTINCT order_id 统计，避免同一订单多商品重复计数。"
+      - "按商品行汇总 price；GMV 是商品行天然粒度，不需要为订单跨品类归属。"
       - "优先展示英文品类映射；缺失映射时保留原始品类或 uncategorized。"
 
   - id: demo_metric_overview
