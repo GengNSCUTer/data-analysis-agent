@@ -1,6 +1,6 @@
 manifest_id: cspider_bf16_lora_2epoch_v1
 manifest_version: "1"
-status: training_completed_evaluation_entry_implemented_not_run
+status: automated_evaluation_complete_pending_changed_case_review
 purpose: >-
   Train one CSpider bf16 LoRA adapter for exactly two complete passes over the
   length-bounded official train split, then compare it with the matching frozen
@@ -63,7 +63,7 @@ training:
     physical_nvidia_smi_device: 3
     expected_uuid: GPU-10863af0-8588-7625-5609-640ba794f64b
 matching_base_adapter_generation_contract:
-  status: implemented_not_run
+  status: verified_and_completed
   canonical_implementations:
     generator: scripts/post_training/inference/generate_post_training_text_to_sql.py
     matching_verifier: scripts/post_training/evaluation/verify_cspider_matching_generation.py
@@ -133,3 +133,20 @@ quality_gate:
     - non_finite_train_or_validation_loss
     - missing_or_unloadable_adapter
     - incomplete_or_nonmatching_base_adapter_case_coverage
+  result:
+    generation_coverage: 1034/1034_for_base_and_adapter
+    matching_verifier: passed
+    sqlite_diagnostics: completed
+    bounded_denotation: completed
+    changed_case_human_review: pending
+    quality_interpretation: positive_net_change_with_predeclared_regressions_not_full_gate_pass
+    production_runtime_change: false
+    cspider_final_test_used: false
+    official_leaderboard_claim: false
+  evidence:
+    external_pair_directory: /disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-cspider-bf16-lora-full2epoch-pair-v1-20260902
+    matching_verification_sha256: 2d5fe7f12ffdc9956227a2d83ffae7099f3d65319d875e31bbf98dbb571dec57
+    base_sqlite_diagnostics_sha256: efee9714128b473ac2c1fcbbca93dd04ccac40aeaa71a2d03f9bbbd0c6ea7450
+    adapter_sqlite_diagnostics_sha256: d242783191938f5db0391f9ab9a82d200f848f918bf9329820763f6feeb80388
+    paired_analysis_sha256: f86404b9135fe51548664f01c23415302bc95cf299283bdf69bb9896e0d74b4b
+    bounded_denotation_sha256: c7c674532564fa8b990dac95ee75501e8cddbf2372b212b7c032e3dca1266ea2

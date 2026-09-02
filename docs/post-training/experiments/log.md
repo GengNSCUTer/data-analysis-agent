@@ -38,6 +38,28 @@ SQLite、paired analysis 与生成后 denotation 均只能在 verifier 成功后
 不调用 Spider Test Suite，也不引用 CSpider final test。15 项相关回归、ruff、CLI、shell 语法和 diff
 check 通过；这些只是入口正确性证据，不是 SQL 语义、可执行性或模型质量结果。
 
+## 最近完成：CSpider matching Base/Adapter 完整离线评测
+
+2026-09-02，CSpider official validation 的 Base 与最终 bf16 LoRA Adapter 均完成 `1,034/1,034`
+候选生成，并通过 matching verifier。两侧使用相同的基座 revision、bf16、prompt v2、greedy
+decode、seed、token 上限、source hash 和 case 顺序；Base 使用 physical GPU `3` 的 RTX 4090，
+Adapter 使用 physical GPU `0` 的 RTX 3090。不同 GPU 只影响耗时，未用于质量对照。
+
+只读 SQLite diagnostics：Base `911 executed / 7 policy rejected / 116 execution errors`，
+Adapter `932 / 0 / 102`；执行数净增 `21`。生成冻结后 bounded denotation：Base exact-or-bag
+match `525/1034 (50.77%)`，Adapter `743/1034 (71.86%)`，严格有序 match 为 `507 -> 725`。
+状态迁移中 `289` 条由不匹配/不可执行变为匹配，`71` 条原匹配 case 退化，`674` 条匹配状态不变，
+净增 `218`；SQLite status 有 `93` 条 execution error -> executed 与 `7` 条 policy rejected ->
+executed，同时存在 `79` 条 executed -> execution error。结果是当前 CSpider validation SQLite
+快照上的正向离线证据，但不是无回退通过。
+
+Adapter 平均生成 token `108.29 -> 29.61`，Base 有 `257` 条达到 256 token 上限，Adapter 为 `0`；
+Base 仅 `406` 条直接 SQL 开头，Adapter 为 `1,034`。这些是输出形态证据，不是跨 GPU 的生产延迟
+或吞吐结论。CSpider final test、官方榜单、Olist/PostgreSQL 迁移和生产运行时均未使用或改变。
+完整原始产物留在仓库外 pair 目录，safe paired analysis 和 denotation 报告只保存聚合/状态，不
+保存问题、候选 SQL、gold SQL、数据库标识或结果行。下一步应先审查 71 条 denotation 回退及错误
+类别，再决定是否设计后续训练实验。
+
 ## 最近完成：CSpider bf16 LoRA 两 epoch 训练与 reload
 
 2026-09-02，CSpider 正式长度物化 train/validation `8,574/1,034` 在 logical CUDA `1` ->
