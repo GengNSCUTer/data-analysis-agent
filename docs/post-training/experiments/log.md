@@ -10,19 +10,28 @@
 - 永久隔离：项目的 60 条 v2 golden 不进入训练、偏好数据、示例或改写。
 - 运行时隔离：生产 Vanna/FastAPI/PostgreSQL 代码不被离线训练改写；模型候选仍需通过服务器安全和结果合同。
 
-## 当前运行：CSpider matching Base/Adapter 完整生成
+## 最近完成：CSpider Adapter Olist PostgreSQL 迁移评测
 
-2026-09-02，用户明确批准后以两个独立 `screen` 启动 CSpider validation 的完整 Base/Adapter
-候选生成。Base 会话 `daa-cspider-base-eval-v1` 使用 logical CUDA `1` -> physical GPU `3` 的 RTX
-4090；Adapter 会话 `daa-cspider-adapter-eval-v1` 使用 logical CUDA `2` -> physical GPU `0` 的空闲
-RTX 3090。启动检查确认两个 UUID guard、外部 adapter、模型、CSpider acquisition manifest 与输入
-资产存在；随后 GPU 显存/利用率和 prediction JSONL 递增均正常。final test 未传给任一进程。
+2026-09-02，最终 CSpider 两 epoch bf16 LoRA Adapter 在当前 Olist 工作区的 12 条永久 protected
+`answerable` holdout 上完成一次独立离线候选 SQL 评测。它只加载候选模型；每条仍经过
+QuestionRouter、Semantic Catalog、QueryPlan、ResultContract、SqlPolicy、PostgreSQL readonly role
+和 ResultValidator。未调用 Vanna/SiliconFlow、SQL repair、图表或生产模型切换，CSpider final test
+也没有读取。
 
-两侧模型输入与生成合同相同：CSpider validation schema/question、基座 revision、bf16、prompt v2、
-greedy decode、seed 和 token 上限；唯一模型变量仍为 adapter 是否加载。不同 GPU 只影响墙钟时间，
-不进入 SQL 质量比较或延迟结论。当前仅为生成进行中状态，尚无 SQLite、denotation、可执行性、语义
-正确性、Base/Adapter 优劣或业务迁移结论。两侧完整输出冻结后必须先通过 matching verifier，再单独
-启动 SQLite diagnostics、paired analysis 和 bounded denotation。
+为避免重复运行 Base 而引入额外变量，本次复用 2026-09-01 中文 Base 的脱敏报告，但只在其
+comparison contract 与本次 Adapter 逐字段一致后才做比较：相同 12 个 source ID、基座 revision、
+bf16、`olist-candidate-sql-v1`、greedy decode、seed、256 新 token、中文源问题、PostgreSQL、禁用
+repair，以及相同 manifest/source/holdout hash。Base 为 `12/12 generated, 6 policy accepted, 4
+executed, 2 ResultContract valid`；CSpider Adapter 为 `12/12, 2, 1, 0`，变化为 `0/-4/-3/-2`。没有
+`non-valid -> valid`，两条 Base 合同有效 case 分别变为 policy rejection 和 result-contract rejection。
+
+Adapter 安全报告 SHA-256 为 `e159240a8d873907019d5d5382960b6b9101d10289d2cdcd05014c035e71a615`，
+paired safe comparison 为 `0d8e032715097b241b0d2cbd88abefbfe5ee321a91f6b7ece6211a9610cba2f4`，adapter
+权重为 `35eb45c0ebccaaeaf2cefb742473788031eb01bb3948412b2f35c5840c974983`。它们及完整日志、原始
+问题、候选 SQL 和结果行均保留在仓库外的
+`qwen25coder15b-cspider-bf16-lora-olist-transfer-v1-20260902/`。当前 runner 的合同冻结 Catalog、
+数据集版本和策略版本，但未独立 hash PostgreSQL 内容快照，因此结论仅对该冻结合同和工作区版本负责。
+这不是业务语义准确率，也不支持将 Adapter 接入生产默认路径。
 
 ## 最近完成：CSpider matching Base/Adapter 评测入口
 
@@ -139,7 +148,7 @@ Spider SFT v2 训练、前缀 Base/Adapter smoke、独立 164-case 复验和完�
 | `analysis-v1` | 确认回退模式 | 上述 pair 的聚合诊断与受限人工 changed-case 审核 | 253 条从 executed 变失败，88 条反向恢复；20 个库中 17 回退、3 不变；抽检的 4 条表面恢复均不满足语义 | 不能用执行 recovery 代替正确率；下一步先控制变量。 |
 | `qlora_coverage26_v1` | 验证约一轮训练覆盖后的 QLoRA 工程路径 | 4-bit NF4，26 steps，effective batch 4，LoRA r16/alpha32/dropout0.05 | train/eval loss 0.427482/0.290193；peak allocated 4.35 GiB；fresh reload finite loss 0.249638 | 训练和 reload 通过；尚未与对应 4-bit base 做全量质量对照。 |
 | `bf16_lora_coverage26_v1` | 在同配置下验证直接 bf16 LoRA 是否可行 | bf16 base，26 steps，其余与 QLoRA 相同 | train/eval loss 0.426504/0.309192；peak allocated 5.19 GiB；fresh reload finite loss 0.245578 | 1.5B 可在 24GB 卡做 bf16 LoRA；尚未与对应 bf16 base 做全量质量对照。 |
-| `cspider_bf16_lora_length1536_full2epoch_v1` | 验证正式中文 CSpider 的 bf16 LoRA 两 epoch 训练、显存与 artifact 链路 | 8,574/1,034、1536 上限、2 epoch/4,288 step、batch 4、AdamW、weight decay 0.01 | 完成、末尾 validation loss 0.318318、peak allocated/reserved 15.35/23.16 GiB、fresh reload finite；最低 validation loss 0.278697 出现在 step 1,072 | 工程和 artifact 通过；末尾非 validation-loss 最优，未执行 CSpider SQL 质量评测。 |
+| `cspider_bf16_lora_length1536_full2epoch_v1` | 验证正式中文 CSpider 的 bf16 LoRA 两 epoch 训练、显存与 artifact 链路 | 8,574/1,034、1536 上限、2 epoch/4,288 step、batch 4、AdamW、weight decay 0.01 | 完成、末尾 validation loss 0.318318、peak allocated/reserved 15.35/23.16 GiB、fresh reload finite；最终 Adapter 的 CSpider validation denotation `525 -> 743/1,034` | CSpider SQLite 上正向但有 71 条回退；独立 Olist 迁移为 ResultContract valid `2 -> 0`，不能接入运行时。 |
 | `cspider_bf16_lora_batch4_smoke_v1` | 验证正式 CSpider 长度物化输入能否使用真实 batch=4、未量化 bf16 LoRA 和普通 AdamW 跑通 | 8,574/1,034 CSpider train/validation，1536 上限，1 step，bf16 LoRA，batch=4，accumulation=1，AdamW `weight_decay=0.01` | 1 step 完成、全 validation finite loss、peak allocated 10.76 GiB、adapter fresh reload finite；无 OOM | 只闭合 batch-4 工程/显存/产物链路；不构成 SQL 质量或完整训练结论。详见 `cspider-bf16-batch4-smoke-v1.md`。 |
 | `spider_sft_v2_independent_smoke164` | 检验 v2 SFT 的独立非回退资格 | 164 条/17 未观察 schema，bf16 Base/Adapter、v2 prompt、greedy decode | denotation `97 -> 122`，SQLite `153 -> 155`，`no_such_column` `9 -> 8` | 通过预冻结 bounded smoke 门，进入完整 1,034-case 对照；不是官方分数。 |
 

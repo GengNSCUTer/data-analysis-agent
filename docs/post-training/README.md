@@ -49,7 +49,7 @@
 | R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 已完成但失败 | 官方 release 上 matching Base/26-step QLoRA Adapter 均 1,034/1,034；SQLite executed `829 -> 671`，Test Suite internal all `0.433 -> 0.376`，限定列错误 `15 -> 296`。详见官方专属分析。 |
 | R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 本轮完成 | 3,600 条 official train-only v2 corpus、2 epoch bf16 LoRA、164-case/17-schema 独立 smoke 和完整 1,034-case 对照均完成；SQLite `950 -> 961`、Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`。 |
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
-| R5 受控接入 | 将候选模型作为运行时可选生成器 | 未开始 | 12 条 Olist 业务迁移子门未通过（ResultContract valid `2 -> 0`）；先构建领域对齐训练资产，安全、权限、结果与图表合同仍在服务器端执行。 |
+| R5 受控接入 | 将候选模型作为运行时可选生成器 | 未开始 | Spider 与 CSpider 两个 Adapter 的 12 条 Olist 业务迁移子门均未通过；最新 CSpider Adapter 的 ResultContract valid 为 Base `2`、Adapter `0`。先构建领域对齐训练资产，安全、权限、结果与图表合同仍在服务器端执行。 |
 
 ## CSpider 当前检查点
 
@@ -61,6 +61,14 @@ Adapter 不可执行，因此这是当前 SQLite validation 快照上的正向�
 跨数据集泛化或生产业务结论。生成阶段受 acquisition manifest、source hash、validation-only、gold
 SQL 不读取和 final-test 不读取约束；final test 仍未使用。合同见
 [`data/cspider-sft-2epoch-evaluation-contract-v1.md`](data/cspider-sft-2epoch-evaluation-contract-v1.md)。
+
+同一最终 CSpider Adapter 随后以受保护的 12 条中文 Olist PostgreSQL holdout 做独立迁移
+评测。复用 comparison contract 完全匹配的 bf16 Base 脱敏报告后，Adapter 的 Policy /
+PostgreSQL executed / ResultContract valid 为 `2/1/0`，Base 为 `6/4/2`；不存在
+`non-valid -> valid`，有两条 `valid -> non-valid`。这否定了“CSpider validation 改善即可
+迁移到当前业务工作区”的假设，但不等同于业务准确率统计。原始 SQL、问题、结果行和日志均在
+仓库外，且当前 runner 未单独冻结数据库内容快照；生产默认路径没有改动。完整记录见
+[`experiments/cspider-bf16-lora-2epoch-v1.md`](experiments/cspider-bf16-lora-2epoch-v1.md)。
 
 ## 已完成实验，按目的理解
 
@@ -75,6 +83,7 @@ SQL 不读取和 final-test 不读取约束；final test 仍未使用。合同�
 | SFT v2 full evaluation | 规模化 bf16 LoRA 是否在完整冻结合同下超过 matching Base | SQLite `950 -> 961`、fixed Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`；仍有 75 条 denotation 回退 | 通过离线候选生成质量门；保留运行时边界，下一步是受控接口和独立业务评测。 |
 | Olist business transfer v1 | Spider Adapter 能否迁移到当前中文 PostgreSQL 业务上下文 | 12 条 protected holdout：Policy `6 -> 6`、PostgreSQL executed `4 -> 2`、ResultContract valid `2 -> 0`，0 条无效变有效、2 条有效变无效 | 业务迁移子门未通过；不接入默认运行时，不盲目扩大 Spider，先做领域对齐训练/验证。 |
 | Olist English prompt transfer v1 | 仅改变候选生成器看到的问题语言是否会改变业务迁移结果 | fresh 中文/英文对照中 Base contract-valid `2 -> 1`，Adapter `0 -> 0`；英文直入中文 Catalog/Router 仅 8/12 可查库 | 英文 workspace 支持与 LoRA 语言敏感性必须分开评测，Adapter 仍不接入默认运行时。 |
+| CSpider Olist transfer v1 | CSpider 两 epoch bf16 LoRA 是否能迁移到当前中文 PostgreSQL 业务上下文 | 12 条 protected holdout：Policy `6 -> 2`、PostgreSQL executed `4 -> 1`、ResultContract valid `2 -> 0`，0 条无效变有效、2 条有效变无效 | CSpider SQLite validation 的正向离线证据未迁移；不接入默认运行时，领域对齐数据仍是下一前置条件。 |
 
 ## 本轮最小对照：官方 release 质量评测已完成
 
@@ -112,7 +121,8 @@ SQL 不读取和 final-test 不读取约束；final test 仍未使用。合同�
 14. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
 15. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
 16. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
-17. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
+17. [CSpider 两 Epoch 实验与 Olist 迁移结果](experiments/cspider-bf16-lora-2epoch-v1.md)：查看 CSpider SQLite 对照，以及最终 Adapter 在受保护 Olist 工作区的独立迁移结果。
+18. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
 
 ## 看日志与停止任务
 

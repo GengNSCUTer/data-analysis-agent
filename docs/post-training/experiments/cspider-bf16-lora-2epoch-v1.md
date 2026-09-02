@@ -86,6 +86,41 @@ validation SQLite 快照、当前 prompt 和最终 adapter 下存在明显的离
 71 条匹配退化和各类列/聚合错误。它不证明跨数据集泛化、中文 Olist/PostgreSQL 业务正确性、
 安全策略充分性或生产可替换性。
 
+## Olist PostgreSQL 迁移评测
+
+为检验上述 SQLite validation 证据是否能迁移到产品工作区，最终 Adapter 在 12 条永久 protected
+中文 Olist `answerable` holdout 上完成一次独立候选 SQL 评测。它只取代候选生成器；服务器拥有的
+QuestionRouter、Semantic Catalog、QueryPlan、ResultContract、SqlPolicy、PostgreSQL readonly role
+和 ResultValidator 全部保留，SQL repair、Vanna/SiliconFlow、图表和生产模型切换均禁用。
+
+本轮没有再次运行 Base。分析器先确认 2026-09-01 中文 bf16 Base 安全报告与本次 Adapter 的
+comparison contract 逐字段一致，才复用该 Base：模型 revision、bf16、source IDs、中文源问题、
+`olist-candidate-sql-v1`、greedy decode、seed、256 新 token、PostgreSQL、禁用 repair，以及
+manifest/source/holdout SHA-256 均相同。允许的唯一模型变量是是否加载 Adapter。当前 runner 只
+记录 Olist dataset/catalog/metric/policy version，未独立 hash PostgreSQL 内容快照，因此这是一份
+版本化工作区合同下的受控对照，不是不可变数据库快照上的基准分数。
+
+| 指标 | bf16 Base | CSpider bf16 LoRA Adapter | Adapter - Base |
+| --- | ---: | ---: | ---: |
+| 生成成功 | 12 | 12 | 0 |
+| 通过 SqlPolicy | 6 | 2 | -4 |
+| PostgreSQL 执行完成 | 4 | 1 | -3 |
+| ResultContract 有效 | 2 | 0 | -2 |
+| 无效 -> 有效 | - | 0 | - |
+| 有效 -> 无效 | - | 2 | - |
+
+12 条的状态迁移为 5 条 `policy_rejected -> policy_rejected`、1 条
+`policy_rejected -> postgres_execution_error`、2 条 `postgres_execution_error -> policy_rejected`、
+2 条 `result_contract_rejected -> policy_rejected`、1 条 `result_contract_valid -> policy_rejected` 和
+1 条 `result_contract_valid -> result_contract_rejected`。脱敏报告没有保存问题、候选 SQL、最终 SQL 或
+查询结果，因此本轮不对具体 SQL 错误机制作超出证据的归因。
+
+这次迁移评测没有出现任何新的合同有效候选，且使 Base 的两条合同有效候选失效。结论是当前 CSpider
+训练所得的正向 SQLite denotation 证据没有迁移到中文 Olist/PostgreSQL 业务链路。它不构成业务语义
+准确率，不改变生产默认 Vanna/SiliconFlow 路径；下一步仍应先设计与 Catalog、QueryPlan 和
+PostgreSQL 结果合同对齐、且与全部 holdout 严格隔离的领域数据，而不是直接接入 Adapter 或读取
+CSpider final test。
+
 ## 产物位置与下一步
 
 所有权重、checkpoint、日志和 JSON evidence 均在仓库外：
@@ -108,7 +143,14 @@ qwen25coder15b-cspider-bf16-lora-full2epoch-pair-v1-20260902/
 
 其中包括两侧的 `predictions.jsonl`、`generation_evidence.json`、SQLite diagnostics，以及
 `matching-generation-verification.json`、`sqlite-paired-analysis.json` 和
-`bounded-denotation-audit.json`。下一步不是读取 final test 或直接接入运行时，而是针对 71 条
-denotation 回退与 Adapter 的 `no_such_column`/聚合错误做受限 changed-case 人工审核。当前自动
-评测已给出正向净变化，但人工审核尚未完成，因此质量合同不能标记为无回退通过。确认错误模式后再
-决定是否需要新训练实验；任何新实验都必须重新冻结 matching Base、唯一变量和停止条件。
+`bounded-denotation-audit.json`。Olist 迁移证据位于仓库外：
+
+```text
+/disk2/gengnan/data-analysis-agent-data/experiments/
+qwen25coder15b-cspider-bf16-lora-olist-transfer-v1-20260902/
+```
+
+其中 `adapter/safe-report.json`、`analysis/safe-comparison.json` 与 `screen-run.log` 可复核本轮聚合
+结果；原始候选 SQL 仍只在同一外部目录。下一步不是读取 CSpider final test 或直接接入运行时，而是
+先在严格隔离的条件下设计 Olist 领域对齐数据的范围、口径与人工审核门；任何新实验都必须重新冻结
+matching Base、唯一变量和停止条件。
