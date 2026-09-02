@@ -1,0 +1,119 @@
+manifest_id: cspider_bf16_lora_2epoch_v1
+manifest_version: "1"
+status: frozen_not_started
+purpose: >-
+  Train one CSpider bf16 LoRA adapter for exactly two complete passes over the
+  length-bounded official train split, then compare it with the matching frozen
+  base on the official validation split. This is an offline candidate-generation
+  experiment and never changes the trusted PostgreSQL/Vanna runtime.
+source_snapshot:
+  dataset: cspider
+  release: cspider-1.0-official-2026-09-01
+  materialized_split_directory: /disk2/gengnan/data-analysis-agent-data/text-to-sql/cspider/cspider-1.0-official-2026-09-01/prepared/official-splits-length1536-v1
+  split_audit_sha256: 185040a739b83ea6de4b4e22f1295c89ec1786ce5fbc6230ac719090bd719f2f
+  train:
+    rows: 8574
+    sha256: 925257ef230007854f6075c9b2ea9d277beb736e885c6925b30aa10bc92faf08
+    role: parameter_updates
+  validation:
+    rows: 1034
+    sha256: 50d5022bde8f496273fd2e87dd645e162702e7c43733954f8de10c820323e41b
+    role: validation_only_and_matching_generation_evaluation
+  final_test:
+    rows: 2147
+    role: final_evaluation_only
+    prohibited_uses:
+      - training
+      - validation
+      - model_selection
+      - prompt_examples
+      - data_synthesis
+      - this_experiment
+  token_length_contract:
+    version: cspider-token-length-v1
+    max_seq_length: 1536
+    truncation: forbidden
+training:
+  model:
+    id: Qwen/Qwen2.5-Coder-1.5B
+    revision: df3ce67c0e24480f20468b6ef2894622d69eb73b
+    base_weight_mode: bf16_lora
+  seed: 20260902
+  epochs: 2
+  expected_optimizer_steps: 4288
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 1
+  effective_batch_size: 4
+  per_device_eval_batch_size: 4
+  learning_rate: 0.0001
+  optimizer: adamw_torch
+  weight_decay: 0.01
+  lr_scheduler_type: constant
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  checkpoints:
+    evaluation_steps: 536
+    save_steps: 536
+    save_total_limit: 2
+  gpu:
+    logical_cuda_visible_devices: "1"
+    physical_nvidia_smi_device: 3
+    expected_uuid: GPU-10863af0-8588-7625-5609-640ba794f64b
+matching_base_adapter_generation_contract:
+  status: implementation_required_before_generation
+  dataset: official_cspider_validation_only
+  case_order: source_order_frozen_and_identical
+  model_facing_inputs:
+    - validation_schema
+    - validation_question
+  prohibited_generation_inputs:
+    - validation_gold_sql
+    - final_test
+    - sqlite_database_rows
+    - olist_or_postgres_runtime_context
+  invariant_between_base_and_adapter:
+    - model_id_and_revision
+    - bf16_model_loading
+    - tokenizer_and_prompt_serialization
+    - validation_case_order
+    - greedy_decode_parameters
+    - max_input_and_new_token_limits
+    - sqlite_diagnostic_policy_and_timeout
+  unique_variable: adapter_loaded
+  decode:
+    do_sample: false
+    num_beams: 1
+    seed: 42
+    max_input_tokens: 1536
+    max_new_tokens: 256
+post_generation_evaluation_contract:
+  required:
+    - complete_base_and_adapter_candidate_coverage_for_1034_validation_cases
+    - readonly_sqlite_policy_and_execution_diagnostics
+    - paired_status_and_error_migration_analysis
+    - bounded_denotation_audit_after_both_generation_outputs_are_frozen
+    - bounded_changed_case_human_review
+  gold_sql_boundary:
+    generation: forbidden
+    denotation_audit_after_generation_freeze: allowed_read_only
+  not_in_this_contract:
+    - official_leaderboard_claim
+    - CSpider_final_test_evaluation
+    - Olist_or_PostgreSQL_business_migration_claim
+    - production_model_replacement
+quality_gate:
+  pass_requires:
+    - training_and_fresh_adapter_reload_evidence
+    - identical_base_adapter_generation_inputs_and_decode_configuration
+    - all_required_post_generation_evaluations_complete
+    - no_unexplained_regression_in_predeclared_metrics
+  failure_or_stop_conditions:
+    - GPU_uuid_mismatch
+    - out_of_memory
+    - split_or_length_contract_failure
+    - non_finite_train_or_validation_loss
+    - missing_or_unloadable_adapter
+    - incomplete_or_nonmatching_base_adapter_case_coverage

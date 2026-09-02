@@ -95,6 +95,7 @@
 9. [CSpider SFT 训练长度合同 v1](data/cspider-token-length-contract.md)：查看与真实 Dataset 一致的 token 计数、1,536 上限、超长样本门和 test 隔离。
 10. [CSpider 正式长度物化结果](data/cspider-token-length-contract.md#正式物化结果)：查看 8,574 train、1,034 validation、2,147 final test 及 82 条外部排除清单。
 11. [CSpider 训练入口配置审阅](data/cspider-training-entry-review-v1.md)：核对 bf16 LoRA、普通 AdamW、weight decay、batch/gradient accumulation 与 test 隔离。
+12. [CSpider 两 Epoch 训练与成对评测合同](data/cspider-sft-2epoch-evaluation-contract-v1.md)：查看 4,288-step 训练、GPU UUID guard、Base/Adapter 唯一变量与生成后评测边界；当前只冻结，尚未启动。
 12. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：审查只含单指标、安全维度和单轮显式时间的领域 pilot 范围；尚未构造数据。
 13. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
 14. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
