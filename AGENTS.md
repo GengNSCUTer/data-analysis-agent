@@ -134,6 +134,14 @@
 
 ## 9. 最近一次同步记录
 
+### 2026-09-02：CSpider bf16 LoRA batch-4 冒烟
+
+- 目标：只验证正式长度物化输入在单张 RTX 4090 上的未量化 bf16 LoRA、真实 batch=4、普通 AdamW 工程链路和显存边界；不进行完整训练或 test 评测。
+- 运行：logical CUDA `1` -> physical GPU `3`（UUID guard 通过），CSpider train/validation 为 `8,574/1,034`，`max_steps=1`、`per_device_train_batch_size=4`、`gradient_accumulation_steps=1`、`adamw_torch`、`weight_decay=0.01`、`max_seq_length=1536`。完成一次真实 batch forward/backward、一次 optimizer step、全 validation loss、LoRA-only adapter 保存和独立 PEFT reload。
+- 证据：训练 peak allocated/reserved 为 `11,550,524,416 / 12,480,151,552` bytes（约 `10.76 / 11.62 GiB`），未 OOM；train loss `0.752299`、validation loss `0.996588`、fresh reload loss `0.997075` 均为有限值。外部证据目录为 `qwen25coder15b-cspider-bf16-lora-batch4-smoke-v1-20260902/`，不进入 Git。
+- 边界：单步 loss 或 reload 成功只证明训练工程、显存预算和 artifact 可用，不证明 SQL 可执行、语义正确、泛化、CSpider test 表现或 Olist 业务迁移。test 没有传入训练 runner。
+- 下一步：若用户确认，单独冻结完整两 epoch 的 Base/Adapter matching 评测合同后再训练；不得以本次冒烟直接发布质量结论。
+
 ### 2026-09-02：CSpider 正式长度物化与 bf16 batch 配置审阅
 
 - 目标：按已冻结的 `cspider-token-length-v1` 物化正式 train/validation/test；审阅训练入口并确定不量化的 bf16 LoRA 与真实 batch 配置。本轮不启动训练。
