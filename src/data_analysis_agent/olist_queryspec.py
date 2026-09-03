@@ -50,6 +50,10 @@ _DIMENSION_FOR_SHAPE = {
 }
 _SENSITIVE_DIMENSIONS = frozenset({"seller_id", "seller_city", "seller_state"})
 _ATTRIBUTION_DIMENSIONS = frozenset({"payment_type"})
+_CANONICAL_DIMENSION_EXPRESSIONS = {
+    "customer_state": "c.customer_state",
+    "product_category_name": "p.product_category_name",
+}
 
 
 class QuerySpecValidationError(ValueError):
@@ -195,6 +199,11 @@ class QuerySpec:
         except (KeyError, TypeError, ValueError) as exc:
             raise QuerySpecValidationError("invalid_query_spec", "QuerySpec has invalid field types") from exc
         return spec
+
+    @classmethod
+    def create_validated(cls, **kwargs: Any) -> "QuerySpec":
+        """Construct and immediately validate a QuerySpec for the current snapshot."""
+        return validate_query_spec(cls.create(**kwargs))
 
     def canonical_payload(self) -> dict[str, Any]:
         return {
@@ -348,6 +357,9 @@ def validate_query_spec(spec: QuerySpec, catalog: Catalog | None = None) -> Quer
     if spec.result_shape == "time_series":
         if len(families) != 1:
             raise QuerySpecValidationError("coverage_shape_not_permitted", "mixed purchase/review time fields are not supported")
+        time_fields = {METRIC_SQL_REGISTRY[metric].time_field for metric in spec.metric_ids}
+        if len(time_fields) != 1:
+            raise QuerySpecValidationError("coverage_shape_not_permitted", "time series metrics must share one canonical time field")
         if families == {"review"}:
             if not set(spec.metric_ids) <= _REVIEW_METRICS:
                 raise QuerySpecValidationError("coverage_shape_not_permitted", "unsupported review series metric set")
@@ -421,11 +433,8 @@ def _where(filters: Sequence[str]) -> str:
 
 
 def _dimension_expr(dimension: str | None, alias: str) -> str | None:
-    if dimension == "customer_state":
-        return f"c.customer_state"
-    if dimension == "product_category_name":
-        return "p.product_category_name"
-    return None
+    del alias  # expressions are canonical and intentionally not caller-controlled
+    return _CANONICAL_DIMENSION_EXPRESSIONS.get(dimension)
 
 
 def _metric_cte(metric_id: str, spec: QuerySpec, index: int) -> str:

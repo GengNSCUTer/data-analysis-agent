@@ -32,7 +32,7 @@
 - [`data-dictionary.md`](data-dictionary.md)：当前工作区字段字典。
 - [`metric-catalog.md`](metric-catalog.md)：当前十项指标的简表与机器可读 Catalog 入口。
 - [`metric-contracts/olist-metrics-v2.md`](metric-contracts/olist-metrics-v2.md)：十项指标的公式、分母、归属边界和数据库回归证据。
-- [`post-training/data/olist-queryspec-renderer-design-v1.md`](post-training/data/olist-queryspec-renderer-design-v1.md)：Olist 领域 SFT 中离线 QuerySpec 与 deterministic PostgreSQL Gold SQL renderer 的职责边界；尚未实现或物化样本。
+- [`post-training/data/olist-queryspec-renderer-design-v1.md`](post-training/data/olist-queryspec-renderer-design-v1.md)：Olist 领域 SFT 中离线 QuerySpec 与 deterministic PostgreSQL Gold SQL renderer 的职责边界及实现状态；尚未物化样本。
 - [`sql-policy.md`](sql-policy.md)：`sqlglot` AST 策略和 SQL 执行边界。
 - [`data-loading.md`](data-loading.md)：数据清洗、加载和版本化说明。
 - [`local-postgres.md`](local-postgres.md)：本机 PostgreSQL 服务与连接约定。

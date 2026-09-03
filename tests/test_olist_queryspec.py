@@ -67,6 +67,16 @@ def test_mapping_round_trip_preserves_a_valid_canonical_query_spec() -> None:
     assert validate_query_spec(recovered) == original
 
 
+def test_create_validated_rejects_invalid_candidates_at_the_boundary() -> None:
+    valid = QuerySpec.create_validated(metric_ids=("gmv",), result_shape="scalar")
+    assert valid == validate_query_spec(valid)
+
+    with pytest.raises(QuerySpecValidationError) as exc_info:
+        QuerySpec.create_validated(metric_ids=("gmv", "gmv"), result_shape="scalar")
+
+    assert exc_info.value.reason_code == "invalid_metric_ids"
+
+
 @pytest.mark.parametrize("metric_id", ALL_METRICS)
 def test_all_metrics_have_read_only_registry_definitions_and_scalar_gold(metric_id: str) -> None:
     spec = _spec(metric_ids=(metric_id,), result_shape="scalar")
@@ -179,6 +189,24 @@ def test_absolute_range_uses_half_open_filter_on_each_metric_time_field() -> Non
     assert "r.review_creation_date >= TIMESTAMP '2017-01-01'" in artifact.sql
     assert "r.review_creation_date < TIMESTAMP '2018-01-01'" in artifact.sql
     assert "date_trunc('year', r.review_creation_date) AS time" in artifact.sql
+
+
+def test_grouped_sql_uses_one_canonical_key_and_explicit_null_exclusion() -> None:
+    state_sql = render_gold_sql(
+        _spec(metric_ids=("gmv", "paid_order_count"), result_shape="state_grouped")
+    ).sql
+    series_sql = render_gold_sql(
+        _spec(
+            metric_ids=("gmv", "paid_order_count"),
+            result_shape="time_series",
+            time=QueryTime("series", "2017-01-01", "2018-01-01", "month"),
+        )
+    ).sql
+
+    assert state_sql.count("c.customer_state AS customer_state") == 2
+    assert state_sql.count("c.customer_state IS NOT NULL") == 2
+    assert "date_trunc('month', o.order_purchase_timestamp) AS time" in series_sql
+    assert series_sql.count("date_trunc('month', o.order_purchase_timestamp)") == 2
 
 
 def test_from_mapping_rejects_stale_or_tampered_query_spec_id() -> None:

@@ -191,9 +191,9 @@ Validated QuerySpec + pinned Catalog + MetricSqlDefinition registry
 
 ## 5. 设计后的实现与测试边界
 
-下一轮实现只能包含以下内容：`QuerySpec` immutable model、验证器、只读指标表达式注册表、
-renderer 和确定性单元测试。不得在同一轮开始 split audit、生成正式 QuerySpec、执行数据库、
-物化 Prompt/Gold、token 审计或 GPU 任务。
+本轮已完成 `QuerySpec` immutable model、验证器、只读指标表达式注册表、renderer 和确定性单元测试。
+下一轮只设计受控 QuerySpec 批量物化器；不得在该设计阶段生成正式 QuerySpec、执行数据库、物化 Prompt/Gold、
+进行 token 审计或启动 GPU 任务。
 
 最低测试集应覆盖：
 
@@ -210,5 +210,5 @@ renderer 和确定性单元测试。不得在同一轮开始 split audit、生�
 - 实现在 `src/data_analysis_agent/olist_queryspec.py`：冻结 dataclass 以 canonical JSON 生成 `query_spec_id`；验证器只接受当前 workspace 快照、十项已登记指标和 coverage v2 的静态形状。版本漂移、指标/结果列篡改、归因、敏感卖家维度、支付归因、混合时间字段及未知字段均 fail closed。
 - `METRIC_SQL_REGISTRY` 是 `MappingProxyType` 只读表。它编码十项指标的固定事实表、时间字段、聚合表达式和分母/默认过滤；渲染器只从该表和固定 Join 程序输出 SQL，不插入问题、模型输出或调用方提供的 SQL 文本。
 - renderer 对同一 QuerySpec 产生字节稳定的 PostgreSQL SQL 和脱敏 evidence。多指标使用独立 CTE 后再组合；AOV 先在订单内 `SUM(i.price)`，再平均订单金额。renderer 不调用 LLM、SqlPolicy、reader role、ResultValidator 或数据库。
-- `tests/test_olist_queryspec.py` 覆盖十项标量公式/过滤、四类输出形状、AOV 粒度、多指标 CTE、半开时间范围、稳定 hash、映射往返及冻结拒绝码；`SqlPolicy` 兼容性作为测试断言而非 renderer 副作用。专项 `43 passed`，与 Catalog/Router/QueryPlan/ResultValidator/SqlPolicy/Trusted SQL Tool 的相关回归 `159 passed`。
+- `tests/test_olist_queryspec.py` 覆盖十项标量公式/过滤、四类输出形状、AOV 粒度、多指标 CTE、半开时间范围、稳定 hash、映射往返及冻结拒绝码；`SqlPolicy` 兼容性作为测试断言而非 renderer 副作用。专项 `45 passed`，与 Catalog/Router/QueryPlan/ResultValidator/SqlPolicy/Trusted SQL Tool 的相关回归 `161 passed`。
 - 仍未验证：真实 PostgreSQL 结果值、reader-role 执行、ResultContract/ResultValidator 的后续准入、人工逐条业务语义审核，以及从 QuerySpec 物化 Prompt/Gold/训练行。测试通过不代表 Gold SQL 已经获得这些后续证据。
