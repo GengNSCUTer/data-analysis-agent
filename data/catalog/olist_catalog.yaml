@@ -168,7 +168,8 @@ metrics:
     source_tables: [fact_orders, fact_order_items]
     source_columns: [fact_orders.order_status, fact_order_items.price]
     default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
-    allowed_dimensions: [date, customer_state, customer_city, product_category_name, seller_id, payment_type]
+    allowed_dimensions: [date, customer_state, customer_city, product_category_name, payment_type]
+    result_value_constraints: {minimum: 0}
     dimension_policies:
       payment_type:
         description: "一个订单可能对应多条支付记录；必须先明确 GMV 按支付方式拆分、分摊或归属的业务规则，禁止自行使用 payment_sequential=1 代替归属口径。"
@@ -185,13 +186,11 @@ metrics:
     source_tables: [fact_orders]
     source_columns: [fact_orders.order_id, fact_orders.order_status]
     default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
-    allowed_dimensions: [date, customer_state, customer_city, seller_id, product_category_name, payment_type]
+    allowed_dimensions: [date, customer_state, customer_city, product_category_name, payment_type]
+    result_value_constraints: {minimum: 0, integer_like: true}
     dimension_policies:
       product_category_name:
         description: "一个订单可能包含多个品类；按品类计订单时必须先冻结订单归属、去重或分摊口径，禁止把含该品类的订单直接当作可跨品类相加的订单数。"
-        mode: requires_attribution
-      seller_id:
-        description: "一个订单可能包含多个卖家；按卖家计订单时必须先冻结订单归属、去重或分摊口径，禁止通过商品行直接重复订单计数。"
         mode: requires_attribution
       payment_type:
         description: "一个订单可能对应多条支付记录；必须先明确订单归属支付方式的业务规则，禁止自行使用 payment_sequential=1 代替归属口径。"
@@ -208,13 +207,11 @@ metrics:
     source_tables: [fact_orders]
     source_columns: [fact_orders.order_purchase_timestamp, fact_orders.order_delivered_customer_date]
     default_filters: ["fact_orders.order_purchase_timestamp IS NOT NULL", "fact_orders.order_delivered_customer_date IS NOT NULL"]
-    allowed_dimensions: [date, customer_state, customer_city, seller_id, product_category_name]
+    allowed_dimensions: [date, customer_state, customer_city, product_category_name]
+    result_value_constraints: {minimum: 0}
     dimension_policies:
       product_category_name:
         description: "一个订单可能包含多个品类；按品类汇总履约天数时，必须先明确是按订单归属、按商品行加权还是采用其他分摊规则，禁止直接通过订单商品行重复订单履约时长。"
-        mode: requires_attribution
-      seller_id:
-        description: "一个订单可能包含多个卖家；按卖家汇总履约天数时，必须先明确订单归属、商品行加权或分摊规则，禁止通过订单商品行重复订单履约时长。"
         mode: requires_attribution
     recommended_chart: line
     role_visibility: [analyst, admin]
@@ -228,13 +225,11 @@ metrics:
     source_tables: [fact_reviews]
     source_columns: [fact_reviews.review_score]
     default_filters: ["fact_reviews.review_score BETWEEN 1 AND 5"]
-    allowed_dimensions: [date, customer_state, customer_city, seller_id, product_category_name]
+    allowed_dimensions: [date, customer_state, customer_city, product_category_name]
+    result_value_constraints: {minimum: 0, maximum: 1}
     dimension_policies:
       product_category_name:
         description: "一条订单评价可能关联多个品类；按品类汇总好评率时，必须先明确评价归属或分摊规则，禁止通过订单商品行复制评价后直接计算。"
-        mode: requires_attribution
-      seller_id:
-        description: "一条订单评价可能关联多个卖家；按卖家汇总好评率时，必须先明确评价归属或分摊规则，禁止通过订单商品行复制评价后直接计算。"
         mode: requires_attribution
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
@@ -248,7 +243,8 @@ metrics:
     source_tables: [fact_orders, fact_order_items]
     source_columns: [fact_orders.order_status, fact_order_items.order_id, fact_order_items.order_item_id]
     default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
-    allowed_dimensions: [date, customer_state, customer_city, product_category_name, seller_id, payment_type]
+    allowed_dimensions: [date, customer_state, customer_city, product_category_name, payment_type]
+    result_value_constraints: {minimum: 0, integer_like: true}
     dimension_policies:
       payment_type:
         description: "一个订单可能对应多条支付记录；按支付方式统计商品件数必须先明确商品行的支付归属或分摊规则。"
@@ -266,6 +262,7 @@ metrics:
     source_columns: [fact_orders.order_id, fact_orders.order_status, fact_order_items.order_id, fact_order_items.price]
     default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
     allowed_dimensions: [date, customer_state, customer_city]
+    result_value_constraints: {minimum: 0}
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 
@@ -279,6 +276,7 @@ metrics:
     source_columns: [fact_reviews.review_score]
     default_filters: ["fact_reviews.review_score BETWEEN 1 AND 5"]
     allowed_dimensions: [date, customer_state, customer_city]
+    result_value_constraints: {minimum: 1, maximum: 5}
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 
@@ -292,6 +290,7 @@ metrics:
     source_columns: [fact_orders.order_status, fact_orders.order_purchase_timestamp, fact_orders.order_delivered_customer_date, fact_orders.order_estimated_delivery_date]
     default_filters: ["fact_orders.order_status = 'delivered'", "fact_orders.order_purchase_timestamp IS NOT NULL", "fact_orders.order_delivered_customer_date IS NOT NULL", "fact_orders.order_estimated_delivery_date IS NOT NULL"]
     allowed_dimensions: [date, customer_state, customer_city]
+    result_value_constraints: {minimum: 0, maximum: 1}
     recommended_chart: line
     role_visibility: [analyst, admin]
 
@@ -305,6 +304,7 @@ metrics:
     source_columns: [fact_orders.order_id, fact_orders.order_status, fact_orders.order_purchase_timestamp]
     default_filters: ["fact_orders.order_purchase_timestamp IS NOT NULL"]
     allowed_dimensions: [date, customer_state, customer_city]
+    result_value_constraints: {minimum: 0, maximum: 1}
     recommended_chart: line
     role_visibility: [analyst, admin]
 
@@ -317,7 +317,8 @@ metrics:
     source_tables: [fact_orders, fact_order_items]
     source_columns: [fact_orders.order_status, fact_order_items.freight_value]
     default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
-    allowed_dimensions: [date, customer_state, customer_city, product_category_name, seller_id, payment_type]
+    allowed_dimensions: [date, customer_state, customer_city, product_category_name, payment_type]
+    result_value_constraints: {minimum: 0}
     dimension_policies:
       payment_type:
         description: "一个订单可能对应多条支付记录；按支付方式统计运费金额必须先明确运费的支付归属或分摊规则。"

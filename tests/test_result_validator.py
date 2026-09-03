@@ -30,6 +30,33 @@ def test_validator_refuses_missing_metric_and_non_finite_values() -> None:
     assert invalid.state == "refuse"
 
 
+def test_validator_rejects_extra_columns_and_metric_range_violations() -> None:
+    extra = ResultValidator().validate(
+        pd.DataFrame({"gmv": [10.0], "order_status": ["delivered"]}),
+        required_columns=("gmv",),
+        metric_columns=("gmv",),
+        exact_columns=True,
+    )
+    invalid_rate = ResultValidator().validate(
+        pd.DataFrame({"cancellation_rate": [1.2]}),
+        required_columns=("cancellation_rate",),
+        metric_columns=("cancellation_rate",),
+        exact_columns=True,
+        metric_value_constraints={"cancellation_rate": {"minimum": 0, "maximum": 1}},
+    )
+    negative_amount = ResultValidator().validate(
+        pd.DataFrame({"gmv": [-1.0]}),
+        required_columns=("gmv",),
+        metric_columns=("gmv",),
+        exact_columns=True,
+        metric_value_constraints={"gmv": {"minimum": 0}},
+    )
+
+    assert extra.state == "refuse"
+    assert invalid_rate.state == "refuse"
+    assert negative_amount.state == "refuse"
+
+
 def test_validator_does_not_turn_empty_or_truncated_result_into_numbers() -> None:
     empty = ResultValidator().validate(
         pd.DataFrame(columns=["gmv"]), metric_columns=("gmv",)

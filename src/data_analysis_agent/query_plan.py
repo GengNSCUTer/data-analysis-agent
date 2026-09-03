@@ -8,6 +8,8 @@ Vanna.  The SQL Policy remains the final security boundary.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
+import math
 import re
 from typing import Any, Literal, Mapping
 
@@ -17,6 +19,7 @@ from .semantic_catalog import (
     CatalogSelection,
     MetricDefinition,
 )
+from .sql_policy import DEFAULT_ANALYST_RESULT_LIMIT
 
 
 PlanType = Literal[
@@ -45,6 +48,37 @@ _DIMENSION_ALIASES: tuple[tuple[str, str], ...] = (
     ("商家", "seller_id"),
     ("支付方式", "payment_type"),
 )
+
+# These are server-owned display-cardinality bounds, not database statistics
+# inferred at request time.  A new workspace must explicitly declare/replace
+# them before enabling the corresponding grouped output.
+_DISPLAY_DIMENSION_CARDINALITY: dict[str, int] = {
+    "customer_state": 27,
+    "product_category_name": 73,
+}
+_TIME_GRAIN_CARDINALITY: dict[str, int] = {
+    "year": 3,
+    "quarter": 12,
+    "month": 36,
+    "week": 160,
+    "day": 1_100,
+}
+_NON_DISPLAYABLE_DIMENSIONS = frozenset({"seller_id", "customer_city", "payment_type"})
+_EXPLICIT_DATE_RANGE = re.compile(
+    r"(?P<start>20\d{2}-\d{2}-\d{2})\s*(?:至|到|到|-|~|～)\s*"
+    r"(?P<end>20\d{2}-\d{2}-\d{2})"
+)
+_EXPLICIT_YEAR = re.compile(r"(?<!\d)20\d{2}(?!\d)")
+
+
+@dataclass(frozen=True)
+class QueryPlanPreflight:
+    """Deterministic capability check before candidate SQL generation."""
+
+    allowed: bool
+    reason_code: str | None = None
+    clarification: str | None = None
+    estimated_max_rows: int | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +130,66 @@ class QueryPlan:
     attribution_requirements: tuple[AttributionRequirement, ...]
     execution_strategy: str
     warnings: tuple[str, ...] = ()
+
+    @classmethod
+    def preflight(
+        cls,
+        metrics: tuple[MetricDefinition, ...],
+        question: str,
+        conversation_state: Mapping[str, Any] | None = None,
+        *,
+        max_result_rows: int = DEFAULT_ANALYST_RESULT_LIMIT,
+    ) -> QueryPlanPreflight:
+        """Reject query shapes the current result contract cannot display.
+
+        This is intentionally prior to LLM/SQL generation.  It validates only
+        deterministic output capability, not business metric attribution;
+        attribution remains owned by the Catalog policy checked by the Router.
+        """
+        if max_result_rows <= 0:
+            raise ValueError("max_result_rows must be positive")
+        dimensions = cls._dimensions(question, metrics)
+        non_displayable = next(
+            (dimension for dimension in dimensions if dimension in _NON_DISPLAYABLE_DIMENSIONS),
+            None,
+        )
+        if non_displayable:
+            display_name = {
+                "seller_id": "卖家",
+                "customer_city": "客户城市",
+                "payment_type": "支付方式",
+            }[non_displayable]
+            return QueryPlanPreflight(
+                False,
+                "dimension_not_displayable",
+                f"当前结果合同尚未支持按{display_name}稳定展示。请改按客户州、商品品类，或缩小为已支持的汇总范围。",
+            )
+        time_grain = cls._time_grain(question)
+        state = conversation_state or {}
+        has_explicit_range = bool(
+            cls._time_range(state)
+            or _EXPLICIT_DATE_RANGE.search(question)
+            or _EXPLICIT_YEAR.search(question)
+        )
+        if time_grain == "day" and not has_explicit_range:
+            return QueryPlanPreflight(
+                False,
+                "daily_series_requires_explicit_range",
+                "按日统计必须先给出明确的绝对日期范围，避免结果超出当前行数预算。",
+            )
+        estimated_rows = 1
+        for dimension in dimensions:
+            estimated_rows *= _DISPLAY_DIMENSION_CARDINALITY.get(dimension, max_result_rows + 1)
+        if time_grain:
+            estimated_rows *= cls._series_bucket_bound(time_grain, question, state)
+        if estimated_rows > max_result_rows:
+            return QueryPlanPreflight(
+                False,
+                "result_row_budget_exceeded",
+                "当前分组形状可能超过可验证的结果行数预算。请缩小时间范围、降低时间粒度或减少分组维度。",
+                estimated_rows,
+            )
+        return QueryPlanPreflight(True, estimated_max_rows=estimated_rows)
 
     @classmethod
     def from_selection(
@@ -201,6 +295,53 @@ class QueryPlan:
         if isinstance(start, str) and isinstance(end, str) and start and end:
             return {"start": start[:32], "end": end[:32]}
         return None
+
+    @staticmethod
+    def _series_bucket_bound(
+        time_grain: str, question: str, state: Mapping[str, Any]
+    ) -> int:
+        """Return a conservative temporal bucket count for output preflight.
+
+        An absolute range affects only the output-shape estimate. It does not
+        change the eventual SQL filter or prove a candidate SQL is correct.
+        Unknown or malformed ranges retain the Catalog-owned global bound.
+        """
+        time_range = QueryPlan._time_range(state)
+        if time_range is None:
+            match = _EXPLICIT_DATE_RANGE.search(question)
+            if match:
+                time_range = match.groupdict()
+            else:
+                year = _EXPLICIT_YEAR.search(question)
+                if year:
+                    time_range = {
+                        "start": f"{year.group(0)}-01-01",
+                        "end": f"{year.group(0)}-12-31",
+                    }
+        if time_range is None:
+            return _TIME_GRAIN_CARDINALITY[time_grain]
+        try:
+            start = date.fromisoformat(time_range["start"])
+            end = date.fromisoformat(time_range["end"])
+        except (KeyError, TypeError, ValueError):
+            return _TIME_GRAIN_CARDINALITY[time_grain]
+        if end < start:
+            return _TIME_GRAIN_CARDINALITY[time_grain]
+
+        days = (end - start).days + 1
+        if time_grain == "day":
+            return days
+        if time_grain == "week":
+            return math.ceil(days / 7)
+        if time_grain == "month":
+            return (end.year - start.year) * 12 + end.month - start.month + 1
+        if time_grain == "quarter":
+            start_quarter = (start.month - 1) // 3
+            end_quarter = (end.month - 1) // 3
+            return (end.year - start.year) * 4 + end_quarter - start_quarter + 1
+        if time_grain == "year":
+            return end.year - start.year + 1
+        return _TIME_GRAIN_CARDINALITY[time_grain]
 
     @staticmethod
     def _comparison(state: Mapping[str, Any]) -> str | None:

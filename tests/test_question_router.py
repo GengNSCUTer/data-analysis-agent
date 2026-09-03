@@ -128,6 +128,38 @@ def test_router_requires_comparison_baseline_after_metric_match(router) -> None:
     assert not route.should_generate_sql
 
 
+@pytest.mark.parametrize(
+    ("question", "reason_code"),
+    [
+        ("按卖家统计 GMV", "dimension_not_displayable"),
+        ("按客户城市统计 GMV", "dimension_not_displayable"),
+        ("按日统计 GMV", "daily_series_requires_explicit_range"),
+        ("2017年按月统计各州 GMV", "result_row_budget_exceeded"),
+    ],
+)
+def test_router_preflight_blocks_unsupported_output_shapes(
+    router: QuestionRouter, question: str, reason_code: str
+) -> None:
+    route = router.classify(question, user=_user())
+
+    assert route.state == "clarification_required"
+    assert route.reason_code == reason_code
+    assert route.should_generate_sql is False
+
+
+def test_router_rejects_too_many_metrics_instead_of_silent_prompt_truncation(
+    router: QuestionRouter,
+) -> None:
+    route = router.classify(
+        "概览 GMV、有效订单数、平均履约天数、好评率和商品件数", user=_user()
+    )
+
+    assert route.state == "clarification_required"
+    assert route.reason_code == "metric_count_exceeds_prompt_contract"
+    assert len(route.metric_ids) == 5
+    assert route.should_generate_sql is False
+
+
 def test_explicit_comparison_baseline_is_answerable(router) -> None:
     route = router.classify("GMV 同比增长", user=_user())
 

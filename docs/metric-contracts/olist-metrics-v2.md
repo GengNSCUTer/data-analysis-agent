@@ -6,7 +6,7 @@
 
 ## 1. 适用边界
 
-指标 ID 是业务语义和最终结果列别名，不是物理字段。候选 SQL 必须从 Catalog 给出的真实表、列、时间字段、默认过滤和 Join 路径编译表达式；随后仍须经过 SQL Policy、PostgreSQL `daa_analytics_reader`、ResultContract 和 ResultValidator。
+指标 ID 是业务语义和最终结果列别名，不是物理字段。候选 SQL 必须从 Catalog 给出的真实表、列、时间字段、默认过滤和 Join 路径编译表达式；随后仍须经过 SQL Policy、PostgreSQL `daa_analytics_reader`、ResultContract 和 ResultValidator。当前候选结果必须且只能返回服务器声明的列；金额/时长/计数不得为负，计数必须为整数，比例必须落在 `[0, 1]`，评价分必须在 `[1, 5]`。这些是必要的结果合理性约束，不证明指标公式或任意 join 的业务语义正确。
 
 本合同不授予如下能力：支付归因、订单/评价按品类或卖家的归属、自由过滤、排名/Top-N、同比环比、因果解释、QuerySpec 或 SQL 生成。历史 `text_to_sql_v2` 与其 60 条 protected holdout 固定在 `olist-catalog-v1` / `0.1-draft`，不能当作本快照的 v2 评测或训练输入。
 
@@ -47,6 +47,7 @@
 ## 4. 版本、接口与后续门
 
 - `CatalogLoader`、`OLIST_WORKSPACE`、Prompt、ResultContract、运行 trace 和审计默认携带 `olist-catalog-v2` / `0.2-frozen`，避免新旧口径混用。
-- 维度识别只接受维度列名或列别名的直接命中，不再因商品行表带有 `GMV` 标签而误把 GMV 问题判成卖家维度。
-- 旧的“按品类有效订单数前十”starter 已移除，因为它需要未冻结的订单归属规则且 Top-N 尚未进入 QueryPlan 合同；替换为无排名的“按商品品类统计 GMV”。受保护的 `text_to_sql_v2` 仍保留两条旧预期，因此当前 Catalog 下确定性回放为 `58/60`，两条均以 `dimension_attribution_requires_clarification` fail closed；它们不是 v2 回归通过率。
+- `seller_id` 已从所有 metric 的 `allowed_dimensions` 删除；CatalogLoader 会拒绝任何将敏感物理列重新声明为 analyst 可展示维度的配置。它仍可按 SQL Policy 在内部关联或受控聚合中使用，不能成为最终分组或结果列。
+- `customer_city`、`payment_type` 以及卖家展示在当前运行时由 QueryPlan 预检拒绝，直到单独冻结稳定排序、Top-N、行数预算、截断解释或归属合同。维度识别仍只接受列名或列别名的直接命中，不再因商品行表带有 `GMV` 标签而误把 GMV 问题判成卖家维度。
+- 旧的“按品类有效订单数前十”starter 已移除，因为它需要未冻结的订单归属规则且 Top-N 尚未进入 QueryPlan 合同；替换为无排名的“按商品品类统计 GMV”。受保护的 `text_to_sql_v2` 保留旧快照预期，因此当前 Catalog 下确定性回放为 `57/60`：`data_014` 与 `multi_006` 因 `dimension_attribution_requires_clarification` 被拒绝，`multi_005` 因州 × 月的保守结果形状超过 200 行预算而以 `result_row_budget_exceeded` 被拒绝。三者都是历史到 v2 合同的迁移差异，不是 v2 回归通过率。
 - 十指标 coverage matrix 与 QuerySpec/renderer 职责设计均已冻结。下一项仅可实现并共同审阅 QuerySpec schema、验证器、只读指标表达式注册表、deterministic renderer 及其单元测试；在此之前不得物化训练行或启动 split/token 审计、GPU 训练和评测。

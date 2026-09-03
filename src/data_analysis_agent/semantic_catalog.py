@@ -115,6 +115,9 @@ class MetricDefinition:
     allowed_dimensions: tuple[str, ...]
     recommended_chart: str
     role_visibility: frozenset[str]
+    result_value_constraints: Mapping[str, float | bool] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     dimension_policies: Mapping[str, DimensionPolicy] = field(
         default_factory=lambda: MappingProxyType({})
     )
@@ -238,6 +241,10 @@ class ResultContract:
     selected_join_ids: tuple[str, ...]
     result_column_labels: Mapping[str, str]
     metric_fact_grains: Mapping[str, str]
+    exact_result_columns: bool = True
+    metric_value_constraints: Mapping[str, Mapping[str, float | bool]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     attribution_requirements: tuple[AttributionRequirement, ...] = ()
 
     @classmethod
@@ -300,6 +307,13 @@ class ResultContract:
             metric_fact_grains=MappingProxyType(
                 {metric.metric_id: metric.grain for metric in selection.metrics}
             ),
+            exact_result_columns=True,
+            metric_value_constraints=MappingProxyType(
+                {
+                    metric.metric_id: metric.result_value_constraints
+                    for metric in selection.metrics
+                }
+            ),
             attribution_requirements=attribution_requirements,
         )
 
@@ -347,6 +361,11 @@ class ResultContract:
             "selected_join_ids": list(self.selected_join_ids),
             "result_column_labels": dict(self.result_column_labels),
             "metric_fact_grains": dict(self.metric_fact_grains),
+            "exact_result_columns": self.exact_result_columns,
+            "metric_value_constraints": {
+                metric_id: dict(constraints)
+                for metric_id, constraints in self.metric_value_constraints.items()
+            },
             "attribution_requirements": [
                 requirement.as_dict()
                 for requirement in self.attribution_requirements
@@ -370,6 +389,11 @@ class ResultContract:
             "requested_end": self.requested_end,
             "selected_join_ids": list(self.selected_join_ids),
             "metric_fact_grains": dict(self.metric_fact_grains),
+            "exact_result_columns": self.exact_result_columns,
+            "metric_value_constraints": {
+                metric_id: dict(constraints)
+                for metric_id, constraints in self.metric_value_constraints.items()
+            },
             "attribution_requirements": [
                 requirement.as_dict()
                 for requirement in self.attribution_requirements
@@ -548,7 +572,7 @@ class CatalogLoader:
             "recommended_chart", "role_visibility",
         }
         missing = required - set(item)
-        unknown = set(item) - required - {"dimension_policies"}
+        unknown = set(item) - required - {"dimension_policies", "result_value_constraints"}
         if missing or unknown:
             detail = []
             if missing:
@@ -568,10 +592,17 @@ class CatalogLoader:
                 raise CatalogValidationError(f"metric {metric_id} references unknown source column: {qualified}")
         time_field = self._qualified_column(item["time_field"], f"{metric_id}.time_field", table_map)
         roles = self._roles(item["role_visibility"], f"{metric_id}.role_visibility")
+        allowed_dimensions = self._strings(item["allowed_dimensions"], f"{metric_id}.allowed_dimensions")
+        sensitive_dimensions = set(allowed_dimensions) & set(self.sensitive_projection_columns)
+        if sensitive_dimensions:
+            raise CatalogValidationError(
+                f"metric {metric_id} exposes sensitive output dimensions: "
+                f"{sorted(sensitive_dimensions)}"
+            )
         dimension_policies = self._dimension_policies(
             item.get("dimension_policies", {}),
             f"{metric_id}.dimension_policies",
-            allowed_dimensions=self._strings(item["allowed_dimensions"], f"{metric_id}.allowed_dimensions"),
+            allowed_dimensions=allowed_dimensions,
         )
         return MetricDefinition(
             metric_id=metric_id,
@@ -583,9 +614,12 @@ class CatalogLoader:
             source_tables=source_tables,
             source_columns=source_columns,
             default_filters=self._strings(item["default_filters"], f"{metric_id}.default_filters"),
-            allowed_dimensions=self._strings(item["allowed_dimensions"], f"{metric_id}.allowed_dimensions"),
+            allowed_dimensions=allowed_dimensions,
             recommended_chart=self._nonempty(item["recommended_chart"], f"{metric_id}.recommended_chart"),
             role_visibility=roles,
+            result_value_constraints=self._result_value_constraints(
+                item.get("result_value_constraints", {}), metric_id
+            ),
             dimension_policies=dimension_policies,
         )
 
@@ -696,6 +730,45 @@ class CatalogLoader:
                 attribution_rule_id=rule_id,
             )
         return MappingProxyType(policies)
+
+    @staticmethod
+    def _result_value_constraints(
+        value: Any, metric_id: str
+    ) -> Mapping[str, float | bool]:
+        if not isinstance(value, dict):
+            raise CatalogValidationError(
+                f"{metric_id}.result_value_constraints must be a mapping"
+            )
+        unknown = set(value) - {"minimum", "maximum", "integer_like"}
+        if unknown:
+            raise CatalogValidationError(
+                f"{metric_id}.result_value_constraints has unknown fields: {sorted(unknown)}"
+            )
+        result: dict[str, float | bool] = {}
+        for boundary in ("minimum", "maximum"):
+            raw = value.get(boundary)
+            if raw is None:
+                continue
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise CatalogValidationError(
+                    f"{metric_id}.result_value_constraints.{boundary} must be numeric"
+                )
+            result[boundary] = float(raw)
+        if "integer_like" in value:
+            if not isinstance(value["integer_like"], bool):
+                raise CatalogValidationError(
+                    f"{metric_id}.result_value_constraints.integer_like must be boolean"
+                )
+            result["integer_like"] = value["integer_like"]
+        if (
+            "minimum" in result
+            and "maximum" in result
+            and result["minimum"] > result["maximum"]
+        ):
+            raise CatalogValidationError(
+                f"{metric_id}.result_value_constraints minimum exceeds maximum"
+            )
+        return MappingProxyType(result)
 
     @staticmethod
     def _identifier(value: Any, label: str) -> str:
@@ -924,6 +997,25 @@ class CatalogRetriever:
             joins=selected_joins,
             trace=trace,
             prompt=prompt,
+        )
+
+    def matched_metric_ids(
+        self, question: str, user: User | None = None
+    ) -> tuple[str, ...]:
+        """Return every visible metric explicitly matched before prompt caps.
+
+        This method is used only to reject a request that asks for more
+        metrics than the candidate-SQL Prompt can carry.  It never changes
+        retrieval selection or leaks hidden metrics across roles.
+        """
+        role = _role_for_user(user)
+        visible_metrics = [
+            metric for metric in self.catalog.metrics if role in metric.role_visibility
+        ]
+        return tuple(
+            metric.metric_id
+            for metric, score, _ in self._rank_metrics(_normalize(question), visible_metrics)
+            if score >= self.min_score
         )
 
     def _joins_for(self, table_ids: set[str]) -> tuple[JoinPath, ...]:

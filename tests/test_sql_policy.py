@@ -55,6 +55,7 @@ def test_policy_qualifies_tables_and_adds_analyst_limit(policy: SqlPolicy) -> No
     assert "analytics.dim_customers" in decision.final_sql
     assert decision.final_sql.endswith("LIMIT 200")
     assert decision.tables == ("dim_customers", "fact_orders")
+    assert decision.policy_limit_applied is True
 
 
 def test_policy_caps_a_large_limit(policy: SqlPolicy) -> None:
@@ -64,6 +65,18 @@ def test_policy_caps_a_large_limit(policy: SqlPolicy) -> None:
 
     assert decision.final_sql.endswith("LIMIT 200")
     assert decision.row_limit == 200
+    assert decision.policy_limit_applied is True
+
+
+def test_policy_keeps_a_smaller_explicit_limit_distinct_from_a_policy_cap(
+    policy: SqlPolicy,
+) -> None:
+    decision = policy.evaluate(
+        "SELECT customer_state FROM dim_customers LIMIT 5", role="analyst"
+    )
+
+    assert decision.row_limit == 5
+    assert decision.policy_limit_applied is False
 
 
 def test_policy_allows_count_of_join_key_but_not_raw_identifier(policy: SqlPolicy) -> None:

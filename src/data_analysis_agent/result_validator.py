@@ -179,6 +179,8 @@ class ResultValidator:
         requested_end: str | date | datetime | None = None,
         limit_applied: bool = False,
         join_multiplicity: Mapping[str, int] | None = None,
+        exact_columns: bool = False,
+        metric_value_constraints: Mapping[str, Mapping[str, float | bool]] | None = None,
     ) -> ResultValidation:
         if not isinstance(frame, pd.DataFrame):
             return ResultValidation("refuse", "结果不是受支持的表格类型。", 0, ())
@@ -200,6 +202,22 @@ class ResultValidator:
                 columns,
                 missing_columns=missing,
             )
+        if exact_columns:
+            allowed_actual_columns: set[str] = set()
+            for column in required_columns:
+                allowed_actual_columns.update(
+                    candidate
+                    for candidate in dict.fromkeys((column, *aliases.get(column, ())))
+                    if candidate in frame.columns
+                )
+            unexpected = tuple(column for column in columns if column not in allowed_actual_columns)
+            if unexpected:
+                return ResultValidation(
+                    "refuse",
+                    "结果包含未在服务器合同中声明的列。",
+                    len(frame),
+                    columns,
+                )
         if join_multiplicity and any(value > 1 for value in join_multiplicity.values()):
             return ResultValidation(
                 "refuse",
@@ -238,6 +256,26 @@ class ResultValidator:
                     len(frame),
                     columns,
                 )
+            constraints = (metric_value_constraints or {}).get(column, {})
+            if numeric.notna().any():
+                values = numeric.dropna()
+                minimum = constraints.get("minimum")
+                maximum = constraints.get("maximum")
+                integer_like = constraints.get("integer_like", False)
+                if (
+                    (minimum is not None and (values < float(minimum)).any())
+                    or (maximum is not None and (values > float(maximum)).any())
+                    or (
+                        integer_like
+                        and not values.map(lambda value: float(value).is_integer()).all()
+                    )
+                ):
+                    return ResultValidation(
+                        "refuse",
+                        "结果中的指标值不满足服务器定义的合理范围。",
+                        len(frame),
+                        columns,
+                    )
         if len(frame) >= self.max_rows or limit_applied:
             return ResultValidation(
                 "needs_clarification",

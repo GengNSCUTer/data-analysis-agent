@@ -90,11 +90,11 @@ ResultContract、ResultValidator 和人工口径审查。
 
 | 查询形状 | 指标集合 | 维度/时间 | 程序 | 决定 |
 | --- | --- | --- | --- | --- |
-| 标量概览 | 十项中任意 2--10 项 | 无维度，可带确认时窗 | `JP09` | 纳入。每项以独立 CTE 聚合，禁止跨事实表明细 Join。 |
-| 按客户州多指标 | 十项中任意 2--10 项 | `customer_state`，可带确认时窗 | `JP10` | 纳入。所有指标均有安全州级路径。 |
+| 标量概览 | 十项中任意 2--4 项 | 无维度，可带确认时窗 | `JP09` | 纳入。上限必须与当前 `CatalogRetriever.max_metrics=4` 一致；每项以独立 CTE 聚合，禁止跨事实表明细 Join。 |
+| 按客户州多指标 | 十项中任意 2--4 项 | `customer_state`，可带确认时窗 | `JP10` | 纳入。上限为 4；所有指标均有安全州级路径。 |
 | 按客户城市多指标 | 任意安全多指标 | `customer_city` | 暂缓。语义路径安全，但高基数结果、行数上限、排序和样本长度尚未进入 QuerySpec 合同。 |
-| 购买时间多指标序列 | `gmv`、`item_count`、`freight_amount`、`paid_order_count`、`average_delivery_days`、`average_order_value`、`on_time_delivery_rate`、`cancellation_rate` 中任意 2--8 项 | 日/月/季度/年 | `JP11` | 纳入。八项同用购买时间。 |
-| 评价时间多指标序列 | `positive_review_rate`、`average_review_score` | 日/月/季度/年 | `JP12` | 纳入。两项同用评价创建时间。 |
+| 购买时间多指标序列 | `gmv`、`item_count`、`freight_amount`、`paid_order_count`、`average_delivery_days`、`average_order_value`、`on_time_delivery_rate`、`cancellation_rate` 中任意 2--4 项 | 日/月/季度/年 | `JP11` | 纳入。四项上限与运行时一致；按日必须有确认绝对范围，且任何形状都不得超过 analyst 200 行结果预算。 |
+| 评价时间多指标序列 | `positive_review_rate`、`average_review_score` | 日/月/季度/年 | `JP12` | 纳入。按日必须有确认绝对范围，且受 200 行结果预算约束。 |
 | 跨购买/评价时间字段的序列 | 任意同时含订单/商品行与评价行指标 | 时间序列 | 无 | 排除。`QueryPlan` 会产生 `selected_metrics_use_different_time_fields` warning，不能把有 warning 的形状写入 SQL SFT。 |
 | 按品类/卖家多指标 | 任意混合粒度组合 | 品类或卖家 | 无 | 排除。混入订单或评价指标会产生归属歧义；卖家 ID 还属于敏感结果/分组列。 |
 | 支付方式多指标 | 任意 | `payment_type` | 无 | 排除。没有服务器归属/分摊规则。 |
@@ -110,9 +110,9 @@ ResultContract、ResultValidator 和人工口径审查。
 | B. 单指标时间序列 | 十指标，各自时间字段 | 760 | 115 | 115 | 60 |
 | C. 单指标客户州 | 十指标，州，无时间或确认时窗 | 720 | 105 | 105 | 50 |
 | D. 商品行品类维度 | `gmv`/`item_count`/`freight_amount` 按品类 | 300 | 45 | 45 | 20 |
-| E. 多指标标量 | 任意安全 2--10 项 | 600 | 90 | 90 | 50 |
-| F. 多指标按州 | 任意安全 2--10 项 | `customer_state`，可带确认时窗 | 720 | 105 | 105 | 60 |
-| G. 同时间字段多指标序列 | `JP11` 或 `JP12` | 日/月/季度/年 | 600 | 90 | 90 | 40 |
+| E. 多指标标量 | 任意安全 2--4 项 | 600 | 90 | 90 | 50 |
+| F. 多指标按州 | 任意安全 2--4 项 | `customer_state`，可带确认时窗 | 720 | 105 | 105 | 60 |
+| G. 同时间字段多指标序列 | `JP11` 或 `JP12`；2--4 项 | 日/月/季度/年，按日需绝对范围和行数预算 | 600 | 90 | 90 | 40 |
 | **总计** | 仅本矩阵的纳入范围 | **4,460** | **665** | **665** | **330** |
 
 同一 `family_id`、`sql_program_id` 或仅日期/阈值/措辞/别名不同的表面改写只能属于一个 split。
@@ -127,7 +127,7 @@ Train、validation 和 in-domain test 可以共享原子指标、表和单指标
 | --- | --- | --- |
 | 品类/卖家下的订单、履约、AOV、准时率、取消率或评价指标 | 需澄清或排除 | 需要显式订单/评价归属、去重或分摊合同；不得以商品行 Join 隐式复制事实。 |
 | `payment_type` | 排除 | 需要按订单、商品金额和运费分别定义支付归属/分摊规则。 |
-| 客户城市分组 | 暂缓 | 关联粒度安全，但当前真实 Prompt 没有表达稳定排序、行数上限和截断解释；先由 QuerySpec/结果合同定义后再决定是否纳入。 |
+| 客户城市分组 | 运行时与物化均拒绝 | 关联粒度本身安全，但当前没有 Top-N、稳定排序、行数上限和截断解释合同；`QueryPlan` 在 SQL 前返回澄清。 |
 | 卖家分组 | 排除 | 虽然卖家天然关联商品行，但 `seller_id` 是 analyst 的敏感投影/分组列；当前 SQL Policy 明确拒绝，不能用训练样本绕过。 |
 | Top-N、排序、排名 | 排除 | QueryPlan 尚未将排序字段、方向、limit 作为真实 Prompt 的结构化合同。 |
 | 自由业务筛选 | 排除 | 当前没有受控过滤解析和 Prompt 合同；只允许默认过滤和确认时间范围。 |
@@ -144,7 +144,7 @@ Train、validation 和 in-domain test 可以共享原子指标、表和单指标
 2. 十项 canonical PostgreSQL 表达式、默认过滤、日期边界、时间截断与 AOV/履约天数/比例分母；
 3. 多指标 CTE 的稳定命名、Join 键、空值策略和顶层 alias 顺序；
 4. renderer 对“需澄清”和“排除”单元必须拒绝，而不是尝试猜测业务语义；
-5. 品类分组是 `category_grouped`，仅限 `gmv`、`item_count`、`freight_amount` 的单指标 `JP07_category_item`；卖家分组保持排除，因为 `seller_id` 是 analyst 敏感投影/分组列。
+5. 品类分组是 `category_grouped`，仅限 `gmv`、`item_count`、`freight_amount` 的单指标 `JP07_category_item`；卖家分组保持排除，因为 `seller_id` 是 analyst 敏感投影/分组列。多指标上限为四项；按日序列必须具有明确绝对范围，并受 200 行 analyst 结果预算约束。
 
 下一项可以且只能实现并审阅 QuerySpec schema、验证器、只读指标表达式注册表、renderer 和确定性单元测试。
 在代码与测试经审阅且用户确认前，不生成正式 QuerySpec、Gold SQL、训练行或启动 split/token 审计和 GPU 任务。

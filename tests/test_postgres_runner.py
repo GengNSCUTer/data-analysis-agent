@@ -16,7 +16,7 @@ from data_analysis_agent.budget import BudgetedToolRegistry, BudgetUsage, Reques
 from data_analysis_agent.budget import BudgetSafetyMiddleware
 from data_analysis_agent.chat_runtime import BudgetedChatHandler
 from data_analysis_agent.conversation_store import PostgresConversationStore
-from data_analysis_agent.result_validator import ResultValidator
+from data_analysis_agent.result_validator import ResultValidationError, ResultValidator
 from data_analysis_agent.run_recorder import PostgresRunRecorder
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
@@ -82,6 +82,55 @@ async def test_runner_executes_allowed_query_and_audits_policy_rejection() -> No
     assert [audit["policy_status"] for audit in audits[:2]] == ["rejected", "allowed"]
     assert audits[1]["question"] == "integration test"
     assert "analytics.fact_orders" in audits[1]["final_sql"]
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_columns_outside_the_server_result_contract() -> None:
+    """A Policy-allowed projection must still satisfy the server contract."""
+    runner = SecurePostgresRunner()
+    context = make_context(f"exact-columns-{uuid.uuid4().hex[:12]}")
+    context.metadata.update(
+        {
+            "required_result_columns": ["paid_order_count"],
+            "metric_result_columns": ["paid_order_count"],
+            "exact_result_columns": True,
+            "metric_value_constraints": {
+                "paid_order_count": {"minimum": 0, "integer_like": True}
+            },
+        }
+    )
+
+    with pytest.raises(ResultValidationError, match="未在服务器合同中声明的列"):
+        await runner.run_sql(
+            RunSqlToolArgs(
+                sql=(
+                    "SELECT COUNT(DISTINCT order_id) AS paid_order_count, "
+                    "'extra' AS extra FROM fact_orders"
+                )
+            ),
+            context,
+        )
+
+    validation = context.metadata["result_validation"]
+    assert validation["state"] == "refuse"
+    assert context.metadata.get("result_contract_satisfied") is None
+
+
+@pytest.mark.asyncio
+async def test_runner_treats_the_policy_row_limit_as_possible_truncation() -> None:
+    """The effective SQL Policy limit, not fetchmany's defensive cap, is authoritative."""
+    runner = SecurePostgresRunner()
+    context = make_context(f"policy-limit-{uuid.uuid4().hex[:12]}")
+
+    with pytest.raises(ResultValidationError, match="行数上限截断"):
+        await runner.run_sql(
+            RunSqlToolArgs(sql="SELECT customer_state FROM dim_customers"), context
+        )
+
+    validation = context.metadata["result_validation"]
+    assert validation["state"] == "needs_clarification"
+    assert validation["truncated"] is True
+    assert validation["row_count"] == 200
 
 
 @pytest.mark.asyncio

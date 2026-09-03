@@ -344,6 +344,20 @@ class QuestionRouter:
                 "no_metric_match",
             )
 
+        matched_metric_ids = self.retriever.matched_metric_ids(question, user)
+        if len(matched_metric_ids) > self.retriever.max_metrics:
+            return QuestionRoute(
+                "clarification_required",
+                ("metric_count",),
+                matched_metric_ids,
+                f"当前一次受控查询最多支持 {self.retriever.max_metrics} 个指标；"
+                "请拆分为更小的指标组合，系统不会静默遗漏你提出的指标。",
+                "metric_count_exceeds_prompt_contract",
+                intent="clarification_required",
+                requires_database=False,
+                evidence_mode="clarification",
+            )
+
         # Dimension attribution is a Catalog-owned business rule.  Run it
         # only after help, definition, generic-advice, and follow-up branches
         # have opted out of database access.  A data question may omit words
@@ -393,6 +407,30 @@ class QuestionRouter:
                         requires_database=False,
                         evidence_mode="clarification",
                     )
+
+        # Import locally to avoid the QueryPlan -> QuestionRoute module cycle.
+        from .query_plan import QueryPlan
+
+        preflight = QueryPlan.preflight(
+            tuple(
+                self.retriever.catalog.metrics_by_id[metric_id]
+                for metric_id in metric_ids
+                if metric_id in self.retriever.catalog.metrics_by_id
+            ),
+            question,
+            state,
+        )
+        if not preflight.allowed:
+            return QuestionRoute(
+                "clarification_required",
+                (preflight.reason_code or "query_shape",),
+                metric_ids,
+                preflight.clarification,
+                preflight.reason_code or "query_shape_not_supported",
+                intent="clarification_required",
+                requires_database=False,
+                evidence_mode="clarification",
+            )
 
         intent: IntentKind = "data_query"
         evidence_mode: EvidenceMode = "database_result"

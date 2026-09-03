@@ -76,3 +76,42 @@ def test_single_metric_plan_does_not_invent_dimensions() -> None:
     assert plan.dimensions == ()
     assert plan.time_grain is None
     assert plan.required_result_columns == ("gmv",)
+
+
+def test_query_plan_preflight_rejects_unbounded_or_over_budget_shapes() -> None:
+    router = _router()
+    cases = (
+        ("按客户城市统计 GMV", "dimension_not_displayable"),
+        ("2017年按月统计各州 GMV", "result_row_budget_exceeded"),
+        ("按日统计 GMV", "daily_series_requires_explicit_range"),
+    )
+
+    for question, reason_code in cases:
+        selection = router.retriever.retrieve(question, _user())
+        decision = QueryPlan.preflight(
+            selection.metrics, question, conversation_state={}
+        )
+        assert decision.reason_code == reason_code
+        assert decision.allowed is False
+
+
+def test_query_plan_preflight_uses_an_explicit_range_for_daily_row_budget() -> None:
+    router = _router()
+    selection = router.retriever.retrieve("按日统计 GMV", _user())
+
+    short_range = QueryPlan.preflight(
+        selection.metrics,
+        "2027-01-01 至 2027-01-31按日统计 GMV",
+        conversation_state={},
+    )
+    long_range = QueryPlan.preflight(
+        selection.metrics,
+        "2027-01-01 至 2027-12-31按日统计 GMV",
+        conversation_state={},
+    )
+
+    assert short_range.allowed is True
+    assert short_range.estimated_max_rows == 31
+    assert long_range.allowed is False
+    assert long_range.reason_code == "result_row_budget_exceeded"
+    assert long_range.estimated_max_rows == 365

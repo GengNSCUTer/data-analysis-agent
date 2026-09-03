@@ -106,7 +106,7 @@ QuerySpec 只回答下列确定性问题：
 | --- | --- |
 | `schema_version` | 固定为 `olist-query-spec-v1`。未来破坏性变化只能创建 v2，不得静默兼容。 |
 | `workspace` | 必须逐字段匹配上述 v2 快照；任何 Catalog、指标、数据、策略、Prompt 或方言版本漂移都拒绝渲染。 |
-| `metric_ids` | 1--10 个、唯一、按声明顺序稳定；每个都必须存在于当前 Catalog，顺序决定最终 metric alias 顺序。 |
+| `metric_ids` | 1--4 个、唯一、按声明顺序稳定；必须与当前 `CatalogRetriever.max_metrics=4` 保持一致。每个都必须存在于当前 Catalog，顺序决定最终 metric alias 顺序。 |
 | `result_shape` | 仅 `scalar`、`state_grouped`、`category_grouped`、`time_series`。分组形状可带已确认的绝对时间过滤，但不允许“维度 + 时间序列”双分组、城市、多个普通维度、Top-N 或比较结果。 |
 | `dimension` | `scalar`/`time_series` 必须为 `null`；`state_grouped` 必须为 `customer_state`；`category_grouped` 必须为 `product_category_name`，且只允许单指标 `gmv`、`item_count` 或 `freight_amount`。 |
 | `time.mode` | `all_time`、`absolute_range`、`series`。`absolute_range` 要求 ISO 日期 `start` 和严格大于它的 `end_exclusive`；采用半开区间 `[start, end_exclusive)`。`series` 必须有 `day`、`week`、`month`、`quarter` 或 `year`，可同时带已确认绝对范围，但只允许 `time_series` 形状；其他形状不得给 grain。 |
@@ -126,7 +126,7 @@ Prompt，不能反过来由模型或自然语言直接填写 QuerySpec。
 | 场景 | reason code |
 | --- | --- |
 | Catalog 或 Prompt 版本不匹配 | `workspace_version_mismatch` |
-| 未知/重复指标，或超出 10 项 | `invalid_metric_ids` |
+| 未知/重复指标，或超出 4 项 | `invalid_metric_ids` |
 | `result_shape`、维度、时间或 join program 组合不在 coverage v2 | `coverage_shape_not_permitted` |
 | 输出列不是派生合同列 | `result_columns_do_not_match_contract` |
 | 日期无效、非半开区间或时间粒度不匹配 | `invalid_time_contract` |
@@ -183,7 +183,7 @@ Validated QuerySpec + pinned Catalog + MetricSqlDefinition registry
 | 方言与对象 | PostgreSQL；所有真实表均显式使用 `analytics.` schema；只使用 Catalog 允许表、列与 Join。 |
 | CTE 命名 | 多指标按声明顺序使用 `m01_<metric_id>` 至 `m10_<metric_id>`；中间 AOV 订单聚合使用该 metric CTE 内固定子 CTE 名，不从问题文本生成。 |
 | 过滤 | 指标默认过滤不省略；绝对时间一律作用于该指标自身 `time_field`，并使用 `[start, end_exclusive)`。 |
-| 时间序列 | 使用 `date_trunc(grain, time_field)`，最终 alias 固定为 `time`；多指标序列只允许同一时间字段组。 |
+| 时间序列 | 使用 `date_trunc(grain, time_field)`，最终 alias 固定为 `time`；多指标序列只允许同一时间字段组。按日必须有确认绝对范围，且 QuerySpec 预检不得允许超过 analyst 200 行结果预算的形状。 |
 | 多指标粒度 | 先独立聚合后组合，禁止商品行、订单、评价或支付明细裸 Join 后再聚合。 |
 | 输出 | 仅输出 `required_result_columns`，不投影敏感 ID、辅助键或调试列；SELECT 列顺序与 QuerySpec 派生列顺序完全一致。 |
 | 排序与 LIMIT | v1 renderer 不输出 `ORDER BY` 或 `LIMIT`；SQL Policy 可以在实际执行时附加安全行数上限，但该策略副作用不能成为 Gold 语义。 |

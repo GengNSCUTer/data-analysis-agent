@@ -74,6 +74,8 @@ SENSITIVE_PROJECTION_COLUMNS: Final[frozenset[str]] = frozenset(
         "dataset_version_id", "archive_sha256", "source_url",
     }
 )
+DEFAULT_ANALYST_RESULT_LIMIT: Final[int] = 200
+DEFAULT_ADMIN_RESULT_LIMIT: Final[int] = 1_000
 FORBIDDEN_FUNCTIONS: Final[frozenset[str]] = frozenset(
     {"PG_SLEEP", "PG_READ_FILE", "PG_READ_BINARY_FILE", "LO_IMPORT", "DBLINK", "SET_CONFIG"}
 )
@@ -95,6 +97,7 @@ class PolicyDecision:
     tables: tuple[str, ...]
     columns: tuple[str, ...]
     row_limit: int
+    policy_limit_applied: bool
     status: str = "allowed"
     reason: str = "SQL passed the AST policy"
 
@@ -104,8 +107,8 @@ class SqlPolicy:
 
     def __init__(
         self,
-        analyst_limit: int = 200,
-        admin_limit: int = 1000,
+        analyst_limit: int = DEFAULT_ANALYST_RESULT_LIMIT,
+        admin_limit: int = DEFAULT_ADMIN_RESULT_LIMIT,
         workspace: WorkspaceProfile | None = None,
     ):
         self.limits = {"analyst": analyst_limit, "admin": admin_limit}
@@ -239,6 +242,7 @@ class SqlPolicy:
         if limit_expression is None:
             statement = statement.limit(maximum)
             row_limit = maximum
+            policy_limit_applied = True
         else:
             value = limit_expression.expression
             if not isinstance(value, exp.Literal) or not value.is_int:
@@ -247,6 +251,7 @@ class SqlPolicy:
             if requested <= 0:
                 raise PolicyViolation("LIMIT must be greater than zero")
             row_limit = min(requested, maximum)
+            policy_limit_applied = requested > maximum
             if requested > maximum:
                 statement.set("limit", exp.Limit(expression=exp.Literal.number(maximum)))
 
@@ -257,6 +262,7 @@ class SqlPolicy:
             tables=tuple(sorted(tables)),
             columns=tuple(sorted(columns)),
             row_limit=row_limit,
+            policy_limit_applied=policy_limit_applied,
         )
 
     @staticmethod

@@ -168,6 +168,17 @@ def test_catalog_dimension_policy_uses_explicit_attribution_mode(catalog) -> Non
     assert catalog.available_attribution_rule_ids == frozenset()
 
 
+def test_catalog_rejects_a_sensitive_dimension_declared_as_displayable(tmp_path: Path) -> None:
+    def mutate(raw: dict) -> None:
+        metric = next(item for item in raw["metrics"] if item["metric_id"] == "gmv")
+        metric["allowed_dimensions"].append("seller_id")
+
+    path = _mutated_catalog(tmp_path, mutate)
+
+    with pytest.raises(CatalogValidationError, match="sensitive output dimensions"):
+        CatalogLoader().load(path)
+
+
 def test_server_owned_rule_requires_registered_server_implementation(tmp_path: Path) -> None:
     def mutate(raw: dict) -> None:
         metric = next(item for item in raw["metrics"] if item["metric_id"] == "gmv")
@@ -192,11 +203,13 @@ def test_server_owned_rule_requires_registered_server_implementation(tmp_path: P
         ).reason_code
         == "dimension_attribution_rule_unavailable"
     )
-    # This verifies Catalog declaration and registration wiring only. It does
-    # not claim that the Olist demo has a SQL compiler for this allocation.
-    assert QuestionRouter(CatalogRetriever(registered)).classify(
+    # Registration clears the attribution gate, but does not itself create a
+    # stable display/cardinality contract for payment-type output.
+    registered_route = QuestionRouter(CatalogRetriever(registered)).classify(
         "不同支付方式的 GMV", user=user
-    ).should_generate_sql
+    )
+    assert registered_route.should_generate_sql is False
+    assert registered_route.reason_code == "dimension_not_displayable"
 
 
 def test_catalog_prompt_exposes_workspace_currency_contract(catalog) -> None:

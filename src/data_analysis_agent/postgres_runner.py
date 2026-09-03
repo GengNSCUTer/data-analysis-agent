@@ -160,7 +160,10 @@ class SecurePostgresRunner(SqlRunner):
         self.settings = configured_settings
         self.policy = policy or SqlPolicy(workspace=self.workspace)
         self.audit = PostgresQueryAudit(self.settings, model_name)
-        self.result_validator = result_validator
+        # Result validation is part of the trusted execution boundary. A
+        # direct runner construction must not accidentally bypass it just
+        # because the composition root omitted an explicit dependency.
+        self.result_validator = result_validator or ResultValidator(self.settings.max_rows)
 
     async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
         return await asyncio.to_thread(self._run_sql_sync, args, context)
@@ -223,8 +226,20 @@ class SecurePostgresRunner(SqlRunner):
                 time_column_aliases=context.metadata.get("result_time_column_aliases", ()),
                 requested_start=context.metadata.get("requested_start"),
                 requested_end=context.metadata.get("requested_end"),
-                limit_applied=len(rows) >= self.settings.max_rows,
+                # A clarification is required only if Policy itself inserted
+                # or tightened the cap and the response reaches it. An
+                # explicit smaller SQL LIMIT is a separate semantic concern
+                # for QueryPlan/Gold-SQL review, not evidence of a Policy
+                # truncation.
+                limit_applied=(
+                    decision.policy_limit_applied
+                    and len(rows) >= decision.row_limit
+                ),
                 join_multiplicity=context.metadata.get("join_multiplicity"),
+                exact_columns=bool(context.metadata.get("exact_result_columns", False)),
+                metric_value_constraints=context.metadata.get(
+                    "metric_value_constraints", {}
+                ),
             )
             context.metadata["result_validation"] = validation.as_dict()
             if not validation.safe_to_answer:
