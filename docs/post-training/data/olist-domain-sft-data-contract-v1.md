@@ -4,7 +4,7 @@
 
 **合同 ID：** `olist-domain-sft-data-contract-v1`<br>
 **状态：** 已冻结设计；尚未物化任何样本、未加载 tokenizer、未启动 GPU 或训练。<br>
-**目标工作区：** `olist-catalog-v1` / `olist-kaggle-v2-2026-08-03` / PostgreSQL / `sql-policy-v1`。<br>
+**目标工作区：** `olist-catalog-v2` / `metric_version=0.2-frozen` / `olist-kaggle-v2-2026-08-03` / PostgreSQL / `sql-policy-v1`。<br>
 **训练对象：** 离线 `Qwen2.5-Coder-1.5B` LoRA candidate generator；它只产生候选 SQL。<br>
 **产品默认路径：** 不变，仍为 Vanna/SiliconFlow。领域 Adapter 不接入运行时，也不能绕过既有可信查询链路。
 
@@ -61,7 +61,7 @@ labels    = -100 for every prompt token + canonical_sql tokens + EOS
 ### 3.1 从 QuerySpec 到训练行
 
 领域样本的事实来源不是模型输出，而是一个先审查再物化的结构化 `QuerySpec`。每个
-`QuerySpec` 表示一个业务查询程序，例如它声明指标、维度、时间范围、过滤、排序、限制、结果形状和受控 Join/归因策略；它不是最终 SQL 字符串。
+`QuerySpec` 表示一个业务查询程序，例如它声明指标、结果形状、允许维度、已确认的绝对时间范围和受控 Join 程序；它不是最终 SQL 字符串。v1 不包含自由过滤、排序、LIMIT、Top-N 或未冻结归因策略。
 
 ```text
 Catalog snapshot + permitted QuerySpec
@@ -239,10 +239,11 @@ Gold 的 canonical form 必须是单条 PostgreSQL read-only SQL，并稳定使�
 
 ## 9. 后续单一任务顺序
 
-已完成：盘点当前 Catalog 中可训练的指标、维度、Join、时间与归因边界，并冻结
-[`olist-domain-sft-coverage-matrix-v1.md`](olist-domain-sft-coverage-matrix-v1.md)。之后只按以下顺序逐项推进，每项需要单独审查与用户确认：
+已完成：盘点当前 v2 Catalog 中可训练的指标、维度、Join、时间与归因边界，并冻结
+[`olist-domain-sft-coverage-matrix-v2.md`](olist-domain-sft-coverage-matrix-v2.md)，以及 QuerySpec/renderer
+职责设计 [`olist-queryspec-renderer-design-v1.md`](olist-queryspec-renderer-design-v1.md)。之后只按以下顺序逐项推进，每项需要单独审查与用户确认：
 
-1. 设计并审阅 `QuerySpec` schema 与 deterministic PostgreSQL Gold SQL renderer 的职责边界；
+1. 单独实现并审阅 `QuerySpec` schema、验证器与 deterministic PostgreSQL Gold SQL renderer，不生成正式训练行；
 2. 实现 split / holdout / near-duplicate audit，不生成正式训练行；
 3. 进行 token-length audit，证明 `1536` 的真实覆盖率；
 4. 仅物化小批人工审阅样本，先验证 Prompt、Gold、执行、合同和审计；

@@ -14,16 +14,16 @@
 
 | ID | 公式与粒度 | 默认时间字段 | 安全直接维度 | 不能自行推断的边界 |
 | --- | --- | --- | --- | --- |
-| `gmv` | 有效订单的 `SUM(fact_order_items.price)`；商品行粒度，不含 `freight_value` | `fact_orders.order_purchase_timestamp` | 日期、客户州/城市、商品品类、卖家 | 支付方式需要支付归属/分摊规则。 |
+| `gmv` | 有效订单的 `SUM(fact_order_items.price)`；商品行粒度，不含 `freight_value` | `fact_orders.order_purchase_timestamp` | 日期、客户州/城市、商品品类 | `seller_id` 是敏感展示/分组列；支付方式需要支付归属/分摊规则。 |
 | `paid_order_count` | 有效订单的 `COUNT(DISTINCT fact_orders.order_id)`；订单粒度 | `fact_orders.order_purchase_timestamp` | 日期、客户州/城市 | 品类、卖家、支付方式都可能使同一订单跨组出现，须先冻结归属/分摊规则。 |
 | `average_delivery_days` | `AVG(actual_delivery - purchase)`，仅两端时间齐全；订单粒度 | `fact_orders.order_purchase_timestamp` | 日期、客户州/城市 | 商品品类、卖家会通过订单商品行复制订单时长，须归属规则。 |
 | `positive_review_rate` | 有效评分评价行中 `review_score >= 4` 的比例；评价行粒度 | `fact_reviews.review_creation_date` | 日期、客户州/城市 | 商品品类、卖家会复制评价行，须归属规则。 |
-| `item_count` | 有效订单的 `COUNT(*)` 商品行；每个 `(order_id, order_item_id)` 是一件商品行 | `fact_orders.order_purchase_timestamp` | 日期、客户州/城市、商品品类、卖家 | 支付方式需要商品行的支付归属/分摊规则。 |
+| `item_count` | 有效订单的 `COUNT(*)` 商品行；每个 `(order_id, order_item_id)` 是一件商品行 | `fact_orders.order_purchase_timestamp` | 日期、客户州/城市、商品品类 | `seller_id` 是敏感展示/分组列；支付方式需要商品行的支付归属/分摊规则。 |
 | `average_order_value` | 有效订单商品金额之和 / 有效订单数。必须先按订单聚合 `SUM(price)`，再平均订单金额；订单粒度，不含运费且不是支付金额 | `fact_orders.order_purchase_timestamp` | 日期、客户州/城市 | 品类、卖家、支付方式下的分子/分母归属尚未冻结。 |
 | `average_review_score` | 有效评分评价行的 `AVG(review_score)`；评价行粒度，不按 `review_id` 去重 | `fact_reviews.review_creation_date` | 日期、客户州/城市 | 品类、卖家、支付方式的归属尚未冻结。 |
 | `on_time_delivery_rate` | `delivered_customer_date <= estimated_delivery_date` 的 eligible delivered 订单数 / eligible delivered 订单数；订单粒度 | `fact_orders.order_purchase_timestamp` | 日期、客户州/城市 | 分母仅含 `order_status='delivered'` 且购买、实际送达、预计送达时间都存在的订单；不能把未送达、取消或缺失预计时间当作迟到。 |
 | `cancellation_rate` | `order_status='canceled'` 的订单数 / 购买时间存在的全部订单数；订单粒度 | `fact_orders.order_purchase_timestamp` | 日期、客户州/城市 | `unavailable` 不计入取消分子；不能把“未完成”或支付失败自行并入。 |
-| `freight_amount` | 有效订单的 `SUM(fact_order_items.freight_value)`；商品行粒度，以 BRL 计 | `fact_orders.order_purchase_timestamp` | 日期、客户州/城市、商品品类、卖家 | 不得和 GMV 或 `payment_value` 混称；支付方式需要运费归属/分摊规则。 |
+| `freight_amount` | 有效订单的 `SUM(fact_order_items.freight_value)`；商品行粒度，以 BRL 计 | `fact_orders.order_purchase_timestamp` | 日期、客户州/城市、商品品类 | `seller_id` 是敏感展示/分组列；不得和 GMV 或 `payment_value` 混称；支付方式需要运费归属/分摊规则。 |
 
 “有效订单”统一为 `order_status NOT IN ('canceled', 'unavailable')`。所有金额均为 `BRL`，展示符号 `R$`；不做汇率换算。
 
@@ -49,4 +49,4 @@
 - `CatalogLoader`、`OLIST_WORKSPACE`、Prompt、ResultContract、运行 trace 和审计默认携带 `olist-catalog-v2` / `0.2-frozen`，避免新旧口径混用。
 - 维度识别只接受维度列名或列别名的直接命中，不再因商品行表带有 `GMV` 标签而误把 GMV 问题判成卖家维度。
 - 旧的“按品类有效订单数前十”starter 已移除，因为它需要未冻结的订单归属规则且 Top-N 尚未进入 QueryPlan 合同；替换为无排名的“按商品品类统计 GMV”。受保护的 `text_to_sql_v2` 仍保留两条旧预期，因此当前 Catalog 下确定性回放为 `58/60`，两条均以 `dimension_attribution_requires_clarification` fail closed；它们不是 v2 回归通过率。
-- 下一项仅可修订 Olist 领域 SFT 覆盖矩阵，使其基于这 10 项指标划分安全覆盖和明确排除项。完成并审阅该矩阵前，不进入 QuerySpec、renderer、训练行物化、token 审计或 GPU 训练。
+- 十指标 coverage matrix 与 QuerySpec/renderer 职责设计均已冻结。下一项仅可实现并共同审阅 QuerySpec schema、验证器、只读指标表达式注册表、deterministic renderer 及其单元测试；在此之前不得物化训练行或启动 split/token 审计、GPU 训练和评测。
