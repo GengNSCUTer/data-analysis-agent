@@ -180,7 +180,10 @@ def validate_split_audit(
         validate_spider_candidate_audit(checks, policy)
     elif split_strategy == "official_cspider_train_dev_test":
         validate_cspider_official_audit(audit, checks, policy, train_path, validation_path)
-    elif split_strategy == "olist_pilot_v1_family_isolated":
+    elif split_strategy in {
+        "olist_pilot_v1_family_isolated",
+        "olist_family_isolated_v1",
+    }:
         validate_olist_pilot_audit(audit, checks, policy, train_path, validation_path)
     else:
         raise ValueError(f"unsupported split audit strategy: {split_strategy}")

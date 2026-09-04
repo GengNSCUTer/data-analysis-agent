@@ -49,7 +49,7 @@
 | R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 已完成但失败 | 官方 release 上 matching Base/26-step QLoRA Adapter 均 1,034/1,034；SQLite executed `829 -> 671`，Test Suite internal all `0.433 -> 0.376`，限定列错误 `15 -> 296`。详见官方专属分析。 |
 | R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 本轮完成 | 3,600 条 official train-only v2 corpus、2 epoch bf16 LoRA、164-case/17-schema 独立 smoke 和完整 1,034-case 对照均完成；SQLite `950 -> 961`、Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`。 |
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
-| R5 领域数据与受控接入 | 构建运行时 Prompt 对齐的 Olist 领域资产，并在通过质量门后再讨论候选接入 | Medium v1 已冻结，尚未训练 | 40 条 Pilot 是工程验收集，不是正式训练规模。Medium v1 已完成 `720/240/240` family-isolated split、1,200 条 Gold 准入、生产 Prompt 重建和 3072 无截断长度审计；下一项是单独冻结 matching Base/Adapter 生成评测与训练配置，不能直接接入运行时。 |
+| R5 领域数据与受控接入 | 构建运行时 Prompt 对齐的 Olist 领域资产，并在通过质量门后再讨论候选接入 | Medium v1 数据已冻结，训练前 smoke 已通过 | Medium v1 已完成 `720/240/240` family-isolated split、1,200 条 Gold 准入、生产 Prompt 重建和 3072 无截断长度审计；bf16 LoRA 1-step smoke 已在 RTX 4090 通过，尚未完整训练或接入运行时。训练与 matching Base/Adapter 合同见 [`data/olist-medium-v1-training-evaluation-contract.md`](data/olist-medium-v1-training-evaluation-contract.md)。 |
 
 ## CSpider 当前检查点
 
