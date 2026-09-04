@@ -87,5 +87,7 @@ the SQL AST Policy, `daa_analytics_reader` execution, QuerySpec-derived
 ResultValidator contract, and DeepSeek-V4-Flash's advisory structured semantic
 review. The redacted aggregate reports `6 admitted`, `0 needs_human_review`,
 and `0 rejected`; detailed SQL, validated result summaries, and review prose
-remain external. This is batch admission evidence only, not a completed corpus,
-natural-language dataset, training result, or model-quality claim.
+remain external. The DeepSeek review is model-assisted, not a human sign-off;
+before expanding the corpus, a future sample must still receive human metric
+and grain review. This is batch admission evidence only, not a completed
+corpus, natural-language dataset, training result, or model-quality claim.

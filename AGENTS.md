@@ -137,7 +137,7 @@
 
 ### 当前暂停点
 
-2026-09-04 当前暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并冻结 Olist/PostgreSQL 的十指标 Catalog、coverage matrix、QuerySpec/deterministic PostgreSQL Gold renderer 和静态 seed。受限人工流程已将当前 QuerySpec 可表达的 protected 数据查询映射为 17 个外部 family ID，并导出不可逆 summary/evidence；6 条非碰撞小批 seed 随后物化，全部通过 `SqlPolicy -> daa_analytics_reader -> ResultValidator` 与 DeepSeek-V4-Flash advisory-only 结构化语义审阅。该闭环没有创建 question/Prompt/训练 JSONL、token 审计、GPU 训练或评测。下一项只能为这 6 条已准入结构记录构造并审阅真实运行时 QueryPlan/`olist-candidate-sql-v1` Prompt 及受控中文 query 变体；不得扩数、启动正式 split/token 审计或训练。Spider 3,600 条 v2 和 12 条 Olist 迁移结果只作历史证据，不自动触发实验。
+2026-09-04 当前暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并冻结 Olist/PostgreSQL 的十指标 Catalog、coverage matrix、QuerySpec/deterministic PostgreSQL Gold renderer 和静态 seed。受限审阅流程已将当前 QuerySpec 可表达的 protected 数据查询映射为 17 个外部 family ID，并导出不可逆 summary/evidence；6 条非碰撞小批 seed 随后物化，全部通过 `SqlPolicy -> daa_analytics_reader -> ResultValidator` 与 DeepSeek-V4-Flash advisory-only 结构化语义审阅。DeepSeek 是模型辅助审阅而非人类签字；扩展语料前仍须抽样人工核对指标与粒度。该闭环没有创建 question/Prompt/训练 JSONL、token 审计、GPU 训练或评测。下一项只能为这 6 条已准入结构记录构造并审阅真实运行时 QueryPlan/`olist-candidate-sql-v1` Prompt 及受控中文 query 变体；不得扩数、启动正式 split/token 审计或训练。Spider 3,600 条 v2 和 12 条 Olist 迁移结果只作历史证据，不自动触发实验。
 
 2026-09-04 补充：物化器现将 `--protected-evidence-json` 作为必填参数，验证 summary/evidence 的 hash、family 数、协议和 WorkspacePin；family identity 也忽略多指标输出顺序，避免同一业务程序仅交换列顺序绕过 protected collision。新增 `scripts/post_training/evaluation/admit_olist_gold_batch.py`，最多处理 6 条外部 Gold 行，并在现有 Policy、reader role 和 ResultValidator 后调用 DeepSeek 作不可执行、失败即 `needs_human_review` 的顾问审阅。实际小批为 6 admitted / 0 rejected / 0 needs-human-review；原始 SQL、结果摘要、provider 文本和 protected family 原文均在仓库外。此结果只允许进入下一项 Prompt/query 构造审阅，不能声称正式训练集或模型质量已经完成。
 
@@ -376,6 +376,6 @@
 
 ### 2026-09-04：Olist 小批 Gold 准入闭环
 
-- 受限输入：人工审阅当前 QuerySpec 可表达的 protected 数据查询 family，导出 17 个 family 的仓库外 fingerprint summary/evidence。帮助、澄清、安全、非 SQL、Top-N 或未冻结归因的 protected case 不强行映射为 Gold SQL family。
+- 受限输入：受限审阅当前 QuerySpec 可表达的 protected 数据查询 family，导出 17 个 family 的仓库外 fingerprint summary/evidence。帮助、澄清、安全、非 SQL、Top-N 或未冻结归因的 protected case 不强行映射为 Gold SQL family。
 - 物化与执行：选取 6 条与摘要无碰撞的静态 seed，覆盖标量、客户州分组和评价月序列，以及 train/validation/in-domain-test 的结构标签。结构物化为 6/6 accepted、0 collision；随后 6/6 通过 AST Policy、`daa_analytics_reader`、QuerySpec 派生 ResultValidator 合同和 DeepSeek-V4-Flash advisory review。
-- 限制与下一步：这批不含自然语言问题、Prompt 或训练 JSONL，不能作为准确率、泛化或训练成功证据。原始 SQL、结果和 LLM 审阅文本均留在仓库外。下一项仅构造并审阅这 6 条记录的真实运行时 QueryPlan/Prompt 和受控中文 query 变体。
+- 限制与下一步：这批不含自然语言问题、Prompt 或训练 JSONL，不能作为准确率、泛化或训练成功证据。DeepSeek 的 `pass` 只是模型辅助意见，不替代人工口径签字；原始 SQL、结果和 LLM 审阅文本均留在仓库外。下一项仅构造并审阅这 6 条记录的真实运行时 QueryPlan/Prompt 和受控中文 query 变体。
