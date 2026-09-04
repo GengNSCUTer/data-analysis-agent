@@ -42,3 +42,11 @@ non-reversible fingerprint summary and evidence sidecar outside the repository.
 It is intentionally not run against the real holdout during its implementation
 task. The evidence sidecar becomes mandatory materializer input only in the next
 separate small-batch materialization task.
+
+`materialize_olist_queryspecs.py` now requires both `--protected-summary-json`
+and `--protected-evidence-json`; it verifies their hash, family count, current
+WorkspacePin, and protocol versions before reading seeds. The separate
+`evaluation/admit_olist_gold_batch.py` then admits at most six external Gold
+records through the existing AST policy, reader role, ResultValidator, and an
+advisory-only SiliconFlow semantic reviewer. Neither command creates questions,
+runtime Prompts, SFT JSONL, or model-training artifacts.

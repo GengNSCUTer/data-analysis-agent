@@ -49,7 +49,7 @@
 | R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 已完成但失败 | 官方 release 上 matching Base/26-step QLoRA Adapter 均 1,034/1,034；SQLite executed `829 -> 671`，Test Suite internal all `0.433 -> 0.376`，限定列错误 `15 -> 296`。详见官方专属分析。 |
 | R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 本轮完成 | 3,600 条 official train-only v2 corpus、2 epoch bf16 LoRA、164-case/17-schema 独立 smoke 和完整 1,034-case 对照均完成；SQLite `950 -> 961`、Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`。 |
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
-| R5 领域数据与受控接入 | 构建运行时 Prompt 对齐的 Olist 领域资产，并在通过质量门后再讨论候选接入 | QuerySpec/renderer/materializer 和 protected-summary 导出器已实现；15 条静态 coverage seed 已冻结，尚未实际物化 | Spider 与 CSpider 两个 Adapter 的 12 条 Olist 业务迁移子门均未通过；`olist-catalog-v2` 已冻结 10 项指标及分母/归属边界，coverage v2 已将可训练、需澄清和排除的形状逐项锁定。导出器只处理隔离人工批准的 family ID，真实 protected summary 尚未导出；静态 seed 也只验证结构、family 与 program/split 隔离，不含问题、Prompt、SQL 或 protected 内容，不能作为模型评测。下一项是小批 Gold 准入设计，先将真实 summary 与 seed 物化为结构产物；归因、Top-N、自由筛选和未建模排序继续排除，安全、权限、结果与图表合同仍在服务器端执行。 |
+| R5 领域数据与受控接入 | 构建运行时 Prompt 对齐的 Olist 领域资产，并在通过质量门后再讨论候选接入 | protected summary/evidence、6 条小批 QuerySpec/Gold 物化与逐层准入已完成；尚未创建自然语言训练行 | Spider 与 CSpider 两个 Adapter 的 12 条 Olist 业务迁移子门均未通过；`olist-catalog-v2` 已冻结 10 项指标及分母/归属边界，coverage v2 已将可训练、需澄清和排除的形状逐项锁定。受限人工审阅已导出 17 个当前可表达 protected family 的外部 fingerprint summary；6 条非碰撞 Gold 均通过 Policy、reader role、ResultValidator 和 DeepSeek advisory review。它们不含问题/Prompt/训练 JSONL，不能作为模型质量证据。下一项是为这 6 条准入结构记录构造真实运行时 QueryPlan/Prompt 与受控中文 query 变体；归因、Top-N、自由筛选和未建模排序继续排除，安全、权限、结果与图表合同仍在服务器端执行。 |
 
 ## CSpider 当前检查点
 

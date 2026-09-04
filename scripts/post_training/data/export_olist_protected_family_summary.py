@@ -26,6 +26,7 @@ if str(ROOT) not in sys.path:
 
 from data_analysis_agent.olist_queryspec import WorkspacePin  # noqa: E402
 from scripts.post_training.data.materialize_olist_queryspecs import (  # noqa: E402
+    PROTECTED_EVIDENCE_VERSION,
     PROTECTED_SUMMARY_VERSION,
     family_fingerprint,
     sha256_file,
@@ -34,7 +35,7 @@ from scripts.post_training.data.materialize_olist_queryspecs import (  # noqa: E
 
 APPROVED_FAMILY_IDS_VERSION = "olist-approved-protected-family-ids-v1"
 EXPORTER_VERSION = "olist-protected-family-summary-exporter-v1"
-EVIDENCE_VERSION = "olist-protected-family-summary-evidence-v1"
+EVIDENCE_VERSION = PROTECTED_EVIDENCE_VERSION
 _FAMILY_ID_RE = re.compile(r"^family_[0-9a-f]{24}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _APPROVED_INPUT_FIELDS = frozenset(

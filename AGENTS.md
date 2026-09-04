@@ -137,9 +137,9 @@
 
 ### 当前暂停点
 
-2026-09-03 起继续暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并已冻结 Olist/PostgreSQL 领域数据接口合同、四指标 v1 历史 coverage 快照、十指标 v2 Catalog 合同、十指标 coverage matrix，以及 QuerySpec/deterministic PostgreSQL Gold renderer 责任设计；规范入口为 `docs/post-training/data/olist-domain-sft-data-contract-v1.md`、`docs/metric-contracts/olist-metrics-v2.md`、`docs/post-training/data/olist-domain-sft-coverage-matrix-v2.md`、`docs/post-training/data/olist-queryspec-renderer-design-v1.md` 与 `data/catalog/olist_catalog.yaml`。`src/data_analysis_agent/olist_queryspec.py` 和 `tests/test_olist_queryspec.py` 已实现并通过专项 `44 passed` 与相关运行时回归 `160 passed`：QuerySpec 是离线版本锁定施工图，不给模型直接读取；renderer 只编译 canonical SQL，不执行、不调用 LLM、repair、SqlPolicy、reader role 或 ResultValidator。v1 可覆盖标量、客户州、商品品类单指标和同时间字段序列；卖家维度因 `seller_id` 是 analyst 敏感投影/分组列而拒绝。静态 coverage seed、受控物化器和 protected-summary 导出器已随后实现，但真实 protected summary、Gold 执行、Prompt/训练行、split/token 审计、GPU 训练和评测仍未启动。下一项只能设计并审阅带 evidence 绑定的小批 Gold 准入；当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
+2026-09-04 当前暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并冻结 Olist/PostgreSQL 的十指标 Catalog、coverage matrix、QuerySpec/deterministic PostgreSQL Gold renderer 和静态 seed。受限人工流程已将当前 QuerySpec 可表达的 protected 数据查询映射为 17 个外部 family ID，并导出不可逆 summary/evidence；6 条非碰撞小批 seed 随后物化，全部通过 `SqlPolicy -> daa_analytics_reader -> ResultValidator` 与 DeepSeek-V4-Flash advisory-only 结构化语义审阅。该闭环没有创建 question/Prompt/训练 JSONL、token 审计、GPU 训练或评测。下一项只能为这 6 条已准入结构记录构造并审阅真实运行时 QueryPlan/`olist-candidate-sql-v1` Prompt 及受控中文 query 变体；不得扩数、启动正式 split/token 审计或训练。Spider 3,600 条 v2 和 12 条 Olist 迁移结果只作历史证据，不自动触发实验。
 
-2026-09-04 补充：`QuerySpec`/renderer 完成轻量加固，并已实现受控物化脚本 `scripts/post_training/data/materialize_olist_queryspecs.py`；最终证据为 QuerySpec/物化器专项 `53 passed`、相关运行时回归 `169 passed`。`create_validated()` 仅是显式构造入口，renderer 仍保留二次验证；时间序列强制共享 canonical time field，分组键表达式固定且 NULL 策略有测试。物化器只接受结构化 seed 和 protected family fingerprint summary，拒绝 question/未知字段、归因、敏感维度、重复、跨 split program 与 renderer hash 漂移，并且仅能原子写入仓库外目录。尚未运行任何真实 Olist seed，仍禁止读取 protected holdout、执行 Gold SQL、构造 Prompt/训练 JSONL、启动 token 审计、GPU 训练或评测。静态 seed 与受限 protected-summary 导出边界已随后冻结；真实 summary 导出后才可单独设计小批 Gold 准入，不得直接大规模物化。
+2026-09-04 补充：物化器现将 `--protected-evidence-json` 作为必填参数，验证 summary/evidence 的 hash、family 数、协议和 WorkspacePin；family identity 也忽略多指标输出顺序，避免同一业务程序仅交换列顺序绕过 protected collision。新增 `scripts/post_training/evaluation/admit_olist_gold_batch.py`，最多处理 6 条外部 Gold 行，并在现有 Policy、reader role 和 ResultValidator 后调用 DeepSeek 作不可执行、失败即 `needs_human_review` 的顾问审阅。实际小批为 6 admitted / 0 rejected / 0 needs-human-review；原始 SQL、结果摘要、provider 文本和 protected family 原文均在仓库外。此结果只允许进入下一项 Prompt/query 构造审阅，不能声称正式训练集或模型质量已经完成。
 
 ## 9. 最近一次同步记录
 
@@ -372,4 +372,10 @@
 - 目标：实现不接触 protected 原文的 summary 导出边界，为之后的碰撞检测准备最小、不可逆输入。
 - 实现：新增 `scripts/post_training/data/export_olist_protected_family_summary.py`。它没有 holdout 文件路径，只接受仓库外人工批准的排序去重 `family_id`、当前 WorkspacePin、source-manifest SHA-256 与非敏感 review reference；输出也只能写到仓库外，且只生成 fingerprint summary 与不含 family 原文的 hash evidence。
 - 失败保护：case/question/prompt/SQL/result/seed 等未知字段、空或未排序/重复 family、Workspace 版本漂移、仓库内输入/输出和覆盖既有输出均 fail closed。
-- 验证与限制：专项及 QuerySpec/materializer 回归 `59 passed`，ruff、compileall、diff check 与 CLI help 通过。测试只使用合成 family ID；真实 holdout 未读取、真实 summary 未导出，未调用 materializer/renderer、数据库、tokenizer 或 GPU。下一项若获批准，只能设计并审阅带 evidence 绑定的小批 Gold 准入/结构物化，仍不得生成 Prompt/训练 JSONL 或启动训练。
+- 验证与限制：专项及 QuerySpec/materializer 回归 `59 passed`，ruff、compileall、diff check 与 CLI help 通过。测试只使用合成 family ID；真实 holdout 未读取、真实 summary 未导出，未调用 materializer/renderer、数据库、tokenizer 或 GPU。后续真实导出和小批 Gold 准入已在独立记录中完成。
+
+### 2026-09-04：Olist 小批 Gold 准入闭环
+
+- 受限输入：人工审阅当前 QuerySpec 可表达的 protected 数据查询 family，导出 17 个 family 的仓库外 fingerprint summary/evidence。帮助、澄清、安全、非 SQL、Top-N 或未冻结归因的 protected case 不强行映射为 Gold SQL family。
+- 物化与执行：选取 6 条与摘要无碰撞的静态 seed，覆盖标量、客户州分组和评价月序列，以及 train/validation/in-domain-test 的结构标签。结构物化为 6/6 accepted、0 collision；随后 6/6 通过 AST Policy、`daa_analytics_reader`、QuerySpec 派生 ResultValidator 合同和 DeepSeek-V4-Flash advisory review。
+- 限制与下一步：这批不含自然语言问题、Prompt 或训练 JSONL，不能作为准确率、泛化或训练成功证据。原始 SQL、结果和 LLM 审阅文本均留在仓库外。下一项仅构造并审阅这 6 条记录的真实运行时 QueryPlan/Prompt 和受控中文 query 变体。

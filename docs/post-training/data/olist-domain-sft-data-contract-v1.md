@@ -241,12 +241,12 @@ Gold 的 canonical form 必须是单条 PostgreSQL read-only SQL，并稳定使�
 
 已完成：盘点当前 v2 Catalog 中可训练的指标、维度、Join、时间与归因边界，并冻结
 [`olist-domain-sft-coverage-matrix-v2.md`](olist-domain-sft-coverage-matrix-v2.md)；已实现 QuerySpec/renderer、受控
-结构物化器、15 条静态 coverage seed fixture 和受限 protected-family summary 导出器。真实 protected summary
-尚未导出，未生成 Prompt/训练行。之后只按以下顺序逐项推进，每项需要单独审查与用户确认：
+结构物化器、15 条静态 coverage seed fixture、受限 protected-family summary 导出器和 evidence 绑定的 6 条 Gold
+准入闭环。已导出当前可表达 protected family 的外部 fingerprint summary，未生成 Prompt/训练行。之后只按以下顺序逐项推进，每项需要单独审查与用户确认：
 
-1. 受限人工环境审阅 protected case family 映射，运行导出器生成真实 fingerprint summary/evidence；
-2. 设计并执行 evidence 绑定的小批结构物化，验证 seed/summary/版本/家族/程序碰撞；
-3. 让小批 Gold 逐条经过 Policy、reader role、ResultContract/ResultValidator 与人工语义抽检；
+1. 已完成：受限人工环境审阅 protected case family 映射，运行导出器生成真实 fingerprint summary/evidence；
+2. 已完成：evidence 绑定的小批结构物化，验证 seed/summary/版本/家族/程序碰撞；
+3. 已完成：6 条 Gold 逐条通过 Policy、reader role、ResultValidator 和 advisory-only DeepSeek 语义审阅；
 4. 仅对已准入记录派生真实运行时 QueryPlan/Prompt，并审阅受控中文 query 语言变体；
 5. 扩展独立 family/program 后冻结正式 split audit，再进行 token-length audit，证明 `1536` 的真实覆盖率；
 6. 用户审阅通过后才物化完整 train/validation/in-domain-test、训练和 matching 评测。

@@ -6,11 +6,15 @@ from pathlib import Path
 
 import pytest
 
+from data_analysis_agent.olist_queryspec import WorkspacePin
 import scripts.post_training.data.materialize_olist_queryspecs as materializer_module
 from scripts.post_training.data.materialize_olist_queryspecs import (
+    PROTECTED_EVIDENCE_VERSION,
     PROTECTED_SUMMARY_VERSION,
+    family_id,
     family_fingerprint,
     materialize,
+    sha256_file,
 )
 
 
@@ -27,6 +31,29 @@ def _write_protected_summary(path: Path, fingerprints: list[str] | None = None) 
             {
                 "summary_version": PROTECTED_SUMMARY_VERSION,
                 "family_fingerprints": fingerprints or [],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_protected_evidence(summary: Path, evidence: Path) -> None:
+    fingerprints = json.loads(summary.read_text(encoding="utf-8"))["family_fingerprints"]
+    evidence.write_text(
+        json.dumps(
+            {
+                "evidence_version": PROTECTED_EVIDENCE_VERSION,
+                "exporter_version": "test-exporter",
+                "generated_at": "2026-09-04T00:00:00+00:00",
+                "approved_input_version": "test-approved-input",
+                "approved_input_sha256": "a" * 64,
+                "protected_source_manifest_sha256": "b" * 64,
+                "review_reference": "test-review",
+                "workspace": WorkspacePin.current().as_dict(),
+                "family_count": len(fingerprints),
+                "protected_summary_version": PROTECTED_SUMMARY_VERSION,
+                "protected_summary_sha256": sha256_file(summary),
             },
             sort_keys=True,
         ),
@@ -58,6 +85,7 @@ def _seed(
 def test_materialize_writes_external_structural_artifacts_and_audit(tmp_path: Path) -> None:
     seeds = tmp_path / "seeds.jsonl"
     protected = tmp_path / "protected-summary.json"
+    evidence = tmp_path / "protected-summary-evidence.json"
     output = tmp_path / "external-output"
     _write_jsonl(
         seeds,
@@ -68,13 +96,17 @@ def test_materialize_writes_external_structural_artifacts_and_audit(tmp_path: Pa
         ],
     )
     _write_protected_summary(protected)
+    _write_protected_evidence(protected, evidence)
 
-    manifest = materialize(seeds, protected, output, generated_at="2026-09-04T00:00:00+00:00")
+    manifest = materialize(
+        seeds, protected, evidence, output, generated_at="2026-09-04T00:00:00+00:00"
+    )
 
     assert manifest["counts"]["accepted_rows"] == 3
     assert manifest["counts"]["families"] == 3
     assert manifest["checks"]["sql_executed"] is False
     assert manifest["checks"]["protected_holdout_raw_read"] is False
+    assert manifest["source"]["protected_review_reference"] == "test-review"
     query_rows = [json.loads(line) for line in (output / "query_specs.jsonl").read_text(encoding="utf-8").splitlines()]
     gold_rows = [json.loads(line) for line in (output / "gold_sql.jsonl").read_text(encoding="utf-8").splitlines()]
     assert {row["query_spec"]["query_spec_id"] for row in query_rows} == {
@@ -86,6 +118,7 @@ def test_materialize_writes_external_structural_artifacts_and_audit(tmp_path: Pa
 def test_materialize_rejects_a_second_date_variant_of_the_same_family(tmp_path: Path) -> None:
     seeds = tmp_path / "seeds.jsonl"
     protected = tmp_path / "protected-summary.json"
+    evidence = tmp_path / "protected-summary-evidence.json"
     output = tmp_path / "external-output"
     _write_jsonl(
         seeds,
@@ -95,26 +128,42 @@ def test_materialize_rejects_a_second_date_variant_of_the_same_family(tmp_path: 
         ],
     )
     _write_protected_summary(protected)
+    _write_protected_evidence(protected, evidence)
 
-    manifest = materialize(seeds, protected, output)
+    manifest = materialize(seeds, protected, evidence, output)
 
     assert manifest["counts"]["accepted_rows"] == 1
     assert manifest["counts"]["rejections_by_reason"] == {"duplicate_family": 1}
 
 
+def test_family_identity_ignores_multi_metric_output_order() -> None:
+    first = materializer_module.QuerySpec.create_validated(
+        metric_ids=("gmv", "paid_order_count"), result_shape="scalar"
+    )
+    reordered = materializer_module.QuerySpec.create_validated(
+        metric_ids=("paid_order_count", "gmv"), result_shape="scalar"
+    )
+
+    assert first.query_spec_id != reordered.query_spec_id
+    assert family_id(first) == family_id(reordered)
+
+
 def test_materialize_rejects_a_protected_family_without_reading_holdout_content(tmp_path: Path) -> None:
     seeds = tmp_path / "seeds.jsonl"
     protected = tmp_path / "protected-summary.json"
+    evidence = tmp_path / "protected-summary-evidence.json"
     output = tmp_path / "external-output"
     _write_jsonl(seeds, [_seed("seed-gmv", "train", ["gmv"], "scalar", None, "JP01_item_scalar")])
 
     first_output = tmp_path / "first-output"
     _write_protected_summary(protected)
-    first = materialize(seeds, protected, first_output)
+    _write_protected_evidence(protected, evidence)
+    first = materialize(seeds, protected, evidence, first_output)
     family = first["splits"]["train"]["family_ids"][0]
     _write_protected_summary(protected, [family_fingerprint(family)])
+    _write_protected_evidence(protected, evidence)
 
-    manifest = materialize(seeds, protected, output)
+    manifest = materialize(seeds, protected, evidence, output)
 
     assert manifest["counts"]["accepted_rows"] == 0
     assert manifest["counts"]["protected_family_collisions"] == 1
@@ -124,6 +173,7 @@ def test_materialize_rejects_a_protected_family_without_reading_holdout_content(
 def test_materialize_fails_closed_when_a_program_crosses_splits(tmp_path: Path) -> None:
     seeds = tmp_path / "seeds.jsonl"
     protected = tmp_path / "protected-summary.json"
+    evidence = tmp_path / "protected-summary-evidence.json"
     output = tmp_path / "external-output"
     _write_jsonl(
         seeds,
@@ -133,9 +183,10 @@ def test_materialize_fails_closed_when_a_program_crosses_splits(tmp_path: Path) 
         ],
     )
     _write_protected_summary(protected)
+    _write_protected_evidence(protected, evidence)
 
     with pytest.raises(ValueError, match="SQL programs cross splits"):
-        materialize(seeds, protected, output)
+        materialize(seeds, protected, evidence, output)
 
     assert not output.exists()
 
@@ -143,6 +194,7 @@ def test_materialize_fails_closed_when_a_program_crosses_splits(tmp_path: Path) 
 def test_materialize_records_validator_rejections_without_writing_them_as_gold(tmp_path: Path) -> None:
     seeds = tmp_path / "seeds.jsonl"
     protected = tmp_path / "protected-summary.json"
+    evidence = tmp_path / "protected-summary-evidence.json"
     output = tmp_path / "external-output"
     _write_jsonl(
         seeds,
@@ -152,8 +204,9 @@ def test_materialize_records_validator_rejections_without_writing_them_as_gold(t
         ],
     )
     _write_protected_summary(protected)
+    _write_protected_evidence(protected, evidence)
 
-    manifest = materialize(seeds, protected, output)
+    manifest = materialize(seeds, protected, evidence, output)
 
     assert manifest["counts"]["accepted_rows"] == 1
     assert manifest["counts"]["rejections_by_reason"] == {"sensitive_dimension_not_displayable": 1}
@@ -165,13 +218,15 @@ def test_materialize_records_validator_rejections_without_writing_them_as_gold(t
 def test_materialize_rejects_non_structural_seed_fields(tmp_path: Path) -> None:
     seeds = tmp_path / "seeds.jsonl"
     protected = tmp_path / "protected-summary.json"
+    evidence = tmp_path / "protected-summary-evidence.json"
     output = tmp_path / "external-output"
     invalid = _seed("seed-question", "train", ["gmv"], "scalar", None, "JP01_item_scalar")
     invalid["question"] = "这个字段不能进入物化器"
     _write_jsonl(seeds, [invalid])
     _write_protected_summary(protected)
+    _write_protected_evidence(protected, evidence)
 
-    manifest = materialize(seeds, protected, output)
+    manifest = materialize(seeds, protected, evidence, output)
 
     assert manifest["counts"]["accepted_rows"] == 0
     assert manifest["counts"]["rejections_by_reason"] == {"unsupported_query_feature": 1}
@@ -180,16 +235,34 @@ def test_materialize_rejects_non_structural_seed_fields(tmp_path: Path) -> None:
 def test_materialize_rejects_a_renderer_hash_mismatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     seeds = tmp_path / "seeds.jsonl"
     protected = tmp_path / "protected-summary.json"
+    evidence = tmp_path / "protected-summary-evidence.json"
     output = tmp_path / "external-output"
     _write_jsonl(seeds, [_seed("seed-gmv", "train", ["gmv"], "scalar", None, "JP01_item_scalar")])
     _write_protected_summary(protected)
+    _write_protected_evidence(protected, evidence)
     original = materializer_module.render_gold_sql
 
     def tampered_renderer(spec: object) -> object:
         return replace(original(spec), sql_sha256="0" * 64)
 
     monkeypatch.setattr(materializer_module, "render_gold_sql", tampered_renderer)
-    manifest = materialize(seeds, protected, output)
+    manifest = materialize(seeds, protected, evidence, output)
 
     assert manifest["counts"]["accepted_rows"] == 0
     assert manifest["counts"]["rejections_by_reason"] == {"renderer_hash_mismatch": 1}
+
+
+def test_materialize_rejects_summary_evidence_mismatch_before_reading_seeds(tmp_path: Path) -> None:
+    seeds = tmp_path / "seeds.jsonl"
+    protected = tmp_path / "protected-summary.json"
+    evidence = tmp_path / "protected-summary-evidence.json"
+    output = tmp_path / "external-output"
+    _write_jsonl(seeds, [_seed("seed-gmv", "train", ["gmv"], "scalar", None, "JP01_item_scalar")])
+    _write_protected_summary(protected)
+    _write_protected_evidence(protected, evidence)
+    _write_protected_summary(protected, ["0" * 64])
+
+    with pytest.raises(ValueError, match="family count does not match"):
+        materialize(seeds, protected, evidence, output)
+
+    assert not output.exists()
