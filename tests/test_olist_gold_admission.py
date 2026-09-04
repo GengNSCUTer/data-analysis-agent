@@ -9,6 +9,7 @@ import pytest
 from data_analysis_agent.olist_queryspec import QuerySpec, WorkspacePin, render_gold_sql
 from scripts.post_training.evaluation.admit_olist_gold_batch import (
     MAX_BATCH_ROWS,
+    _validate_selection,
     load_materialized_gold_rows,
     metric_constraints,
     parse_review_response,
@@ -55,6 +56,7 @@ def _write_materialization(directory: Path, rows: list[dict[str, object]]) -> No
                     "protected_summary_sha256": "a" * 64,
                     "protected_evidence_sha256": "b" * 64,
                 },
+                "checks": {"status": "pass"},
             }
         ),
         encoding="utf-8",
@@ -94,6 +96,55 @@ def test_admission_loader_rejects_more_than_the_small_batch_limit(tmp_path: Path
 
     with pytest.raises(ValueError, match="1-6 Gold rows"):
         load_materialized_gold_rows(directory)
+
+
+def test_admission_loader_selects_a_bounded_subset_in_source_order(tmp_path: Path) -> None:
+    directory = tmp_path / "external-materialization"
+    _write_materialization(directory, [_row(f"seed-{index}") for index in range(8)])
+
+    _, rows = load_materialized_gold_rows(
+        directory,
+        seed_ids=["seed-4", "seed-1", "seed-6"],
+    )
+
+    assert [row["seed_id"] for row in rows] == ["seed-1", "seed-4", "seed-6"]
+
+
+def test_admission_selection_rejects_duplicate_unknown_and_oversized_ids() -> None:
+    available = {"seed-1", "seed-2", "seed-3", "seed-4", "seed-5", "seed-6", "seed-7"}
+    with pytest.raises(ValueError, match="unique"):
+        _validate_selection(["seed-1", "seed-1"], available)
+    with pytest.raises(ValueError, match="unknown"):
+        _validate_selection(["seed-unknown"], available)
+    with pytest.raises(ValueError, match="1-6"):
+        _validate_selection(sorted(available), available)
+
+
+def test_admission_loader_rejects_non_passing_or_mismatched_source_sets(tmp_path: Path) -> None:
+    directory = tmp_path / "external-materialization"
+    rows = [_row("seed-1"), _row("seed-2")]
+    _write_materialization(directory, rows)
+
+    manifest_path = directory / "materialization_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["checks"] = {"status": "failed"}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="passing structural audit"):
+        load_materialized_gold_rows(directory)
+
+    _write_materialization(tmp_path / "second-external-materialization", rows)
+    second = tmp_path / "second-external-materialization"
+    gold_path = second / "gold_sql.jsonl"
+    gold_path.write_text(
+        "".join(json.dumps(rows[0], sort_keys=True) + "\n" for _ in range(2)),
+        encoding="utf-8",
+    )
+    manifest_path = second / "materialization_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["outputs"]["gold_sql_jsonl"]["sha256"] = _sha256(gold_path)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="Gold seed IDs are not unique"):
+        load_materialized_gold_rows(second)
 
 
 def test_review_response_is_strict_and_metric_constraints_are_deterministic() -> None:

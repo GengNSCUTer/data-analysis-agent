@@ -404,3 +404,11 @@
 - 外部产物：`/disk2/gengnan/data-analysis-agent-data/evals/olist-domain-sft-pilot-v1/queryspec-materialized-20260904/` 已生成 `query_specs.jsonl`、`gold_sql.jsonl`、rejections 和 manifest。结果为 40/40 accepted、40 个唯一 family/QuerySpec/SQL hash、0 protected collision、0 rejection，split 为 24/8/8；manifest 明确 `prompt_or_question_materialized=false`、`sql_executed=false`。
 - 验证：QuerySpec、renderer、materializer、protected summary 和 coverage 专项回归共 `63 passed`，`git diff --check` 通过。旧 v1 fixture 与 strict split policy 保持不变；本轮变更尚未提交。
 - 边界与下一步：这些只是结构化 QuerySpec/Gold SQL 中间层，不能称为最终 SFT train/validation/test，也不代表业务语义或模型质量。下一项只允许把这 40 条分批接入现有 runtime Prompt/admission 流程，逐条提供人工审核的中文问题，重建 Router/Catalog/QueryPlan/ResultContract 并通过 reader-role、ResultValidator 和语义复核；完成前不得构造 tokenizer 输入或启动 GPU 训练。
+
+### 2026-09-04：Olist Pilot v1 第一批 Gold 准入
+
+- 目标：在保持单批至多六条的人审/模型复核预算下，让已通过结构审计的 40-family materialization 可以按显式 seed ID 分批走现有 Gold admission gate。
+- 实现：`admit_olist_gold_batch.py` 新增可重复的 `--seed-id` 参数。它先验证完整 materialization 的 manifest 状态、hash、Gold/QuerySpec seed 集合和每行 artifact，再按源顺序选择 1--6 条；未知、重复、空、超限选择和不通过的源结构审计均 fail closed。admission aggregate 同时记录完整源行数、请求顺序和实际选择。新增任务卡与回归测试。
+- 真实第一批：外部目录 `/disk2/gengnan/data-analysis-agent-data/evals/olist-domain-sft-pilot-v1/gold-admission-batch-01-verified-20260904/` 选择 6 条，覆盖 train/validation/in_domain_test、标量、州分组、品类分组、购买/评价序列和多指标。完整源为 40 条；该批为 6 admitted、0 rejected、0 needs_human_review，全部经 `SqlPolicy -> daa_analytics_reader -> ResultValidator -> DeepSeek advisory review`。
+- 验证：Gold admission、materializer、coverage 和 protected summary 专项共 `23 passed`，`compileall`、CLI help 与 `git diff --check` 通过。只证明这 6 个已选 Gold 通过冻结工作区的准入，不证明其余 34 条、最终训练语料、模型能力或业务泛化。
+- 下一步：继续以不同 family/shape/split 选择第二个小批，完成后再决定是否为全部已准入 family 编写人工审核中文问题和 runtime Prompt；不得将未准入的结构条目直接变成训练行。

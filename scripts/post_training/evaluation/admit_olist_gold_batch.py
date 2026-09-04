@@ -59,6 +59,15 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--materialization-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--seed-id",
+        action="append",
+        default=None,
+        help=(
+            "Select one Gold seed from a larger verified materialization. Repeat at most six "
+            "times; omitting this retains the historical whole-directory small-batch contract."
+        ),
+    )
     parser.add_argument("--generated-at", default=None)
     return parser.parse_args()
 
@@ -104,8 +113,29 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def load_materialized_gold_rows(directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Load and cross-check the external structural materialization artifacts."""
+def _validate_selection(seed_ids: list[str] | None, available_seed_ids: set[str]) -> set[str] | None:
+    """Validate an explicit small-batch selection without trusting caller ordering."""
+    if seed_ids is None:
+        return None
+    if not seed_ids or len(seed_ids) > MAX_BATCH_ROWS:
+        raise ValueError(f"admission selection must contain 1-{MAX_BATCH_ROWS} seed IDs")
+    if any(not isinstance(seed_id, str) or not seed_id.strip() for seed_id in seed_ids):
+        raise ValueError("admission selection seed IDs must be non-empty strings")
+    normalized = [seed_id.strip() for seed_id in seed_ids]
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("admission selection seed IDs must be unique")
+    unknown = sorted(set(normalized) - available_seed_ids)
+    if unknown:
+        raise ValueError(f"admission selection contains unknown seed IDs: {unknown}")
+    return set(normalized)
+
+
+def load_materialized_gold_rows(
+    directory: Path,
+    *,
+    seed_ids: list[str] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Validate all source artifacts, then return a requested bounded subset."""
     manifest_path = directory / "materialization_manifest.json"
     gold_path = directory / "gold_sql.jsonl"
     query_specs_path = directory / "query_specs.jsonl"
@@ -116,6 +146,8 @@ def load_materialized_gold_rows(directory: Path) -> tuple[dict[str, Any], list[d
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(manifest, dict):
         raise ValueError("materialization manifest must be an object")
+    if manifest.get("checks", {}).get("status") != "pass":
+        raise ValueError("materialization manifest does not report a passing structural audit")
     if manifest.get("workspace") != WorkspacePin.current().as_dict():
         raise ValueError("materialization workspace does not match the current pin")
     outputs = manifest.get("outputs", {})
@@ -131,6 +163,11 @@ def load_materialized_gold_rows(directory: Path) -> tuple[dict[str, Any], list[d
     if len(query_specs_by_seed) != len(query_spec_rows):
         raise ValueError("materialization QuerySpec seed IDs are not unique")
     gold_rows = _read_jsonl(gold_path)
+    gold_seed_ids = [str(row.get("seed_id")) for row in gold_rows]
+    if len(gold_seed_ids) != len(set(gold_seed_ids)):
+        raise ValueError("materialization Gold seed IDs are not unique")
+    if set(gold_seed_ids) != set(query_specs_by_seed):
+        raise ValueError("materialization Gold and QuerySpec seed ID sets do not match")
     rows: list[dict[str, Any]] = []
     for gold_row in gold_rows:
         seed_id = str(gold_row.get("seed_id"))
@@ -142,8 +179,6 @@ def load_materialized_gold_rows(directory: Path) -> tuple[dict[str, Any], list[d
         rows.append({**gold_row, "query_spec": query_row.get("query_spec")})
     if len(query_specs_by_seed) != len(rows):
         raise ValueError("materialization Gold and QuerySpec row counts do not match")
-    if not rows or len(rows) > MAX_BATCH_ROWS:
-        raise ValueError(f"admission batch must contain 1-{MAX_BATCH_ROWS} Gold rows")
     if len(rows) != outputs.get("gold_sql_jsonl", {}).get("rows"):
         raise ValueError("materialization Gold row count does not match its manifest")
     if len(rows) != outputs.get("query_specs_jsonl", {}).get("rows"):
@@ -157,6 +192,11 @@ def load_materialized_gold_rows(directory: Path) -> tuple[dict[str, Any], list[d
         spec = QuerySpec.from_mapping(row.get("query_spec", {}))
         if artifact.get("query_spec_id") != spec.query_spec_id:
             raise ValueError("Gold artifact QuerySpec ID does not match its QuerySpec record")
+    selected_seed_ids = _validate_selection(seed_ids, set(query_specs_by_seed))
+    if selected_seed_ids is not None:
+        rows = [row for row in rows if str(row["seed_id"]) in selected_seed_ids]
+    if not rows or len(rows) > MAX_BATCH_ROWS:
+        raise ValueError(f"admission batch must contain 1-{MAX_BATCH_ROWS} Gold rows")
     return manifest, rows
 
 
@@ -274,10 +314,11 @@ async def admit(
     output_dir: Path,
     *,
     generated_at: str | None = None,
+    seed_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     materialized_path = _require_external_existing_dir(materialization_dir, "materialization directory")
     output_path = _require_external_new_dir(output_dir)
-    manifest, gold_rows = load_materialized_gold_rows(materialized_path)
+    manifest, gold_rows = load_materialized_gold_rows(materialized_path, seed_ids=seed_ids)
     load_dotenv(ROOT / ".env")
     runner = SecurePostgresRunner(
         settings=PostgresConnectionSettings.from_environment(),
@@ -333,6 +374,11 @@ async def admit(
             "materialization_manifest_sha256": sha256_file(
                 materialized_path / "materialization_manifest.json"
             ),
+            "selection": {
+                "source_materialized_rows": manifest["outputs"]["gold_sql_jsonl"]["rows"],
+                "requested_seed_ids": list(seed_ids) if seed_ids is not None else None,
+                "selected_seed_ids": [str(record["seed_id"]) for record in records],
+            },
             "protected_summary_sha256": manifest["source"]["protected_summary_sha256"],
             "protected_evidence_sha256": manifest["source"]["protected_evidence_sha256"],
             "counts": {
@@ -372,7 +418,12 @@ async def admit(
 def main() -> int:
     args = parse_args()
     aggregate = asyncio.run(
-        admit(args.materialization_dir, args.output_dir, generated_at=args.generated_at)
+        admit(
+            args.materialization_dir,
+            args.output_dir,
+            generated_at=args.generated_at,
+            seed_ids=args.seed_id,
+        )
     )
     print(json.dumps(aggregate, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
