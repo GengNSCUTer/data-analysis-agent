@@ -55,6 +55,7 @@ PROTECTED_SUMMARY_VERSION = "olist-protected-family-summary-v1"
 PROTECTED_EVIDENCE_VERSION = "olist-protected-family-summary-evidence-v1"
 # 允许的数据集切分集合：训练集、验证集、域内测试集
 _SPLITS = frozenset({"train", "validation", "in_domain_test"})
+_SPLIT_POLICIES = frozenset({"strict_v1", "family_scoped_v2"})
 # 种子输入文件允许的全部字段
 _SEED_FIELDS = frozenset(
     {
@@ -79,6 +80,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--protected-summary-json", type=Path, required=True)
     parser.add_argument("--protected-evidence-json", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--split-policy",
+        choices=sorted(_SPLIT_POLICIES),
+        default="strict_v1",
+        help="v1 forbids join programs crossing splits; v2 isolates families/programs without banning shared join paths.",
+    )
     parser.add_argument(
         "--generated-at",
         default=None,
@@ -353,6 +360,7 @@ def materialize(
     output_dir: Path,
     *,
     generated_at: str | None = None,
+    split_policy: str = "strict_v1",
 ) -> dict[str, Any]:
     """
     主物化流程函数
@@ -360,6 +368,8 @@ def materialize(
     """
     """Write structural QuerySpec/Gold records and an audit manifest atomically."""
     output_dir = output_dir.resolve()
+    if split_policy not in _SPLIT_POLICIES:
+        raise ValueError(f"unsupported split policy: {split_policy}")
     _check_output_dir(output_dir)
     raw_seeds = _read_jsonl(seeds_jsonl.resolve())
     protected_summary_path = _require_external_file(protected_summary_json, "protected summary")
@@ -437,12 +447,13 @@ def materialize(
             }
         )
 
-    # 跨数据集泄露检查：同一个SQL模板join_program_id，不能同时存在于多个split
+    # v1 的历史合同禁止 join path 跨 split；v2 将泄露边界收紧到完整 family/
+    # canonical SQL，而允许同一底层 join path 服务不同业务组合。
     program_splits: dict[str, set[str]] = {}
     for row in accepted:
         program_splits.setdefault(row["sql_program_id"], set()).add(row["split"])
     crossing_programs = sorted(program for program, splits in program_splits.items() if len(splits) > 1)
-    if crossing_programs:
+    if split_policy == "strict_v1" and crossing_programs:
         raise ValueError(f"SQL programs cross splits: {crossing_programs}")
 
     # 原子写入策略：先写入临时目录，全部成功后再重命名成最终目录；崩溃不会留下残缺文件
@@ -475,6 +486,7 @@ def materialize(
         # 生成审计清单manifest，记录版本、哈希、样本统计，用于溯源与实验复现
         manifest = {
             "materializer_version": MATERIALIZER_VERSION,
+            "split_policy": split_policy,
             "generated_at": generated_at,
             "query_spec_schema_version": QUERY_SPEC_SCHEMA_VERSION,
             "renderer_version": RENDERER_VERSION,
@@ -513,7 +525,7 @@ def materialize(
             "checks": {
                 "family_split_overlap": [],
                 "query_spec_split_overlap": [],
-                "sql_program_split_overlap": [],
+                "sql_program_split_overlap": crossing_programs if split_policy == "family_scoped_v2" else [],
                 "protected_holdout_raw_read": False,
                 "sql_executed": False,
                 "prompt_or_question_materialized": False,
@@ -543,6 +555,7 @@ def main() -> int:
         args.protected_evidence_json,
         args.output_dir,
         generated_at=args.generated_at,
+        split_policy=args.split_policy,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

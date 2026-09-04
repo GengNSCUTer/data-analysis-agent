@@ -191,6 +191,36 @@ def test_materialize_fails_closed_when_a_program_crosses_splits(tmp_path: Path) 
     assert not output.exists()
 
 
+def test_family_scoped_v2_allows_shared_join_programs_but_records_them(tmp_path: Path) -> None:
+    seeds = tmp_path / "seeds.jsonl"
+    protected = tmp_path / "protected-summary.json"
+    evidence = tmp_path / "protected-summary-evidence.json"
+    output = tmp_path / "external-output"
+    _write_jsonl(
+        seeds,
+        [
+            _seed("seed-gmv", "train", ["gmv"], "scalar", None, "JP01_item_scalar"),
+            _seed("seed-items", "validation", ["item_count"], "scalar", None, "JP01_item_scalar"),
+        ],
+    )
+    _write_protected_summary(protected)
+    _write_protected_evidence(protected, evidence)
+
+    manifest = materialize(
+        seeds,
+        protected,
+        evidence,
+        output,
+        split_policy="family_scoped_v2",
+    )
+
+    assert manifest["counts"]["accepted_rows"] == 2
+    assert manifest["split_policy"] == "family_scoped_v2"
+    assert manifest["checks"]["family_split_overlap"] == []
+    assert manifest["checks"]["query_spec_split_overlap"] == []
+    assert manifest["checks"]["sql_program_split_overlap"] == ["JP01_item_scalar"]
+
+
 def test_materialize_records_validator_rejections_without_writing_them_as_gold(tmp_path: Path) -> None:
     seeds = tmp_path / "seeds.jsonl"
     protected = tmp_path / "protected-summary.json"

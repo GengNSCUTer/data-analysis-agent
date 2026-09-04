@@ -396,3 +396,11 @@
 - 结果：12/12 物化，0 rejected；每个 family 的指标、维度、时间范围/粒度、执行策略和结果列合同成对一致；两条 Prompt hash 不同。Router、Catalog、QueryPlan、ResultContract 全部通过；`model_called=false`、`sql_executed=false`、`gpu_used=false`、`protected_holdout_read=false`。
 - 验证：专项测试 **5 passed**；`ruff check`、`compileall` 和 JSON 解析检查通过。审阅记录见 `docs/post-training/data/olist-runtime-question-variants-v2-review.md`；物化 JSONL 和完整问题仍只保留在仓库外。
 - 边界：这是 AI 辅助的结构化口径预审，不等同于用户/业务专家签字；12 条仍是变体准入小批，不是最终 train/validation/test 评测集，也不提供模型质量结论。下一项需在用户确认后单独设计扩展评测集冻结。
+
+### 2026-09-04：Olist Pilot v1 约 40 个 QuerySpec family 扩展
+
+- 目标：在不读取 protected holdout 原文、不生成自然语言 Prompt、不启动训练的前提下，扩展后续领域 SFT 的结构覆盖，并建立可审阅的 train/validation/in-domain-test 中间产物。
+- 实现：新增 `data/fixtures/olist_queryspec_coverage_seeds_v2.jsonl`，共 40 条静态结构 seed（train 24、validation 8、in_domain_test 8），覆盖十项指标、四种结果形态、单/多指标、客户州/商品品类和购买/评价时间序列。`materialize_olist_queryspecs.py` 新增 `family_scoped_v2` split policy：family、QuerySpec 和 canonical SQL hash 必须跨 split 隔离；共享底层 `join_program_id` 可以跨 split，但必须记录 overlap。修正两个客户州商品行指标的 Join program 错配，并新增 coverage manifest 回归测试。
+- 外部产物：`/disk2/gengnan/data-analysis-agent-data/evals/olist-domain-sft-pilot-v1/queryspec-materialized-20260904/` 已生成 `query_specs.jsonl`、`gold_sql.jsonl`、rejections 和 manifest。结果为 40/40 accepted、40 个唯一 family/QuerySpec/SQL hash、0 protected collision、0 rejection，split 为 24/8/8；manifest 明确 `prompt_or_question_materialized=false`、`sql_executed=false`。
+- 验证：QuerySpec、renderer、materializer、protected summary 和 coverage 专项回归共 `63 passed`，`git diff --check` 通过。旧 v1 fixture 与 strict split policy 保持不变；本轮变更尚未提交。
+- 边界与下一步：这些只是结构化 QuerySpec/Gold SQL 中间层，不能称为最终 SFT train/validation/test，也不代表业务语义或模型质量。下一项只允许把这 40 条分批接入现有 runtime Prompt/admission 流程，逐条提供人工审核的中文问题，重建 Router/Catalog/QueryPlan/ResultContract 并通过 reader-role、ResultValidator 和语义复核；完成前不得构造 tokenizer 输入或启动 GPU 训练。
