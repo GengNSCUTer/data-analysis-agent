@@ -56,8 +56,8 @@ protected-summary 准入通过后，materializer 才会把它转换为 QuerySpec
 }
 ```
 
-它不得包含 case ID、问题、Prompt、SQL、执行结果或可逆 family 原文。摘要生成器的权限来源、输入版本、
-代码 hash、输出 hash、人工复核和保存路径都仍是下一项独立设计；在这之前禁止使用本清单实际物化。
+它不得包含 case ID、问题、Prompt、SQL、执行结果或可逆 family 原文。受限导出器现已冻结权限来源、输入版本、
+代码 hash、输出 hash、人工复核引用和保存路径；但真实 summary 尚未生成，因而仍禁止使用本清单实际物化。
 
 ## 5. 审阅和验收
 
@@ -66,4 +66,4 @@ protected-summary 准入通过后，materializer 才会把它转换为 QuerySpec
 materializer CLI、PostgreSQL 或 tokenizer。通过测试只说明静态输入满足当前结构合同，不说明指标口径、SQL
 执行、结果合同或模型泛化已经通过。
 
-下一项：单独设计并审阅 restricted protected-family summary 的导出边界；未获批准前，不物化本清单。
+下一项：单独设计并审阅带 evidence 绑定的小批 Gold 准入/结构物化；在真实 summary 导出并获批准前，不物化本清单。

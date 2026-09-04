@@ -137,9 +137,9 @@
 
 ### 当前暂停点
 
-2026-09-03 起继续暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并已冻结 Olist/PostgreSQL 领域数据接口合同、四指标 v1 历史 coverage 快照、十指标 v2 Catalog 合同、十指标 coverage matrix，以及 QuerySpec/deterministic PostgreSQL Gold renderer 责任设计；规范入口为 `docs/post-training/data/olist-domain-sft-data-contract-v1.md`、`docs/metric-contracts/olist-metrics-v2.md`、`docs/post-training/data/olist-domain-sft-coverage-matrix-v2.md`、`docs/post-training/data/olist-queryspec-renderer-design-v1.md` 与 `data/catalog/olist_catalog.yaml`。`src/data_analysis_agent/olist_queryspec.py` 和 `tests/test_olist_queryspec.py` 已实现并通过专项 `44 passed` 与相关运行时回归 `160 passed`：QuerySpec 是离线版本锁定施工图，不给模型直接读取；renderer 只编译 canonical SQL，不执行、不调用 LLM、repair、SqlPolicy、reader role 或 ResultValidator。v1 可覆盖标量、客户州、商品品类单指标和同时间字段序列；卖家维度因 `seller_id` 是 analyst 敏感投影/分组列而拒绝。仍未创建正式 QuerySpec/coverage seed/训练数据，未读取 protected holdout，未执行 Gold SQL，也未启动 split/token 审计、GPU 训练或评测。下一步只能先由用户亲自审阅该模块与配套测试，复述输入、输出、不变量、fail-closed 边界及测试空白；用户确认后才可单独设计 QuerySpec 的受控物化与后续 Gold 准入。当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
+2026-09-03 起继续暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并已冻结 Olist/PostgreSQL 领域数据接口合同、四指标 v1 历史 coverage 快照、十指标 v2 Catalog 合同、十指标 coverage matrix，以及 QuerySpec/deterministic PostgreSQL Gold renderer 责任设计；规范入口为 `docs/post-training/data/olist-domain-sft-data-contract-v1.md`、`docs/metric-contracts/olist-metrics-v2.md`、`docs/post-training/data/olist-domain-sft-coverage-matrix-v2.md`、`docs/post-training/data/olist-queryspec-renderer-design-v1.md` 与 `data/catalog/olist_catalog.yaml`。`src/data_analysis_agent/olist_queryspec.py` 和 `tests/test_olist_queryspec.py` 已实现并通过专项 `44 passed` 与相关运行时回归 `160 passed`：QuerySpec 是离线版本锁定施工图，不给模型直接读取；renderer 只编译 canonical SQL，不执行、不调用 LLM、repair、SqlPolicy、reader role 或 ResultValidator。v1 可覆盖标量、客户州、商品品类单指标和同时间字段序列；卖家维度因 `seller_id` 是 analyst 敏感投影/分组列而拒绝。静态 coverage seed、受控物化器和 protected-summary 导出器已随后实现，但真实 protected summary、Gold 执行、Prompt/训练行、split/token 审计、GPU 训练和评测仍未启动。下一项只能设计并审阅带 evidence 绑定的小批 Gold 准入；当前 Spider 3,600 条 v2 训练和 12 条 Olist 迁移评测的结果只作为已有证据，不自动触发下一轮实验。
 
-2026-09-04 补充：`QuerySpec`/renderer 完成轻量加固，并已实现受控物化脚本 `scripts/post_training/data/materialize_olist_queryspecs.py`；最终证据为 QuerySpec/物化器专项 `53 passed`、相关运行时回归 `169 passed`。`create_validated()` 仅是显式构造入口，renderer 仍保留二次验证；时间序列强制共享 canonical time field，分组键表达式固定且 NULL 策略有测试。物化器只接受结构化 seed 和 protected family fingerprint summary，拒绝 question/未知字段、归因、敏感维度、重复、跨 split program 与 renderer hash 漂移，并且仅能原子写入仓库外目录。尚未运行任何真实 Olist seed，仍禁止读取 protected holdout、执行 Gold SQL、构造 Prompt/训练 JSONL、启动 token 审计、GPU 训练或评测。下一步只能由用户先审阅小型 coverage seed 与 protected summary 的输入边界，确认后才可单独构造其静态清单；不得直接大规模物化。
+2026-09-04 补充：`QuerySpec`/renderer 完成轻量加固，并已实现受控物化脚本 `scripts/post_training/data/materialize_olist_queryspecs.py`；最终证据为 QuerySpec/物化器专项 `53 passed`、相关运行时回归 `169 passed`。`create_validated()` 仅是显式构造入口，renderer 仍保留二次验证；时间序列强制共享 canonical time field，分组键表达式固定且 NULL 策略有测试。物化器只接受结构化 seed 和 protected family fingerprint summary，拒绝 question/未知字段、归因、敏感维度、重复、跨 split program 与 renderer hash 漂移，并且仅能原子写入仓库外目录。尚未运行任何真实 Olist seed，仍禁止读取 protected holdout、执行 Gold SQL、构造 Prompt/训练 JSONL、启动 token 审计、GPU 训练或评测。静态 seed 与受限 protected-summary 导出边界已随后冻结；真实 summary 导出后才可单独设计小批 Gold 准入，不得直接大规模物化。
 
 ## 9. 最近一次同步记录
 
@@ -365,4 +365,11 @@
 - 目标：只设计并审阅后续 QuerySpec 物化器的最小结构化输入，不进入实际物化或训练。
 - 实现：提交 `data/fixtures/olist_queryspec_coverage_seeds_v1.jsonl` 的 15 条静态记录、任务卡、设计说明和结构测试。记录只包含 `seed_id`、显式 split、指标/形状/维度/时间/Join program；覆盖十项指标、四种允许形状与三类 split，不含用户问题、Prompt、SQL、结果、原始 Olist 行或 protected 内容。
 - 验证范围：测试仅构造并验证内存中的 QuerySpec、family 唯一性、program 不跨 split 和预期覆盖分布；不调用 renderer/materializer、不写仓库外产物、不访问数据库。
-- 限制与下一步：当前“Join program 不跨 split”规则严格且仅有 11 个 program，15 条清单只能验证结构和隔离边界，不能作为最终训练/评测集或准确率证据。下一项只能设计 restricted protected-family summary 的生成权限、不可逆输出、hash 证据和人工复核；在获批前禁止物化。
+- 限制与下一步：当前“Join program 不跨 split”规则严格且仅有 11 个 program，15 条清单只能验证结构和隔离边界，不能作为最终训练/评测集或准确率证据。受限 protected summary 导出器已随后实现；在真实 summary 导出并获批准前禁止物化，之后下一项是带 evidence 绑定的小批 Gold 准入。
+
+### 2026-09-04：Olist Protected-Family Summary 受限导出
+
+- 目标：实现不接触 protected 原文的 summary 导出边界，为之后的碰撞检测准备最小、不可逆输入。
+- 实现：新增 `scripts/post_training/data/export_olist_protected_family_summary.py`。它没有 holdout 文件路径，只接受仓库外人工批准的排序去重 `family_id`、当前 WorkspacePin、source-manifest SHA-256 与非敏感 review reference；输出也只能写到仓库外，且只生成 fingerprint summary 与不含 family 原文的 hash evidence。
+- 失败保护：case/question/prompt/SQL/result/seed 等未知字段、空或未排序/重复 family、Workspace 版本漂移、仓库内输入/输出和覆盖既有输出均 fail closed。
+- 验证与限制：专项及 QuerySpec/materializer 回归 `59 passed`，ruff、compileall、diff check 与 CLI help 通过。测试只使用合成 family ID；真实 holdout 未读取、真实 summary 未导出，未调用 materializer/renderer、数据库、tokenizer 或 GPU。下一项若获批准，只能设计并审阅带 evidence 绑定的小批 Gold 准入/结构物化，仍不得生成 Prompt/训练 JSONL 或启动训练。

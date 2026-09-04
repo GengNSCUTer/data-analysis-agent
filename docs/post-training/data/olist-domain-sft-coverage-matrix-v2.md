@@ -150,4 +150,5 @@ Train、validation 和 in-domain test 可以共享原子指标、表和单指标
 已提交 [`../../../data/fixtures/olist_queryspec_coverage_seeds_v1.jsonl`](../../../data/fixtures/olist_queryspec_coverage_seeds_v1.jsonl)
 作为 15 条静态结构 seed 的审阅清单；它不含自然语言、SQL、结果或 protected 内容，且尚未调用物化器生成
 QuerySpec、Gold SQL 或训练行。物化器只接受结构化 seed 和仓库外的 protected family fingerprint summary，输出也只能写到仓库外。
-下一项只能设计并审阅 restricted protected summary 的生成边界，不得直接大规模物化、执行 SQL、启动结果合同/token 审计或 GPU 任务。
+受限导出器已实现，但真实 protected summary 尚未生成。下一项只能设计并审阅带 evidence 绑定的小批 Gold 准入/结构物化，
+不得直接大规模物化、生成 Prompt/训练行、启动结果合同/token 审计或 GPU 任务。
