@@ -28,3 +28,9 @@ validation.
 training: it accepts only structural coverage seeds and a protected family
 summary, writes external QuerySpec/Gold intermediate artifacts atomically, and
 does not read questions, execute SQL, build training JSONL, or load a model.
+
+The committed `data/fixtures/olist_queryspec_coverage_seeds_v1.jsonl` is a small
+review fixture for that structural input contract. It is not a training dataset,
+is not accompanied by an in-repository protected summary, and must not be passed
+to the materializer until the restricted protected-summary export boundary has
+been separately approved.

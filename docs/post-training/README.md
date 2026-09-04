@@ -49,7 +49,7 @@
 | R2 SFT 质量门 | 先建立不回退的 SFT 基线 | 已完成但失败 | 官方 release 上 matching Base/26-step QLoRA Adapter 均 1,034/1,034；SQLite executed `829 -> 671`，Test Suite internal all `0.433 -> 0.376`，限定列错误 `15 -> 296`。详见官方专属分析。 |
 | R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 本轮完成 | 3,600 条 official train-only v2 corpus、2 epoch bf16 LoRA、164-case/17-schema 独立 smoke 和完整 1,034-case 对照均完成；SQLite `950 -> 961`、Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`。 |
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
-| R5 领域数据与受控接入 | 构建运行时 Prompt 对齐的 Olist 领域资产，并在通过质量门后再讨论候选接入 | 十指标 Catalog、coverage v2 与 QuerySpec/renderer 设计已冻结，尚未实现或物化 | Spider 与 CSpider 两个 Adapter 的 12 条 Olist 业务迁移子门均未通过；`olist-catalog-v2` 已冻结 10 项指标及分母/归属边界，coverage v2 已将可训练、需澄清和排除的形状逐项锁定。`QuerySpec` 是离线施工图，renderer 只编译 deterministic Gold SQL；下一项仅可实现并审阅两者及其单测。归因、Top-N、自由筛选和未建模排序继续排除，安全、权限、结果与图表合同仍在服务器端执行。 |
+| R5 领域数据与受控接入 | 构建运行时 Prompt 对齐的 Olist 领域资产，并在通过质量门后再讨论候选接入 | QuerySpec/renderer/materializer 已实现；15 条静态 coverage seed 已冻结，尚未实际物化 | Spider 与 CSpider 两个 Adapter 的 12 条 Olist 业务迁移子门均未通过；`olist-catalog-v2` 已冻结 10 项指标及分母/归属边界，coverage v2 已将可训练、需澄清和排除的形状逐项锁定。静态 seed 只验证结构、family 与 program/split 隔离，不含问题、Prompt、SQL 或 protected 内容，也不能作为模型评测。下一项只能设计 restricted protected-family summary 的导出/复核边界；归因、Top-N、自由筛选和未建模排序继续排除，安全、权限、结果与图表合同仍在服务器端执行。 |
 
 ## CSpider 当前检查点
 
@@ -118,16 +118,17 @@ PostgreSQL executed / ResultContract valid 为 `2/1/0`，Base 为 `6/4/2`；不�
 12. [CSpider 两 Epoch 训练与成对评测合同](data/cspider-sft-2epoch-evaluation-contract-v1.md)：查看 4,288-step 训练、GPU UUID guard、Base/Adapter 唯一变量与生成后评测边界；当前只冻结，尚未启动。
 13. [Olist 领域 Candidate SQL SFT 数据合同 v1](data/olist-domain-sft-data-contract-v1.md)：固定真实运行时 Prompt、Gold SQL、split、长度、holdout 和停止门；尚未构造数据。
 14. [Olist 十项业务指标合同 v2](../metric-contracts/olist-metrics-v2.md)：当前 Catalog 的公式、分母、归属边界和数据库基线；尚未生成领域样本。
-15. [Olist QuerySpec 与 deterministic Gold SQL renderer 设计 v1](data/olist-queryspec-renderer-design-v1.md)：冻结离线业务施工图、SQL 编译职责和后续实现测试边界；尚未实现或物化数据。
-15. [Olist 领域 Candidate SQL SFT 覆盖矩阵 v2](data/olist-domain-sft-coverage-matrix-v2.md)：十指标的安全覆盖、归属澄清、排除项与物化前 family 目标；尚未生成样本。
-16. [Olist 领域 Candidate SQL SFT 覆盖矩阵 v1](data/olist-domain-sft-coverage-matrix-v1.md)：4 指标历史快照，只用于理解版本演进，不能物化。
-17. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：历史单指标 pilot 参考，不是当前训练数据或覆盖承诺。
-18. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
-19. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
-20. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
-21. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
-22. [CSpider 两 Epoch 实验与 Olist 迁移结果](experiments/cspider-bf16-lora-2epoch-v1.md)：查看 CSpider SQLite 对照，以及最终 Adapter 在受保护 Olist 工作区的独立迁移结果。
-23. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
+15. [Olist QuerySpec 与 deterministic Gold SQL renderer 设计 v1](data/olist-queryspec-renderer-design-v1.md)：离线业务施工图、SQL 编译职责与已实现的确定性测试边界；尚未进行真实 SQL 执行或训练数据物化。
+16. [Olist 静态 Coverage Seed 清单 v1](data/olist-queryspec-coverage-seed-manifest-v1.md)：15 条结构化 seed 的覆盖、split 限制和 protected-summary 准入边界；尚未实际物化。
+17. [Olist 领域 Candidate SQL SFT 覆盖矩阵 v2](data/olist-domain-sft-coverage-matrix-v2.md)：十指标的安全覆盖、归属澄清、排除项与物化前 family 目标；尚未生成样本。
+18. [Olist 领域 Candidate SQL SFT 覆盖矩阵 v1](data/olist-domain-sft-coverage-matrix-v1.md)：4 指标历史快照，只用于理解版本演进，不能物化。
+19. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：历史单指标 pilot 参考，不是当前训练数据或覆盖承诺。
+20. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
+21. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
+22. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
+23. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
+24. [CSpider 两 Epoch 实验与 Olist 迁移结果](experiments/cspider-bf16-lora-2epoch-v1.md)：查看 CSpider SQLite 对照，以及最终 Adapter 在受保护 Olist 工作区的独立迁移结果。
+25. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
 
 ## 看日志与停止任务
 

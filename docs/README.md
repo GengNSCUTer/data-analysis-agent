@@ -33,6 +33,7 @@
 - [`metric-catalog.md`](metric-catalog.md)：当前十项指标的简表与机器可读 Catalog 入口。
 - [`metric-contracts/olist-metrics-v2.md`](metric-contracts/olist-metrics-v2.md)：十项指标的公式、分母、归属边界和数据库回归证据。
 - [`post-training/data/olist-queryspec-renderer-design-v1.md`](post-training/data/olist-queryspec-renderer-design-v1.md)：Olist 领域 SFT 中离线 QuerySpec 与 deterministic PostgreSQL Gold SQL renderer 的职责边界及实现状态；尚未物化样本。
+- [`post-training/data/olist-queryspec-coverage-seed-manifest-v1.md`](post-training/data/olist-queryspec-coverage-seed-manifest-v1.md)：小型静态 coverage seed 的输入边界、覆盖分布、split 限制与 protected-summary 准入条件；尚未实际物化。
 - [`sql-policy.md`](sql-policy.md)：`sqlglot` AST 策略和 SQL 执行边界。
 - [`data-loading.md`](data-loading.md)：数据清洗、加载和版本化说明。
 - [`local-postgres.md`](local-postgres.md)：本机 PostgreSQL 服务与连接约定。
@@ -55,7 +56,7 @@
 后训练文档已经完成目录化，唯一规范入口是 [`post-training/README.md`](post-training/README.md)：
 
 - `post-training/learning/`：概念、代码审阅和用户问答；当前重点是逐小单元审查真实训练代码。项目进度和实验状态不放入学习笔记，统一看 `PROJECT.md` 及飞书项目文档。
-- `post-training/data/`：数据协议、holdout 隔离、领域训练接口合同和覆盖矩阵；当前 Olist 领域训练以 [数据合同](post-training/data/olist-domain-sft-data-contract-v1.md)、[十指标合同](metric-contracts/olist-metrics-v2.md) 和 [十指标覆盖矩阵 v2](post-training/data/olist-domain-sft-coverage-matrix-v2.md) 为入口。四指标 v1 矩阵保留为历史快照，不能用于物化。
+- `post-training/data/`：数据协议、holdout 隔离、领域训练接口合同和覆盖矩阵；当前 Olist 领域训练以 [数据合同](post-training/data/olist-domain-sft-data-contract-v1.md)、[十指标合同](metric-contracts/olist-metrics-v2.md)、[十指标覆盖矩阵 v2](post-training/data/olist-domain-sft-coverage-matrix-v2.md) 和 [静态 seed 清单](post-training/data/olist-queryspec-coverage-seed-manifest-v1.md) 为入口。四指标 v1 矩阵保留为历史快照，不能用于物化。
 - `post-training/experiments/`：实验台账，只记录配置、聚合结果和结论。
 - `post-training/archive/`：不再作为实时状态依据的旧路线和旧笔记。
 

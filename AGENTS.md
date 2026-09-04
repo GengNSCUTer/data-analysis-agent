@@ -359,3 +359,10 @@
 - 实现：新增 20 条脱敏 quality manifest（其中 5 条携带有界图表意图）、人工标签和运行器结构性图表证据字段；报告不保留问题、回答、SQL、行或图表 payload。
 - 验证：20/20 Agent Run，权限 20/20；指标语义 11 pass / 2 fail / 7 N/A，回答有据 11 pass / 9 fail；原批次 3/5 发出图表组件、2/5 在 SQL 前超时。Playwright 真实页面确认 SVG、标签、数据标记和无横向溢出，但折线图请求实际渲染为柱状图；独立州图表重放 180 秒超时。评测合同测试 9 passed，嵌入窗口 E2E 9 passed。
 - 风险/下一步：支付方式归因、评价行粒度与图表类型仍由模型提示主导，下一轮必须把三者收敛为服务器 Result/Chart Contract，再评估模型超时、缓存或异步化；不发布总体准确率、图表成功率或 P50/P95。
+
+### 2026-09-04：Olist 静态 Coverage Seed 清单
+
+- 目标：只设计并审阅后续 QuerySpec 物化器的最小结构化输入，不进入实际物化或训练。
+- 实现：提交 `data/fixtures/olist_queryspec_coverage_seeds_v1.jsonl` 的 15 条静态记录、任务卡、设计说明和结构测试。记录只包含 `seed_id`、显式 split、指标/形状/维度/时间/Join program；覆盖十项指标、四种允许形状与三类 split，不含用户问题、Prompt、SQL、结果、原始 Olist 行或 protected 内容。
+- 验证范围：测试仅构造并验证内存中的 QuerySpec、family 唯一性、program 不跨 split 和预期覆盖分布；不调用 renderer/materializer、不写仓库外产物、不访问数据库。
+- 限制与下一步：当前“Join program 不跨 split”规则严格且仅有 11 个 program，15 条清单只能验证结构和隔离边界，不能作为最终训练/评测集或准确率证据。下一项只能设计 restricted protected-family summary 的生成权限、不可逆输出、hash 证据和人工复核；在获批前禁止物化。

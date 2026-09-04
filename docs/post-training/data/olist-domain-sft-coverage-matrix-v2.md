@@ -147,6 +147,7 @@ Train、validation 和 in-domain test 可以共享原子指标、表和单指标
 5. 品类分组是 `category_grouped`，仅限 `gmv`、`item_count`、`freight_amount` 的单指标 `JP07_category_item`；卖家分组保持排除，因为 `seller_id` 是 analyst 敏感投影/分组列。多指标上限为四项；按日序列必须具有明确绝对范围，并受 200 行 analyst 结果预算约束。
 
 上述 QuerySpec schema、验证器、只读指标表达式注册表、renderer 与受控批量物化器已实现并完成合成/运行时回归。
-物化器只接受结构化 seed 和 protected family fingerprint summary，输出只能写到仓库外；尚未用任何真实 Olist seed
-生成 QuerySpec、Gold SQL 或训练行。下一项只能先设计并审阅小型 coverage seed 与 protected summary 的输入边界，
-不得直接大规模物化、执行 SQL、启动结果合同/token 审计或 GPU 任务。
+已提交 [`../../../data/fixtures/olist_queryspec_coverage_seeds_v1.jsonl`](../../../data/fixtures/olist_queryspec_coverage_seeds_v1.jsonl)
+作为 15 条静态结构 seed 的审阅清单；它不含自然语言、SQL、结果或 protected 内容，且尚未调用物化器生成
+QuerySpec、Gold SQL 或训练行。物化器只接受结构化 seed 和仓库外的 protected family fingerprint summary，输出也只能写到仓库外。
+下一项只能设计并审阅 restricted protected summary 的生成边界，不得直接大规模物化、执行 SQL、启动结果合同/token 审计或 GPU 任务。
