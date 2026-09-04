@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from data_analysis_agent.result_validator import ResultValidator, build_result_summary
 
@@ -86,6 +87,31 @@ def test_validator_checks_time_coverage_and_join_amplification() -> None:
 
     assert outside.state == "refuse"
     assert amplified.state == "refuse"
+
+
+def test_validator_accepts_server_owned_bucket_label_before_partial_range_start() -> None:
+    result = ResultValidator().validate(
+        pd.DataFrame({"time": ["2017-01-01"], "gmv": [123.4]}),
+        metric_columns=("gmv",),
+        time_column="time",
+        time_bucket_grain="year",
+        requested_start="2017-04-01",
+        requested_end="2017-07-01",
+    )
+
+    assert result.state == "valid"
+
+
+def test_validator_rejects_an_unknown_time_bucket_grain() -> None:
+    with pytest.raises(ValueError, match="unsupported server-owned"):
+        ResultValidator().validate(
+            pd.DataFrame({"time": ["2017-01-01"], "gmv": [123.4]}),
+            metric_columns=("gmv",),
+            time_column="time",
+            time_bucket_grain="fiscal_period",
+            requested_start="2017-04-01",
+            requested_end="2017-07-01",
+        )
 
 
 def test_validator_accepts_catalog_time_alias_for_temporal_result() -> None:

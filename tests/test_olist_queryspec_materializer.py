@@ -272,8 +272,8 @@ def test_materialize_rejects_a_renderer_hash_mismatch(tmp_path: Path, monkeypatc
     _write_protected_evidence(protected, evidence)
     original = materializer_module.render_gold_sql
 
-    def tampered_renderer(spec: object) -> object:
-        return replace(original(spec), sql_sha256="0" * 64)
+    def tampered_renderer(spec: object, catalog: object | None = None) -> object:
+        return replace(original(spec, catalog), sql_sha256="0" * 64)
 
     monkeypatch.setattr(materializer_module, "render_gold_sql", tampered_renderer)
     manifest = materialize(seeds, protected, evidence, output)

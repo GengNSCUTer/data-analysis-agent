@@ -175,6 +175,7 @@ class ResultValidator:
         metric_columns: Sequence[str] = (),
         time_column: str | None = None,
         time_column_aliases: Sequence[str] = (),
+        time_bucket_grain: str | None = None,
         requested_start: str | date | datetime | None = None,
         requested_end: str | date | datetime | None = None,
         limit_applied: bool = False,
@@ -309,6 +310,8 @@ class ResultValidator:
                 )
             start = pd.Timestamp(requested_start) if requested_start is not None else None
             end = pd.Timestamp(requested_end) if requested_end is not None else None
+            if start is not None and time_bucket_grain is not None:
+                start = _bucket_start(start, time_bucket_grain)
             if start is not None and parsed.min() < start or end is not None and parsed.max() > end:
                 return ResultValidation(
                     "refuse",
@@ -327,3 +330,24 @@ class ResultValidator:
                 time_end=parsed.max().isoformat(),
             )
         return ResultValidation("valid", "结果通过确定性检查。", len(frame), columns)
+
+
+def _bucket_start(value: pd.Timestamp, grain: str) -> pd.Timestamp:
+    """Map a requested instant to the label used by PostgreSQL date_trunc.
+
+    A grouped time-series result legitimately labels a partial month, quarter,
+    year, or Monday-starting week with the beginning of that bucket.  This
+    helper is intentionally available only when the server owns the grain;
+    arbitrary model-provided labels keep the strict time-bound check.
+    """
+    if grain == "day":
+        return value.normalize()
+    if grain == "week":
+        return value.to_period("W-SUN").start_time
+    if grain == "month":
+        return value.to_period("M").start_time
+    if grain == "quarter":
+        return value.to_period("Q").start_time
+    if grain == "year":
+        return value.to_period("Y").start_time
+    raise ValueError(f"unsupported server-owned time bucket grain: {grain}")

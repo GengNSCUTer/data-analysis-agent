@@ -44,6 +44,7 @@ from data_analysis_agent.olist_queryspec import (  # noqa: E402
     render_gold_sql,
     validate_query_spec,
 )
+from data_analysis_agent.semantic_catalog import Catalog, CatalogLoader  # noqa: E402
 
 # 当前物化程序版本号，写入产物清单用于后期溯源
 MATERIALIZER_VERSION = "olist-queryspec-materializer-v1"
@@ -312,14 +313,14 @@ def _rejection(seed_id: str, split: str | None, reason_code: str) -> dict[str, A
     }
 
 
-def _validate_artifact(spec: QuerySpec) -> tuple[dict[str, Any], dict[str, Any]]:
+def _validate_artifact(spec: QuerySpec, catalog: Catalog) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     调用渲染器生成黄金标准答案SQL，并做一致性校验
     校验SQL哈希、返回字段，防止渲染器内部逻辑漂移
     """
     # Keep the explicit validator even though create_validated and renderer validate too.
-    validate_query_spec(spec)
-    artifact = render_gold_sql(spec)
+    validate_query_spec(spec, catalog)
+    artifact = render_gold_sql(spec, catalog)
     actual_hash = sha256_bytes(artifact.sql.encode("utf-8"))
     if actual_hash != artifact.sql_sha256 or actual_hash != artifact.evidence["sql_sha256"]:
         raise QuerySpecValidationError("renderer_hash_mismatch", "renderer SQL hash is inconsistent")
@@ -372,6 +373,7 @@ def materialize(
         raise ValueError(f"unsupported split policy: {split_policy}")
     _check_output_dir(output_dir)
     raw_seeds = _read_jsonl(seeds_jsonl.resolve())
+    catalog = CatalogLoader().load()
     protected_summary_path = _require_external_file(protected_summary_json, "protected summary")
     protected_fingerprints = load_protected_family_fingerprints(protected_summary_path)
     protected_evidence_path = _require_external_file(
@@ -405,14 +407,14 @@ def materialize(
             # 1.清洗校验原始种子字段
             seed = canonicalize_seed(raw_seed)
             # 2.由种子生成QuerySpec查询规格对象
-            spec = QuerySpec.create_validated(
+            spec = validate_query_spec(QuerySpec.create(
                 metric_ids=seed["metric_ids"],
                 result_shape=seed["result_shape"],
                 dimension=seed["dimension"],
                 time=seed["time"],
                 join_program_id=seed["join_program_id"],
                 attribution_rule_id=seed["attribution_rule_id"],
-            )
+            ), catalog)
             # 3.计算该查询所属家族id
             family = family_id(spec)
             # 安全校验：家族命中黑名单，则拒绝，防止测试集泄露进训练集
@@ -422,7 +424,7 @@ def materialize(
             if family in seen_families:
                 raise QuerySpecValidationError("duplicate_family", "family appears more than once")
             # 4.渲染生成黄金SQL并且校验产物一致性
-            query_spec, artifact = _validate_artifact(spec)
+            query_spec, artifact = _validate_artifact(spec, catalog)
             if spec.query_spec_id in seen_query_specs:
                 raise QuerySpecValidationError("duplicate_query_spec", "QuerySpec appears more than once")
             if artifact["sql_sha256"] in seen_sql_hashes:

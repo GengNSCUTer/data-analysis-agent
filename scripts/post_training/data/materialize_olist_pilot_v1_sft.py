@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize the admitted Olist Pilot v1 runtime Prompt -> Gold SQL SFT splits.
+"""Materialize admitted Olist runtime Prompt -> Gold SQL SFT splits.
 
 All inputs and outputs remain external. The command binds the admitted Gold
 assembly and the rebuilt production runtime prompts by seed ID, refuses split
@@ -28,12 +28,12 @@ from data_analysis_agent.candidate_sql_generator import OLIST_CANDIDATE_SQL_PROM
 from data_analysis_agent.olist_queryspec import WorkspacePin  # noqa: E402
 
 
-CONTRACT_VERSION = "olist-pilot-v1-sft-v1"
-EXPECTED_SPLITS = {"train": 24, "validation": 8, "in_domain_test": 8}
-# Olist's actual production Catalog + QueryPlan prompt is materially longer
-# than the historical SQLite benchmark prompt. The measured Pilot v1 maximum
-# is 2,076 tokens, so 2,304 is the smallest practical 256-token-aligned cap.
-DEFAULT_MAX_SEQ_LENGTH = 2304
+CONTRACT_VERSION = "olist-release-sft-v1"
+# Olist's production Catalog + QueryPlan prompt is materially longer than the
+# historical SQLite benchmark prompt. Pilot v1 fit 2,304, but the ten-metric
+# Medium v1 maximum is 2,915; 3,072 is the smallest practical 256-aligned cap
+# that preserves every frozen release row without truncation.
+DEFAULT_MAX_SEQ_LENGTH = 3072
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,6 +42,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runtime-prompt-dir", type=Path, required=True)
     parser.add_argument("--tokenizer-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--expected-train", type=int, required=True)
+    parser.add_argument("--expected-validation", type=int, required=True)
+    parser.add_argument("--expected-in-domain-test", type=int, required=True)
     parser.add_argument("--max-seq-length", type=int, default=DEFAULT_MAX_SEQ_LENGTH)
     parser.add_argument("--generated-at", default=None)
     return parser.parse_args()
@@ -117,14 +120,14 @@ def load_tokenizer(path: Path) -> Any:
     return tokenizer
 
 
-def _load_assembly(directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _load_assembly(directory: Path, expected_rows: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     directory = _external_existing_dir(directory, "admission assembly directory")
     manifest = _read_json(directory / "admission_assembly_manifest.json", "admission assembly manifest")
     records_path = _external_existing(directory / "admitted_records.jsonl", "admitted records")
     evidence = manifest.get("output", {}).get("admitted_records_jsonl", {})
     if manifest.get("workspace") != WorkspacePin.current().as_dict() or manifest.get("checks", {}).get("status") != "pass":
         raise ValueError("admission assembly does not match the current passing workspace")
-    if evidence.get("rows") != 40 or evidence.get("sha256") != sha256_file(records_path):
+    if evidence.get("rows") != expected_rows or evidence.get("sha256") != sha256_file(records_path):
         raise ValueError("admission assembly records do not match manifest")
     return manifest, _read_jsonl(records_path, "admitted records")
 
@@ -151,16 +154,17 @@ def _query_spec_id(row: Mapping[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def build_rows(admitted: list[dict[str, Any]], runtime: list[dict[str, Any]], tokenizer: Any, max_seq_length: int) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+def build_rows(admitted: list[dict[str, Any]], runtime: list[dict[str, Any]], tokenizer: Any, max_seq_length: int, expected_splits: Mapping[str, int]) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
     if max_seq_length <= 0:
         raise ValueError("max_seq_length must be positive")
     admitted_by_seed = {str(row.get("seed_id")): row for row in admitted}
     runtime_by_seed = {str(row.get("seed_id")): row for row in runtime}
-    if len(admitted_by_seed) != 40 or set(admitted_by_seed) != set(runtime_by_seed):
-        raise ValueError("admission/runtime seed sets must be identical 40-row sets")
-    splits = {name: [] for name in EXPECTED_SPLITS}
+    expected_rows = sum(expected_splits.values())
+    if len(admitted_by_seed) != expected_rows or set(admitted_by_seed) != set(runtime_by_seed):
+        raise ValueError("admission/runtime seed sets must be identical release sets")
+    splits = {name: [] for name in expected_splits}
     exclusions: list[dict[str, Any]] = []
-    families_by_split: dict[str, set[str]] = {name: set() for name in EXPECTED_SPLITS}
+    families_by_split: dict[str, set[str]] = {name: set() for name in expected_splits}
     for index, seed_id in enumerate(admitted_by_seed, 1):
         admitted_row = admitted_by_seed[seed_id]
         runtime_row = runtime_by_seed[seed_id]
@@ -185,7 +189,7 @@ def build_rows(admitted: list[dict[str, Any]], runtime: list[dict[str, Any]], to
         prompt_tokens = len(tokenizer(prompt + "\n", add_special_tokens=False)["input_ids"])
         target_tokens = len(tokenizer(sql.strip(), add_special_tokens=False)["input_ids"]) + 1
         sequence_tokens = prompt_tokens + target_tokens
-        sample_id = f"olist-pilot-v1-{index:03d}"
+        sample_id = f"olist-release-{index:04d}"
         if sequence_tokens > max_seq_length:
             exclusions.append({
                 "sample_id": sample_id,
@@ -220,9 +224,9 @@ def build_rows(admitted: list[dict[str, Any]], runtime: list[dict[str, Any]], to
             },
         })
     if exclusions:
-        raise ValueError("Pilot v1 does not permit length exclusions; inspect external exclusion evidence")
-    if {name: len(rows) for name, rows in splits.items()} != EXPECTED_SPLITS:
-        raise ValueError("materialized split counts differ from Pilot v1 contract")
+        raise ValueError("release does not permit length exclusions; inspect external exclusion evidence")
+    if {name: len(rows) for name, rows in splits.items()} != dict(expected_splits):
+        raise ValueError("materialized split counts differ from the release contract")
     all_families = [row["family_id"] for rows in splits.values() for row in rows]
     if len(all_families) != len(set(all_families)):
         raise ValueError("family IDs cross splits")
@@ -235,12 +239,14 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def materialize(assembly_dir: Path, runtime_dir: Path, tokenizer_dir: Path, output_dir: Path, *, max_seq_length: int, generated_at: str | None = None) -> dict[str, Any]:
+def materialize(assembly_dir: Path, runtime_dir: Path, tokenizer_dir: Path, output_dir: Path, *, max_seq_length: int, expected_splits: Mapping[str, int], generated_at: str | None = None) -> dict[str, Any]:
     output_dir = _external_new_dir(output_dir)
-    assembly_manifest, admitted = _load_assembly(assembly_dir)
+    if set(expected_splits) != {"train", "validation", "in_domain_test"} or any(value <= 0 for value in expected_splits.values()):
+        raise ValueError("expected split counts must be positive train/validation/in_domain_test values")
+    assembly_manifest, admitted = _load_assembly(assembly_dir, sum(expected_splits.values()))
     runtime_manifest, runtime = _load_runtime(runtime_dir)
     tokenizer = load_tokenizer(tokenizer_dir)
-    splits, exclusions = build_rows(admitted, runtime, tokenizer, max_seq_length)
+    splits, exclusions = build_rows(admitted, runtime, tokenizer, max_seq_length, expected_splits)
     generated_at = generated_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = output_dir.parent / f".{output_dir.name}.staging-{uuid.uuid4().hex}"
@@ -286,7 +292,7 @@ def materialize(assembly_dir: Path, runtime_dir: Path, tokenizer_dir: Path, outp
             "tokenizer": {"dir": str(Path(tokenizer_dir).resolve()), "eos_token_id": tokenizer.eos_token_id},
             "training_length_contract": {"max_seq_length": max_seq_length, "formula": "exact rendered runtime prompt + canonical SQL + EOS", "silent_truncation": False},
             "policy": {
-                "split_strategy": "olist_pilot_v1_family_isolated",
+                "split_strategy": "olist_family_isolated_v1",
                 "primary_group": "family_id",
                 "test_storage": "final_evaluation_only",
                 "test_forbidden_for_training": True,
@@ -311,7 +317,12 @@ def materialize(assembly_dir: Path, runtime_dir: Path, tokenizer_dir: Path, outp
 
 def main() -> int:
     args = parse_args()
-    result = materialize(args.admission_assembly_dir, args.runtime_prompt_dir, args.tokenizer_dir, args.output_dir, max_seq_length=args.max_seq_length, generated_at=args.generated_at)
+    expected_splits = {
+        "train": args.expected_train,
+        "validation": args.expected_validation,
+        "in_domain_test": args.expected_in_domain_test,
+    }
+    result = materialize(args.admission_assembly_dir, args.runtime_prompt_dir, args.tokenizer_dir, args.output_dir, max_seq_length=args.max_seq_length, expected_splits=expected_splits, generated_at=args.generated_at)
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

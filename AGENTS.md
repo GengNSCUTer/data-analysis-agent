@@ -1,422 +1,77 @@
-# Data Analysis Agent — 协作与迭代规则
+# Data Analysis Agent 协作与质量约束
 
-本文件约束在本仓库内执行的所有后续工作。若用户当前指令与本文件冲突，以用户最新指令为准；否则必须遵守以下流程。
+本文件只维护稳定的协作规则、接口不变量和安全边界，不维护项目进度、实验流水账或临时状态。当前项目事实以 `PROJECT.md`、`docs/README.md`、`docs/post-training/README.md` 和飞书项目文档为准。
 
-## 1. 项目事实来源
+## 1. 第一性原则
 
-- `PROJECT.md` 是需求、架构、数据策略、技术决策、阶段路线和变更记录的本地基线；
-- `docs/README.md` 是本地文档总导航，说明规范文档、历史证据和兼容入口的职责；不要把同一事实复制到多个“最新”文档中；
-- 飞书项目文档（<https://my.feishu.cn/docx/QIr2dfKp7oIJvqxcPerckYd6nfC>）是用户可直接查看的同步项目记录；
-- 飞书《数据分析 Agent｜微调与后训练学习笔记》（<https://my.feishu.cn/docx/Lx34diMehoPns6xcXP9cb8aLnmh>）只记录后训练原理、真实代码审阅、用户问答和面试知识；不在其中维护项目进度或实验状态；
-- GitHub 仓库 `GengNSCUTer/data-analysis-agent` 是项目代码、可复现脚本、文档和提交历史的唯一远端；
-- Vanna 已按当前项目决策合并进本仓库，仓库同时保留 `upstream` 远端用于跟踪上游；不要再创建第二个自有 Vanna 仓库。项目不再建设独立 Next.js/TailAdmin 前端，`<vanna-chat>` 是嵌入既有业务页的唯一交互基座。
+- 先定义问题和验收证据，再写代码。每项实质任务先写最小任务卡：目标、非目标、输入、输出、关键不变量、验收方式。
+- 复杂度必须服务于明确风险。安全、权限、数据泄漏、SQL 执行、模型训练和数据质量需要强校验；低风险样板、格式化和重复性转换不做无收益的过度审查。
+- 测试通过只证明被覆盖的行为；loss 下降、单次成功、模型生成更短或 AI 审阅通过，都不能直接推出业务语义正确、泛化有效或可上线。
+- 任何自动化扩展都必须可复现、可回读、可回滚，并明确记录实际覆盖量与未覆盖项。不能为了达到目标行数复制样本、伪造执行证据或放宽失败门。
 
-## 2. 每次迭代的强制闭环
+## 2. 每次迭代闭环
 
-每次完成一个有意义的迭代（需求变化、设计决策、功能、测试、数据管道、Bug 修复、发布准备）时，按下列顺序执行：
+1. 开始前读取相关 `PROJECT.md`/规范文档，明确本轮范围和不做项。
+2. 只实现当前一个独立目标；运行与风险相称的单元、集成或端到端验证。
+3. 更新本地事实文档；项目进度和实验状态写入 `PROJECT.md` 或后训练实验文档，不写入本文件。
+4. 如形成项目事实，追加飞书项目文档；学习问答只写飞书学习笔记和 `docs/post-training/learning/`。
+5. 检查 diff、密钥和大文件后使用 Conventional Commit 提交并推送 `origin`；失败时如实记录，不假称同步完成。
+6. 交付时说明改动文件、调用方影响、保持/改变的不变量、测试证据、测试空白和停止条件。
 
-1. **开始前记录**：读取 `PROJECT.md` 与飞书项目文档的相关部分，明确本轮目标、范围、验收条件和不做项。若需求或架构发生变化，先更新设计记录再编码。
-2. **实施与验证**：只实现本轮范围内的内容；运行与变更相称的格式化、静态检查、单元/集成/E2E 测试，并记录结果。
-3. **本地项目文档更新**：更新 `PROJECT.md` 的需求、设计、路线图、决策或变更记录；必要时新增 ADR、评测报告或数据字典。不要只改代码不留决策依据。
-4. **飞书同步**：在飞书项目文档追加本轮迭代记录，至少包含日期、目标、实现内容、设计决策、验证结果、风险/限制和下一步。重大架构变更须同步正文对应章节，而不只写日志。
-5. **Git 更新**：检查 `git diff` 与 `git status`；只提交本轮相关文件。提交信息使用清晰的 Conventional Commit 风格，例如 `feat(sql-policy): add AST allowlist validation`。
-6. **远端推送**：在确认提交内容不含密钥、原始受限数据、缓存和构建产物后，推送到 `origin`。若推送失败，保留本地提交并在飞书迭代记录中注明状态，不能假称已同步。
-7. **交付汇报**：说明完成内容、验证证据、飞书文档链接/更新位置、Git commit SHA、是否已推送，以及仍存在的限制。
+## 3. 代码审阅节奏
 
-小型纯讨论不必产生 Git commit；一旦形成实际项目决策，必须更新 `PROJECT.md` 和飞书记录。
+- 先看模块地图、输入输出契约和失败保护，再深入涉及 SQL、权限、数据隔离、模型训练和即将修改函数的关键代码；不要求逐行通读整个仓库。
+- 讲解和审阅按一个小单元推进：用户先看真实代码与测试并复述，我再纠正；未完成当前单元时不启动新的长训练或完整评测。
+- 对已被明确契约和回归测试覆盖的重复转换，采用抽样检查和聚合证据即可；发现新风险再升级为逐条审查。
+- 每次审阅区分“已验证行为”“测试空白”“待确认设计”，不要因为目录或文档视觉整齐进行无关重构。
 
-### AI 协作与工程主导权
+## 4. 数据与安全边界
 
-- AI 是调研、实现、测试、代码审查和文档整理的加速器，不是项目需求、架构取舍、数据边界、安全边界或验收结论的默认决策者。用户必须能说明项目解决的问题、明确不做项、关键风险与“什么证据才算完成”。
-- 单次迭代只处理一个可独立审查的具体目标；开始前明确该目标的边界，完成后先交付可复核的文件、证据和未覆盖项，再由用户决定下一件事。不得在同一轮中顺带启动训练、扩数、重构、评测或运行时接入等额外工作。
-- 每项有实质影响的开发、重构、实验或评测，在编码前先形成一个最小任务卡：`目标`、`非目标`、`输入`、`输出/接口影响`、`不变量`、`验收证据`。需求不完整时先补齐任务卡，不让 AI 通过默认假设扩大范围。
-- 代码阅读不要求逐行覆盖整个仓库，按关键数据流和风险分层推进：先建立模块地图（谁调用、输入、输出、依赖），再审输入/输出契约与失败保护；只有涉及权限、数据隔离、SQL 执行、模型训练/评测、密钥、破坏性操作、异常指标，或准备修改的关键函数，才进入逐行审阅。
-- 用户必须亲自掌握每条关键链路的“目标 -> 输入 -> 关键决策 -> 输出 -> 风险 -> 验证证据”。对低风险样板、格式化、重复性脚本和受充分测试保护的局部实现，可由 AI 高自主完成；不得以此降低关键边界的审阅标准。
-- AI 提交实质代码变更时，除 diff 外还必须说明：改动文件与原因、接口/调用方影响、保持或改变的不变量、测试覆盖与空白、预期失败模式、回滚或停止条件。用户验收的是这份可审计变更包及其证据，而不只是“代码能运行”。
-- 测试通过只证明被覆盖的行为。单元、集成、端到端、离线评测和人工业务核验分别提供不同层级的证据，不能互相替代；不得由 loss 下降、单次成功、单测通过或 AI 总结直接推出语义正确、泛化有效或可上线。
-- 每次审阅或实施结束时，明确记录“已验证行为”“测试空白”“待确认设计”和“下一步是否获准”。发现重构机会先记录，不为视觉整齐贸然移动高耦合模块；只有接口、依赖和回归范围已审查并经用户确认后才实施迁移。
-- 后训练学习问答也属于学习记录：每次用户复述后，将“用户答案、纠正点、代码入口、测试证据、未解决问题和下一学习单元”写入本地 `docs/post-training/learning/review-*.md`，并同步到飞书学习笔记；只有问答形成实际项目决策、实验状态或下一步变更时，才将该项目事实追加到飞书项目文档。问答记录不替代代码审阅、测试或业务评测证据。
-- 文档治理规则：`PROJECT.md` 只维护项目事实与决策；飞书项目文档维护项目进度、微调实验状态、结果、风险和下一步；`docs/post-training/README.md` 维护后训练本地阶段地图；`docs/post-training/learning/` 和飞书学习笔记只维护学习与问答；`docs/post-training/experiments/` 维护实验聚合证据；历史报告保留原文，不为了减少文件数强行合并。根目录后训练旧文件是只读兼容入口，不再追加新内容。
-- 学习协作规则：每次只推进一个小代码/概念单元。用户先阅读真实代码和测试，再用自己的话回答；我只在此基础上纠正、补充和给出下一单元。未完成当前单元的理解和审阅前，不启动新的训练、长评测或领域数据构造。
+- API key、数据库密码、访问令牌、`.env`、模型密钥和含敏感信息的日志永不提交 Git；使用 `.env.example`。
+- 原始第三方数据集、大型 CSV/Parquet、数据库 dump、模型、Adapter、checkpoint 和完整运行日志放在仓库外 `/disk2/gengnan/data-analysis-agent-data/`；仓库内只放 manifest、schema、转换定义和小型 fixture。
+- 数据分析使用独立只读账号；应用元数据账号和分析查询账号不得混用。
+- 所有用户/模型 SQL 必须经过 AST 策略、对象白名单、单语句、LIMIT/超时和只读数据库角色。不得用字符串黑名单替代 AST 安全策略。
+- 受保护 holdout 不得作为训练、验证、in-domain test、few-shot 或合成种子。切分时按 `family_id`/程序族隔离，日期、措辞、别名等表面变体不得跨 split。
+- Gold SQL 的业务公式来自冻结 Catalog/指标合同和 deterministic renderer；模型候选仍必须经过 SqlPolicy、reader role、ResultContract/ResultValidator，不能以训练数据绕过运行时治理。
 
-### 2026-08-30：SFT 入口代码审阅回归
+## 5. 项目架构边界
 
-- 目标：修复用户中文注释改动覆盖的两个训练入口行为契约，并恢复 GPU 审计字段的正确读取；本轮不启动训练、不构造数据、不修改生产运行时。
-- 实现：恢复 `CausalSqlCollator.__call__()` 对 `batch.items()` 的遍历；恢复 `validate_split_audit()` 及其入口调用，核对 split 状态、holdout 隔离、`spider_db_id` 分组、train/validation 行数与 SHA-256；修正 `CUDA_VISIBLE_DEVICES` 环境变量拼写。用户已有中文注释和其他工作区修改保持不回退。
-- 验证：数据格式/候选构建/切分 `7 passed`；SFT Dataset、labels、动态 padding、collator、split audit `3 passed`；ruff、compileall、`git diff --check` 通过。
-- 代码审阅结论：padding 位置使用 `pad_token`、`attention_mask=0`、`labels=-100`；真实 EOS 保持可关注并参与 SQL 目标 loss。测试只证明确定性输入/输出契约，不证明模型生成的 SQL 业务正确或泛化有效。
-- 下一步：继续按“每次一个学习单元”的规则审阅模型加载、`prepare_model_for_kbit_training()` 和 `get_peft_model()`；用户确认理解和测试证据前，不进入 Trainer、GPU 实验或新数据构造。
+- 产品运行时是 Python 3.12、FastAPI、Vanna、PostgreSQL、SQLAlchemy/Alembic、`sqlglot` 和原生 `<vanna-chat>`；不另建独立前端，不引入没有实际需求的 Redis、多 Agent、MCP 或任意 Python 执行。
+- Olist 领域 SFT 的训练输入必须复用真实 `olist-candidate-sql-v1` Prompt（Catalog + QueryPlan + ResultContract），目标仅为 canonical PostgreSQL SQL 加 EOS；不能退化为 SQLite Schema-only 模板。
+- `QuerySpec` 是离线、版本锁定的结构化施工图，不是自然语言解析结果，也不是 SQL 字符串；renderer 只编译已验证结构，不解析问题、不执行 SQL、不调用 LLM。
+- 训练数据、模型实验和生产运行时分开；后训练 Adapter 未通过匹配 Base/Adapter 业务质量门前，不接入生产默认路径。
 
-## 3. 安全、数据与开源边界
+## 6. 文档职责
 
-- 永远不要提交 API Key、数据库密码、访问令牌、`.env`、模型密钥或含敏感信息的日志；提供 `.env.example` 代替。
-- 原始第三方数据集、大型 CSV/Parquet、Kaggle 下载内容、数据库 dump 不得提交 Git。提交数据集 manifest、下载/加载脚本、DDL、转换脚本、许可证与署名说明、小型合成 fixture。
-- 数据目录分层固定为：仓库内 `data/` 只保存可提交的 `catalog/`、`manifest/`、`fixtures/` 和转换定义；仓库外 `/disk2/gengnan/data-analysis-agent-data/` 是唯一的大型本地数据根，保存 `text-to-sql/` 原始基准、`models/`、`experiments/`、`evals/` 与 Olist 原始/派生数据。新基准按 `text-to-sql/<dataset>/<release>/` 收纳，压缩原包放在该 release 的 `archives/`；不得在仓库 `data/` 下另建原始数据副本。
-- 使用第三方数据和代码时，记录来源、许可证、版本/commit 和必要的署名；不得把 Olist 或其他境外数据描述为中国真实平台数据。
-- 分析数据库必须使用独立只读账号；应用元数据账号和分析查询账号不得混用。
-- 不得用字符串黑名单替代 SQL AST 安全策略。所有用户/模型产生的 SQL 都必须经过 AST、对象白名单、单语句、LIMIT 和超时策略。
+- `PROJECT.md`：项目需求、架构、当前阶段、决策和变更记录。
+- `docs/README.md`：文档导航；`docs/post-training/README.md`：后训练阶段地图。
+- `docs/post-training/data/`：数据合同、切分、覆盖和物化协议；`experiments/`：已运行实验证据；`learning/`：概念、代码审阅和问答。
+- 飞书项目文档记录项目进度、实验状态、风险和下一步；飞书学习笔记只记录后训练知识与问答，不混入项目进度。
+- 文档中的计划、通过和质量结论必须使用准确措辞，不能把工程 smoke 写成模型提升。
 
-## 4. v1 架构约束
+## 7. GPU 约定
 
-- 当前基线：Python 3.12、仓库内 Vanna 2.0.2、FastAPI、Vanna 原生 `<vanna-chat>`，先通过 `examples/siliconflow_sqlite_web_demo.py` 跑通最小闭环；
-- 后续目标后端：Python 3.12、FastAPI、Vanna、PostgreSQL、SQLAlchemy、Alembic、`sqlglot`、pytest；
-- 后续目标前端：原生 Vanna `<vanna-chat>` Web Component；通过宿主页 HTML/CSS、元素属性和浏览器事件完成浮动/侧栏形态、中文文案与业务结果呈现，优先不改 Vanna 组件核心；
-- 交互：当前使用 Vanna 原生 SSE 返回进度、表格和结论；后续扩展 SQL、图表和证据对象；
-- v1 持久化：PostgreSQL；没有实际缓存、限流、异步导出或多实例协调需求时，不引入 Redis；
-- v1 不做多 Agent、MCP、任意 Python 代码执行、写库操作或多数据库方言支持。
+逻辑 CUDA 设备与 `nvidia-smi` 物理编号固定映射如下：
 
-## 5. 质量门槛
-
-- 每个成功分析结果必须可追溯到指标口径、最终 SQL、来源表/字段、结果摘要和策略记录；
-- 安全测试必须覆盖写操作、多语句、越权对象、无界查询和注释绕过；策略拒绝必须有可读原因；
-- 新增或修改指标时，必须同步数据字典、指标版本和相应评测用例；
-- 新增功能至少有与风险匹配的测试；不要以“手工页面能打开”代替后端安全/语义测试；
-- 任何声称的准确率、延迟、拦截率或性能数据，必须有对应评测用例、运行配置和结果记录。
-
-## 6. 文档与命名约定
-
-- 文档、API、数据模型和代码使用清晰的中英文术语；对外展示使用中文业务语言，并保留原始数据字段映射；
-- 长期设计变更可以在 `docs/adr/` 中新增 `NNNN-title.md`；
-- 数据集相关内容位于 `data/` 下，但仅提交 manifest、schema、transforms 与 fixtures，不提交原始数据；
-- 自有目录约定为 Vanna 源码根目录、`examples/`、`src/data_analysis_agent/`、`tests/`、`docs/`、`data/`、`evals/` 和 `infra/`；本仓库是唯一开发、提交和推送位置。若仍保留 `/disk2/gengnan/_upstream/tailadmin-nextjs-dashboard/`，它只作历史参考，严禁在其中实现本项目业务代码；
-- 文档更新应陈述已验证事实与未决假设，不能把计划描述成已实现能力。
-
-## 7. GPU 资源与设备映射
-
-本机 CUDA 逻辑设备编号与 `nvidia-smi` 物理编号并非同一顺序。后续所有本地推理、评测、微调和后训练任务必须以此映射为准，并在实验 manifest、日志或启动命令中同时记录逻辑设备与物理 GPU 编号。
-
-| `CUDA_VISIBLE_DEVICES` 中的逻辑编号 | 实际 GPU | `nvidia-smi` 物理编号 |
+| `CUDA_VISIBLE_DEVICES` 逻辑编号 | 实际 GPU | `nvidia-smi` 物理编号 |
 | --- | --- | --- |
-| `0` | NVIDIA GeForce RTX 4090 | `2` |
-| `1` | NVIDIA GeForce RTX 4090 | `3` |
-| `2` | NVIDIA GeForce RTX 3090 | `0` |
-| `3` | NVIDIA GeForce RTX 3090 | `1` |
+| `0` | RTX 4090 | `2` |
+| `1` | RTX 4090 | `3` |
+| `2` | RTX 3090 | `0` |
+| `3` | RTX 3090 | `1` |
 
-- 等价映射为：逻辑 CUDA `0,1,2,3` 分别对应 `nvidia-smi` 的 `2,3,0,1`；不得按 `nvidia-smi` 默认顺序猜测模型实际落点；
-- 启动任何占用显存的任务前，必须重新执行 `nvidia-smi` 检查显存和进程占用；不得停止、重启或抢占其他项目的进程；
-- 训练/评测脚本应明确设置 `CUDA_VISIBLE_DEVICES`。进程内部的 `cuda:0` 仅表示该变量可见设备集合中的第一个设备，不能单独当作物理卡号；
-- 不假定四张卡能够同时使用。多卡训练、分布式启动或显存预算必须在实际空闲状态、互连和任务授权均确认后另行决定。
+- 启动占用显存的任务前重新执行 `nvidia-smi`，不得停止、抢占或重启其他进程。
+- 训练/评测命令必须显式设置 `CUDA_VISIBLE_DEVICES`，并记录逻辑设备、物理设备和 UUID；不假定四张卡可以同时使用。
 
-## 8. 后训练学习协作门
+## 8. 数据集构造的最小质量门
 
-后训练工作以“共同学习和审查”为目标，不以替用户连续执行实验为目标。适用于数据集构建、模型下载、prompt 设计、tokenizer/label、LoRA/QLoRA、SFT、评测、领域迁移和任何 DPO/GRPO 计划。
+- 先锁定指标、维度、时间、Join 和结果列合同，再生成自然语言问题和 Prompt。
+- 每条训练行必须能追溯到 QuerySpec、Gold SQL、Prompt 版本、workspace 快照、split 和长度统计。
+- 不静默截断 Prompt 或 SQL；超长样本进入脱敏 exclusion manifest，除非合同明确允许并记录原因。
+- 中等规模数据必须同时报告行数、QuerySpec 数、family 数、程序族覆盖和每个 split 的哈希；行数不能替代独立语义能力。
+- 自动生成的大批量样本使用确定性 renderer 和全量确定性契约检查；对高风险指标/粒度做分层人工或模型辅助抽样，不为低风险重复样本逐条制造昂贵人工流程。
 
-### 每个阶段的强制顺序
+## 9. 变更停止条件
 
-1. **先讲清楚**：在运行命令或修改训练代码前，先说明本阶段假设、要解决的问题、输入文件、输出文件、关键函数、核心参数、资源预算、质量门和不做项。
-2. **先读后跑**：先带用户按文件和函数阅读当前实现；必要时用一个最小、只读、低成本示例验证理解，不直接启动长时间 GPU 任务。
-3. **每次只推进一个学习单元**：完成一个单元后停下来，让用户用自己的话复述。需要纠正时先指出概念、代码和结论之间的差异，再继续下一单元。
-4. **用户确认后才执行**：没有用户明确确认，不开始下一阶段的训练、扩充数据、完整评测、运行时接入或其他长时间/高资源任务。
-5. **实验必须可反驳**：用户必须能回答假设、matching Base、唯一变量、数据隔离、评测指标和停止条件；loss 下降、训练完成或输出更短不能直接写成模型质量提升。
-6. **过程同步**：每个学习单元在本地文档记录“已学内容、待回答问题、代码入口和验证结果”；形成项目决策后再按既有流程同步飞书和 GitHub。
-
-### 后训练教学材料约定
-
-- `docs/post-training/README.md` 是后训练文档唯一规范入口，按 learning/data/experiments/archive 分类；根目录旧路径只作兼容跳转，不继续承载新内容；
-- `docs/post-training/learning/walkthrough-v1.md` 是从环境、数据、prompt、tokenizer、LoRA/QLoRA、SFT、重载到评测的逐步审查主手册；
-- `docs/post-training/learning/review-2026-08-28.md` 记录每轮已讨论的问答、代码入口、已纠正概念与下一学习单元；
-- `docs/post-training/learning/fundamentals.md` 只讲原理和面试表达，`docs/post-training/archive/learning-notes-v1.md` 只作历史参考；
-- `docs/post-training/experiments/log.md` 只记录已完成实验和证据，不把计划写成结果；
-- 后训练脚本的规范实现位置是 `scripts/post_training/{data,training,inference,evaluation,launchers}/`；`scripts/` 下同名文件仅保留为兼容入口，新增代码和文档使用规范路径。
-- 每次新实验都必须新增或更新：假设、matching Base、唯一变量、数据/模型 hash、质量门、失败停止条件和面试表达。
-
-### Olist 领域 SFT 数据边界
-
-- Olist 领域 SQL SFT 的接口合同仍是 `docs/post-training/data/olist-domain-sft-data-contract-v1.md`；当前指标快照以 `docs/metric-contracts/olist-metrics-v2.md` 和 `olist-catalog-v2` / `0.2-frozen` 为准。训练输入必须是当前 `olist-candidate-sql-v1` 的真实运行时 Prompt，目标仅为 canonical PostgreSQL SQL 加 EOS；不得退化为 CSpider 的 SQLite Schema-only 模板。
-- 十个 Olist 业务指标都是业务 ID 与结果 alias，不是物理字段。领域 Gold 必须从 Catalog 的真实表/列、粒度、默认过滤和 Join 路径确定性构造，并通过 Policy、reader role、ResultContract 与人工语义审查。
-- 领域数据必须按 `family_id` / `sql_program_id` 整组切分；日期、阈值、措辞、别名或格式的表面改写仍属同族。`post_training_holdout_v1.yaml` 的 60 条 protected case（包括当前迁移评测边界）严禁被读取为构造输入、训练、验证、in-domain test、few-shot 或合成种子。
-- 用户要求后续每轮只处理一个具体事项：先完成覆盖矩阵，再设计 renderer，再审计 split，之后才做长度审计、小批审阅、正式物化、训练或评测。不得在任一项中顺带启动下一项。
-
-### 后训练代码审阅门
-
-- 讲解概念、阅读 Markdown 或看到测试通过，均不等于用户已经理解或审阅了实现；在进入新的数据构造、训练、完整评测、运行时接入或后训练算法前，必须先共同阅读该阶段的规范代码、配套测试和输入/输出契约。
-- 规范审阅路线记录在 `docs/post-training/learning/code-review-guide-v1.md`。每次只读其中一个单元：用户先在 IDE 打开主文件与测试，说明输入、输出、不变量、失败保护和仍不能保证的结论；随后才讨论代码审查发现或低成本验证。
-- 代码审查结论必须以文件/函数/行号和相应测试为证据，区分“已验证行为”“测试空白”“待确认设计”；禁止只根据文档叙述或 loss/单次运行给出质量结论。
-- 审阅期间优先记录重构候选，不为目录美观移动生产模块、上游 Vanna、兼容入口或测试。只有接口、依赖和回归范围已共同审查且用户确认时，才拆分/迁移代码。
-- 每个审阅单元在本地学习记录中补充已读文件、用户复述、发现、测试证据和下一单元；形成项目决策后仍按飞书、GitHub 同步闭环执行。
-
-### 当前暂停点
-
-2026-09-04 当前暂停扩充通用 Spider 数据、启动新训练和 Olist 运行时接入。已共同审查产品/离线边界、数据隔离、tokenizer/labels、forward smoke、SFT/梯度累积、LoRA/QLoRA、validation/test 边界，并冻结 Olist/PostgreSQL 的十指标 Catalog、coverage matrix、QuerySpec/deterministic PostgreSQL Gold renderer 和静态 seed。受限审阅流程已将当前 QuerySpec 可表达的 protected 数据查询映射为 17 个外部 family ID，并导出不可逆 summary/evidence；6 条非碰撞小批 seed 随后物化，全部通过 `SqlPolicy -> daa_analytics_reader -> ResultValidator` 与 DeepSeek-V4-Flash advisory-only 结构化语义审阅。DeepSeek 是模型辅助审阅而非人类签字；扩展语料前仍须抽样人工核对指标与粒度。该闭环没有创建 question/Prompt/训练 JSONL、token 审计、GPU 训练或评测。下一项只能为这 6 条已准入结构记录构造并审阅真实运行时 QueryPlan/`olist-candidate-sql-v1` Prompt 及受控中文 query 变体；不得扩数、启动正式 split/token 审计或训练。Spider 3,600 条 v2 和 12 条 Olist 迁移结果只作历史证据，不自动触发实验。
-
-2026-09-04 补充：物化器现将 `--protected-evidence-json` 作为必填参数，验证 summary/evidence 的 hash、family 数、协议和 WorkspacePin；family identity 也忽略多指标输出顺序，避免同一业务程序仅交换列顺序绕过 protected collision。新增 `scripts/post_training/evaluation/admit_olist_gold_batch.py`，最多处理 6 条外部 Gold 行，并在现有 Policy、reader role 和 ResultValidator 后调用 DeepSeek 作不可执行、失败即 `needs_human_review` 的顾问审阅。实际小批为 6 admitted / 0 rejected / 0 needs-human-review；原始 SQL、结果摘要、provider 文本和 protected family 原文均在仓库外。此结果只允许进入下一项 Prompt/query 构造审阅，不能声称正式训练集或模型质量已经完成。
-
-## 9. 最近一次同步记录
-
-### 2026-09-02：CSpider 两 epoch 训练与成对评测合同冻结
-
-- 目标：在启动长训练前，冻结可复核的两 epoch bf16 LoRA 与 matching Base/Adapter 生成评测边界；本记录不表示训练或质量评测已经开始。
-- 冻结训练：CSpider `official-splits-length1536-v1` 的 train/validation 为 `8,574/1,034`；final test `2,147` 不被读取。`batch=4`、`accumulation=1`、2 epoch、预期 `4,288` optimizer steps、`adamw_torch`、`lr=1e-4`、`weight_decay=0.01`、bf16 LoRA `r=16/alpha=32/dropout=0.05`；每 `536` step 验证/保存。
-- 匹配评测：Base 与 Adapter 只以“是否加载 adapter”为变量，使用相同 validation schema/question、基座 revision、bf16、tokenizer/prompt、greedy decode、seed 和 token 上限。生成阶段禁止读取 gold SQL、数据库行、final test 和业务运行时；两侧输出冻结后才允许 readonly SQLite/denotation、状态迁移和有限 changed-case 审查。
-- 资源/停止条件：启动器默认 logical CUDA `1` -> physical GPU `3`，强制 UUID `GPU-10863af0-8588-7625-5609-640ba794f64b`；设备映射、数据/长度合同、有限 loss、OOM 和 adapter reload 任一失败即停止。YAML 解析、训练 CLI（启动器环境）、shell syntax 与 13 项数据/训练回归通过。
-- 当前状态：用户已批准并在 `daa-cspider-bf16-lora-full2epoch-v1` 启动训练；启动后已观察到真实 step `42/4,288`、约 16.3 GiB 显存与 83% GPU 利用率，未见 UUID、合同或 OOM 失败。运行中不改变超参、不读取 test、不启动评测。
-- 当前空白：现有自由生成器是 Spider 专用，CSpider 成对生成/评测入口尚需独立适配和回归，不能把历史 Spider 的结果冒充为 CSpider。训练完成后先核验 artifact，再将 CSpider 评测入口作为下一件独立任务。
-
-### 2026-09-02：CSpider 两 epoch 训练完成与 fresh reload
-
-- 已验证：训练正常退出（`global_step=4,288`、`epoch=2.0`、`exit_code=0`），完成 8 次独立 full validation，最终 adapter、checkpoint `3752/4288`、训练 evidence 与日志均在仓库外保存。最终 adapter 以同一 bf16 基座在新进程 fresh reload 成功，PEFT/UUID guard 通过，validation sample 得到 finite loss。
-- 指标事实：最终 aggregate train loss `0.117384`、final validation loss `0.318318`，peak allocated/reserved 约 `15.35/23.16 GiB`，无 OOM；最低 validation loss 为 step `1,072` 的 `0.278697`，final 高 `14.22%`。loss 只能反映当前 SFT 目标和 validation 拟合，不能替代 SQL executable/denotation、业务语义、泛化或生产安全结论。
-- 下一项：单独适配、审阅和测试 CSpider matching Base/Adapter 生成/SQLite/生成后 denotation 入口。不得提前使用 final test，也不因为 final loss 非最优而事后替换合同的最终 adapter；是否将中期 checkpoint 纳入预注册对照，应作为另一个明确实验而非事后挑选。
-
-### 2026-09-02：CSpider bf16 LoRA batch-4 冒烟
-
-- 目标：只验证正式长度物化输入在单张 RTX 4090 上的未量化 bf16 LoRA、真实 batch=4、普通 AdamW 工程链路和显存边界；不进行完整训练或 test 评测。
-- 运行：logical CUDA `1` -> physical GPU `3`（UUID guard 通过），CSpider train/validation 为 `8,574/1,034`，`max_steps=1`、`per_device_train_batch_size=4`、`gradient_accumulation_steps=1`、`adamw_torch`、`weight_decay=0.01`、`max_seq_length=1536`。完成一次真实 batch forward/backward、一次 optimizer step、全 validation loss、LoRA-only adapter 保存和独立 PEFT reload。
-- 证据：训练 peak allocated/reserved 为 `11,550,524,416 / 12,480,151,552` bytes（约 `10.76 / 11.62 GiB`），未 OOM；train loss `0.752299`、validation loss `0.996588`、fresh reload loss `0.997075` 均为有限值。外部证据目录为 `qwen25coder15b-cspider-bf16-lora-batch4-smoke-v1-20260902/`，不进入 Git。
-- 边界：单步 loss 或 reload 成功只证明训练工程、显存预算和 artifact 可用，不证明 SQL 可执行、语义正确、泛化、CSpider test 表现或 Olist 业务迁移。test 没有传入训练 runner。
-- 下一步：若用户确认，单独冻结完整两 epoch 的 Base/Adapter matching 评测合同后再训练；不得以本次冒烟直接发布质量结论。
-
-### 2026-09-02：CSpider 正式长度物化与 bf16 batch 配置审阅
-
-- 目标：按已冻结的 `cspider-token-length-v1` 物化正式 train/validation/test；审阅训练入口并确定不量化的 bf16 LoRA 与真实 batch 配置。本轮不启动训练。
-- 实现：新增 `materialize_cspider_sft_splits.py` 与回归测试；仓库外 `official-splits-length1536-v1` 保留 train `8,574`、validation `1,034`、完整 final test `2,147`，82 条 train 超长样本进入不含问题/SQL 的 exclusion manifest。test 最大 996 token，若未来超长则 fail closed，不过滤官方最终评测总体。新增 CSpider bf16 launcher 仅供后续确认后启动。
-- 入口决策：`bf16_lora` 默认加载未量化 bf16 基座，默认 `adamw_torch` + `weight_decay=0.01`；`per_device_train_batch_size=4`、`gradient_accumulation_steps=1`，一次 forward/backward 真正并行四条样本，effective batch 为 4。QLoRA 与 8-bit optimizer 仅保留历史兼容模式，不与正式结果混比。
-- 加固：Trainer 在加载模型前校验 materialized length contract、外部 exclusion manifest 的 hash/计数/脱敏状态和 train/validation 最大长度；训练 evidence 记录实际 batch、累积步数、effective batch、optimizer 与 weight decay。
-- 验证：物化器实际输出数量和 hash 已核对；专项数据、SFT Dataset/collator、split audit、长度物化共 `16 passed`，ruff、py_compile、bash -n 和 diff check 通过。未加载模型权重、使用 GPU、训练或读取 test 正文。
-- 下一步：用户确认后只做一次 batch-4 bf16 forward/backward smoke，先测显存与 OOM 边界，再决定是否完整两 epoch；不得把配置审阅结果写成训练效果。
-
-### 2026-09-02：CSpider token 长度审计与训练长度合同
-
-- 目标：只审计 CSpider 官方 `train`/`validation` 的实际 SFT token 长度，并冻结不可静默截断的训练长度合同；不读取 final test、不加载权重、不用 GPU、不训练、不评测或物化过滤数据。
-- 实现：新增 `audit_cspider_sft_token_lengths.py`，精确复用 `split_prompt_and_target()` 与 Dataset 的 `prompt + SQL + EOS`、`add_special_tokens=false` 布局，使用本地冻结 tokenizer（指纹只覆盖 tokenizer 资产，不读取模型权重），写出仅含聚合统计和 hash 的外部报告。新增 `cspider-token-length-v1`：`max_seq_length=1536`、padding 排除、超长 fail closed；未来物化器必须独立记录源/tokenizer hash、排除计数与 stable ID，并保持官方角色和 test 隔离。
-- 验证：真实 train/validation 审计完成，1,536 下保留 train `8,574/8,656`（99.05%）与全部 validation `1,034/1,034`；`2048`/`3072` 不增加可入选行。专项 audit、Trainer split-audit 与 CSpider 构造测试共 `12 passed`，ruff、py_compile、diff check 通过。
-- 边界与下一步：82 条 train 超长记录仍留在未改写的官方源中，尚未生成派生训练输入。只有用户明确确认后，才能单独实现物化器与 exclusion manifest；test 继续不得读取或用于长度决策。
-
-### 2026-09-02：CSpider split-audit 契约适配
-
-- 目标：只让 Trainer 在加载 tokenizer/模型前可信地接受 CSpider 的官方 train/dev/test audit；不改变 dataset、collator、模型加载、优化器、训练参数、GPU 分配或运行时链路。
-- 实现：`validate_split_audit()` 改为显式协议分派。历史 Spider candidate audit 继续要求 `spider_db_id` 与 `v2_holdout_used=false`；CSpider 只接受 `official_cspider_train_dev_test`，并校验 `cspider_db_id`、官方角色、raw data 在 Git 外、三组数据库无交集、test 双重禁训标记、`final_evaluation_only` 物理路径、当前 train/validation 输出路径、SHA-256/行数和 SQLite explain 通过数。未知策略或证据缺失均 fail closed。
-- 验证：专用 `data-analysis-agent-qlora` 环境的 SFT 契约专项 `7 passed`，覆盖历史 Spider 兼容、CSpider 成功、test 禁训标记缺失、train/test schema overlap 和将 test 伪作 train 输出的拒绝；真实 CSpider `train.jsonl`/`validation.jsonl` 与 audit 成功验证，test 未加载。轻量环境静态 ruff、py_compile 和 diff check 通过。
-- 边界与下一步：audit 只能证明输入切分与来源证据，不能证明 token 长度、训练稳定性、SQL 业务语义或迁移效果。下一步经用户确认后，仅做 CSpider train/validation token 长度分布审计和训练长度合同，不读取或统计 test。
-
-### 2026-09-01：CSpider 官方三切分 SFT 输入构造
-
-- 目标：仅从已核验的 CSpider full release 构造中文 Text-to-SQL 的官方 train/dev/test JSONL 与 split audit；不加载 tokenizer/模型、不启动 GPU、不训练、不评测、不接入生产运行时。
-- 实现：新增 `scripts/post_training/data/build_cspider_sft_splits.py` 与 `tests/test_build_cspider_sft_splits.py`。构造器复用版本化 Spider schema/prompt 格式，核验 acquisition manifest、源文件和解压树 hash、官方角色/数量、字段/表元数据及 schema 无交集；官方 dev 映射为 validation，test 物理写入 `final_evaluation_only/`，并以真实 `cspider_db_id` 写入 audit。
-- 数据质量决策：真实 SQLite 逐条只读 `EXPLAIN` 发现官方 train 有 3/8,659 条 gold 与随 release SQLite/schema 不一致。它们以错误证据隔离到外部 `source_quality_exclusions/train.jsonl`，不进入参数更新；其余输出为 train 8,656、validation 1,034、test 2,147。不得修补、猜测或把 test 转为训练样本。
-- 验证：专项 `3 passed`；ruff、py_compile、`git diff --check` 通过；实际 JSONL 行数与 audit SHA-256 一致，train/validation/test schema 交集为空。测试覆盖角色映射、中文 prompt、test 隔离、源树漂移 fail closed 与无效 SQL 隔离。
-- 边界与下一步：`EXPLAIN` 只证明 SQLite 解析/对象解析，不证明 SQL 业务语义或模型质量。现有 Trainer 的 audit 校验仍硬编码 Spider 的 `spider_db_id` 和两切分假设；下一项必须单独审阅并改造该契约，保持 `final_evaluation_only/test.jsonl` 永不作为训练输入。
-
-### 2026-09-01：CSpider 官方资产获取与三切分预检
-
-- 目标：仅安全解压并核验 CSpider full release，为后续中文 Text-to-SQL 数据构建建立可追溯输入；不构造 SFT 样本、不加载 tokenizer/模型、不启动 GPU。
-- 实现：新增 `scripts/post_training/data/acquire_cspider.py`。脚本拒绝路径穿越、反斜杠路径、符号链接、重复成员、缺失官方文件、缺失 `db_id/question/query`、跨 train/dev/test schema 重叠、表元数据缺失和 SQLite 只读打开失败；只在完整验证通过后原子写入外部 `extracted/` 及其 acquisition manifest。新增 `tests/test_acquire_cspider.py` 覆盖成功、路径穿越拒绝与 schema 重叠拒绝。
-- 验证：真实 full release 预检为 train 8,659 条/146 个 schema、dev 1,034 条/20 个 schema、test 2,147 条/40 个 schema；166 个 train/dev SQLite 和 40 个 test SQLite 均以只读模式打开，三切分 schema 无交集。专项测试 `3 passed`，ruff、py_compile、`git diff --check` 通过。
-- 边界：test JSON 和 test gold SQL 仅保留为最终评测资产，禁止作为训练样本、few-shot、prompt 上下文或数据合成输入。尚未生成 JSONL、token 统计、训练配置、LoRA adapter 或任何质量指标。
-- 下一步：在用户确认后，仅构建 train/dev/test 的 CSpider SFT 输入 JSONL 与 split audit，不启动训练。
-
-### 2026-08-30：后训练数据边界与 SFT 入口加固
-
-- 目标：修复已审阅的两个会影响后续训练可信度的边界问题，不扩充数据、不调整模型或超参数。
-- 实现：`build_spider_sft_candidates.py` 的 overfetch 预期数量改为只统计通过字段/schema 校验、实际可进入分组的候选；`run_post_training_sft_smoke.py` 新增 `validate_split_audit()`，在模型加载前核对 train/validation 当前文件的行数和 SHA-256、`spider_db_id` 分组策略、`status=pass` 与 holdout 标记，任何审计缺失或文件替换都 fail closed。
-- 验证：`data-analysis-agent` 环境的数据格式/候选构建/切分专项 **7 passed**；`data-analysis-agent-qlora` 环境的 Dataset/label/collator/审计专项 **3 passed**；ruff、compileall、`git diff --check` 通过。验证覆盖了“坏行 + overfetch 不误报”和“split 文件篡改被拒绝”两个回归路径。
-- 边界：`assert_train_only()` 仍是路径防呆而非完整 provenance 证明；`read_only_explain()` 仍只证明 SQLite 解析/名称解析，不证明业务语义；`question_redacted` 命名和 Prompt 版本/调用方一致性仍是后续审阅项。本轮未启动 GPU、未构造数据、未训练、未评测、未改变生产运行时。
-- 提交：`329ccb8 fix(post-training): verify split artifacts before sft`，已推送 `origin/main`。用户此前在三个数据构建文件中的中文注释改动保持工作区未提交。
-
-### 2026-08-30：AI 协作与工程主导权规则
-
-- 决策：AI 是实现、测试、调研和审查的加速器；用户保留问题定义、非目标、架构取舍、数据/安全边界和验收结论的主导权。每个实质任务先明确“目标、非目标、输入、输出/接口影响、不变量、验收证据”，避免 AI 以默认假设扩大范围。
-- 审阅方法：不要求逐行覆盖全仓库；先建立模块地图，再阅读契约和失败保护，只在权限、数据隔离、SQL 执行、训练/评测、密钥、破坏性操作、异常指标或待修改关键函数处升级为逐行审阅。用户应能讲清关键链路的目标、输入、关键决策、输出、风险和验证证据。
-- 交付要求：AI 的实质变更必须附带影响范围、不变量、测试覆盖/空白、失败模式和回滚/停止条件。单元、集成、端到端、离线评测和人工业务核验分别提供不同证据；不得将 loss、单次成功、测试通过或 AI 总结直接写成业务语义正确、泛化有效或可上线。
-- 范围：本轮只更新协作约束与项目台账，保留用户已存在的三个数据构建源码改动，不启动 GPU、不生成数据、不运行训练或评测、不改变生产运行时。
-
-### 2026-08-30：项目目录地图与后训练代码审阅门
-
-- 目标：让后训练学习从“理解原理和实验结论”转为“用户亲自审阅真实代码与测试”，并明确上游 Vanna、项目运行时、离线研究脚本和本地研究产物的目录边界。
-- 实现：新增 `docs/architecture/repository-map.md` 和 `docs/post-training/learning/code-review-guide-v1.md`，按 prompt/数据、token/训练、生成、SQLite/Test Suite/denotation、Olist 业务迁移和启动器划分审阅单元，列出规范文件、关键函数、配套测试、审阅问题和结束标准。
-- 决策：在任一后训练新阶段前，用户必须先阅读相关实现和测试、复述输入输出与失败保护；讲解或测试通过不能代替代码审阅。审阅期间只记录重构候选，不移动生产模块、上游 Vanna、兼容入口或测试目录。`github-research-output/` 是 Git 忽略的大型调研产物，后续经确认后可迁出仓库根目录；本轮不移动、不删除。
-- 验证：本轮只做目录/依赖审计和文档更新；未读取密钥、未启动 GPU、未构造领域数据、未改变 Vanna/SiliconFlow/PostgreSQL 生产运行时。
-
-### 2026-08-28：后训练学习问答沉淀与脚本/文档分层
-
-- 目标：停止“只运行实验、不理解过程”的协作方式，将本轮已经共同审查的 Text-to-SQL SFT、LoRA 和评测知识沉淀为可持续学习材料，同时清理后训练代码与文档的平铺目录。
-- 实现：新增 `docs/post-training/` 分类入口和 `learning/review-2026-08-28.md`，覆盖候选 SQL 边界、gold SQL 泄漏、schema-disjoint、SQLite EXPLAIN、labels/EOS、forward smoke、梯度累积、AdamW、validation/test、LoRA A/B、rank、bf16 LoRA/QLoRA 与 PEFT 生命周期。后训练真实实现移动至 `scripts/post_training/` 的 data/training/inference/evaluation/launchers 分类目录，根目录同名脚本保留兼容入口。
-- 学习：已补充 Olist/PostgreSQL 领域数据合同，明确 60 条 v2 holdout 及其派生表达永久隔离；领域 SFT 输入需要 QuestionRouter、Catalog slice、QueryPlan 和结果列合同，不能只用问题到 SQL；候选 SQL Adapter 只训练可回答数据库路由。规模先做数据合同，之后最多从约 300--500 条语义独立 pilot 开始，不将“凑到几千条”当作前置条件。
-- 决策：生产 `src/data_analysis_agent/` 运行时模块不做为了目录美观的全量迁移，以免引入大范围导入风险；原始数据、模型、Adapter、checkpoint 和日志仍不进入 Git。新训练、数据构造、完整评测和运行时接入仍暂停，下一步先审查领域样本覆盖矩阵。
-- 验证：后训练运行时回归 `54 passed, 1 skipped`、QLoRA dataset/label 回归 `2 passed`、ruff、兼容 CLI、shell syntax、Markdown 链接与 diff check 已通过；本单元只阅读现有可信链路，没有启动 GPU 或修改生产运行时。
-
-### 2026-08-26：Olist PostgreSQL 业务迁移候选 SQL 质量门
-
-- 目标：在不改变 Vanna/SiliconFlow 默认模型、不开启 SQL repair 的前提下，验证已通过 Spider SQLite 离线质量门的 bf16 LoRA Adapter 是否能迁移到当前中文 Olist PostgreSQL 工作区。
-- 实现：新增 `olist-candidate-sql-v1` SQL-only prompt、12 条永久 holdout manifest、Base/Adapter runner、脱敏 paired analyzer 和顺序 `screen` launcher。每条候选仍复用 QuestionRouter、Catalog、QueryPlan、ResultContract、SqlPolicy、reader role 和 ResultValidator；候选 SQL、问题、数据库行、模型和 Adapter 一律留在仓库外。
-- 证据：最终 v2 对照的 Base/Adapter 均为 12/12 generation、SqlPolicy `6 -> 6`、PostgreSQL executed `4 -> 2`、ResultContract valid `2 -> 0`；没有 `non_valid -> valid`，有 2 条 `valid -> non-valid`。Base 有 5/12 触达 256 token 生成上限；Adapter 更短但未得到有效业务合同结果。
-- 决策：Spider 离线候选质量门仍为通过，但 Olist 业务迁移子门为未通过；不得把 Adapter 接入生产默认模型，也不因本结果盲目扩大通用 Spider。下一实验先构建与 v2 60 条 holdout 及其改写严格隔离的领域对齐 Olist/PostgreSQL train/validation 数据，再按同一业务合同复测。
-- 健壮性：截断 SQL 的 `sqlglot.TokenError` 现与 `ParseError` 同样归一为可审计 `PolicyViolation`；`WorkspaceProfile` 与 `MetricDefinition` 的不可变映射默认值改为 `default_factory`，使 QLoRA Python 3.11 环境可加载项目可信链路。专项 68 passed、项目 PostgreSQL runner 5 passed、ruff/compileall/shell/CLI smoke/diff check 通过。
-
-### 2026-08-26：Spider SFT v2 全量质量诊断闭环
-
-- 目标：完成 3k 级 bf16 LoRA Adapter 与 matching bf16 Base 的完整 1,034-case Spider dev 对照，并避免把离线生成质量误写为生产能力或官方榜单。
-- 证据：Base/Adapter 均完成生成、只读 SQLite diagnostics、固定 commit Test Suite bridge 和生成冻结后全量 bounded denotation audit。SQLite executed 为 `950 -> 961`；fixed Test Suite internal all 为 `0.507 -> 0.667`，四个难度桶均提升；denotation exact-or-bag match 为 `570 -> 708`，净增 138（213 non-match -> match、75 match -> non-match）。原始问题、gold/candidate SQL、数据库行、模型、预测与日志均留在仓库外。
-- 诊断：Adapter 的 direct SQL-shaped completion `370 -> 1,034`、generation-cap hit `264 -> 1`，但仍有多余 join、表列混淆、`DISTINCT`/分组/集合重复度、投影顺序和函数形状回退。SQLite snapshot denotation 不足以证明所有可能数据实例的等价性，固定 Test Suite 仅是当前固定资产组合的内部输出。
-- 修复与验证：denotation audit 对 Spider SQLite 中非 UTF-8 TEXT 以原始 bytes 比较，避免只读结果比较中断且不改变 SQL、数据库或报告脱敏边界；新增对应回归测试。完整结论见 `docs/post-training-spider-sft-v2-full-analysis.md` 与冻结 manifest。
-- 决策：`offline_candidate_generator_quality_gate_passed_runtime_integration_deferred`。下一步只设计可开关、可回退的 runtime candidate generator，并在独立业务 workspace 评测；不得移除 `QuestionRouter`、Catalog/QueryPlan、AST Policy、PostgreSQL reader role、Result/Chart Contract，不进入 DPO/GRPO。
-
-### 2026-08-25：后训练材料重组与 26-step LoRA/QLoRA 覆盖度实验
-
-- 目标：将概念学习、实时项目状态和实验结论拆开，验证首轮 8-step 负向 ablation 是否至少受训练覆盖度或 4-bit 基座加载方式影响。
-- 文档：新增 `docs/post-training-index.md` 作为唯一入口，新增独立学习指南和实验台账；历史路线/笔记保留为参考并明确不承担实时状态。项目运行时的 Vanna/PostgreSQL 可信链路与 Spider SQLite 离线研究边界被单独说明。
-- 实现：SFT runner 和 adapter reload validator 都支持 `qlora_4bit` / `bf16_lora`，记录 launcher 声明的物理 GPU、进程内 UUID、量化方式和证据；两个 26-step 任务使用同一 Qwen 1.5B revision、102/26 schema-disjoint split、seed、学习率、有效 batch 与 LoRA 配置，只改冻结基座的 4-bit NF4/bf16 表示。
-- 验证：QLoRA 在 logical `0` / physical `2` 的 RTX 4090 完成 26 step，train/eval loss `0.427482/0.290193`、allocated peak `4,675,977,728` bytes；bf16 LoRA 在 logical `1` / physical `3` 完成，`0.426504/0.309192`、`5,574,457,856` bytes。两个 74 MB adapter 均 fresh PEFT reload 并在 validation sample 得到 finite loss。Python dataset tests **2 passed**、shell syntax、CLI help 和 diff check 通过。
-- 边界：loss/reload 只证明训练工程与资源差异，不构成 SQL 执行、Test Suite 或业务语义质量结论。下一步必须对每种加载精度单独完成同合同的 1,034-case base/adapter 对照、错误迁移与人工语义核验；不进入 DPO/GRPO。
-
-### 2026-08-25：26-step matching Base/Adapter 全量评测已启动
-
-- QLoRA-26 与 bf16 LoRA-26 的完整质量评测已分别在 `daa-qwen15b-qlora26-eval-v1` 与 `daa-qwen15b-bf16lora26-eval-v1` 中启动。前者复用已完成的 matching 4-bit Base，只生成新 adapter；后者在同一 GPU 上按 bf16 Base、bf16 adapter 的顺序运行，避免同一精度对照发生显存竞争。
-- 设备守卫固定为 logic `0` -> physical `2` -> UUID `GPU-129ba5d7-5a0a-745d-5a49-11dc7967bb52`，以及 logic `1` -> physical `3` -> UUID `GPU-10863af0-8588-7625-5609-640ba794f64b`。启动前 bf16 adapter 的 2-case fresh-load smoke 已通过。
-- 每条完成后才依次读取 1,034-case generation evidence、SQLite diagnostics、pinned Test Suite bridge 和安全聚合的 paired report；在此之前不得宣称 non-regression、精度差异或语义提升。
-
-### 2026-08-18：真实 SiliconFlow 人工标签评测
-
-- 目标：将已完成的前端加固、v2 确定性资产收敛为可复核的真实模型小样本，不把 SQL 执行成功伪装成语义正确。
-- 实现：新增 24 条 online v1 清单和通过 Trusted Demo SSE 的运行器；报告按 request ID 回读 Agent Run/SQL 审计，逐条记录路由、澄清、SQL、指标口径、结果合同、权限、回答有据、工具/SQL/修复次数、时延和 token 状态。原始问题、回答、SQL、结果行、cookie、密钥和运行报告均不提交 Git。
-- 结论：24/24 Agent Run；路由 23 pass/1 fail，权限 24 pass，回答有据 17 pass/7 fail。`data_014`/`data_016` 的首个正确 SQL 后续被无关 SQL 破坏，ResultValidator 已安全阻断；`multi_003` 因 Catalog slice 遗漏可用 Join 而在 180 秒后未完成。当前没有 repair lifecycle recovery；provider 未返回 usage 时明确记为 unknown。
-- 后续：先修复币种、已通过合同后的工具停止、多指标 Catalog slice 和支付归因；修复后对已失败 case 做固定回归，再评估多次修复或延迟优化。
-
-### 2026-08-18：通用语义检索与结果合同加固
-
-- 目标：将在线评测暴露的币种误标、多跳 Catalog 缺表、支付维度自行猜口径和合同通过后重复 SQL，收敛为可复用的 Workspace/Catalog/预算机制。
-- 实现：Catalog 支持工作区币种元数据与 `DimensionPolicy`；检索在可见 Join 图上做 BFS 路径闭包，受表、Join、列和 Prompt 预算约束；QuestionRouter 对声明为歧义的维度返回零 SQL 澄清；ResultValidator 成功后标记 `result_contract_satisfied`，预算层拦截后续冗余 `run_sql` 并保留可用图表调用；Prompt 增加币种和保守趋势表述合同。没有加入 Olist 问题文本特判。
-- 验证：相关专项测试 71 passed；`run_text_to_sql_evaluation.py` 60/60 passed；全量 pytest 的失败来自 Vanna 上游可选依赖/缺失 fixture，不计入本项目质量门。
-- 后续：补充真实 runner 对合同状态的集成证据，复跑固定失败样本，随后再评估在线模型延迟、usage 采集和第二数据集适配。
-
-### 2026-08-19：真实 PostgreSQL 合同链路集成测试
-
-- 目标：验证结果合同状态不是仅存在于单元测试或内存对象，而是能沿真实 SQL 工具链和 Agent Run 持久化链路闭环。
-- 实现：新增 `test_result_contract_state_flows_through_real_runner_and_budget_registry`，使用项目专属 PostgreSQL 执行真实有效订单聚合，经 `ResultValidator` 通过后检查 `ToolContext`/`BudgetUsage` 状态；再次提交 `run_sql` 时由 `BudgetedToolRegistry` 抑制，不增加 SQL/tool budget，且查询审计不产生第二条记录。运行记录将合同通过和冗余 SQL 抑制计入既有 `catalog_trace` JSONB，不改数据库表结构。
-- 验证：`RUN_PROJECT_DB=1 DATA_ANALYSIS_POSTGRES_HOST=/tmp pytest tests/test_postgres_runner.py tests/test_postgres_run_recorder.py` 为 **5 passed**；ruff、compileall 和 diff check 通过。
-- 风险/下一步：测试验证的是确定性真实数据库链路，不包含在线模型多轮行为；后续可针对真实 SSE 请求补充一条模型发出重复工具调用的固定 mock 回归。
-
-### 2026-08-19：SSE 模型响应合同回归
-
-- 目标：验证冗余 SQL 在模型响应边界被抑制，而不只依赖工具注册表的最后防线。
-- 实现：用固定 `LlmService` 驱动真实 `Agent`、`BudgetedChatHandler`、PostgreSQL ConversationStore/RunRecorder 和生产 SQL 工具链；同一请求中第一轮模型调用受控 SQL，第二轮模型再次返回 `run_sql`。`BudgetSafetyMiddleware` 移除第二轮工具调用，Agent 正常完成。
-- 验证：真实数据库专项由 5 项扩展为 **6 passed**；合并预算、Catalog、路由、SQL 工具、PostgreSQL 与运行记录专项为 **75 passed**，v2 golden **60/60 passed**。断言 Agent Run 为 1 次 SQL/工具调用、`completed`、合同/抑制证据完整，且仅有 1 条 allowed 审计。
-- 后续：接着处理在线模型的 token usage 可观测性和长响应超时边界；仍不据固定模型回归声称在线准确率或延迟分位数。
-
-### 2026-08-19：LLM 可观测性与 6 条定向 SiliconFlow 复测
-
-- 实现：`ObservedLlmService` 统一 asyncio/OpenAI/httpx timeout，记录 bounded `llm_observations`；Vanna OpenAI-compatible 同步调用移到工作线程，避免阻塞事件循环。新增 targeted manifest 和 `--allow-small-sample`，默认批量评测门槛仍为 20--30 条。
-- 验证：LLM/线程/评测器单测 **8 passed**；项目 PostgreSQL/run recorder **10 passed**；真实 SSE 定向复测 **6/6 Agent Run、0 客户端错误**，路由 6/6、SQL 可执行 5/5、结果合同 5/5、权限 6/6，5 条查库请求各 1 条 SQL，usage 均 reported，总客户端耗时 499,174 ms。人工语义/最终 grounded 仍有 3 条 pending，不发布在线准确率或 P50/P95。
-- 边界：在线模型仍可能有较高延迟；人工标签尚未覆盖全部定向结果；报告只保存在被忽略的 `evals/reports/`，不含问题、回答、SQL、数据行或密钥。下一步是将定向失败转成固定回归并优化模型轮次/缓存，而不是扩大 SQL 修复次数。
-
-### 2026-08-19：可信结果确定性收口
-
-- 实现：未显式要求图表时，已通过 `ResultValidator` 的 SQL 结果由服务端依据结果合同收口，不再调用模型生成最终摘要；收口不产生趋势、币种或因果判断。图表请求显式禁用收口，保留 `visualize_data`。运行台账和在线脱敏评测均记录 `deterministic_result_finalized`。
-- 验证：真实 `data_005` SSE 回归为 `deterministic_result_finalized=true`、1 条实际 PostgreSQL 执行、2 次模型调用、68,516 ms；首次模型 SQL 被 AST Policy 以敏感 `order_id` 拒绝，第二次有效，因此两轮不是冗余总结。单测 25 passed（1 skipped）、PostgreSQL 10 passed、v2 60/60。
-- 边界：这是一个定向单次时延观测，不是 P50/P95；服务端收口优先保证“表格可核对、结论不越界”，更丰富的业务解释应通过后续明确追问和可信结果摘要完成。
-
-### 2026-08-06：证据路由、QueryPlan 与可信结果记忆
-
-- 目标：按 Text-to-SQL 改造顺序拆开“是否命中指标”和“是否允许查库”，补齐多指标查询的服务器计划，并让结果追问只依赖可信结果证据。
-- 实现：`QuestionRouter` 新增 `intent`、`requires_database`、`evidence_mode`、`confidence` 和 `reason_code`，覆盖帮助、指标定义、通用业务/知识、数据查询、数据分析、混合请求、结果追问和澄清；通用回答使用 `_send_llm_request` 的 `tools=None` 边界，帮助/指标定义走确定性回答。新增 `QueryPlan`，把多指标标量概览约束为每指标独立聚合后 `CROSS JOIN`，把分组维度和时间列加入 `ResultContract` 与 ToolContext。`ResultValidator` 成功后生成有界摘要，`BudgetUsage`、Agent Run trace 和 `WorkingMemory.previous_result_summary` 均可记录；没有可信摘要的结果追问会先澄清。
-- 验证：QuestionRouter、QueryPlan、WorkingMemory、ResultValidator、预算、TrustedRunSqlTool、SQL Policy 和修复专项 **88 passed**；`ruff check`、`compileall`、`git diff --check` 通过。全量 Vanna 上游可选驱动测试仍受环境依赖影响，未作为本项目质量门；未运行在线 SiliconFlow 批量语义评测。
-- 设计决策：指标命中不等于查库；通用回答不得看到 SQL/图表工具；QueryPlan 当前是服务器拥有的 grounding/result contract 和 Prompt 约束，尚不是完整 SQL AST 形状证明；结果摘要只来自通过 ResultValidator 的 DataFrame，不接受助手文本或客户端 metadata。
-- 风险/限制：仍需真实模型路由/多指标批量评测，QueryPlan 的 CTE/Join 形状还要在后续 AST 检查中增强；结果追问目前只解释有限样例摘要，不是任意历史结果回放；Olist 仍是当前 adapter，演示 cookie 不是生产认证。
-- 下一步：建立版本化 v2 路由/语义 golden，先做固定问题集上的人工核验，再决定是否加入低置信度结构化分类器和更强的 QueryPlan 执行校验。
-
-### 2026-08-06：通用工作区与一次 SQL 修复生命周期
-
-- 目标：完成本轮四项优化，明确 Olist 适配层与通用分析 Agent 核心的边界，并把一次 SQL 修复从独立契约接入 Vanna 工具生命周期。
-- 实现：新增 `WorkspaceProfile`；`SqlPolicy`、`CatalogLoader`、`SecurePostgresRunner` 和预算处理器读取工作区配置。新增 `TrustedRunSqlTool`，失败 SQL 只经过一次脱敏修复；修复候选重新通过 AST Policy，由 PostgreSQL reader role 重执行，成功后再过 `ResultValidator`，二次失败直接可信拒答。`query_audits`、`agent_runs` 和预算记录保存 `repair_evidence`。
-- 测试：专项集合 `84 passed`；项目 PostgreSQL `test_postgres_run_recorder.py` 与 `test_postgres_runner.py` 为 `4 passed`；固定 SSE 的浏览器多轮澄清回归 `1 passed, 6 deselected`；ruff、compileall、`git diff --check` 通过。未将这些确定性结果写成在线 LLM 语义准确率。
-- 边界：Olist 仍是当前 adapter/展示案例，尚无第二真实数据集；演示 cookie 不是生产认证，未实现组织级 RLS；尚未做 SiliconFlow 批量修复成功率和 token/P95 评测。
-- 下一步：建立版本化 v2 评测集，先用固定 Olist golden 和人工标签核验真实模型，再决定是否引入更复杂的 schema retrieval、judge 或多候选策略。
-
-### 2026-08-06：嵌入式可靠性与延迟定位
-
-- 目标：处理 `/embedded-demo` 的窗口恢复布局、非数据库问题误走 SQL、历史消息 Markdown 原样显示和响应过慢四项反馈。
-- 实现：SQL Policy 增加多 CTE 输出列/外层别名识别，并修复 scalar subquery 关联键的敏感列误判；`QuestionRouter` 对纯指标定义/统计口径问题直接从 Catalog 返回 `catalog_answered` Markdown；历史 assistant 消息与流式文本共用转义后渲染的 Markdown renderer；宿主页通过双 `requestAnimationFrame` 与 `ResizeObserver` 同步组件高度。预算台账增加 `route_catalog`、`llm_request`、`sql_policy`、`postgres_sql` 阶段耗时证据。
-- 验证：Web Component `npm run build` 通过；相关后端专项 **63 passed, 1 skipped**；Playwright `tests/e2e/test_trusted_embedded_window.py` **7 passed**；`ruff check`、`compileall` 和 `git diff --check` 通过。真实多指标请求已完成，代表性观测约 77.7 秒，其中两轮 SiliconFlow 模型调用约 77.2 秒，PostgreSQL 约 0.39 秒。
-- 边界：该延迟是单次观测，不是 P95；仍未完成模型批量语义准确率、模型超时/流式优化、真实认证、组织级 RLS 和第二真实数据集。
-- 下一步：先建立带人工标签和 golden SQL 的 v2 评测集，再基于阶段耗时做模型调用超时、流式状态和 Prompt/上下文压缩优化。
-
-### 2026-08-03：Text-to-SQL 第一阶段运行时合同
-
-- 目标：修正 Catalog/WorkingMemory 派生的结果语义合同没有进入实际 Vanna `ToolContext` 的硬缺口。
-- 实现：新增服务器拥有的 `ResultContract`，接入指标/时间别名/请求范围/Join 与版本证据；补充
-  `ResultValidator` 和 PostgreSQL Runner 的别名校验；统一 Prompt、Catalog trace、Agent Run 与 SQL
-  审计中的版本字段；预算 trace 改为合并写入。
-- 验证：Text-to-SQL 专项 `68 passed`；项目 PostgreSQL 集成 `9 passed, 1 warning`；编译检查和
-  `git diff --check` 通过。未将在线模型准确率、token 成本或完整自动修复生命周期写成已完成能力。
-- GitHub：`cc8b688 feat(text-to-sql): wire semantic result contract` 已推送到 `main`；后续同步文档提交
-  会继续记录在飞书项目文档。
-
-### 2026-08-19：敏感关联键投影误拒绝修复
-
-- 问题：真实 `data_005` 首轮 SQL 在内部 CTE 中按 `order_id` 聚合并用于 Join，最终只返回
-  `time/gmv`；旧 AST Policy 将 CTE 内部关联键误当作对外投影，造成一次不必要的模型重试。
-- 实现：SQL Policy 区分内部 CTE/子查询阶段与最外层结果阶段。CTE 内可保留敏感键以保持事实
-  粒度；最外层仍拒绝敏感结果列、结果别名、`GROUP BY` 和 `ORDER BY`，并继续执行 Catalog、
-  reader role 和 ResultValidator 边界。QueryPlan/Catalog Prompt 同步明确顶层结果列白名单和
-  内部键使用规则，不绑定 Olist 字段名。
-- 验证：专项 **50 passed**，v2 golden **60/60**，真实 PostgreSQL 链路 **11 passed**；真实
-  SiliconFlow 回归由 `2 SQL/2 LLM rounds/1 rejected audit` 收敛为 `1 SQL/1 LLM round/0
-  rejected audit`，结果合同通过、1 条 allowed 审计、`deterministic_result_finalized=true`。
-
-### 2026-08-19：真实业务解释与图表质量评测
-
-- 目标：用真实 SiliconFlow 业务问题验证指标语义、结果解释和显式图表请求，不把 SQL 执行成功当作业务正确。
-- 实现：新增 20 条脱敏 quality manifest（其中 5 条携带有界图表意图）、人工标签和运行器结构性图表证据字段；报告不保留问题、回答、SQL、行或图表 payload。
-- 验证：20/20 Agent Run，权限 20/20；指标语义 11 pass / 2 fail / 7 N/A，回答有据 11 pass / 9 fail；原批次 3/5 发出图表组件、2/5 在 SQL 前超时。Playwright 真实页面确认 SVG、标签、数据标记和无横向溢出，但折线图请求实际渲染为柱状图；独立州图表重放 180 秒超时。评测合同测试 9 passed，嵌入窗口 E2E 9 passed。
-- 风险/下一步：支付方式归因、评价行粒度与图表类型仍由模型提示主导，下一轮必须把三者收敛为服务器 Result/Chart Contract，再评估模型超时、缓存或异步化；不发布总体准确率、图表成功率或 P50/P95。
-
-### 2026-09-04：Olist 静态 Coverage Seed 清单
-
-- 目标：只设计并审阅后续 QuerySpec 物化器的最小结构化输入，不进入实际物化或训练。
-- 实现：提交 `data/fixtures/olist_queryspec_coverage_seeds_v1.jsonl` 的 15 条静态记录、任务卡、设计说明和结构测试。记录只包含 `seed_id`、显式 split、指标/形状/维度/时间/Join program；覆盖十项指标、四种允许形状与三类 split，不含用户问题、Prompt、SQL、结果、原始 Olist 行或 protected 内容。
-- 验证范围：测试仅构造并验证内存中的 QuerySpec、family 唯一性、program 不跨 split 和预期覆盖分布；不调用 renderer/materializer、不写仓库外产物、不访问数据库。
-- 限制与下一步：当前“Join program 不跨 split”规则严格且仅有 11 个 program，15 条清单只能验证结构和隔离边界，不能作为最终训练/评测集或准确率证据。受限 protected summary 导出器已随后实现；在真实 summary 导出并获批准前禁止物化，之后下一项是带 evidence 绑定的小批 Gold 准入。
-
-### 2026-09-04：Olist Protected-Family Summary 受限导出
-
-- 目标：实现不接触 protected 原文的 summary 导出边界，为之后的碰撞检测准备最小、不可逆输入。
-- 实现：新增 `scripts/post_training/data/export_olist_protected_family_summary.py`。它没有 holdout 文件路径，只接受仓库外人工批准的排序去重 `family_id`、当前 WorkspacePin、source-manifest SHA-256 与非敏感 review reference；输出也只能写到仓库外，且只生成 fingerprint summary 与不含 family 原文的 hash evidence。
-- 失败保护：case/question/prompt/SQL/result/seed 等未知字段、空或未排序/重复 family、Workspace 版本漂移、仓库内输入/输出和覆盖既有输出均 fail closed。
-- 验证与限制：专项及 QuerySpec/materializer 回归 `59 passed`，ruff、compileall、diff check 与 CLI help 通过。测试只使用合成 family ID；真实 holdout 未读取、真实 summary 未导出，未调用 materializer/renderer、数据库、tokenizer 或 GPU。后续真实导出和小批 Gold 准入已在独立记录中完成。
-
-### 2026-09-04：Olist 小批 Gold 准入闭环
-
-- 受限输入：受限审阅当前 QuerySpec 可表达的 protected 数据查询 family，导出 17 个 family 的仓库外 fingerprint summary/evidence。帮助、澄清、安全、非 SQL、Top-N 或未冻结归因的 protected case 不强行映射为 Gold SQL family。
-- 物化与执行：选取 6 条与摘要无碰撞的静态 seed，覆盖标量、客户州分组和评价月序列，以及 train/validation/in-domain-test 的结构标签。结构物化为 6/6 accepted、0 collision；随后 6/6 通过 AST Policy、`daa_analytics_reader`、QuerySpec 派生 ResultValidator 合同和 DeepSeek-V4-Flash advisory review。
-- 限制与下一步：这批不含自然语言问题、Prompt 或训练 JSONL，不能作为准确率、泛化或训练成功证据。DeepSeek 的 `pass` 只是模型辅助意见，不替代人工口径签字；原始 SQL、结果和 LLM 审阅文本均留在仓库外。下一项仅构造并审阅这 6 条记录的真实运行时 QueryPlan/Prompt 和受控中文 query 变体。
-
-### 2026-09-04：小批 Olist 运行时 Prompt 物化
-
-- 目标：将 6 条已准入 Gold 记录重新走真实运行时的 QuestionRouter、Semantic Catalog、QueryPlan 和 ResultContract，构造 `olist-candidate-sql-v1` 的输入上下文；本轮不生成训练集、不调用模型或数据库。
-- 实现：新增 `scripts/post_training/data/materialize_olist_runtime_prompts.py`。脚本要求仓库外 admitted 记录和仓库外中文问题变体，严格校验 seed ID、Prompt 版本、Router 可查库状态、指标/维度/时间粒度、结果列集合及 QueryPlan warning；任何不一致均 fail closed。QuerySpec 仅作离线结构基准，模型实际看到的是运行时 Catalog + QueryPlan + 用户问题，输出列顺序由 QuerySpec 规范化。
-- 外部输入/输出：问题变体位于 `/disk2/gengnan/data-analysis-agent-data/evals/olist-small-gold-admission-v1/runtime-question-variants-v1.json`；物化结果位于 `/disk2/gengnan/data-analysis-agent-data/evals/olist-small-gold-admission-v1/runtime-20260904/`，包含 `runtime_candidates.jsonl` 和 `runtime_prompt_manifest.json`，不进入 Git。
-- 结果：6/6 物化，0 rejected；Router、Catalog、QueryPlan、ResultContract 均重建成功；`sql_executed=false`、`model_called=false`、`gpu_used=false`、`protected_holdout_read=false`。多指标检索排序可能与 Gold metric 顺序不同，脚本按集合校验语义一致性，并使用 QuerySpec 的规范结果列顺序。
-- 验证：`ruff check`、`compileall` 通过；`PYTHONPATH=.:src pytest -q tests/test_olist_runtime_prompt_materializer.py` 为 **3 passed**。
-- 边界与下一步：这 6 条只是运行时 Prompt/合同准入样本，不代表模型准确率或训练数据规模；后续应先人工审核这些问题和 Prompt，再扩展同一 family 的少量中文变体，最后才设计正式 train/validation/test 生成。
-
-### 2026-09-04：Olist 运行时中文 Query 变体 v2
-
-- 目标：为 6 条已准入 family 各增加 1 条中文自然语言改写，并验证两条问法保持同一运行时语义；本轮不启动模型、数据库、GPU 或最终评测冻结。
-- 实现：外部 overlay `/disk2/gengnan/data-analysis-agent-data/evals/olist-small-gold-admission-v1/runtime-question-variants-v2.json` 收录每个 seed 的原始问法和第二条问法。`materialize_olist_runtime_prompts.py` 新增 v2 loader，要求每个 seed 恰好两条、`variant_id` 唯一，并在输出记录中保留 `variant_id`；v1 单条 overlay 继续兼容。
-- 结果：12/12 物化，0 rejected；每个 family 的指标、维度、时间范围/粒度、执行策略和结果列合同成对一致；两条 Prompt hash 不同。Router、Catalog、QueryPlan、ResultContract 全部通过；`model_called=false`、`sql_executed=false`、`gpu_used=false`、`protected_holdout_read=false`。
-- 验证：专项测试 **5 passed**；`ruff check`、`compileall` 和 JSON 解析检查通过。审阅记录见 `docs/post-training/data/olist-runtime-question-variants-v2-review.md`；物化 JSONL 和完整问题仍只保留在仓库外。
-- 边界：这是 AI 辅助的结构化口径预审，不等同于用户/业务专家签字；12 条仍是变体准入小批，不是最终 train/validation/test 评测集，也不提供模型质量结论。下一项需在用户确认后单独设计扩展评测集冻结。
-
-### 2026-09-04：Olist Pilot v1 约 40 个 QuerySpec family 扩展
-
-- 目标：在不读取 protected holdout 原文、不生成自然语言 Prompt、不启动训练的前提下，扩展后续领域 SFT 的结构覆盖，并建立可审阅的 train/validation/in-domain-test 中间产物。
-- 实现：新增 `data/fixtures/olist_queryspec_coverage_seeds_v2.jsonl`，共 40 条静态结构 seed（train 24、validation 8、in_domain_test 8），覆盖十项指标、四种结果形态、单/多指标、客户州/商品品类和购买/评价时间序列。`materialize_olist_queryspecs.py` 新增 `family_scoped_v2` split policy：family、QuerySpec 和 canonical SQL hash 必须跨 split 隔离；共享底层 `join_program_id` 可以跨 split，但必须记录 overlap。修正两个客户州商品行指标的 Join program 错配，并新增 coverage manifest 回归测试。
-- 外部产物：`/disk2/gengnan/data-analysis-agent-data/evals/olist-domain-sft-pilot-v1/queryspec-materialized-20260904/` 已生成 `query_specs.jsonl`、`gold_sql.jsonl`、rejections 和 manifest。结果为 40/40 accepted、40 个唯一 family/QuerySpec/SQL hash、0 protected collision、0 rejection，split 为 24/8/8；manifest 明确 `prompt_or_question_materialized=false`、`sql_executed=false`。
-- 验证：QuerySpec、renderer、materializer、protected summary 和 coverage 专项回归共 `63 passed`，`git diff --check` 通过。旧 v1 fixture 与 strict split policy 保持不变；本轮变更尚未提交。
-- 边界与下一步：这些只是结构化 QuerySpec/Gold SQL 中间层，不能称为最终 SFT train/validation/test，也不代表业务语义或模型质量。下一项只允许把这 40 条分批接入现有 runtime Prompt/admission 流程，逐条提供人工审核的中文问题，重建 Router/Catalog/QueryPlan/ResultContract 并通过 reader-role、ResultValidator 和语义复核；完成前不得构造 tokenizer 输入或启动 GPU 训练。
-
-### 2026-09-04：Olist Pilot v1 第一批 Gold 准入
-
-- 目标：在保持单批至多六条的人审/模型复核预算下，让已通过结构审计的 40-family materialization 可以按显式 seed ID 分批走现有 Gold admission gate。
-- 实现：`admit_olist_gold_batch.py` 新增可重复的 `--seed-id` 参数。它先验证完整 materialization 的 manifest 状态、hash、Gold/QuerySpec seed 集合和每行 artifact，再按源顺序选择 1--6 条；未知、重复、空、超限选择和不通过的源结构审计均 fail closed。admission aggregate 同时记录完整源行数、请求顺序和实际选择。新增任务卡与回归测试。
-- 真实第一批：外部目录 `/disk2/gengnan/data-analysis-agent-data/evals/olist-domain-sft-pilot-v1/gold-admission-batch-01-verified-20260904/` 选择 6 条，覆盖 train/validation/in_domain_test、标量、州分组、品类分组、购买/评价序列和多指标。完整源为 40 条；该批为 6 admitted、0 rejected、0 needs_human_review，全部经 `SqlPolicy -> daa_analytics_reader -> ResultValidator -> DeepSeek advisory review`。
-- 验证：Gold admission、materializer、coverage 和 protected summary 专项共 `23 passed`，`compileall`、CLI help 与 `git diff --check` 通过。只证明这 6 个已选 Gold 通过冻结工作区的准入，不证明其余 34 条、最终训练语料、模型能力或业务泛化。
-- 下一步：继续以不同 family/shape/split 选择第二个小批，完成后再决定是否为全部已准入 family 编写人工审核中文问题和 runtime Prompt；不得将未准入的结构条目直接变成训练行。
-
-### 2026-09-04：Olist Pilot v1 正式 SFT 三切分冻结
-
-- 目标：连续完成已批准的 40-family Gold 准入、中文问题、真实运行时 Prompt 重建、口径审核和第一版正式 train/validation/in-domain-test 物化；本轮不启动训练或改变生产默认模型。
-- 实现：完整 40 条 Gold 分 7 批通过 `SqlPolicy -> daa_analytics_reader -> ResultValidator`。DeepSeek advisory 的 2 条 `needs_human_review` 由外部人工审批按 `seed_id + query_spec_id + gold_sql_sha256` 绑定；assembly 只接受完整 40 行及已解决审阅。中文 overlay 先经当前 Router/Catalog/QueryPlan/ResultContract 重建生产 `olist-candidate-sql-v1` Prompt，再与 canonical SQL 精确拼接。新增 assembly、问题生成和正式 SFT 物化器；Trainer 只接受 Olist PostgreSQL execution/result-contract evidence、family-isolated audit、隔离 test 和未截断长度合同。
-- 数据与长度：外部正式资产为 train `24`、validation `8`、`final_evaluation_only/in_domain_test` `8`，40 个 family/QuerySpec 跨 split 均无重叠。真实 Olist Prompt + SQL + EOS 最大为 `2076`，故本 Pilot 固定 `max_seq_length=2304`、`silent_truncation=false`；长度排除 `0`。不得对该资产复用 CSpider 的 `1536` 上限。初始自然中文日期写法被 `WorkingMemory` 解析拒绝，正式 overlay 使用生产当前可识别的 ISO 日期、`各客户州`、`各商品品类`、`按月/季度`；这是解析边界证据，不是模型训练结论。
-- 验证：外部审计回读确认 train/validation/test=`24/8/8`、40 个 family/QuerySpec 唯一、训练文本精确等于 Prompt + SQL、所有序列不超过 2304；QLoRA 环境训练契约回归 `14 passed`，应用环境 Gold admission `6 passed`、运行时 Prompt/结构回归 `18 passed`，`compileall`、ruff 和 `git diff --check` 通过。物化初次发现 atomic staging 目录被写入 split audit，已修复为最终路径后重建；旧目录按 `-invalid-staging-path-audit` 保留在 Git 外，不能用于训练。
-- 边界与下一步：24 个 train family 只能作为数据工程 Pilot，不能推导 SQL 质量、业务准确率或领域泛化。下一迭代只做 `2304` bf16 LoRA 的小步显存 smoke，确认 24GB 卡上的真实 batch/峰值显存；之后才由用户决定完整 Pilot 训练和 matching Base/Adapter 生成质量评测。
+- 发现 workspace、指标合同、Prompt、SQL hash、split、权限或长度证据漂移时立即停止并修复来源，不继续训练或发布。
+- 测试失败、外部依赖缺失、GPU/数据库资源不满足或推送失败时如实报告；保留可复现的本地证据，不删除用户已有修改。

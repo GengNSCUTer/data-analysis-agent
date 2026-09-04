@@ -134,6 +134,7 @@ def load_materialized_gold_rows(
     directory: Path,
     *,
     seed_ids: list[str] | None = None,
+    max_rows: int = MAX_BATCH_ROWS,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Validate all source artifacts, then return a requested bounded subset."""
     manifest_path = directory / "materialization_manifest.json"
@@ -195,8 +196,8 @@ def load_materialized_gold_rows(
     selected_seed_ids = _validate_selection(seed_ids, set(query_specs_by_seed))
     if selected_seed_ids is not None:
         rows = [row for row in rows if str(row["seed_id"]) in selected_seed_ids]
-    if not rows or len(rows) > MAX_BATCH_ROWS:
-        raise ValueError(f"admission batch must contain 1-{MAX_BATCH_ROWS} Gold rows")
+    if not rows or len(rows) > max_rows:
+        raise ValueError(f"admission batch must contain 1-{max_rows} Gold rows")
     return manifest, rows
 
 
@@ -226,6 +227,7 @@ def make_context(spec: QuerySpec, seed_id: str) -> ToolContext:
         metadata["requested_end"] = spec.time.end_exclusive
     if spec.result_shape == "time_series":
         metadata["result_time_column"] = "time"
+        metadata["result_time_grain"] = spec.time.grain
     return ToolContext(
         user=User(id="olist-gold-admission", group_memberships=["analyst"]),
         conversation_id=f"olist-gold-admission-{seed_id}",
@@ -237,7 +239,11 @@ def make_context(spec: QuerySpec, seed_id: str) -> ToolContext:
 
 def review_prompt(spec: QuerySpec, sql: str, validated_summary: str) -> str:
     metric_notes = {
-        metric_id: METRIC_SQL_REGISTRY[metric_id].value_notes
+        metric_id: {
+            "value_notes": METRIC_SQL_REGISTRY[metric_id].value_notes,
+            "canonical_time_field": METRIC_SQL_REGISTRY[metric_id].time_field,
+            "frozen_where_sql": list(METRIC_SQL_REGISTRY[metric_id].where_sql),
+        }
         for metric_id in spec.metric_ids
     }
     payload = {
@@ -245,6 +251,8 @@ def review_prompt(spec: QuerySpec, sql: str, validated_summary: str) -> str:
         "rules": [
             "Do not propose replacement SQL or execute anything.",
             "Check only whether the supplied SQL appears consistent with the frozen QuerySpec and metric notes.",
+            "For a multi-metric absolute range, apply the same date endpoints to each metric's own canonical_time_field; different frozen fields do not by themselves imply a mismatch.",
+            "Treat frozen_where_sql as part of the metric definition, including valid-order filters.",
             "Treat the deterministic policy/result gates as separate evidence, not as proof of business semantics.",
             "Return JSON only with verdict, issues, and rationale.",
         ],

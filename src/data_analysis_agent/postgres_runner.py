@@ -215,6 +215,10 @@ class SecurePostgresRunner(SqlRunner):
             raise SafeSqlExecutionError(safe_error) from exc
 
         if self.result_validator is not None:
+            time_bucket_grain = context.metadata.get("result_time_grain")
+            query_plan = context.metadata.get("query_plan")
+            if time_bucket_grain is None and isinstance(query_plan, dict):
+                time_bucket_grain = query_plan.get("time_grain")
             validation = self.result_validator.validate(
                 pd.DataFrame(rows),
                 required_columns=context.metadata.get("required_result_columns", ()),
@@ -224,6 +228,7 @@ class SecurePostgresRunner(SqlRunner):
                 metric_columns=context.metadata.get("metric_result_columns", ()),
                 time_column=context.metadata.get("result_time_column"),
                 time_column_aliases=context.metadata.get("result_time_column_aliases", ()),
+                time_bucket_grain=time_bucket_grain,
                 requested_start=context.metadata.get("requested_start"),
                 requested_end=context.metadata.get("requested_end"),
                 # A clarification is required only if Policy itself inserted

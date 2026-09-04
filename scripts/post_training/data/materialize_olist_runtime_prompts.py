@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize trusted runtime prompts for a small admitted Olist Gold batch.
+"""Materialize trusted runtime prompts for an admitted Olist Gold release.
 
 This is a prompt-construction gate, not a training-data builder.  It takes
 external admitted Gold metadata and an external, human-reviewed Chinese
@@ -46,8 +46,10 @@ from vanna.core.user import User  # noqa: E402
 
 SCHEMA_VERSION = "olist-runtime-prompt-materialization-v2"
 OVERLAY_SCHEMA_VERSION = "1"
-MAX_SEEDS = 40
-MAX_VARIANTS = 40
+# A bounded release protects the prompt-materialization command from accidental
+# unreviewed bulk inputs. It is not an expected release size.
+MAX_SEEDS = 1500
+MAX_VARIANTS = 1500
 
 
 class RuntimePromptInputError(ValueError):
@@ -110,7 +112,10 @@ def _validate_admission_assembly(records_path: Path, manifest_path: Path) -> Non
     output = manifest.get("output", {}).get("admitted_records_jsonl", {})
     if not isinstance(output, Mapping):
         raise RuntimePromptInputError("admission assembly manifest has no records evidence")
-    if output.get("rows") != MAX_SEEDS or output.get("sha256") != sha256_file(records_path):
+    rows = output.get("rows")
+    if not isinstance(rows, int) or not 1 <= rows <= MAX_SEEDS:
+        raise RuntimePromptInputError("admission assembly records have an unsupported row count")
+    if rows != len(_read_jsonl(records_path, "admission records")) or output.get("sha256") != sha256_file(records_path):
         raise RuntimePromptInputError("admission assembly records do not match its manifest")
 
 
@@ -242,10 +247,9 @@ def materialize(
     records = _read_jsonl(admission_records, "admission records")
     if not records or len(records) > MAX_SEEDS:
         raise RuntimePromptInputError(f"admission records must contain 1-{MAX_SEEDS} rows")
-    if len(records) == MAX_SEEDS:
-        if admission_assembly_manifest is None:
-            raise RuntimePromptInputError("40-row runtime materialization requires an admission assembly manifest")
-        _validate_admission_assembly(admission_records, admission_assembly_manifest)
+    if admission_assembly_manifest is None:
+        raise RuntimePromptInputError("runtime materialization requires an admission assembly manifest")
+    _validate_admission_assembly(admission_records, admission_assembly_manifest)
     admitted = [row for row in records if row.get("admission_status") == "admitted"]
     if len(admitted) != len(records):
         raise RuntimePromptInputError("runtime materialization accepts admitted rows only")

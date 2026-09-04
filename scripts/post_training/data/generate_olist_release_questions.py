@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Generate one deterministic Chinese business question per admitted Olist Pilot v1 Gold row.
+"""Generate one deterministic Chinese question for each admitted Olist release row.
 
-Question text is an external overlay, not Git data. The templates deliberately
-express only already-frozen QuerySpec intent; runtime prompt materialization
-must still rebuild and validate the actual Router/Catalog/QueryPlan contract.
+The question is an external natural-language overlay.  It expresses only the
+already frozen QuerySpec and is not used as a second source of business logic.
+Runtime prompt construction still rebuilds Router, Catalog, QueryPlan and the
+result contract before the row can enter SFT data.
 """
 
 from __future__ import annotations
@@ -17,31 +18,17 @@ import sys
 import uuid
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from data_analysis_agent.candidate_sql_generator import OLIST_CANDIDATE_SQL_PROMPT_VERSION  # noqa: E402
 from data_analysis_agent.olist_queryspec import WorkspacePin  # noqa: E402
+from scripts.post_training.data.generate_olist_pilot_v1_questions import render_question  # noqa: E402
 
 
 OVERLAY_VERSION = "1"
-EXPECTED_ROWS = 40
-_METRIC_LABELS = {
-    "gmv": "GMV",
-    "paid_order_count": "有效订单数",
-    "average_delivery_days": "平均履约天数",
-    "positive_review_rate": "好评率",
-    "item_count": "商品件数",
-    "average_order_value": "平均订单商品金额",
-    "average_review_score": "平均评价分",
-    "on_time_delivery_rate": "准时送达率",
-    "cancellation_rate": "取消率",
-    "freight_amount": "运费金额",
-}
-_DIMENSION_LABELS = {"customer_state": "各客户州", "product_category_name": "各商品品类"}
-_GRAIN_LABELS = {"day": "按日", "week": "按周", "month": "按月", "quarter": "按季度", "year": "按年"}
+MAX_ROWS = 1500
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,45 +64,24 @@ def load_admitted_rows(directory: Path) -> list[dict[str, Any]]:
     directory = directory.resolve()
     if directory.is_relative_to(ROOT) or not directory.is_dir():
         raise ValueError("admission assembly directory must exist outside the Git worktree")
-    manifest_path = directory / "admission_assembly_manifest.json"
-    records_path = directory / "admitted_records.jsonl"
-    manifest = json.loads(_external_existing(manifest_path, "assembly manifest").read_text(encoding="utf-8"))
+    manifest_path = _external_existing(directory / "admission_assembly_manifest.json", "assembly manifest")
+    records_path = _external_existing(directory / "admitted_records.jsonl", "admitted records")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("workspace") != WorkspacePin.current().as_dict():
         raise ValueError("assembly workspace differs from current pin")
     if manifest.get("checks", {}).get("status") != "pass":
         raise ValueError("assembly did not pass")
     output = manifest.get("output", {}).get("admitted_records_jsonl", {})
-    if output.get("sha256") != sha256_file(_external_existing(records_path, "admitted records")):
-        raise ValueError("assembly admitted records hash mismatch")
     rows = [json.loads(line) for line in records_path.read_text(encoding="utf-8").splitlines() if line]
-    if len(rows) != EXPECTED_ROWS or output.get("rows") != EXPECTED_ROWS:
-        raise ValueError("Pilot v1 requires exactly 40 admitted records")
+    if not 1 <= len(rows) <= MAX_ROWS or output.get("rows") != len(rows):
+        raise ValueError("admission record count is outside the release contract")
+    if output.get("sha256") != sha256_file(records_path):
+        raise ValueError("assembly admitted records hash mismatch")
+    if any(row.get("admission_status") != "admitted" for row in rows):
+        raise ValueError("all release records must be admitted before question generation")
     if len({row.get("seed_id") for row in rows}) != len(rows):
         raise ValueError("admitted records have duplicate seed IDs")
     return rows
-
-
-def _date(value: str) -> str:
-    # WorkingMemory accepts ISO endpoints as a production contract. Keep the
-    # training question in that exact user-facing form instead of asking a
-    # second parser to infer Chinese calendar expressions.
-    return value
-
-
-def render_question(spec: dict[str, Any]) -> str:
-    metrics = "、".join(_METRIC_LABELS[metric] for metric in spec["metric_ids"])
-    shape = spec["result_shape"]
-    time = spec["time"]
-    if time["mode"] == "all_time":
-        time_text = "全部可用数据范围内"
-    else:
-        time_text = f"{_date(time['start'])}至{_date(time['end_exclusive'])}"
-    if shape == "scalar":
-        return f"请统计 {time_text} 的{metrics}。"
-    if shape == "time_series":
-        return f"请{_GRAIN_LABELS[time['grain']]}统计 {time_text} 的{metrics}。"
-    dimension = _DIMENSION_LABELS[spec["dimension"]]
-    return f"请统计 {time_text} {dimension}的{metrics}。"
 
 
 def generate(admission_assembly_dir: Path, output_json: Path) -> dict[str, Any]:
