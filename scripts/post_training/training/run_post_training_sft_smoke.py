@@ -137,7 +137,17 @@ def load_rows(path: Path, expected_split: str) -> list[dict[str, Any]]:
     for row in rows:
         if row.get("split", {}).get("name") != expected_split:
             raise ValueError(f"{row['sample_id']} is not in expected {expected_split} split")
-        if row.get("execution_outcome", {}).get("sqlite_readonly_explain") != "pass":
+        outcome = row.get("execution_outcome", {})
+        if not isinstance(outcome, dict):
+            raise ValueError(f"{row['sample_id']} lacks execution evidence")
+        if outcome.get("sqlite_readonly_explain") == "pass":
+            continue
+        if (
+            row.get("prompt_format_version") == "olist-candidate-sql-v1"
+            and outcome.get("postgres_reader_result_contract") == "pass"
+        ):
+            continue
+        else:
             raise ValueError(f"{row['sample_id']} lacks execution evidence")
     return rows
 
@@ -170,6 +180,8 @@ def validate_split_audit(
         validate_spider_candidate_audit(checks, policy)
     elif split_strategy == "official_cspider_train_dev_test":
         validate_cspider_official_audit(audit, checks, policy, train_path, validation_path)
+    elif split_strategy == "olist_pilot_v1_family_isolated":
+        validate_olist_pilot_audit(audit, checks, policy, train_path, validation_path)
     else:
         raise ValueError(f"unsupported split audit strategy: {split_strategy}")
 
@@ -283,6 +295,64 @@ def validate_cspider_official_audit(
             raise ValueError(f"CSpider audit has inconsistent {source_split} execution evidence")
 
 
+def validate_olist_pilot_audit(
+    audit: dict[str, Any],
+    checks: dict[str, Any],
+    policy: dict[str, Any],
+    train_path: Path,
+    validation_path: Path,
+) -> None:
+    """Accept only the explicit Olist PostgreSQL/runtime-Prompt SFT protocol."""
+    if policy.get("primary_group") != "family_id":
+        raise ValueError("Olist audit does not prove family-isolated splits")
+    if policy.get("test_storage") != "final_evaluation_only" or policy.get("test_forbidden_for_training") is not True:
+        raise ValueError("Olist audit does not isolate the in-domain test split")
+    if checks.get("family_split_overlap") != [] or checks.get("query_spec_split_overlap") != []:
+        raise ValueError("Olist audit has cross-split semantic identity overlap")
+    if checks.get("all_gold_admitted") is not True or checks.get("runtime_contract_rebuilt") is not True:
+        raise ValueError("Olist audit lacks Gold or runtime-contract evidence")
+    if checks.get("in_domain_test_forbidden_for_training") is not True:
+        raise ValueError("Olist audit does not forbid in-domain test training")
+    outputs = audit.get("outputs")
+    if not isinstance(outputs, dict):
+        raise ValueError("Olist audit has no output paths")
+    expected = {"train_jsonl": train_path, "validation_jsonl": validation_path}
+    for field, path in expected.items():
+        if Path(str(outputs.get(field, ""))).resolve() != path.resolve():
+            raise ValueError(f"Olist audit {field} does not match requested input")
+    test_path = Path(str(outputs.get("in_domain_test_jsonl", ""))).resolve()
+    if test_path.parent.name != "final_evaluation_only" or test_path in {train_path.resolve(), validation_path.resolve()}:
+        raise ValueError("Olist in-domain test output is not isolated")
+    contract = audit.get("training_length_contract")
+    if not isinstance(contract, dict):
+        raise ValueError("Olist audit has no training length contract")
+    if contract.get("formula") != "exact rendered runtime prompt + canonical SQL + EOS":
+        raise ValueError("Olist audit has an unsupported training length formula")
+    if contract.get("silent_truncation") is not False:
+        raise ValueError("Olist audit does not forbid silent truncation")
+    max_seq_length = contract.get("max_seq_length")
+    if not isinstance(max_seq_length, int) or max_seq_length <= 0:
+        raise ValueError("Olist audit has an invalid training max_seq_length")
+
+
+def required_max_seq_length(audit: dict[str, Any]) -> int | None:
+    """Return a frozen materialization cap when this audit defines one."""
+    checks = audit.get("checks")
+    cspider_contract = checks.get("length_contract") if isinstance(checks, dict) else None
+    if isinstance(cspider_contract, dict):
+        value = cspider_contract.get("max_seq_length")
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError("materialized token-length contract has invalid max_seq_length")
+        return value
+    olist_contract = audit.get("training_length_contract")
+    if isinstance(olist_contract, dict):
+        value = olist_contract.get("max_seq_length")
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError("Olist training length contract has invalid max_seq_length")
+        return value
+    return None
+
+
 def validate_materialized_length_contract(audit: dict[str, Any]) -> None:
     """Validate the external exclusion evidence for a materialized length split."""
     checks = audit.get("checks")
@@ -335,6 +405,14 @@ def split_prompt_and_target(row: dict[str, Any]) -> tuple[str, str]:
     candidate_sql = row.get("candidate_sql")
     if not isinstance(training_text, str) or not isinstance(candidate_sql, str):
         raise ValueError(f"{row['sample_id']} lacks training text or target SQL")
+    rendered_prompt = row.get("rendered_prompt")
+    if rendered_prompt is not None:
+        if not isinstance(rendered_prompt, str) or not rendered_prompt.strip():
+            raise ValueError(f"{row['sample_id']} has an invalid rendered runtime prompt")
+        expected_text = rendered_prompt.rstrip() + "\n" + candidate_sql.strip()
+        if training_text != expected_text:
+            raise ValueError(f"{row['sample_id']} runtime prompt and target SQL mismatch")
+        return rendered_prompt.rstrip() + "\n", candidate_sql.strip()
     if SQL_MARKER not in training_text:
         raise ValueError(f"{row['sample_id']} has no SQL target marker")
     prompt, embedded_sql = training_text.rsplit(SQL_MARKER, 1)
@@ -484,8 +562,8 @@ def main() -> int:
     # 读取切分审计文件，校验数据集切分流程已经通过所有安全检查
     split_audit = json.loads(args.split_audit.read_text(encoding="utf-8"))
     validate_split_audit(split_audit, args.train_jsonl, args.validation_jsonl)
-    length_contract = split_audit.get("checks", {}).get("length_contract")
-    if isinstance(length_contract, dict) and length_contract.get("max_seq_length") != args.max_seq_length:
+    frozen_max_seq_length = required_max_seq_length(split_audit)
+    if frozen_max_seq_length is not None and frozen_max_seq_length != args.max_seq_length:
         raise ValueError("max_seq_length does not match the materialized length contract")
 
     # 固定全部随机种子，保证实验可复现

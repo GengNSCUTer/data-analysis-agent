@@ -44,10 +44,10 @@ from data_analysis_agent.working_memory import WorkingMemory  # noqa: E402
 from vanna.core.user import User  # noqa: E402
 
 
-SCHEMA_VERSION = "olist-runtime-prompt-materialization-v1"
+SCHEMA_VERSION = "olist-runtime-prompt-materialization-v2"
 OVERLAY_SCHEMA_VERSION = "1"
-MAX_SEEDS = 6
-MAX_VARIANTS = 12
+MAX_SEEDS = 40
+MAX_VARIANTS = 40
 
 
 class RuntimePromptInputError(ValueError):
@@ -99,9 +99,25 @@ def _external_new_dir(path: Path) -> Path:
     return resolved
 
 
+def _validate_admission_assembly(records_path: Path, manifest_path: Path) -> None:
+    manifest_path = _external_existing(manifest_path, "admission assembly manifest")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimePromptInputError("admission assembly manifest must be valid JSON") from exc
+    if not isinstance(manifest, Mapping) or manifest.get("checks", {}).get("status") != "pass":
+        raise RuntimePromptInputError("admission assembly manifest did not pass")
+    output = manifest.get("output", {}).get("admitted_records_jsonl", {})
+    if not isinstance(output, Mapping):
+        raise RuntimePromptInputError("admission assembly manifest has no records evidence")
+    if output.get("rows") != MAX_SEEDS or output.get("sha256") != sha256_file(records_path):
+        raise RuntimePromptInputError("admission assembly records do not match its manifest")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--admission-records", type=Path, required=True)
+    parser.add_argument("--admission-assembly-manifest", type=Path, default=None)
     parser.add_argument("--question-variants", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--generated-at", default=None)
@@ -215,10 +231,21 @@ def _compare_contract(spec: QuerySpec, plan: QueryPlan, contract: ResultContract
     return mismatches
 
 
-def materialize(admission_records: Path, variants_path: Path, output_dir: Path, generated_at: str | None) -> dict[str, Any]:
-    records = _read_jsonl(_external_existing(admission_records, "admission records"), "admission records")
+def materialize(
+    admission_records: Path,
+    variants_path: Path,
+    output_dir: Path,
+    generated_at: str | None,
+    admission_assembly_manifest: Path | None = None,
+) -> dict[str, Any]:
+    admission_records = _external_existing(admission_records, "admission records")
+    records = _read_jsonl(admission_records, "admission records")
     if not records or len(records) > MAX_SEEDS:
         raise RuntimePromptInputError(f"admission records must contain 1-{MAX_SEEDS} rows")
+    if len(records) == MAX_SEEDS:
+        if admission_assembly_manifest is None:
+            raise RuntimePromptInputError("40-row runtime materialization requires an admission assembly manifest")
+        _validate_admission_assembly(admission_records, admission_assembly_manifest)
     admitted = [row for row in records if row.get("admission_status") == "admitted"]
     if len(admitted) != len(records):
         raise RuntimePromptInputError("runtime materialization accepts admitted rows only")
@@ -315,6 +342,11 @@ def materialize(admission_records: Path, variants_path: Path, output_dir: Path, 
             "generated_at": generated_at,
             "input": {
                 "admission_records_sha256": sha256_file(admission_records),
+                "admission_assembly_manifest_sha256": (
+                    sha256_file(admission_assembly_manifest)
+                    if admission_assembly_manifest is not None
+                    else None
+                ),
                 "question_variants_sha256": sha256_file(variants_path),
                 "admitted_seed_ids": sorted(seed_ids),
             },
@@ -350,7 +382,13 @@ def materialize(admission_records: Path, variants_path: Path, output_dir: Path, 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    manifest = materialize(args.admission_records, args.question_variants, args.output_dir, args.generated_at)
+    manifest = materialize(
+        args.admission_records,
+        args.question_variants,
+        args.output_dir,
+        args.generated_at,
+        args.admission_assembly_manifest,
+    )
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

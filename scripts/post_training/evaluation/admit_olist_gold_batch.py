@@ -379,6 +379,12 @@ async def admit(
                 "requested_seed_ids": list(seed_ids) if seed_ids is not None else None,
                 "selected_seed_ids": [str(record["seed_id"]) for record in records],
             },
+            "output": {
+                "admission_records_jsonl": {
+                    "rows": len(records),
+                    "sha256": sha256_file(details_path),
+                },
+            },
             "protected_summary_sha256": manifest["source"]["protected_summary_sha256"],
             "protected_evidence_sha256": manifest["source"]["protected_evidence_sha256"],
             "counts": {

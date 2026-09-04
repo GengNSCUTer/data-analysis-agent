@@ -412,3 +412,11 @@
 - 真实第一批：外部目录 `/disk2/gengnan/data-analysis-agent-data/evals/olist-domain-sft-pilot-v1/gold-admission-batch-01-verified-20260904/` 选择 6 条，覆盖 train/validation/in_domain_test、标量、州分组、品类分组、购买/评价序列和多指标。完整源为 40 条；该批为 6 admitted、0 rejected、0 needs_human_review，全部经 `SqlPolicy -> daa_analytics_reader -> ResultValidator -> DeepSeek advisory review`。
 - 验证：Gold admission、materializer、coverage 和 protected summary 专项共 `23 passed`，`compileall`、CLI help 与 `git diff --check` 通过。只证明这 6 个已选 Gold 通过冻结工作区的准入，不证明其余 34 条、最终训练语料、模型能力或业务泛化。
 - 下一步：继续以不同 family/shape/split 选择第二个小批，完成后再决定是否为全部已准入 family 编写人工审核中文问题和 runtime Prompt；不得将未准入的结构条目直接变成训练行。
+
+### 2026-09-04：Olist Pilot v1 正式 SFT 三切分冻结
+
+- 目标：连续完成已批准的 40-family Gold 准入、中文问题、真实运行时 Prompt 重建、口径审核和第一版正式 train/validation/in-domain-test 物化；本轮不启动训练或改变生产默认模型。
+- 实现：完整 40 条 Gold 分 7 批通过 `SqlPolicy -> daa_analytics_reader -> ResultValidator`。DeepSeek advisory 的 2 条 `needs_human_review` 由外部人工审批按 `seed_id + query_spec_id + gold_sql_sha256` 绑定；assembly 只接受完整 40 行及已解决审阅。中文 overlay 先经当前 Router/Catalog/QueryPlan/ResultContract 重建生产 `olist-candidate-sql-v1` Prompt，再与 canonical SQL 精确拼接。新增 assembly、问题生成和正式 SFT 物化器；Trainer 只接受 Olist PostgreSQL execution/result-contract evidence、family-isolated audit、隔离 test 和未截断长度合同。
+- 数据与长度：外部正式资产为 train `24`、validation `8`、`final_evaluation_only/in_domain_test` `8`，40 个 family/QuerySpec 跨 split 均无重叠。真实 Olist Prompt + SQL + EOS 最大为 `2076`，故本 Pilot 固定 `max_seq_length=2304`、`silent_truncation=false`；长度排除 `0`。不得对该资产复用 CSpider 的 `1536` 上限。初始自然中文日期写法被 `WorkingMemory` 解析拒绝，正式 overlay 使用生产当前可识别的 ISO 日期、`各客户州`、`各商品品类`、`按月/季度`；这是解析边界证据，不是模型训练结论。
+- 验证：外部审计回读确认 train/validation/test=`24/8/8`、40 个 family/QuerySpec 唯一、训练文本精确等于 Prompt + SQL、所有序列不超过 2304；QLoRA 环境训练契约回归 `14 passed`，应用环境 Gold admission `6 passed`、运行时 Prompt/结构回归 `18 passed`，`compileall`、ruff 和 `git diff --check` 通过。物化初次发现 atomic staging 目录被写入 split audit，已修复为最终路径后重建；旧目录按 `-invalid-staging-path-audit` 保留在 Git 外，不能用于训练。
+- 边界与下一步：24 个 train family 只能作为数据工程 Pilot，不能推导 SQL 质量、业务准确率或领域泛化。下一迭代只做 `2304` bf16 LoRA 的小步显存 smoke，确认 24GB 卡上的真实 batch/峰值显存；之后才由用户决定完整 Pilot 训练和 matching Base/Adapter 生成质量评测。

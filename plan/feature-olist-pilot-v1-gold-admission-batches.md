@@ -3,7 +3,7 @@ goal: Admit the 40-family Olist Pilot v1 structural materialization in explicit,
 version: 1.0
 date_created: 2026-09-04
 owner: Data Analysis Agent
-status: In progress
+status: Completed
 tags: [feature, post-training, gold-sql, admission, batch-selection]
 ---
 
@@ -47,6 +47,17 @@ and selected seed IDs.
    directory itself must contain at most six rows.
 5. One selected batch proves only the selected frozen Gold rows passed the
    gates. It is neither final SFT data nor a model-quality result.
+
+## Completion Record
+
+The bounded selector was used for all seven admission batches of the 40-family
+Pilot source. All 40 rows passed deterministic policy, PostgreSQL reader-role
+and ResultValidator gates. Two advisory review findings were resolved through
+external manual approvals bound to their QuerySpec IDs and Gold SQL hashes.
+The assembled source then drove Chinese question generation, production runtime
+Prompt rebuilding, and formal `24/8/8` SFT materialization. See
+[`../docs/post-training/data/olist-pilot-v1-sft-data.md`](../docs/post-training/data/olist-pilot-v1-sft-data.md)
+for the final data contract and limitations.
 
 ## Acceptance Evidence
 
