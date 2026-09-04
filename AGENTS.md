@@ -379,3 +379,20 @@
 - 受限输入：受限审阅当前 QuerySpec 可表达的 protected 数据查询 family，导出 17 个 family 的仓库外 fingerprint summary/evidence。帮助、澄清、安全、非 SQL、Top-N 或未冻结归因的 protected case 不强行映射为 Gold SQL family。
 - 物化与执行：选取 6 条与摘要无碰撞的静态 seed，覆盖标量、客户州分组和评价月序列，以及 train/validation/in-domain-test 的结构标签。结构物化为 6/6 accepted、0 collision；随后 6/6 通过 AST Policy、`daa_analytics_reader`、QuerySpec 派生 ResultValidator 合同和 DeepSeek-V4-Flash advisory review。
 - 限制与下一步：这批不含自然语言问题、Prompt 或训练 JSONL，不能作为准确率、泛化或训练成功证据。DeepSeek 的 `pass` 只是模型辅助意见，不替代人工口径签字；原始 SQL、结果和 LLM 审阅文本均留在仓库外。下一项仅构造并审阅这 6 条记录的真实运行时 QueryPlan/Prompt 和受控中文 query 变体。
+
+### 2026-09-04：小批 Olist 运行时 Prompt 物化
+
+- 目标：将 6 条已准入 Gold 记录重新走真实运行时的 QuestionRouter、Semantic Catalog、QueryPlan 和 ResultContract，构造 `olist-candidate-sql-v1` 的输入上下文；本轮不生成训练集、不调用模型或数据库。
+- 实现：新增 `scripts/post_training/data/materialize_olist_runtime_prompts.py`。脚本要求仓库外 admitted 记录和仓库外中文问题变体，严格校验 seed ID、Prompt 版本、Router 可查库状态、指标/维度/时间粒度、结果列集合及 QueryPlan warning；任何不一致均 fail closed。QuerySpec 仅作离线结构基准，模型实际看到的是运行时 Catalog + QueryPlan + 用户问题，输出列顺序由 QuerySpec 规范化。
+- 外部输入/输出：问题变体位于 `/disk2/gengnan/data-analysis-agent-data/evals/olist-small-gold-admission-v1/runtime-question-variants-v1.json`；物化结果位于 `/disk2/gengnan/data-analysis-agent-data/evals/olist-small-gold-admission-v1/runtime-20260904/`，包含 `runtime_candidates.jsonl` 和 `runtime_prompt_manifest.json`，不进入 Git。
+- 结果：6/6 物化，0 rejected；Router、Catalog、QueryPlan、ResultContract 均重建成功；`sql_executed=false`、`model_called=false`、`gpu_used=false`、`protected_holdout_read=false`。多指标检索排序可能与 Gold metric 顺序不同，脚本按集合校验语义一致性，并使用 QuerySpec 的规范结果列顺序。
+- 验证：`ruff check`、`compileall` 通过；`PYTHONPATH=.:src pytest -q tests/test_olist_runtime_prompt_materializer.py` 为 **3 passed**。
+- 边界与下一步：这 6 条只是运行时 Prompt/合同准入样本，不代表模型准确率或训练数据规模；后续应先人工审核这些问题和 Prompt，再扩展同一 family 的少量中文变体，最后才设计正式 train/validation/test 生成。
+
+### 2026-09-04：Olist 运行时中文 Query 变体 v2
+
+- 目标：为 6 条已准入 family 各增加 1 条中文自然语言改写，并验证两条问法保持同一运行时语义；本轮不启动模型、数据库、GPU 或最终评测冻结。
+- 实现：外部 overlay `/disk2/gengnan/data-analysis-agent-data/evals/olist-small-gold-admission-v1/runtime-question-variants-v2.json` 收录每个 seed 的原始问法和第二条问法。`materialize_olist_runtime_prompts.py` 新增 v2 loader，要求每个 seed 恰好两条、`variant_id` 唯一，并在输出记录中保留 `variant_id`；v1 单条 overlay 继续兼容。
+- 结果：12/12 物化，0 rejected；每个 family 的指标、维度、时间范围/粒度、执行策略和结果列合同成对一致；两条 Prompt hash 不同。Router、Catalog、QueryPlan、ResultContract 全部通过；`model_called=false`、`sql_executed=false`、`gpu_used=false`、`protected_holdout_read=false`。
+- 验证：专项测试 **5 passed**；`ruff check`、`compileall` 和 JSON 解析检查通过。审阅记录见 `docs/post-training/data/olist-runtime-question-variants-v2-review.md`；物化 JSONL 和完整问题仍只保留在仓库外。
+- 边界：这是 AI 辅助的结构化口径预审，不等同于用户/业务专家签字；12 条仍是变体准入小批，不是最终 train/validation/test 评测集，也不提供模型质量结论。下一项需在用户确认后单独设计扩展评测集冻结。

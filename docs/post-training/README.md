@@ -122,14 +122,15 @@ PostgreSQL executed / ResultContract valid 为 `2/1/0`，Base 为 `6/4/2`；不�
 16. [Olist 静态 Coverage Seed 清单 v1](data/olist-queryspec-coverage-seed-manifest-v1.md)：15 条结构化 seed 的覆盖、split 限制和 protected-summary 准入边界；尚未实际物化。
 17. [Olist Protected-Family Summary 受限导出 v1](data/olist-protected-family-summary-export-v1.md)：隔离人工输入、不可逆 fingerprint 输出与 evidence；尚未导出真实 summary。
 18. [Olist 领域 Candidate SQL SFT 覆盖矩阵 v2](data/olist-domain-sft-coverage-matrix-v2.md)：十指标的安全覆盖、归属澄清、排除项与物化前 family 目标；尚未生成样本。
-19. [Olist 领域 Candidate SQL SFT 覆盖矩阵 v1](data/olist-domain-sft-coverage-matrix-v1.md)：4 指标历史快照，只用于理解版本演进，不能物化。
-20. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：历史单指标 pilot 参考，不是当前训练数据或覆盖承诺。
-21. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
-22. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
-23. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
-24. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
-25. [CSpider 两 Epoch 实验与 Olist 迁移结果](experiments/cspider-bf16-lora-2epoch-v1.md)：查看 CSpider SQLite 对照，以及最终 Adapter 在受保护 Olist 工作区的独立迁移结果。
-26. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
+19. [Olist 运行时中文 Query 变体 v2 审核](data/olist-runtime-question-variants-v2-review.md)：6 个已准入 family 的双问法语义一致性和 12 条 Prompt 物化证据；尚未冻结最终评测集。
+20. [Olist 领域 Candidate SQL SFT 覆盖矩阵 v1](data/olist-domain-sft-coverage-matrix-v1.md)：4 指标历史快照，只用于理解版本演进，不能物化。
+21. [Olist 基础领域覆盖矩阵 v0.1](data/olist-pilot-coverage-v0.1.md)：历史单指标 pilot 参考，不是当前训练数据或覆盖承诺。
+22. [Spider SFT v2 规模化计划](../post-training-spider-sft-v2-plan.md)：查看当前 3k 级数据、Schema prompt v2、训练与质量门设计。
+23. [SFT v2 全量评测分析](../post-training-spider-sft-v2-full-analysis.md)：查看这轮完整对照、三层证据、回退模式和决策边界。
+24. [Olist 业务迁移评测](../post-training-olist-business-transfer-evaluation-v1.md)：查看本轮 PostgreSQL/Catalog/QueryPlan 对照、失败模式和下一实验边界。
+25. [Olist 英文候选 prompt 对照](experiments/olist-english-prompt-transfer-v1.md)：查看冻结中文 server grounding、仅替换英文候选提示的当日 Base/Adapter 对照及其语言边界。
+26. [CSpider 两 Epoch 实验与 Olist 迁移结果](experiments/cspider-bf16-lora-2epoch-v1.md)：查看 CSpider SQLite 对照，以及最终 Adapter 在受保护 Olist 工作区的独立迁移结果。
+27. [Base/Adapter 评测协议](../post-training-base-adapter-evaluation.md)、[首轮负向诊断](../post-training-base-adapter-analysis-v1.md) 和 [官方 release 成对分析](../post-training-official-base-adapter-analysis-v1.md)：查看评测合同与历史失败实验。
 
 ## 看日志与停止任务
 
