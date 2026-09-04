@@ -14,6 +14,7 @@ from data_analysis_agent.olist_queryspec import (
     render_gold_sql,
     validate_query_spec,
 )
+from data_analysis_agent.semantic_catalog import CatalogLoader
 from data_analysis_agent.sql_policy import SqlPolicy
 
 
@@ -269,6 +270,17 @@ def test_version_drift_and_result_column_drift_are_rejected() -> None:
 
     _assert_rejected(stale_workspace, "workspace_version_mismatch")
     _assert_rejected(tampered_columns, "result_columns_do_not_match_contract")
+
+
+def test_explicit_catalog_must_match_the_pinned_workspace_snapshot() -> None:
+    spec = _spec(metric_ids=("gmv",), result_shape="scalar")
+    current_catalog = CatalogLoader().load()
+    stale_catalog = dataclasses.replace(current_catalog, dataset_version="olist-kaggle-v1")
+
+    with pytest.raises(QuerySpecValidationError) as exc_info:
+        validate_query_spec(spec, catalog=stale_catalog)
+
+    assert exc_info.value.reason_code == "workspace_version_mismatch"
 
 
 def test_workspace_pin_is_explicit_and_not_an_input_for_user_text() -> None:

@@ -1,10 +1,10 @@
 ---
-goal: Design a controlled Olist QuerySpec batch materializer
+goal: Implement a controlled Olist QuerySpec batch materializer
 version: 1.0
 date_created: 2026-09-03
 last_updated: 2026-09-03
 owner: Data Analysis Agent
-status: 'Design only'
+status: 'Implemented; no real data materialized'
 tags: [feature, post-training, data-contract, materialization]
 ---
 
@@ -12,8 +12,8 @@ tags: [feature, post-training, data-contract, materialization]
 
 ## 1. 目标与非目标
 
-本任务只设计后续如何从已冻结 coverage seed 生成、验证和审计一批 `QuerySpec` 与 canonical Gold SQL。
-它不是训练数据生成器，也不在本任务读取 protected holdout、构造自然语言 Prompt、执行 SQL 或启动训练。
+本任务实现从已冻结 coverage seed 生成、验证和审计一批 `QuerySpec` 与 canonical Gold SQL 的受控中间产物。
+它不是训练数据生成器，也不读取 protected holdout、构造自然语言 Prompt、执行 SQL 或启动训练。
 
 物化器的目标是把“可安全覆盖的语义组合”转换为可复现、可审阅的离线中间产物，并在写出任何记录
 之前完成结构校验、重复检查和版本锁定。
@@ -56,7 +56,8 @@ canonicalize seed
 - `query_spec_id` 由 QuerySpec canonical JSON 派生，不能由随机数或自然语言生成；
 - `sql_program_id` 取已冻结的 Join program/聚合程序 ID，不能从 SQL 文本模糊推断；
 - `family_id` 由不含具体日期/措辞的有序指标、结果形状、维度、时间粒度/模式、Join program、聚合/去重策略、版本组成；
-- 相同 `family_id`、相同 `query_spec_id`、相同 `sql_program_id` 或受保护摘要碰撞必须 fail closed；
+- 相同 `family_id`、相同 `query_spec_id`、相同 canonical SQL hash 或受保护 family 摘要碰撞必须 fail closed；
+- 同一 `sql_program_id` 可以服务同一 split 的多个不同 family，但不能跨 split；否则训练/验证/测试会共享完整查询程序。
 - 日期窗口、中文措辞、SQL 空白和别名改写不能制造新的 family；它们属于后续语言物化阶段，不能在本设计中用来虚增覆盖。
 
 ## 5. Split 与配额
@@ -90,6 +91,14 @@ SqlPolicy -> daa_analytics_reader -> ResultContract/ResultValidator -> 人工指
 
 ## 8. 验收证据与停止条件
 
-后续实现必须先用小型合成 seed 覆盖成功、重复、版本漂移、敏感维度、归因、family 泄漏、protected 摘要
-碰撞和 renderer hash 篡改等路径；不得读取 Olist 训练/验证/测试原文或 protected holdout。只有用户审阅并确认
-物化器接口、family 派生、split 分配、输出边界和失败策略后，才能开始编写物化脚本。
+实现位于 `scripts/post_training/data/materialize_olist_queryspecs.py`，测试位于
+`tests/test_olist_queryspec_materializer.py`。它接受显式 split 的结构化 JSONL seed 和仅含 family fingerprint
+的保护摘要；输出仅可写到仓库外目录，并使用 staging directory + 原子 rename。
+
+合成测试覆盖成功物化、日期变体 family 重复、protected family 碰撞、SQL program 跨 split、敏感维度、
+未知 `question` 字段和 renderer hash 篡改。实现后的 QuerySpec/物化器专项为 `53 passed`，与 Catalog/Router/
+QueryPlan/ResultValidator/SqlPolicy/Trusted SQL Tool 的相关回归为 `169 passed`。未运行脚本处理任何真实 Olist seed，
+未读取 protected holdout、未执行 Gold SQL，未生成 Prompt/训练 JSONL，未启动 tokenizer/GPU。
+
+下一项只能先设计并审阅一个很小的结构化 coverage seed 清单和与其匹配的 protected family summary 的生成边界；
+不得直接大规模物化或进入 SQL 执行、结果合同、token 审计和训练。

@@ -6,7 +6,7 @@ production Vanna/PostgreSQL runtime in `src/data_analysis_agent/`.
 
 | Directory | Responsibility | Examples |
 | --- | --- | --- |
-| `data/` | Build train-only Spider candidates and schema-disjoint splits. | `build_spider_sft_candidates.py`, `split_post_training_candidates.py` |
+| `data/` | Build audited benchmark candidates/splits and Olist structural Gold intermediates. | `build_spider_sft_candidates.py`, `split_post_training_candidates.py`, `materialize_olist_queryspecs.py` |
 | `training/` | Freeze a model, run SFT, validate an Adapter, verify artifacts. | `run_post_training_sft_smoke.py` |
 | `inference/` | Generate Base or Adapter SQL candidates without benchmark gold SQL. | `generate_post_training_text_to_sql.py` |
 | `evaluation/` | Verify matching evidence, then run SQLite, Test Suite, denotation and protected Olist transfer diagnostics. | `verify_cspider_matching_generation.py`, `run_sqlite_benchmark.py` |
@@ -23,3 +23,8 @@ python -m scripts.post_training.data.split_post_training_candidates --help
 The candidate generator remains an offline proposal component. It never owns
 production database permissions, SQL policy, metric semantics or result
 validation.
+
+`materialize_olist_queryspecs.py` is deliberately earlier than candidate-SQL
+training: it accepts only structural coverage seeds and a protected family
+summary, writes external QuerySpec/Gold intermediate artifacts atomically, and
+does not read questions, execute SQL, build training JSONL, or load a model.

@@ -331,6 +331,23 @@ def validate_query_spec(spec: QuerySpec, catalog: Catalog | None = None) -> Quer
     if any(not isinstance(metric, str) or not re.fullmatch(r"[a-z][a-z0-9_]+", metric) for metric in spec.metric_ids):
         raise QuerySpecValidationError("invalid_metric_ids", "metric_ids must be safe identifiers")
     active_catalog = catalog or CatalogLoader().load()
+    catalog_snapshot = (
+        active_catalog.catalog_version,
+        active_catalog.dataset_version,
+        active_catalog.metric_version,
+        active_catalog.policy_version,
+    )
+    pinned_snapshot = (
+        spec.workspace.catalog_version,
+        spec.workspace.dataset_version,
+        spec.workspace.metric_version,
+        spec.workspace.policy_version,
+    )
+    if catalog_snapshot != pinned_snapshot:
+        raise QuerySpecValidationError(
+            "workspace_version_mismatch",
+            "provided Catalog does not match the QuerySpec workspace snapshot",
+        )
     unknown_metrics = set(spec.metric_ids) - set(active_catalog.metrics_by_id)
     if unknown_metrics or any(metric not in METRIC_SQL_REGISTRY for metric in spec.metric_ids):
         raise QuerySpecValidationError("invalid_metric_ids", f"unknown metrics: {sorted(unknown_metrics)}")
