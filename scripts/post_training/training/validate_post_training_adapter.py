@@ -70,12 +70,21 @@ def load_row(path: Path, index: int) -> dict[str, Any]:
 
 def encode(row: dict[str, Any], tokenizer: Any, max_seq_length: int) -> dict[str, torch.Tensor]:
     text, sql = row["training_text"], row["candidate_sql"]
-    if SQL_MARKER not in text:
-        raise ValueError("training text lacks SQL marker")
-    prompt, embedded_sql = text.rsplit(SQL_MARKER, 1)
-    if embedded_sql.strip() != sql.strip():
-        raise ValueError("candidate SQL differs from encoded target")
-    prompt_ids = tokenizer(prompt + SQL_MARKER, add_special_tokens=False)["input_ids"]
+    rendered_prompt = row.get("rendered_prompt")
+    if rendered_prompt is not None:
+        if not isinstance(rendered_prompt, str) or not rendered_prompt.strip():
+            raise ValueError("rendered runtime prompt is invalid")
+        prompt_text = rendered_prompt.rstrip() + "\n"
+        if text != prompt_text + sql.strip():
+            raise ValueError("candidate SQL differs from rendered runtime prompt target")
+    else:
+        if SQL_MARKER not in text:
+            raise ValueError("training text lacks SQL marker")
+        prompt, embedded_sql = text.rsplit(SQL_MARKER, 1)
+        if embedded_sql.strip() != sql.strip():
+            raise ValueError("candidate SQL differs from encoded target")
+        prompt_text = prompt + SQL_MARKER
+    prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
     target_ids = tokenizer(sql.strip(), add_special_tokens=False)["input_ids"]
     input_ids = prompt_ids + target_ids + [tokenizer.eos_token_id]
     if len(input_ids) > max_seq_length:
