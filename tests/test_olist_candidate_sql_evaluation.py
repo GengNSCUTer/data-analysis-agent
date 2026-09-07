@@ -93,6 +93,7 @@ def test_candidate_prompt_is_sql_only_and_uses_server_context() -> None:
         ("```sql\nSELECT 1 AS gmv\n```", "SELECT 1 AS gmv"),
         ("SQL: SELECT 1 AS gmv", "SELECT 1 AS gmv"),
         ("Query\nSELECT 1 AS gmv", "SELECT 1 AS gmv"),
+        ("Query\nSQL: SELECT 1 AS gmv", "SELECT 1 AS gmv"),
         ("Query Plan\nWITH totals AS (SELECT 1 AS gmv) SELECT gmv FROM totals", "WITH totals AS (SELECT 1 AS gmv) SELECT gmv FROM totals"),
         ("Code\nSELECT 1 AS gmv", "SELECT 1 AS gmv"),
         ("Here is SQL: SELECT 1 AS gmv", "Here is SQL: SELECT 1 AS gmv"),

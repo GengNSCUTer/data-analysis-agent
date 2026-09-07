@@ -104,6 +104,11 @@ def unwrap_sql_completion(completion: str) -> str:
     lines = value.splitlines()
     if lines and lines[0].strip() in _DISPLAY_PREFIXES:
         value = "\n".join(lines[1:]).strip()
+    # A generator may emit a display label followed by the already-supported
+    # ``SQL:`` marker.  Remove that second presentation layer only; all SQL
+    # content remains untouched for the downstream policy gate.
+    if value[:4].lower() == "sql:":
+        value = value[4:].lstrip()
     if not value:
         raise CandidateSqlGenerationError("model generated only an empty SQL wrapper")
     return value
