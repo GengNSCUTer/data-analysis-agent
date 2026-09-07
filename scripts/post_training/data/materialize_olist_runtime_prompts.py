@@ -44,7 +44,9 @@ from data_analysis_agent.working_memory import WorkingMemory  # noqa: E402
 from vanna.core.user import User  # noqa: E402
 
 
-SCHEMA_VERSION = "olist-runtime-prompt-materialization-v2"
+# v3 serializes the ResultContract time display aliases required by the
+# ResultValidator. Earlier runtime assets omitted this field from evidence.
+SCHEMA_VERSION = "olist-runtime-prompt-materialization-v3"
 OVERLAY_SCHEMA_VERSION = "1"
 # A bounded release protects the prompt-materialization command from accidental
 # unreviewed bulk inputs. It is not an expected release size.

@@ -15,6 +15,11 @@ from .question_router import QuestionRoute
 
 OLIST_CANDIDATE_SQL_PROMPT_VERSION = "olist-candidate-sql-v1"
 
+# These are presentation labels observed from the bounded offline SQL generator.
+# They are intentionally exact, single-line matches: normalization must never
+# guess at or rewrite model-generated SQL/prose.
+_DISPLAY_PREFIXES = frozenset({"Query", "Query Plan", "Code"})
+
 
 class CandidateSqlGenerationError(ValueError):
     """The offline candidate-generation contract cannot be constructed."""
@@ -81,7 +86,7 @@ def render_candidate_sql_prompt(context: CandidateSqlContext) -> str:
 
 
 def unwrap_sql_completion(completion: str) -> str:
-    """Remove only a single outer SQL wrapper; never repair model-generated SQL.
+    """Remove only a single supported presentation wrapper; never repair SQL.
 
     The returned content deliberately remains untouched when it contains prose,
     multiple statements, DDL/DML, invalid identifiers, or an unsupported dialect.
@@ -96,6 +101,9 @@ def unwrap_sql_completion(completion: str) -> str:
             value = "\n".join(lines[1:-1]).strip()
     if value[:4].lower() == "sql:":
         value = value[4:].lstrip()
+    lines = value.splitlines()
+    if lines and lines[0].strip() in _DISPLAY_PREFIXES:
+        value = "\n".join(lines[1:]).strip()
     if not value:
         raise CandidateSqlGenerationError("model generated only an empty SQL wrapper")
     return value

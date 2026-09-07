@@ -14,9 +14,9 @@ PHYSICAL_NVIDIA_SMI_DEVICE="${PHYSICAL_NVIDIA_SMI_DEVICE:-3}"
 EXPECTED_GPU_UUID="${EXPECTED_GPU_UUID:-GPU-10863af0-8588-7625-5609-640ba794f64b}"
 MODEL_DIR="${MODEL_DIR:-/disk2/gengnan/data-analysis-agent-data/models/qwen2.5-coder-1.5b-base-df3ce67c0e24480f20468b6ef2894622d69eb73b}"
 SPLIT_DIR="${SPLIT_DIR:-/disk2/gengnan/data-analysis-agent-data/evals/olist-domain-sft-medium-v1/sft-splits-length3072-v1}"
-RUNTIME_CANDIDATES="${RUNTIME_CANDIDATES:-/disk2/gengnan/data-analysis-agent-data/evals/olist-domain-sft-medium-v1/runtime-prompts-20260904-v1/runtime_candidates.jsonl}"
+RUNTIME_CANDIDATES="${RUNTIME_CANDIDATES:-/disk2/gengnan/data-analysis-agent-data/evals/olist-domain-sft-medium-v1/runtime-prompts-20260907-v3/runtime_candidates.jsonl}"
 ADAPTER_DIR="${ADAPTER_DIR:-/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-olist-medium-bf16-lora-full2epoch-v1-20260904/adapter_final}"
-RUN_DIR="${RUN_DIR:-/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-olist-medium-base-adapter-finaltest-v1-20260906}"
+RUN_DIR="${RUN_DIR:-/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-olist-medium-base-adapter-finaltest-v2b-20260907}"
 
 for required_path in "${PYTHON}" "${MODEL_DIR}" "${ADAPTER_DIR}/adapter_model.safetensors" "${SPLIT_DIR}/final_evaluation_only/in_domain_test.jsonl" "${SPLIT_DIR}/validation.jsonl" "${SPLIT_DIR}/split_audit.json" "${RUNTIME_CANDIDATES}"; do
   [[ -e "${required_path}" ]] || { echo "[error] required path does not exist: ${required_path}" >&2; exit 2; }
@@ -26,7 +26,7 @@ mkdir -p "${RUN_DIR}"
 exec > >(tee -a "${RUN_DIR}/screen-run.log") 2>&1
 
 echo "[start] $(date --iso-8601=seconds)"
-echo "[experiment] olist_medium_matching_base_adapter_finaltest_v1"
+echo "[experiment] olist_medium_matching_base_adapter_finaltest_v2"
 nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total,utilization.gpu --format=csv,noheader
 
 # A fresh load proves that the saved adapter can be attached to the original base.

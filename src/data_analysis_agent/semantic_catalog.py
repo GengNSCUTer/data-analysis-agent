@@ -385,6 +385,7 @@ class ResultContract:
             "required_result_columns": list(self.required_result_columns),
             "metric_result_columns": list(self.metric_result_columns),
             "result_time_column": self.result_time_column,
+            "result_time_column_aliases": list(self.result_time_column_aliases),
             "requested_start": self.requested_start,
             "requested_end": self.requested_end,
             "selected_join_ids": list(self.selected_join_ids),

@@ -395,6 +395,7 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
     assert agent.metadata["policy_version"] == "sql-policy-v1"
     assert agent.metadata["prompt_version"] == "trusted-olist-prompt-v2"
     assert recorder.usage.catalog_trace["result_contract"]["metric_ids"] == ["gmv"]
+    assert "month" in recorder.usage.catalog_trace["result_contract"]["result_time_column_aliases"]
     assert recorder.usage.query_plan["plan_type"] == "single_metric"
     assert recorder.usage.deterministic_result_finalization_disabled is False
 

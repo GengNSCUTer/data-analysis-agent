@@ -2,6 +2,27 @@
 
 本台账只记录已完成实验和待评测的受控实验，不在这里讲通用概念。原始训练样本、SQL、预测、数据库、模型权重、checkpoint 和完整日志都留在仓库外；这里仅记录可复核的配置、哈希和聚合结果。当前学习顺序在上级目录的 `README.md` 中维护。
 
+## 2026-09-07：Olist Medium v1 运行时边界修复与正式 matching 重跑
+
+修复 `unwrap_sql_completion()` 对 `Query`/`Query Plan`/`Code` 精确单行展示前缀的安全归一化；补齐 `ResultContract.as_evidence()` 的 `result_time_column_aliases`，并将 runtime prompt 资产升级为 v3、重建 1,200 条（final test 240 条）。在不读取 Gold 参与生成的正式 matching 链路中，Adapter 为 `240/240` Policy accepted、PostgreSQL executed、ResultContract valid；Base 为 `104/240`、`32/240`、`13/240`。生成后 Gold 对照：Adapter `240/240` ordered denotation match；Base 原始有效候选 `0/13` match，其他 227 条按合同不进入 Gold。该结果替代旧 runtime 资产的表面失败统计，仍只代表当前 Olist final test 和冻结合同，不代表跨数据集泛化或生产默认接入。报告均在仓库外 `qwen25coder15b-olist-medium-base-adapter-finaltest-v2b-20260907/`。
+
+## 2026-09-07：Olist Medium v1 Adapter 150 条失败的诊断性重放
+
+对 2026-09-06 final test 的 Adapter `150` 条未通过样本做了离线反事实重放。原始失败由
+`139` 条 SqlPolicy rejection 和 `11` 条 ResultContract rejection 构成，240 条候选均已生成，
+没有路由或模型生成失败。
+
+139 条候选的首行前缀为 `Query=99`、`Query Plan=30`、`Code=10`。仅删除对应首行后，
+139/139 通过同一 SqlPolicy；在内存中补充时间列 `time` alias 后，139/139 PostgreSQL
+ResultContract valid，并与 deterministic Gold SQL 做有序 denotation match。另行对 11 条
+原 ResultContract rejection 补 `time` alias，结果为 11/11 valid、11/11 Gold match。
+
+这证明本批样本首先暴露的是输出边界和冻结 runtime ResultContract 元数据缺口，而不是已确认
+的 SQL 执行/业务语义错误。它不改变原始评测的 `90/240` ResultContract valid，也不把
+`150/150` 反事实匹配写成生产质量门。完整脱敏重放报告在仓库外
+`.../qwen25coder15b-olist-medium-base-adapter-finaltest-v1-20260906/analysis/adapter-format-replay-v1.json`，
+方法和后续数据建议见 [`olist-medium-v1-failure-analysis.md`](olist-medium-v1-failure-analysis.md)。
+
 ## 固定边界
 
 - 研究模型：`Qwen/Qwen2.5-Coder-1.5B`，revision `df3ce67c0e24480f20468b6ef2894622d69eb73b`。
