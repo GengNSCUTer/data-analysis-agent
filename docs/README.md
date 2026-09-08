@@ -32,6 +32,7 @@
 - [`data-dictionary.md`](data-dictionary.md)：当前工作区字段字典。
 - [`metric-catalog.md`](metric-catalog.md)：当前十项指标的简表与机器可读 Catalog 入口。
 - [`metric-contracts/olist-metrics-v2.md`](metric-contracts/olist-metrics-v2.md)：十项指标的公式、分母、归属边界和数据库回归证据。
+- [`metric-contracts/thelook-metrics-v1.md`](metric-contracts/thelook-metrics-v1.md)：TheLook 首批六项指标合同及状态、时间、币种和跨 schema 比较边界。
 - [`post-training/data/olist-queryspec-renderer-design-v1.md`](post-training/data/olist-queryspec-renderer-design-v1.md)：Olist 领域 SFT 中离线 QuerySpec 与 deterministic PostgreSQL Gold SQL renderer 的职责边界及实现状态；40 条 Gold 已准入，作为工程验收证据。
 - [`post-training/data/olist-pilot-v1-sft-data.md`](post-training/data/olist-pilot-v1-sft-data.md)：40 条工程验收集，记录真实运行时 Prompt、`24/8/8` family-isolated 验收和 `2304` 无截断长度合同；不作为正式训练规模。
 - [`post-training/data/olist-medium-v1-sft-data.md`](post-training/data/olist-medium-v1-sft-data.md)：正式中等规模领域 release 的 `720/240/240` 目标、准入和物化契约。

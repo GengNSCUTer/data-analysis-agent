@@ -96,6 +96,18 @@ The frozen snapshot passed these gates:
 - Source time ranges span late 2018/early 2019 through January 2024 depending on the
   relation. Exact aggregate evidence is in the external `schema_audit.md`.
 
+## Catalog Boundary
+
+The first Catalog snapshot is now frozen as `thelook-catalog-v1` with metric version
+`0.1-frozen`. It contains six metrics: `completed_sale_amount`,
+`completed_order_count`, `average_order_value`, `average_fulfillment_days`,
+`return_rate` and `completed_customer_count`. The contracts deliberately use the
+source's exact order statuses and `orders.created_at`; they do not invent a currency
+code or map TheLook statuses to Olist statuses. Event funnels, inventory turnover,
+margin and fulfillment-center metrics remain out of scope until their denominators
+and cross-fact grain rules are separately reviewed. Details are in
+[`../../../metric-contracts/thelook-metrics-v1.md`](../../../metric-contracts/thelook-metrics-v1.md).
+
 ## Next Boundary
 
 The next separate task is to define a TheLook-only Semantic Catalog and metric contracts

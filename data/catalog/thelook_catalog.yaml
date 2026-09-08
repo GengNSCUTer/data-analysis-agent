@@ -1,0 +1,235 @@
+catalog_version: "thelook-catalog-v1"
+dataset_version: "thelook-kaggle-mirror-v1-20260908"
+metric_version: "0.1-frozen"
+policy_version: "sql-policy-v1"
+description: "Server-owned semantic catalog for the isolated TheLook PostgreSQL evaluation workspace."
+
+tables:
+  - table_id: distribution_centers
+    physical_name: distribution_centers
+    description: "配送中心维度；提供仓网名称和内部空间关联键。"
+    grain: distribution_center
+    aliases: [配送中心, 仓库, 发货仓, fulfillment center]
+    semantic_tags: [仓储, 配送, 履约]
+    role_visibility: [analyst, admin]
+    context_columns: [id, name]
+    columns:
+      - {name: id, type: bigint, description: 配送中心内部标识，仅用于关联, aliases: [配送中心ID, 仓库ID], sensitive: true}
+      - {name: name, type: text, description: 配送中心名称, aliases: [配送中心名称, 仓库名称], sensitive: false}
+      - {name: latitude, type: double_precision, description: 配送中心纬度，不作为展示字段, aliases: [纬度], sensitive: true}
+      - {name: longitude, type: double_precision, description: 配送中心经度，不作为展示字段, aliases: [经度], sensitive: true}
+
+  - table_id: events
+    physical_name: events
+    description: "站内行为事件；一行代表一个用户或匿名会话事件。当前只作为后续漏斗指标的 schema 上下文。"
+    grain: event
+    aliases: [行为事件, 浏览事件, 流量事件, events]
+    semantic_tags: [流量, 访问, 转化, 行为]
+    role_visibility: [analyst, admin]
+    context_columns: [user_id, session_id, created_at, traffic_source, event_type]
+    columns:
+      - {name: id, type: bigint, description: 事件内部标识，仅用于关联, aliases: [事件ID], sensitive: true}
+      - {name: user_id, type: bigint, description: 用户内部标识，仅用于关联或去重, aliases: [用户ID], sensitive: true}
+      - {name: sequence_number, type: integer, description: 会话内事件序号, aliases: [事件序号], sensitive: false}
+      - {name: session_id, type: uuid, description: 会话内部标识，仅用于去重, aliases: [会话ID], sensitive: true}
+      - {name: created_at, type: timestamptz, description: 事件发生时间, aliases: [事件时间, 访问时间], sensitive: false}
+      - {name: city, type: text, description: 事件城市, aliases: [城市], sensitive: false}
+      - {name: state, type: text, description: 事件地区, aliases: [州, 地区], sensitive: false}
+      - {name: browser, type: text, description: 浏览器类型, aliases: [浏览器], sensitive: false}
+      - {name: traffic_source, type: text, description: 流量来源, aliases: [流量来源, 获客渠道], sensitive: false}
+      - {name: uri, type: text, description: 页面路径, aliases: [页面路径, 页面], sensitive: false}
+      - {name: event_type, type: text, description: 事件类型, aliases: [事件类型, 行为类型], sensitive: false}
+
+  - table_id: inventory_items
+    physical_name: inventory_items
+    description: "库存单件事实；一行代表一个可售库存单元。当前不用于首批业务指标。"
+    grain: inventory_item
+    aliases: [库存, 库存明细, inventory]
+    semantic_tags: [库存, 商品, 成本, 仓储]
+    role_visibility: [analyst, admin]
+    context_columns: [id, product_id, created_at, sold_at, cost, product_category]
+    columns:
+      - {name: id, type: bigint, description: 库存单元标识，仅用于关联, aliases: [库存ID], sensitive: true}
+      - {name: product_id, type: bigint, description: 商品内部标识，仅用于关联, aliases: [商品ID], sensitive: true}
+      - {name: created_at, type: timestamptz, description: 入库创建时间, aliases: [入库时间], sensitive: false}
+      - {name: sold_at, type: timestamptz, description: 售出时间, aliases: [售出时间], sensitive: false}
+      - {name: cost, type: numeric, description: 库存采购成本，币种未在来源中冻结, aliases: [成本, 采购成本], sensitive: false}
+      - {name: product_category, type: text, description: 库存快照商品品类, aliases: [商品品类, 品类], sensitive: false}
+      - {name: product_name, type: text, description: 库存快照商品名称, aliases: [商品名称], sensitive: false}
+      - {name: product_brand, type: text, description: 库存快照商品品牌, aliases: [品牌], sensitive: false}
+      - {name: product_retail_price, type: numeric, description: 库存快照零售价，币种未在来源中冻结, aliases: [零售价], sensitive: false}
+      - {name: product_department, type: text, description: 商品部门, aliases: [商品部门, 部门], sensitive: false}
+      - {name: product_sku, type: text, description: 商品 SKU，仅用于关联, aliases: [SKU], sensitive: true}
+      - {name: product_distribution_center_id, type: bigint, description: 配送中心内部标识，仅用于关联, aliases: [配送中心ID], sensitive: true}
+
+  - table_id: order_items
+    physical_name: order_items
+    description: "订单商品行事实；一行代表一个订单中的一个商品行。"
+    grain: order_item
+    aliases: [订单商品, 商品明细, 订单项, order items]
+    semantic_tags: [订单, 商品, 成交额, 销售]
+    role_visibility: [analyst, admin]
+    context_columns: [order_id, user_id, product_id, status, created_at, sale_price]
+    columns:
+      - {name: id, type: bigint, description: 订单商品行内部标识，仅用于关联, aliases: [订单项ID], sensitive: true}
+      - {name: order_id, type: bigint, description: 订单内部标识，仅用于关联或聚合, aliases: [订单ID], sensitive: true}
+      - {name: user_id, type: bigint, description: 用户内部标识，仅用于关联或去重, aliases: [用户ID], sensitive: true}
+      - {name: product_id, type: bigint, description: 商品内部标识，仅用于关联, aliases: [商品ID], sensitive: true}
+      - {name: inventory_item_id, type: bigint, description: 库存单元内部标识，仅用于关联, aliases: [库存ID], sensitive: true}
+      - {name: status, type: text, description: 商品行状态，与订单状态逐行一致, aliases: [商品行状态, 状态], sensitive: false}
+      - {name: created_at, type: timestamptz, description: 商品行创建时间, aliases: [创建时间, 下单时间], sensitive: false}
+      - {name: shipped_at, type: timestamptz, description: 商品行发货时间, aliases: [发货时间], sensitive: false}
+      - {name: delivered_at, type: timestamptz, description: 商品行送达时间, aliases: [送达时间], sensitive: false}
+      - {name: returned_at, type: timestamptz, description: 商品行退货时间, aliases: [退货时间], sensitive: false}
+      - {name: sale_price, type: numeric, description: 商品行成交价；来源未提供币种字段, aliases: [成交价, 销售额, 商品金额], sensitive: false}
+
+  - table_id: orders
+    physical_name: orders
+    description: "订单事实；一行代表一个订单。"
+    grain: order
+    aliases: [订单, 订单表, orders]
+    semantic_tags: [订单, 交易, 履约, 退货]
+    role_visibility: [analyst, admin]
+    context_columns: [order_id, user_id, status, created_at, shipped_at, delivered_at, returned_at, num_of_item]
+    columns:
+      - {name: order_id, type: bigint, description: 订单内部标识，仅用于关联或聚合, aliases: [订单ID], sensitive: true}
+      - {name: user_id, type: bigint, description: 用户内部标识，仅用于关联或去重, aliases: [用户ID], sensitive: true}
+      - {name: status, type: text, description: 订单状态：Cancelled、Complete、Processing、Returned、Shipped, aliases: [订单状态, 状态], sensitive: false}
+      - {name: gender, type: text, description: 下单用户性别快照, aliases: [性别], sensitive: false}
+      - {name: created_at, type: timestamptz, description: 订单创建时间，也是首批订单指标的统计时间, aliases: [下单时间, 订单时间, 创建时间], sensitive: false}
+      - {name: returned_at, type: timestamptz, description: 订单退货时间, aliases: [退货时间], sensitive: false}
+      - {name: shipped_at, type: timestamptz, description: 订单发货时间, aliases: [发货时间], sensitive: false}
+      - {name: delivered_at, type: timestamptz, description: 订单送达时间, aliases: [送达时间, 收货时间], sensitive: false}
+      - {name: num_of_item, type: integer, description: 订单声明商品行数，经导入审计与实际商品行数一致, aliases: [商品件数, 商品行数], sensitive: false}
+
+  - table_id: products
+    physical_name: products
+    description: "商品维度；提供品类、品牌和部门等稳定商品属性。"
+    grain: product
+    aliases: [商品, 产品, 品类, products]
+    semantic_tags: [商品, 品类, 品牌, 部门]
+    role_visibility: [analyst, admin]
+    context_columns: [id, category, brand, department]
+    columns:
+      - {name: id, type: bigint, description: 商品内部标识，仅用于关联, aliases: [商品ID], sensitive: true}
+      - {name: cost, type: numeric, description: 商品成本，币种未在来源中冻结, aliases: [成本], sensitive: false}
+      - {name: category, type: text, description: 商品品类, aliases: [商品品类, 品类, 类目], sensitive: false}
+      - {name: name, type: text, description: 商品名称, aliases: [商品名称], sensitive: false}
+      - {name: brand, type: text, description: 商品品牌, aliases: [品牌], sensitive: false}
+      - {name: retail_price, type: numeric, description: 商品标价，币种未在来源中冻结, aliases: [标价, 零售价], sensitive: false}
+      - {name: department, type: text, description: 商品部门, aliases: [商品部门, 部门], sensitive: false}
+      - {name: sku, type: text, description: 商品 SKU，仅用于关联, aliases: [SKU], sensitive: true}
+      - {name: distribution_center_id, type: bigint, description: 配送中心内部标识，仅用于关联, aliases: [配送中心ID], sensitive: true}
+
+  - table_id: users
+    physical_name: users
+    description: "已脱敏用户维度；仅包含可展示的聚合维度。"
+    grain: user
+    aliases: [用户, 客户, 买家, users]
+    semantic_tags: [用户, 客户, 地域, 获客]
+    role_visibility: [analyst, admin]
+    context_columns: [id, state, city, country, traffic_source, created_at]
+    columns:
+      - {name: id, type: bigint, description: 用户内部标识，仅用于关联或去重, aliases: [用户ID, 客户ID], sensitive: true}
+      - {name: age, type: integer, description: 用户年龄, aliases: [年龄], sensitive: false}
+      - {name: gender, type: text, description: 用户性别, aliases: [性别], sensitive: false}
+      - {name: state, type: text, description: 用户州/地区, aliases: [州, 地区, 区域], sensitive: false}
+      - {name: city, type: text, description: 用户城市, aliases: [城市, 用户城市], sensitive: false}
+      - {name: country, type: text, description: 用户国家, aliases: [国家], sensitive: false}
+      - {name: traffic_source, type: text, description: 用户注册流量来源, aliases: [流量来源, 获客渠道], sensitive: false}
+      - {name: created_at, type: timestamptz, description: 用户注册时间, aliases: [注册时间, 用户创建时间], sensitive: false}
+
+metrics:
+  - metric_id: completed_sale_amount
+    name: 已完成成交额
+    description: "状态为 Complete 的订单商品行 sale_price 之和；不将来源未明确的币种标记为 USD。"
+    aliases: [已完成成交额, 已完成销售额, GMV, 成交额, 销售额]
+    grain: order_item
+    time_field: orders.created_at
+    source_tables: [orders, order_items]
+    source_columns: [orders.order_id, orders.status, orders.created_at, order_items.order_id, order_items.product_id, order_items.sale_price]
+    default_filters: ["orders.status = 'Complete'"]
+    allowed_dimensions: [date, state, city, traffic_source, category, brand, department]
+    result_value_constraints: {minimum: 0}
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+
+  - metric_id: completed_order_count
+    name: 已完成订单数
+    description: "状态为 Complete 的订单数，按 orders.order_id 计数。"
+    aliases: [已完成订单数, 完成订单数, 成交订单数, 完成订单]
+    grain: order
+    time_field: orders.created_at
+    source_tables: [orders]
+    source_columns: [orders.order_id, orders.status, orders.created_at]
+    default_filters: ["orders.status = 'Complete'"]
+    allowed_dimensions: [date, state, city, traffic_source]
+    result_value_constraints: {minimum: 0, integer_like: true}
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+
+  - metric_id: average_order_value
+    name: 平均完成订单金额
+    description: "已完成订单的平均商品行成交额；先按订单汇总 sale_price，再对订单金额取平均，避免商品行数影响分母。"
+    aliases: [平均完成订单金额, 平均订单金额, 客单价, AOV]
+    grain: order
+    time_field: orders.created_at
+    source_tables: [orders, order_items]
+    source_columns: [orders.order_id, orders.status, orders.created_at, order_items.order_id, order_items.sale_price]
+    default_filters: ["orders.status = 'Complete'"]
+    allowed_dimensions: [date, state, city, traffic_source]
+    result_value_constraints: {minimum: 0}
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+
+  - metric_id: average_fulfillment_days
+    name: 平均履约天数
+    description: "已完成订单中 delivered_at 减 created_at 的平均天数；仅纳入两个时间字段均非空的订单。"
+    aliases: [平均履约天数, 平均配送天数, 履约时长, 平均送达时长]
+    grain: order
+    time_field: orders.created_at
+    source_tables: [orders]
+    source_columns: [orders.status, orders.created_at, orders.delivered_at]
+    default_filters: ["orders.status = 'Complete'", "orders.created_at IS NOT NULL", "orders.delivered_at IS NOT NULL"]
+    allowed_dimensions: [date, state, city, traffic_source]
+    result_value_constraints: {minimum: 0}
+    recommended_chart: line
+    role_visibility: [analyst, admin]
+
+  - metric_id: return_rate
+    name: 退货率
+    description: "Returned 订单数除以 Complete 与 Returned 订单数之和；分母限定为已形成履约结果的订单，不把取消和未完成订单混入。"
+    aliases: [退货率, 订单退货率, 退货订单占比]
+    grain: order
+    time_field: orders.created_at
+    source_tables: [orders]
+    source_columns: [orders.order_id, orders.status, orders.created_at, orders.returned_at]
+    default_filters: ["orders.status IN ('Complete', 'Returned')"]
+    allowed_dimensions: [date, state, city, traffic_source]
+    result_value_constraints: {minimum: 0, maximum: 1}
+    recommended_chart: line
+    role_visibility: [analyst, admin]
+
+  - metric_id: completed_customer_count
+    name: 已完成客户数
+    description: "至少有一笔 Complete 订单的去重用户数，按 orders.user_id COUNT(DISTINCT) 计算。"
+    aliases: [已完成客户数, 成交客户数, 活跃成交客户数, 去重客户数]
+    grain: customer
+    time_field: orders.created_at
+    source_tables: [orders]
+    source_columns: [orders.user_id, orders.status, orders.created_at]
+    default_filters: ["orders.status = 'Complete'"]
+    allowed_dimensions: [date, state, city, traffic_source]
+    result_value_constraints: {minimum: 0, integer_like: true}
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+
+joins:
+  - {join_id: order_items_orders, from_table: order_items, to_table: orders, cardinality: many_to_one, "on": "order_items.order_id = orders.order_id", reason: 商品行关联订单；金额与订单时间/状态一起使用时以订单为口径来源}
+  - {join_id: orders_users, from_table: orders, to_table: users, cardinality: many_to_one, "on": "orders.user_id = users.id", reason: 订单关联已脱敏用户地域和流量来源维度}
+  - {join_id: order_items_products, from_table: order_items, to_table: products, cardinality: many_to_one, "on": "order_items.product_id = products.id", reason: 商品行关联商品品类、品牌和部门}
+  - {join_id: order_items_inventory, from_table: order_items, to_table: inventory_items, cardinality: many_to_one, "on": "order_items.inventory_item_id = inventory_items.id", reason: 商品行关联库存单元；当前不用于首批指标}
+  - {join_id: inventory_products, from_table: inventory_items, to_table: products, cardinality: many_to_one, "on": "inventory_items.product_id = products.id", reason: 库存单元关联商品维度}
+  - {join_id: products_distribution_centers, from_table: products, to_table: distribution_centers, cardinality: many_to_one, "on": "products.distribution_center_id = distribution_centers.id", reason: 商品默认配送中心关联}
+  - {join_id: inventory_distribution_centers, from_table: inventory_items, to_table: distribution_centers, cardinality: many_to_one, "on": "inventory_items.product_distribution_center_id = distribution_centers.id", reason: 库存单元配送中心关联}
+  - {join_id: events_users, from_table: events, to_table: users, cardinality: many_to_one, "on": "events.user_id = users.id", reason: 行为事件关联已脱敏用户维度；匿名事件的 user_id 可以为空}
