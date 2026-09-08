@@ -50,6 +50,9 @@ def test_grouped_and_series_gold_have_expected_keys_and_policy(
     assert artifact.required_result_columns == columns
     assert SqlPolicy(workspace=THELOOK_WORKSPACE).evaluate(artifact.sql).status == "allowed"
     assert "thelook_raw" not in artifact.sql
+    selected = artifact.sql.split(" SELECT ", 1)[-1]
+    if shape == "time_series":
+        assert selected.index("completed_order_count") < selected.index(" AS time")
 
 
 def test_aov_gold_preserves_order_grain_before_average() -> None:

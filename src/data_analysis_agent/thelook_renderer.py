@@ -198,18 +198,23 @@ def _final_select(spec: TheLookQuerySpec) -> str:
         return f"SELECT {', '.join(columns)} FROM " + " CROSS JOIN ".join(names)
 
     key = spec.dimension if spec.result_shape == "dimension_grouped" else "time"
-    columns: list[str] = []
+    columns: list[str] = [
+        f"{name}.{metric} AS {metric}" for name, metric in zip(names, spec.metric_ids)
+    ]
     if len(names) == 1:
-        columns.append(f"{names[0]}.{key} AS {key}")
+        key_expression = f"{names[0]}.{key} AS {key}"
     else:
-        columns.append(
+        key_expression = (
             f"COALESCE({names[0]}.{key}, "
             + ", ".join(f"{name}.{key}" for name in names[1:])
             + f") AS {key}"
         )
-    columns.extend(
-        f"{name}.{metric} AS {metric}" for name, metric in zip(names, spec.metric_ids)
-    )
+    # Keep the public order identical to QuerySpec.required_result_columns:
+    # dimension-first for grouped results, metric-first then time for series.
+    if spec.result_shape == "dimension_grouped":
+        columns.insert(0, key_expression)
+    else:
+        columns.append(key_expression)
     sql = f"SELECT {', '.join(columns)} FROM {names[0]}"
     for name in names[1:]:
         sql += f" FULL OUTER JOIN {name} USING ({key})"

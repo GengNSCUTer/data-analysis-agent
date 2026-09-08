@@ -310,6 +310,15 @@ class ResultValidator:
                 )
             start = pd.Timestamp(requested_start) if requested_start is not None else None
             end = pd.Timestamp(requested_end) if requested_end is not None else None
+            # PostgreSQL timestamptz buckets are timezone-aware while QuerySpec
+            # dates are intentionally timezone-neutral. Compare both on the
+            # same naive timeline rather than raising on mixed timestamp types.
+            if parsed.dt.tz is not None:
+                parsed = parsed.dt.tz_localize(None)
+            if start is not None and start.tzinfo is not None:
+                start = start.tz_localize(None)
+            if end is not None and end.tzinfo is not None:
+                end = end.tz_localize(None)
             if start is not None and time_bucket_grain is not None:
                 start = _bucket_start(start, time_bucket_grain)
             if start is not None and parsed.min() < start or end is not None and parsed.max() > end:

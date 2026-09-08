@@ -39,6 +39,7 @@
 - [`post-training/data/thelook-cross-schema-workspace-v1.md`](post-training/data/thelook-cross-schema-workspace-v1.md)：第二电商 schema 的独立 PostgreSQL workspace、来源、最小权限与审计边界；它是 Olist LoRA 的未来零样本评测集，不参与当前训练。
 - [`post-training/data/thelook-queryspec-contract-v1.md`](post-training/data/thelook-queryspec-contract-v1.md)：TheLook 结构化 QuerySpec 字段、允许范围和 fail-closed 校验；不包含自然语言问题或 Gold SQL。
 - [`post-training/data/thelook-renderer-contract-v1.md`](post-training/data/thelook-renderer-contract-v1.md)：TheLook deterministic PostgreSQL Gold SQL renderer 的固定公式、粒度边界和真实 reader 执行证据。
+- [`post-training/data/thelook-cross-schema-final-test-v1.md`](post-training/data/thelook-cross-schema-final-test-v1.md)：TheLook 206 条冻结跨 schema Base/Adapter final test 的覆盖、准入和评测边界。
 - [`post-training/data/olist-queryspec-coverage-seed-manifest-v1.md`](post-training/data/olist-queryspec-coverage-seed-manifest-v1.md)：小型静态 coverage seed 的输入边界、覆盖分布、split 限制与 protected-summary 准入条件；其中 6 条已作为外部 Gold 准入批，仍不是训练数据。
 - [`post-training/data/olist-protected-family-summary-export-v1.md`](post-training/data/olist-protected-family-summary-export-v1.md)：仓库外 protected family fingerprint summary 的受限导出与证据边界；当前 v1 外部 summary/evidence 已经由受限流程导出。
 - [`sql-policy.md`](sql-policy.md)：`sqlglot` AST 策略和 SQL 执行边界。

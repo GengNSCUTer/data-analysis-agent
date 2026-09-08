@@ -129,6 +129,18 @@ def test_validator_accepts_catalog_time_alias_for_temporal_result() -> None:
     assert result.state == "valid"
 
 
+def test_validator_normalizes_timezone_aware_postgres_buckets() -> None:
+    result = ResultValidator().validate(
+        pd.DataFrame({"time": [pd.Timestamp("2019-01-01", tz="Asia/Shanghai")], "gmv": [123.4]}),
+        metric_columns=("gmv",),
+        time_column="time",
+        requested_start="2019-01-01",
+        requested_end="2020-01-01",
+    )
+
+    assert result.state == "valid"
+
+
 def test_result_summary_is_bounded_and_uses_only_contract_columns() -> None:
     frame = pd.DataFrame(
         {
