@@ -52,6 +52,8 @@
 | R5 领域数据与受控接入 | 构建运行时 Prompt 对齐的 Olist 领域资产，并在通过质量门后再讨论候选接入 | Medium v1 训练与最终 Gold 对照完成，尚未接入运行时 | Medium v1 已完成 `720/240/240` family-isolated split、1,200 条 Gold 准入、生产 Prompt 重建、3072 无截断长度审计及两 epoch bf16 LoRA。修复输出展示前缀归一化和时间别名资产传递后，冻结 in-domain test 的正式 matching 评测中，Adapter 的 Policy/PostgreSQL/ResultContract 为 `240/240/240`，Gold ordered denotation 为 `240/240`；Base 分别为 `104/240`、`32/240`、`13/240`，其原始有效候选 Gold 匹配为 `0/13`。该证据仅覆盖当前 240 条 Olist final test 和冻结合同，尚不代表跨数据集泛化或允许接入默认运行时。训练与 matching Base/Adapter 合同见 [`data/olist-medium-v1-training-evaluation-contract.md`](data/olist-medium-v1-training-evaluation-contract.md)。详细实验记录见 [`experiments/log.md`](experiments/log.md)。 |
 | R6 跨 schema 迁移评测 | 保持 Olist LoRA 冻结，在第二个未见电商 schema 上作 Base/Adapter 零样本对照 | 206 条已完成 matching 生成与安全/执行/结果合同/Gold 对照 | TheLook final test 206 条、Prompt/解码合同一致；Base 执行 54、合同通过 23、ordered match 6；Adapter 执行 63、合同通过 63、ordered match 37、bag match 41。Adapter 有明显跨 schema 改善，但仍有 132 条策略拒绝，不能称为通用泛化。原始候选和完整报告在仓库外 `experiments/qwen25coder15b-thelook-matching-v1-20260908/`；生成入口与独立 evaluator 见 `scripts/post_training/evaluation/`。详见 [`data/thelook-cross-schema-final-test-v1.md`](data/thelook-cross-schema-final-test-v1.md)。 |
 
+TheLook matching 错误归因和下一批 Olist 领域数据建议见 [`experiments/thelook-matching-error-analysis-v1.md`](experiments/thelook-matching-error-analysis-v1.md)。
+
 ## CSpider 当前检查点
 
 CSpider 官方 train/validation 的两 epoch bf16 LoRA 已完成，最终 adapter 已 fresh reload。对应的
