@@ -50,6 +50,7 @@
 | R3 数据与错误迭代 | 基于诊断补数据、改模板或超参 | 本轮完成 | 3,600 条 official train-only v2 corpus、2 epoch bf16 LoRA、164-case/17-schema 独立 smoke 和完整 1,034-case 对照均完成；SQLite `950 -> 961`、Test Suite internal all `0.507 -> 0.667`、denotation `570 -> 708`。 |
 | R4 偏好/RL | DPO/GRPO 与执行反馈 | 未开始 | 前提是可复核的 SFT 非回退、可信 chosen/rejected 数据和成本可控的奖励。 |
 | R5 领域数据与受控接入 | 构建运行时 Prompt 对齐的 Olist 领域资产，并在通过质量门后再讨论候选接入 | Medium v1 训练与最终 Gold 对照完成，尚未接入运行时 | Medium v1 已完成 `720/240/240` family-isolated split、1,200 条 Gold 准入、生产 Prompt 重建、3072 无截断长度审计及两 epoch bf16 LoRA。修复输出展示前缀归一化和时间别名资产传递后，冻结 in-domain test 的正式 matching 评测中，Adapter 的 Policy/PostgreSQL/ResultContract 为 `240/240/240`，Gold ordered denotation 为 `240/240`；Base 分别为 `104/240`、`32/240`、`13/240`，其原始有效候选 Gold 匹配为 `0/13`。该证据仅覆盖当前 240 条 Olist final test 和冻结合同，尚不代表跨数据集泛化或允许接入默认运行时。训练与 matching Base/Adapter 合同见 [`data/olist-medium-v1-training-evaluation-contract.md`](data/olist-medium-v1-training-evaluation-contract.md)。详细实验记录见 [`experiments/log.md`](experiments/log.md)。 |
+| R6 跨 schema 迁移评测 | 保持 Olist LoRA 冻结，在第二个未见电商 schema 上作 Base/Adapter 零样本对照 | Workspace 接入完成，尚未设计 Catalog 或生成题目 | TheLook Kaggle mirror 已冻结、导入独立 PostgreSQL `thelook_analytics`，并通过源完整性和最小权限审计。它不进入 Olist 训练、验证、Prompt 示例或调参；下一步仅冻结 TheLook Semantic Catalog/指标合同。详见 [`data/thelook-cross-schema-workspace-v1.md`](data/thelook-cross-schema-workspace-v1.md)。 |
 
 ## CSpider 当前检查点
 
