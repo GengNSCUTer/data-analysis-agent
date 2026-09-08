@@ -111,6 +111,13 @@ def test_queryspec_rejects_invalid_time_and_metric_contracts() -> None:
     _assert_rejected(duplicate_metrics, "invalid_metric_ids")
 
 
+def test_queryspec_rejects_metrics_without_a_renderer_definition() -> None:
+    unsupported = TheLookQuerySpec.create(
+        metric_ids=("future_metric",), result_shape="scalar"
+    )
+    _assert_rejected(unsupported, "invalid_metric_ids")
+
+
 def test_mapping_round_trip_and_tamper_detection() -> None:
     original = TheLookQuerySpec.create_validated(
         metric_ids=("completed_sale_amount",),

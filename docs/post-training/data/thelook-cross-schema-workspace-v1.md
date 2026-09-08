@@ -110,7 +110,8 @@ and cross-fact grain rules are separately reviewed. Details are in
 
 ## Next Boundary
 
-The Semantic Catalog and metric contracts are frozen. The next separate task is to define and
-review the TheLook-only QuerySpec contract, then implement a deterministic PostgreSQL Gold SQL
-renderer. Natural-language question generation, the roughly 200-case evaluation set and
-Base/Adapter evaluation remain blocked until those two deterministic layers are reviewed.
+The Semantic Catalog, metric contracts, QuerySpec contract and deterministic Gold SQL renderer
+are now frozen and tested. The renderer has also executed five representative artifacts through
+the TheLook reader boundary. The next separate task is to construct the roughly 200-case
+evaluation set from these artifacts; Base/Adapter evaluation remains blocked until that set is
+reviewed.

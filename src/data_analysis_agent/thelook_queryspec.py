@@ -28,6 +28,16 @@ _SHAPES = frozenset({"scalar", "dimension_grouped", "time_series"})
 _GROUP_DIMENSIONS = frozenset(
     {"state", "city", "traffic_source", "category", "brand", "department"}
 )
+_SUPPORTED_METRICS = frozenset(
+    {
+        "completed_sale_amount",
+        "completed_order_count",
+        "average_order_value",
+        "average_fulfillment_days",
+        "return_rate",
+        "completed_customer_count",
+    }
+)
 
 
 class TheLookQuerySpecValidationError(ValueError):
@@ -261,7 +271,9 @@ def validate_thelook_query_spec(
     )
     if snapshot != pinned:
         raise TheLookQuerySpecValidationError("workspace_version_mismatch", "Catalog snapshot does not match QuerySpec")
-    unknown = set(spec.metric_ids) - set(active_catalog.metrics_by_id)
+    unknown = (set(spec.metric_ids) - set(active_catalog.metrics_by_id)) | (
+        set(spec.metric_ids) - _SUPPORTED_METRICS
+    )
     if unknown:
         raise TheLookQuerySpecValidationError("invalid_metric_ids", f"unknown metrics: {sorted(unknown)}")
     if spec.result_shape not in _SHAPES:
@@ -278,6 +290,14 @@ def validate_thelook_query_spec(
     if spec.result_shape != "time_series" and spec.time.mode == "series":
         raise TheLookQuerySpecValidationError("invalid_time_contract", "series grain is only valid for time_series")
     _validate_time(spec)
+    if spec.result_shape == "time_series" and any(
+        active_catalog.metrics_by_id[m].time_field != "orders.created_at"
+        for m in spec.metric_ids
+    ):
+        raise TheLookQuerySpecValidationError(
+            "coverage_shape_not_permitted",
+            "TheLook time series currently requires orders.created_at for every metric",
+        )
     expected_program = _default_join_program(spec.metric_ids, spec.result_shape, spec.dimension)
     if spec.join_program_id != expected_program:
         raise TheLookQuerySpecValidationError("coverage_shape_not_permitted", "join program does not match shape/dimension")
