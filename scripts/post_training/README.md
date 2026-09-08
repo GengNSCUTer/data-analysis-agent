@@ -6,7 +6,7 @@ production Vanna/PostgreSQL runtime in `src/data_analysis_agent/`.
 
 | Directory | Responsibility | Examples |
 | --- | --- | --- |
-| `data/` | Build audited benchmark candidates/splits and Olist structural Gold intermediates. | `build_spider_sft_candidates.py`, `split_post_training_candidates.py`, `export_olist_protected_family_summary.py`, `materialize_olist_queryspecs.py` |
+| `data/` | Build audited benchmark candidates/splits and Olist structural Gold intermediates. | `build_spider_sft_candidates.py`, `split_post_training_candidates.py`, `audit_olist_question_diversity.py`, `export_olist_protected_family_summary.py`, `materialize_olist_queryspecs.py` |
 | `training/` | Freeze a model, run SFT, validate an Adapter, verify artifacts. | `run_post_training_sft_smoke.py` |
 | `inference/` | Generate Base or Adapter SQL candidates without benchmark gold SQL. | `generate_post_training_text_to_sql.py` |
 | `evaluation/` | Verify matching evidence, then run SQLite, Test Suite, denotation and protected Olist transfer diagnostics. | `verify_cspider_matching_generation.py`, `run_sqlite_benchmark.py` |
@@ -28,6 +28,11 @@ validation.
 training: it accepts only structural coverage seeds and a protected family
 summary, writes external QuerySpec/Gold intermediate artifacts atomically, and
 does not read questions, execute SQL, build training JSONL, or load a model.
+
+`audit_olist_question_diversity.py` is a read-only report over external runtime
+candidate JSONL. It measures exact duplicates, normalized surface templates,
+opening phrases, time forms, aliases, family variants and split distributions;
+it never writes questions, prompts, SQL or training rows.
 
 The committed `data/fixtures/olist_queryspec_coverage_seeds_v1.jsonl` is a small
 review fixture for that structural input contract. It is not a training dataset,
