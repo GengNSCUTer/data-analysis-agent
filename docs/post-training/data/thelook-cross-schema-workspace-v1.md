@@ -110,9 +110,7 @@ and cross-fact grain rules are separately reviewed. Details are in
 
 ## Next Boundary
 
-The next separate task is to define a TheLook-only Semantic Catalog and metric contracts
-from these reader-visible relations. First establish a small set of comparable but
-schema-specific metrics such as GMV, completed-order count, return rate, fulfillment
-duration and average order value. Do not create QuerySpec families, natural-language
-questions, Gold SQL, Prompt assets, or invoke Base/Adapter generation until that Catalog
-contract is reviewed.
+The Semantic Catalog and metric contracts are frozen. The next separate task is to define and
+review the TheLook-only QuerySpec contract, then implement a deterministic PostgreSQL Gold SQL
+renderer. Natural-language question generation, the roughly 200-case evaluation set and
+Base/Adapter evaluation remain blocked until those two deterministic layers are reviewed.
