@@ -26,6 +26,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from data_analysis_agent.external_artifacts import ensure_path_outside_repository
+from data_analysis_agent.candidate_sql_generator import unwrap_sql_completion
 from data_analysis_agent.result_validator import ResultValidator
 from data_analysis_agent.sql_policy import PolicyViolation, SqlPolicy
 from data_analysis_agent.thelook_context import THELOOK_WORKSPACE
@@ -146,6 +147,16 @@ def _denotation(candidate: pd.DataFrame, gold: pd.DataFrame) -> tuple[bool, bool
 
 
 def _one(case: Mapping[str, Any], candidate_sql: str, policy: SqlPolicy) -> dict[str, Any]:
+    try:
+        candidate_sql = unwrap_sql_completion(candidate_sql)
+    except Exception:
+        return {
+            "case_id": case["case_id"], "candidate_policy": "not_run",
+            "candidate_executed": False, "candidate_result_contract_valid": False,
+            "candidate_failure": "candidate_normalization_error", "gold_policy": "not_run",
+            "gold_executed": False, "ordered_denotation_match": False,
+            "bag_denotation_match": False, "gold_failure": None,
+        }
     candidate_policy, candidate, candidate_failure = _frame(candidate_sql, policy)
     candidate_valid = False
     if candidate is not None:
@@ -189,6 +200,14 @@ def main() -> int:
     output_dir.mkdir(parents=True)
     base_records = [_one(cases[case_id], base_raw[case_id], policy) for case_id in sorted(cases)]
     adapter_records = [_one(cases[case_id], adapter_raw[case_id], policy) for case_id in sorted(cases)]
+    for label, raw in (("base", base_raw), ("adapter", adapter_raw)):
+        with (output_dir / f"{label}-normalized-candidates.jsonl").open("x", encoding="utf-8") as handle:
+            for case_id in sorted(raw):
+                try:
+                    normalized = unwrap_sql_completion(raw[case_id])
+                except Exception:
+                    normalized = ""
+                handle.write(json.dumps({"case_id": case_id, "candidate_sql": normalized}, ensure_ascii=False) + "\n")
     base_by = {r["case_id"]: r for r in base_records}
     adapter_by = {r["case_id"]: r for r in adapter_records}
     transitions = Counter(

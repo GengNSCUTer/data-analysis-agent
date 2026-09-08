@@ -83,6 +83,21 @@ Adapter 的 time_series 结果最好：month ordered match 13/50，quarter 9/30�
 3. 以 Olist 的真实 `olist-candidate-sql-v1` Prompt 构建约 1,000 条领域 SFT，重点加入 AOV、traffic_source/客户归因、时间序列和多指标 CTE。
 4. 先做一轮 LoRA 训练和 Olist holdout 评测，再用 TheLook 作为跨 schema 泛化回归集；不能只依据训练 loss 或 Spider/CSpider 分数判断成功。
 
-## 5. 当前结论
+## 5. 统一前缀清洗后的重评结果
 
-TheLook 评测证明 Adapter 相对 Base 有明显工程质量提升，但当前数字混合了两种因素：一部分是模型输出格式没有被 runner 正确清洗，另一部分是真实的 schema/指标泛化错误。因此，在扩大训练集之前必须先完成格式清洗重评；重评后的剩余错误才是下一轮领域数据和训练目标的主要依据。
+没有重新调用模型，只对原始 Adapter 候选复用统一 `unwrap_sql_completion()` 后重新执行后续链路。Base 也用同一 evaluator 重算，便于保留对照：
+
+| 指标 | Base | Adapter（清洗后） |
+| --- | ---: | ---: |
+| 通过 Policy 并执行 | 54/206 | 174/206 |
+| ResultContract 通过 | 23/206 | 171/206 |
+| ordered denotation match | 6/206 | 100/206 |
+| bag denotation match | 6/206 | 111/206 |
+
+Adapter 清洗后剩余失败为：`policy_rejected=7`（6 条 `event_id` 不存在、1 条 `orders_users` 不存在）、`postgres_execution_error=25`（错误 Join 键或把 events 连接到订单/用户主链路）、ResultContract 失败 3 条。原始 132 条 Policy 拒绝中的 129 条展示前缀问题已经消除，说明第一版数字严重混入了 runner 清洗缺口。
+
+剩余 25 条执行错误主要集中在 traffic_source、category/department/state 分组和少数客户/退货指标：模型仍会把 `events` 当成订单归因表，或使用 `o.id`、`event_id` 等不存在连接键；这才是下一轮领域数据需要重点解决的 schema 泛化问题。
+
+## 6. 当前结论
+
+TheLook 评测证明 Adapter 相对 Base 有明显工程质量提升。统一清洗后的结果表明，格式问题不应再作为训练数据扩充的主要依据；下一轮应围绕剩余的真实 schema/连接错误、AOV 粒度、traffic_source 归因和少量结果合同失败设计领域样本。重评报告位于 `.../evaluation-normalized/evaluation-report.json`，规范化候选位于同目录的 `base-normalized-candidates.jsonl` 和 `adapter-normalized-candidates.jsonl`。

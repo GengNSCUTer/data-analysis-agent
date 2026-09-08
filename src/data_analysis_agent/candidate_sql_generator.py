@@ -18,7 +18,10 @@ OLIST_CANDIDATE_SQL_PROMPT_VERSION = "olist-candidate-sql-v1"
 # These are presentation labels observed from the bounded offline SQL generator.
 # They are intentionally exact, single-line matches: normalization must never
 # guess at or rewrite model-generated SQL/prose.
-_DISPLAY_PREFIXES = frozenset({"Query", "Query Plan", "Code"})
+# Models sometimes emit a presentation heading before the SQL even when the
+# prompt asks for SQL only.  These are exact, bounded headings; normalization
+# never strips arbitrary prose or repairs SQL.
+_DISPLAY_PREFIXES = frozenset({"Query", "Query Plan", "Code", "Selection", "Solution"})
 
 
 class CandidateSqlGenerationError(ValueError):
@@ -104,6 +107,17 @@ def unwrap_sql_completion(completion: str) -> str:
     lines = value.splitlines()
     if lines and lines[0].strip() in _DISPLAY_PREFIXES:
         value = "\n".join(lines[1:]).strip()
+    else:
+        # Support the same exact heading when the model places it on the SQL
+        # line (for example ``Selection WITH ...``).  Restrict the suffix to
+        # a read-query opener so a legitimate SQL identifier is untouched.
+        for prefix in sorted(_DISPLAY_PREFIXES, key=len, reverse=True):
+            marker = prefix + " "
+            if value.startswith(marker):
+                suffix = value[len(marker):].lstrip()
+                if suffix[:4].upper() == "WITH" or suffix[:6].upper() == "SELECT":
+                    value = suffix
+                    break
     # A generator may emit a display label followed by the already-supported
     # ``SQL:`` marker.  Remove that second presentation layer only; all SQL
     # content remains untouched for the downstream policy gate.

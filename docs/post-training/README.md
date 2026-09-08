@@ -54,6 +54,8 @@
 
 TheLook matching 错误归因和下一批 Olist 领域数据建议见 [`experiments/thelook-matching-error-analysis-v1.md`](experiments/thelook-matching-error-analysis-v1.md)。
 
+统一前缀清洗后的 Adapter 最终重评为：执行 174/206、ResultContract 171/206、ordered match 100/206、bag match 111/206；详见错误分析文档中的重评结果和仓库外 `experiments/qwen25coder15b-thelook-matching-v1-20260908/evaluation-normalized/evaluation-report.json`。
+
 ## CSpider 当前检查点
 
 CSpider 官方 train/validation 的两 epoch bf16 LoRA 已完成，最终 adapter 已 fresh reload。对应的
