@@ -54,7 +54,7 @@
 
 TheLook matching 错误归因和下一批 Olist 领域数据建议见 [`experiments/thelook-matching-error-analysis-v1.md`](experiments/thelook-matching-error-analysis-v1.md)。
 
-下一轮 Olist 领域数据扩展方案见 [`data/olist-domain-sft-expansion-plan-v2.md`](data/olist-domain-sft-expansion-plan-v2.md)。该方案明确区分语义程序覆盖与中文 surface-form 多样性。第一批 20 family/100 行 `review_pilot` 已通过 Gold、数据库和运行时 Prompt 重建门，但它只供人工审阅，绝不直接进入训练；审阅通过后才决定是否物化 `1600/400/400` release。
+下一轮 Olist 领域数据扩展方案见 [`data/olist-domain-sft-expansion-plan-v2.md`](data/olist-domain-sft-expansion-plan-v2.md)，正式 release 计数合同见 [`data/olist-domain-sft-release-v2-contract.md`](data/olist-domain-sft-release-v2-contract.md)。第一批 20 family/100 行 `review_pilot` 已通过 Gold、数据库和运行时 Prompt 重建门；正式 v2 结构种子已按 2,400/600/600 条 query instance 构造，但仍待 Gold 准入、Prompt 重建、长度审计和 SFT 物化，不能提前训练。
 
 统一前缀清洗后的 Adapter 最终重评为：执行 174/206、ResultContract 171/206、ordered match 100/206、bag match 111/206；详见错误分析文档中的重评结果和仓库外 `experiments/qwen25coder15b-thelook-matching-v1-20260908/evaluation-normalized/evaluation-report.json`。
 
