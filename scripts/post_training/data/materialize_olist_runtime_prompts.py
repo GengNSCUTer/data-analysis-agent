@@ -202,6 +202,47 @@ def load_question_variant_cases(path: Path, source_ids: set[str]) -> list[dict[s
     return cases
 
 
+def load_question_variant_cases_v3(path: Path, source_ids: set[str]) -> list[dict[str, str]]:
+    """Load a review-pilot overlay: exactly five controlled forms per seed.
+
+    This is intentionally a distinct version rather than loosening v2, so a
+    production release cannot silently receive a different variant cardinality.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimePromptInputError("question variants must be valid JSON") from exc
+    expected_fields = {"schema_version", "language", "prompt_version", "variant_policy", "cases"}
+    if not isinstance(payload, Mapping) or set(payload) != expected_fields:
+        raise RuntimePromptInputError("v3 question variants have unsupported top-level fields")
+    if payload["schema_version"] != "3" or payload["language"] != "zh":
+        raise RuntimePromptInputError("v3 question variants must be schema 3 and language zh")
+    if payload["prompt_version"] != OLIST_CANDIDATE_SQL_PROMPT_VERSION:
+        raise RuntimePromptInputError("question variants prompt version differs from runtime contract")
+    raw_cases = payload["cases"]
+    if not isinstance(raw_cases, list) or len(raw_cases) != len(source_ids) * 5:
+        raise RuntimePromptInputError("v3 question variants must contain exactly five cases per admitted seed")
+    cases: list[dict[str, str]] = []
+    seen_variant_ids: set[str] = set()
+    counts: dict[str, int] = dict.fromkeys(source_ids, 0)
+    for item in raw_cases:
+        if not isinstance(item, Mapping) or set(item) != {"variant_id", "seed_id", "question"}:
+            raise RuntimePromptInputError("each v3 question variant requires only variant_id, seed_id and question")
+        variant_id, seed_id, question = item["variant_id"], item["seed_id"], item["question"]
+        if not isinstance(variant_id, str) or not variant_id.strip() or variant_id in seen_variant_ids:
+            raise RuntimePromptInputError(f"question variant variant_id is empty or duplicate: {variant_id}")
+        if not isinstance(seed_id, str) or seed_id not in source_ids:
+            raise RuntimePromptInputError(f"question variant seed_id is unknown: {seed_id}")
+        if not isinstance(question, str) or not question.strip():
+            raise RuntimePromptInputError(f"question variant is empty: {variant_id}")
+        seen_variant_ids.add(variant_id)
+        counts[seed_id] += 1
+        cases.append({"variant_id": variant_id.strip(), "seed_id": seed_id, "question": question.strip()})
+    if any(count != 5 for count in counts.values()):
+        raise RuntimePromptInputError("v3 question variants must contain exactly five cases per admitted seed")
+    return cases
+
+
 def _expected_shape(spec: QuerySpec) -> str:
     if spec.result_shape == "time_series":
         return "time_series"
@@ -268,8 +309,10 @@ def materialize(
         ]
     elif variant_payload.get("schema_version") == "2":
         variant_cases = load_question_variant_cases(variants_path, seed_ids)
+    elif variant_payload.get("schema_version") == "3":
+        variant_cases = load_question_variant_cases_v3(variants_path, seed_ids)
     else:
-        raise RuntimePromptInputError("question variants schema must be 1 or 2")
+        raise RuntimePromptInputError("question variants schema must be 1, 2 or 3")
     if len(variant_cases) > MAX_VARIANTS:
         raise RuntimePromptInputError(f"question variants must contain at most {MAX_VARIANTS} cases")
     admission_by_seed = {str(row["seed_id"]): row for row in admitted}

@@ -136,6 +136,19 @@ def test_materialize_rejects_a_second_date_variant_of_the_same_family(tmp_path: 
     assert manifest["counts"]["rejections_by_reason"] == {"duplicate_family": 1}
 
 
+def test_materialize_supports_explicit_non_training_review_pilot_split(tmp_path: Path) -> None:
+    seeds = tmp_path / "seeds.jsonl"
+    protected = tmp_path / "protected-summary.json"
+    evidence = tmp_path / "protected-summary-evidence.json"
+    output = tmp_path / "external-output"
+    _write_jsonl(seeds, [_seed("review-gmv", "review_pilot", ["gmv"], "scalar", None, "JP01_item_scalar")])
+    _write_protected_summary(protected)
+    _write_protected_evidence(protected, evidence)
+    manifest = materialize(seeds, protected, evidence, output)
+    assert manifest["counts"]["accepted_rows"] == 1
+    assert manifest["splits"]["review_pilot"]["rows"] == 1
+
+
 def test_family_identity_ignores_multi_metric_output_order() -> None:
     first = materializer_module.QuerySpec.create_validated(
         metric_ids=("gmv", "paid_order_count"), result_shape="scalar"

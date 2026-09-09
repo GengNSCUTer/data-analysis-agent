@@ -224,6 +224,39 @@ gold_sql_sha256, length_stats, admission_status
 Medium v1 的问题-计划绑定没有发现这个层面的数据漂移。这里的“模板”是按指标、维度、日期
 占位后的启发式统计，不等同于 SQL/语义重复判定；它的用途是决定下一批需要增加语言多样性。
 
+### 7.2 20-family / 100-row review pilot 已完成
+
+2026-09-09 已生成第一批只供人工审阅的 `review_pilot`，所有原始问题、完整
+Prompt、Gold SQL 和结果仍留在仓库外：
+
+```text
+/disk2/gengnan/data-analysis-agent-data/evals/
+  olist-surface-form-pilot-v1-20260909-v4/
+```
+
+该批从 2,371 条候选 QuerySpec 中排除了 Medium v1 family 和受保护 family fingerprint，
+得到 20 个新 family、每个 5 条受控中文表达，共 100 行。20 个 family 覆盖十项冻结指标、
+`day/week/month/quarter/year` 五种时间粒度，以及 scalar、州分组和时间序列的多指标难例。
+当前合法的 `category_grouped` family 已全部在 Medium v1 中出现，故本批没有为了凑覆盖而
+重复旧 family；这一限制记入 selection manifest，不应误写成品类泛化证据。
+
+完整质量链路结果如下：
+
+| 门 | 结果 | 含义 |
+| --- | ---: | --- |
+| QuerySpec / deterministic Gold renderer | 20/20 | 每个新 family 有唯一、可追溯 Gold SQL。 |
+| SqlPolicy -> `daa_analytics_reader` -> ResultContract/Validator | 20/20 | Gold 在当前冻结工作区可安全执行且结果合同有效。 |
+| SiliconFlow `DeepSeek-V4-Flash` 分层口径抽检 | 20/20 | 这是辅助语义抽检，不取代 deterministic 准入。 |
+| Router / Catalog / QueryPlan / ResultContract / Prompt 重建 | 100/100 | 五种问法均恢复到相同的结构合同，未调用候选模型或 GPU。 |
+| 完全相同问题 / family 结构漂移 | 0 / 0 | 没有逐字重复，也没有变体改变 QuerySpec 身份。 |
+| 归一化模板 | 75/100 | 归一化模板重复率 25%；它仍是受控小批，不应夸大为真实用户语言分布。 |
+
+实现刻意避免把“比较、趋势、变化”等词混入无比较基线的普通聚合问题。它们会触发
+`QuestionRouter` 的 comparison/clarification 路由，必须等后续有独立的 comparison QuerySpec
+合同后再扩展，不能伪装成普通 Candidate SQL SFT 样本。该小批的 split 是 `review_pilot`，
+物化器显式禁止把它直接传给 Trainer 或升级为 train/validation/test；下一步是人工审阅问法，
+通过后才按相同规则扩展正式 release。
+
 ## 8. 当前结论
 
 TheLook 结果支持扩大 Olist 领域数据，但方向应是“语义程序覆盖 + 受控语言多样性”双轴扩展，而不是简单增加中文行数。第一优先级是 AOV、订单去重、`traffic_source` 归因、最小 Join 和时间字段；第二优先级才是更多同义问法。新的 Adapter 必须同时通过 Olist in-domain Gold 对照和 TheLook cross-schema 回归，不能只看训练 loss 或单一测试集分数。

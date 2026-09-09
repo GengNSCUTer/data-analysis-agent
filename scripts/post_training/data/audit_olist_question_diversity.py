@@ -68,7 +68,10 @@ def normalize_question(question: str) -> str:
 
 
 def _question_id(row: dict[str, Any], index: int) -> str:
-    value = row.get("case_id") or row.get("sample_id") or row.get("seed_id") or row.get("variant_id")
+    # A surface-form pilot has five rows sharing one seed.  Prefer the
+    # per-question variant ID so duplicate-template examples remain directly
+    # reviewable instead of collapsing five distinct forms onto one seed ID.
+    value = row.get("case_id") or row.get("sample_id") or row.get("variant_id") or row.get("seed_id")
     return str(value) if value is not None else f"row-{index:04d}"
 
 

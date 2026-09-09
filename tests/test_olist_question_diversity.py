@@ -40,3 +40,24 @@ def test_audit_reports_duplicates_aliases_and_family_variants() -> None:
     assert report["metric_count_distribution"] == {"1": 3}
     assert report["metric_alias_hit_distribution"]["gmv"] == 2
     assert report["metric_alias_hit_distribution"]["paid_order_count"] == 1
+
+
+def test_audit_uses_variant_id_for_surface_form_review_examples() -> None:
+    rows = [
+        {
+            "seed_id": "seed-a",
+            "variant_id": "seed-a-v1",
+            "family_id": "f1",
+            "question": "请统计成交额。",
+            "query_plan": {"metric_ids": ["gmv"], "result_shape": "scalar"},
+        },
+        {
+            "seed_id": "seed-a",
+            "variant_id": "seed-a-v2",
+            "family_id": "f1",
+            "question": "请统计销售额。",
+            "query_plan": {"metric_ids": ["gmv"], "result_shape": "scalar"},
+        },
+    ]
+    report = audit_rows(rows)
+    assert report["top_normalized_templates"][0]["sample_ids"] == ["seed-a-v1", "seed-a-v2"]

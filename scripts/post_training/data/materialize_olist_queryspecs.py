@@ -55,7 +55,10 @@ PROTECTED_SUMMARY_VERSION = "olist-protected-family-summary-v1"
 # 与 protected summary 同目录的证据文件协议版本。物化器必须验证它，不能只相信摘要本身。
 PROTECTED_EVIDENCE_VERSION = "olist-protected-family-summary-evidence-v1"
 # 允许的数据集切分集合：训练集、验证集、域内测试集
-_SPLITS = frozenset({"train", "validation", "in_domain_test"})
+# `review_pilot` is an explicitly non-training split used only for small,
+# human-reviewable construction batches. It may never be passed to a Trainer
+# or promoted to a release without a separate split/materialization step.
+_SPLITS = frozenset({"train", "validation", "in_domain_test", "review_pilot"})
 _SPLIT_POLICIES = frozenset({"strict_v1", "family_scoped_v2"})
 # 种子输入文件允许的全部字段
 _SEED_FIELDS = frozenset(

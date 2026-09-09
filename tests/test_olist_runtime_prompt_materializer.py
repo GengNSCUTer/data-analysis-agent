@@ -8,6 +8,7 @@ from scripts.post_training.data.materialize_olist_runtime_prompts import (
     RuntimePromptInputError,
     load_question_variants,
     load_question_variant_cases,
+    load_question_variant_cases_v3,
 )
 
 
@@ -100,3 +101,21 @@ def test_v2_question_variants_reject_uneven_seed_counts(tmp_path):
     )
     with pytest.raises(RuntimePromptInputError, match="exactly two cases"):
         load_question_variant_cases(path, {"seed-a", "seed-b"})
+
+
+def test_v3_question_variants_require_five_cases_per_seed(tmp_path):
+    cases = [
+        {"variant_id": f"a-{index}", "seed_id": "seed-a", "question": f"问题{index}"}
+        for index in range(1, 6)
+    ]
+    path = _write_json(
+        tmp_path,
+        {
+            "schema_version": "3",
+            "language": "zh",
+            "prompt_version": "olist-candidate-sql-v1",
+            "variant_policy": "five controlled forms",
+            "cases": cases,
+        },
+    )
+    assert len(load_question_variant_cases_v3(path, {"seed-a"})) == 5
