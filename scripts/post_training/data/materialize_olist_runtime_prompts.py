@@ -50,8 +50,11 @@ SCHEMA_VERSION = "olist-runtime-prompt-materialization-v3"
 OVERLAY_SCHEMA_VERSION = "1"
 # A bounded release protects the prompt-materialization command from accidental
 # unreviewed bulk inputs. It is not an expected release size.
-MAX_SEEDS = 1500
-MAX_VARIANTS = 1500
+# The historical pilot was capped at 1,500 seeds.  The formal v2 release has
+# 3,600 query instances and five reviewed surface forms per instance; keep the
+# guard, but size it for that explicit release contract.
+MAX_SEEDS = 5000
+MAX_VARIANTS = 25000
 
 
 class RuntimePromptInputError(ValueError):

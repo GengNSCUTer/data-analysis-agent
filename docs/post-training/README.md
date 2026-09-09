@@ -54,7 +54,7 @@
 
 TheLook matching 错误归因和下一批 Olist 领域数据建议见 [`experiments/thelook-matching-error-analysis-v1.md`](experiments/thelook-matching-error-analysis-v1.md)。
 
-下一轮 Olist 领域数据扩展方案见 [`data/olist-domain-sft-expansion-plan-v2.md`](data/olist-domain-sft-expansion-plan-v2.md)，正式 release 计数合同见 [`data/olist-domain-sft-release-v2-contract.md`](data/olist-domain-sft-release-v2-contract.md)。第一批 20 family/100 行 `review_pilot` 已通过 Gold、数据库和运行时 Prompt 重建门；正式 v2 结构种子已按 2,400/600/600 条 query instance 构造，但仍待 Gold 准入、Prompt 重建、长度审计和 SFT 物化，不能提前训练。
+下一轮 Olist 领域数据扩展方案见 [`data/olist-domain-sft-expansion-plan-v2.md`](data/olist-domain-sft-expansion-plan-v2.md)，正式 release 计数合同见 [`data/olist-domain-sft-release-v2-contract.md`](data/olist-domain-sft-release-v2-contract.md)。第一批 20 family/100 行 `review_pilot` 已通过 Gold、数据库和运行时 Prompt 重建门；正式 v2 已完成 3,600 条 Gold 全量准入、18,000 条五变体 runtime overlay，以及 train/validation/in-domain_test 为 2,400/600/600 的正式 JSONL 物化。每个 query instance 仅选择一个 v1 主问法进入 SFT，其他四种作为 overlay 元数据，不计作独立语义样本；长度上限 3072 下无排除，尚未启动本轮 GPU 训练。
 
 统一前缀清洗后的 Adapter 最终重评为：执行 174/206、ResultContract 171/206、ordered match 100/206、bag match 111/206；详见错误分析文档中的重评结果和仓库外 `experiments/qwen25coder15b-thelook-matching-v1-20260908/evaluation-normalized/evaluation-report.json`。
 

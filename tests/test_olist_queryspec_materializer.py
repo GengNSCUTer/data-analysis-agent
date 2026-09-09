@@ -115,7 +115,7 @@ def test_materialize_writes_external_structural_artifacts_and_audit(tmp_path: Pa
     assert all("question" not in row for row in query_rows)
 
 
-def test_materialize_rejects_a_second_date_variant_of_the_same_family(tmp_path: Path) -> None:
+def test_materialize_allows_date_variants_inside_one_split(tmp_path: Path) -> None:
     seeds = tmp_path / "seeds.jsonl"
     protected = tmp_path / "protected-summary.json"
     evidence = tmp_path / "protected-summary-evidence.json"
@@ -132,8 +132,33 @@ def test_materialize_rejects_a_second_date_variant_of_the_same_family(tmp_path: 
 
     manifest = materialize(seeds, protected, evidence, output)
 
+    assert manifest["counts"]["accepted_rows"] == 2
+    assert manifest["counts"]["rejections_by_reason"] == {}
+    assert manifest["counts"]["families"] == 1
+    assert manifest["counts"]["query_specs"] == 2
+
+
+def test_materialize_rejects_family_crossing_splits(tmp_path: Path) -> None:
+    seeds = tmp_path / "seeds.jsonl"
+    protected = tmp_path / "protected-summary.json"
+    evidence = tmp_path / "protected-summary-evidence.json"
+    output = tmp_path / "external-output"
+    _write_jsonl(
+        seeds,
+        [
+            _seed("seed-jan", "train", ["gmv"], "scalar", None, "JP01_item_scalar", time={"mode": "absolute_range", "start": "2017-01-01", "end_exclusive": "2017-02-01", "grain": None}),
+            _seed("seed-feb", "validation", ["gmv"], "scalar", None, "JP01_item_scalar", time={"mode": "absolute_range", "start": "2017-02-01", "end_exclusive": "2017-03-01", "grain": None}),
+        ],
+    )
+    _write_protected_summary(protected)
+    _write_protected_evidence(protected, evidence)
+
+    manifest = materialize(seeds, protected, evidence, output)
+
     assert manifest["counts"]["accepted_rows"] == 1
-    assert manifest["counts"]["rejections_by_reason"] == {"duplicate_family": 1}
+    assert manifest["counts"]["rejections_by_reason"] == {"family_cross_split": 1}
+    assert manifest["splits"]["train"]["rows"] == 1
+    assert manifest["splits"]["validation"]["rows"] == 0
 
 
 def test_materialize_supports_explicit_non_training_review_pilot_split(tmp_path: Path) -> None:

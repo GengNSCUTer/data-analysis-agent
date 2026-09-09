@@ -475,6 +475,12 @@ def _metric_cte(metric_id: str, spec: QuerySpec, index: int) -> str:
         if dimension == "customer_state":
             joins += " JOIN analytics.dim_customers AS c ON o.customer_id = c.customer_id"
         filters = _time_filter(definition, spec.time, "o")
+        # Grouped AOV must obey the same display-dimension contract as the
+        # other customer-state metrics.  Without this predicate, orders whose
+        # customer has a NULL state create a NULL dimension bucket in the
+        # order-level intermediate and can leak into the final FULL OUTER JOIN.
+        if dimension == "customer_state":
+            filters.append("c.customer_state IS NOT NULL")
         body = (
             f"SELECT {', '.join(inner_select)} FROM analytics.fact_orders AS o {joins} "
             f"WHERE {_where(filters)} GROUP BY {', '.join(inner_group)}"

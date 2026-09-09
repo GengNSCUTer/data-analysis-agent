@@ -102,6 +102,17 @@ def test_aov_gold_preserves_order_grain_before_average() -> None:
     assert "payment_value" not in artifact.sql
 
 
+def test_grouped_aov_excludes_null_customer_state() -> None:
+    artifact = render_gold_sql(
+        _spec(
+            metric_ids=("average_order_value",),
+            result_shape="state_grouped",
+            dimension="customer_state",
+        )
+    )
+    assert "c.customer_state IS NOT NULL" in artifact.sql
+
+
 @pytest.mark.parametrize(
     ("metric_id", "expression", "required_filters"),
     [

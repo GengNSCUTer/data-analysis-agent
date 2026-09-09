@@ -158,16 +158,33 @@ def build_rows(admitted: list[dict[str, Any]], runtime: list[dict[str, Any]], to
     if max_seq_length <= 0:
         raise ValueError("max_seq_length must be positive")
     admitted_by_seed = {str(row.get("seed_id")): row for row in admitted}
-    runtime_by_seed = {str(row.get("seed_id")): row for row in runtime}
+    # Runtime materialization deliberately contains five surface forms per
+    # query instance.  SFT must keep one semantic row per instance; silently
+    # taking the last dict entry would make the chosen form depend on JSONL
+    # ordering.  Require the v3 cardinality and select the explicit -v1
+    # primary variant deterministically.
+    runtime_by_seed: dict[str, list[dict[str, Any]]] = {}
+    for row in runtime:
+        runtime_by_seed.setdefault(str(row.get("seed_id")), []).append(row)
     expected_rows = sum(expected_splits.values())
     if len(admitted_by_seed) != expected_rows or set(admitted_by_seed) != set(runtime_by_seed):
         raise ValueError("admission/runtime seed sets must be identical release sets")
+    primary_by_seed: dict[str, dict[str, Any]] = {}
+    for seed_id, variants in runtime_by_seed.items():
+        if len(variants) != 5:
+            raise ValueError(f"runtime seed {seed_id} must contain exactly five surface variants")
+        primary = [row for row in variants if str(row.get("variant_id", "")).endswith("-v1")]
+        if len(primary) != 1:
+            raise ValueError(f"runtime seed {seed_id} must contain exactly one v1 primary variant")
+        primary_by_seed[seed_id] = primary[0]
     splits = {name: [] for name in expected_splits}
     exclusions: list[dict[str, Any]] = []
     families_by_split: dict[str, set[str]] = {name: set() for name in expected_splits}
+    family_split: dict[str, str] = {}
+    query_spec_ids: set[str] = set()
     for index, seed_id in enumerate(admitted_by_seed, 1):
         admitted_row = admitted_by_seed[seed_id]
-        runtime_row = runtime_by_seed[seed_id]
+        runtime_row = primary_by_seed[seed_id]
         split = admitted_row.get("split")
         if split not in splits:
             raise ValueError("admitted row has unsupported split")
@@ -178,9 +195,14 @@ def build_rows(admitted: list[dict[str, Any]], runtime: list[dict[str, Any]], to
         if query_spec_id is None or query_spec_id != _query_spec_id(runtime_row):
             raise ValueError(f"runtime QuerySpec identity drift for {seed_id}")
         family_id = str(admitted_row.get("family_id"))
-        if family_id in families_by_split[split]:
-            raise ValueError(f"duplicate family within {split}")
         families_by_split[split].add(family_id)
+        prior_split = family_split.get(family_id)
+        if prior_split is not None and prior_split != split:
+            raise ValueError(f"family {family_id} crosses splits")
+        family_split.setdefault(family_id, split)
+        if query_spec_id in query_spec_ids:
+            raise ValueError(f"duplicate QuerySpec ID {query_spec_id}")
+        query_spec_ids.add(query_spec_id)
         prompt = runtime_row.get("prompt")
         sql = admitted_row.get("gold_sql")
         if not isinstance(prompt, str) or not isinstance(sql, str) or not prompt.endswith("### SQL"):
@@ -212,6 +234,9 @@ def build_rows(admitted: list[dict[str, Any]], runtime: list[dict[str, Any]], to
             "family_id": family_id,
             "sql_program_id": admitted_row["sql_program_id"],
             "language_variant_id": runtime_row["variant_id"],
+            "primary_variant_id": runtime_row["variant_id"],
+            "surface_variant_count": 5,
+            "surface_form_policy": "five_forms_one_query_instance",
             "rendered_prompt": prompt,
             "candidate_sql": sql.strip(),
             "training_text": training_text,
@@ -227,9 +252,11 @@ def build_rows(admitted: list[dict[str, Any]], runtime: list[dict[str, Any]], to
         raise ValueError("release does not permit length exclusions; inspect external exclusion evidence")
     if {name: len(rows) for name, rows in splits.items()} != dict(expected_splits):
         raise ValueError("materialized split counts differ from the release contract")
-    all_families = [row["family_id"] for rows in splits.values() for row in rows]
-    if len(all_families) != len(set(all_families)):
-        raise ValueError("family IDs cross splits")
+    split_family_sets = [{row["family_id"] for row in rows} for rows in splits.values()]
+    for left_index, left in enumerate(split_family_sets):
+        for right in split_family_sets[left_index + 1 :]:
+            if left & right:
+                raise ValueError("family IDs cross splits")
     return splits, exclusions
 
 

@@ -48,8 +48,12 @@ from scripts.post_training.evaluation.admit_olist_gold_batch import (  # noqa: E
 from vanna.capabilities.sql_runner import RunSqlToolArgs  # noqa: E402
 
 
-RELEASE_VERSION = "olist-medium-gold-admission-v1"
-MAX_RELEASE_ROWS = 1500
+# The release gate is intentionally distinct from the six-row advisory batch
+# gate.  v2 contains 3,600 QuerySpec instances and must be admitted as one
+# hash-bound release so downstream prompt/SFT materialization cannot mix
+# independently admitted subsets.
+RELEASE_VERSION = "olist-domain-gold-admission-v2"
+MAX_RELEASE_ROWS = 5000
 SEMANTIC_REVIEW_SAMPLE_SIZE = 40
 SEMANTIC_REVIEW_CONCURRENCY = 4
 

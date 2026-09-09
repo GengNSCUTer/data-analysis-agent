@@ -395,7 +395,9 @@ def materialize(
     # 集合，用来检测各类重复项
     seen_seed_ids: set[str] = set()
     seen_query_specs: set[str] = set()
-    seen_families: set[str] = set()
+    # A family may have multiple query instances (for example, different date
+    # windows) inside one split.  It must never cross split boundaries.
+    seen_families: dict[str, str] = {}
     seen_sql_hashes: set[str] = set()
     # 循环逐条处理每一条种子
     for raw_seed in raw_seeds:
@@ -423,9 +425,12 @@ def materialize(
             # 安全校验：家族命中黑名单，则拒绝，防止测试集泄露进训练集
             if family_fingerprint(family) in protected_fingerprints:
                 raise QuerySpecValidationError("protected_family_collision", "family collides with protected summary")
-            # 禁止同一个家族多次出现
-            if family in seen_families:
-                raise QuerySpecValidationError("duplicate_family", "family appears more than once")
+            prior_split = seen_families.get(family)
+            if prior_split is not None and prior_split != seed["split"]:
+                raise QuerySpecValidationError(
+                    "family_cross_split",
+                    "family appears in more than one split",
+                )
             # 4.渲染生成黄金SQL并且校验产物一致性
             query_spec, artifact = _validate_artifact(spec, catalog)
             if spec.query_spec_id in seen_query_specs:
@@ -438,7 +443,7 @@ def materialize(
             rejections.append(_rejection(seed_id, split, exc.reason_code))
             continue
         # 全部校验通过，加入成功列表
-        seen_families.add(family)
+        seen_families.setdefault(family, seed["split"])
         seen_query_specs.add(spec.query_spec_id)
         seen_sql_hashes.add(artifact["sql_sha256"])
         accepted.append(
@@ -485,7 +490,7 @@ def materialize(
 
         split_rows = Counter(row["split"] for row in accepted)
         split_families = {
-            split: sorted(row["family_id"] for row in accepted if row["split"] == split)
+            split: sorted({row["family_id"] for row in accepted if row["split"] == split})
             for split in _SPLITS
         }
         # 生成审计清单manifest，记录版本、哈希、样本统计，用于溯源与实验复现
@@ -515,7 +520,7 @@ def materialize(
                 "input_seeds": len(raw_seeds),
                 "accepted_rows": len(accepted),
                 "query_specs": len(seen_query_specs),
-                "families": len(seen_families),
+            "families": len(seen_families),
                 "sql_programs": len(program_splits),
                 "canonical_sql_hashes": len(seen_sql_hashes),
                 "rejections_by_reason": dict(sorted(Counter(row["reason_code"] for row in rejections).items())),
