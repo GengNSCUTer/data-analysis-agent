@@ -44,6 +44,7 @@
 - [`post-training/data/thelook-cross-schema-final-test-v1.md`](post-training/data/thelook-cross-schema-final-test-v1.md)：TheLook 206 条冻结跨 schema Base/Adapter final test 的覆盖、准入和评测边界。
 - [`post-training/data/thelook-queryspec-contract-v2.md`](post-training/data/thelook-queryspec-contract-v2.md) 与 [`post-training/data/thelook-renderer-contract-v2.md`](post-training/data/thelook-renderer-contract-v2.md)：TheLook v2 的独立结构化施工图、fail-closed 边界与 deterministic Gold SQL 编译合同。
 - [`post-training/data/thelook-cross-schema-final-test-v2.md`](post-training/data/thelook-cross-schema-final-test-v2.md)：冻结的 600 条 protected cross-schema final test、覆盖、真实数据库准入与下一步 matching 边界。
+- [`post-training/data/thelook-v2-matching-evaluation-contract.md`](post-training/data/thelook-v2-matching-evaluation-contract.md)：TheLook v2 的 Base/Adapter matching 三阶段隔离、完全一致的 Prompt/解码/模型条件、GPU guard 和 Gold 后置评测入口；当前只冻结实现，尚未运行模型。
 - [`post-training/data/thelook-v2-metric-scenario-candidates.md`](post-training/data/thelook-v2-metric-scenario-candidates.md)：v2 冻结前的只读画像和候选设计历史记录；当前规范以 v2 指标/QuerySpec/renderer/final-test 合同为准。
 - [`post-training/data/olist-queryspec-coverage-seed-manifest-v1.md`](post-training/data/olist-queryspec-coverage-seed-manifest-v1.md)：小型静态 coverage seed 的输入边界、覆盖分布、split 限制与 protected-summary 准入条件；其中 6 条已作为外部 Gold 准入批，仍不是训练数据。
 - [`post-training/data/olist-protected-family-summary-export-v1.md`](post-training/data/olist-protected-family-summary-export-v1.md)：仓库外 protected family fingerprint summary 的受限导出与证据边界；当前 v1 外部 summary/evidence 已经由受限流程导出。

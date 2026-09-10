@@ -68,4 +68,4 @@ Catalog / 指标合同
 
 manifest 声明并已回读验证：case ID、QuerySpec ID、family ID 全部唯一；每条都有 5 个问法；所有 case 都通过 QuerySpec、renderer、Policy、reader role 与结果合同；不读取 Olist 训练/Prompt 输入；未运行 Base 或 Adapter 生成。独立回读还确认 manifest 哈希与文件一致、600 条的执行状态均为 `valid`、问题中不含 SQL 或 `analytics.`、Gold SQL 不访问 `thelook_raw`。
 
-这些事实只证明测试资产、Gold SQL 和数据库准入是可重放的，并不证明任何模型的 SQL 生成质量。下一步若启动 v2 matching，必须单独冻结 Base/Adapter 相同 Prompt、解码、模型/adapter 版本、原始候选隔离和“生成结束后才读取 Gold”的评测合同；不能用 v1 的 206 条结果外推到本 v2 集，也不能改变产品运行时默认路径。
+这些事实只证明测试资产、Gold SQL 和数据库准入是可重放的，并不证明任何模型的 SQL 生成质量。v2 matching 的独立 Base/Adapter 合同、三阶段隔离、真实 Prompt token 预检和实现入口已冻结在 [`thelook-v2-matching-evaluation-contract.md`](thelook-v2-matching-evaluation-contract.md)，但尚未启动任何 v2 模型生成；不能用 v1 的 206 条结果外推到本 v2 集，也不能改变产品运行时默认路径。
