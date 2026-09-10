@@ -2,6 +2,12 @@
 
 本台账只记录已完成实验和待评测的受控实验，不在这里讲通用概念。原始训练样本、SQL、预测、数据库、模型权重、checkpoint 和完整日志都留在仓库外；这里仅记录可复核的配置、哈希和聚合结果。当前学习顺序在上级目录的 `README.md` 中维护。
 
+## 2026-09-10：Qwen3.5-4B Instruct bf16 LoRA Trainer smoke
+
+新增独立的 Qwen3.5 Trainer，复用 Olist Release v2 的 2,400/600 训练/验证输入与已冻结 Qwen3.5 chat-template audit；不读取 TheLook v2 或 Olist final test。Trainer 在模型加载前回读 model/source/split/layout hash，并仅将 LoRA 注入 `model.language_model.layers.*` 实际枚举到的 128 个 projection，避免 hybrid/multimodal 模型按 suffix 意外注入。1-step GPU smoke 在逻辑 CUDA 0 / 物理 GPU 2 的 RTX 4090 完成：train loss `0.503757`、eval loss `0.506993`、fresh Base + Adapter reload loss `0.504594` 均有限，LoRA 参数 `21,233,664 / 4,560,499,200`，峰值 allocated/reserved `12,204.7/13,384.0 MiB`。checkpoint、最终 adapter、聚合 run evidence 与日志均在仓库外 `experiments/qwen35-4b-olist-instruct-sft-smoke-v2-20260910/`。
+
+这只验证最短冻结 train/validation 行（`1116/1086` token）的 Trainer 生命周期。首次使用 validation 首行（2,498 token）时，在训练前向成功后验证阶段需要额外 2.31 GiB，因共享 GPU 只剩约 1 GiB 而 OOM；该失败日志保留在独立 v1 run。正式 2-epoch launcher 因而要求物理 GPU 2 至少空闲 17,408 MiB；当前仅 14,715 MiB，故 fail closed，未抢占或影响其他用户任务，也尚未启动正式训练。详见 [`qwen35-4b-olist-instruct-sft-smoke-v1.md`](qwen35-4b-olist-instruct-sft-smoke-v1.md)。
+
 ## 2026-09-10：Olist Domain SFT Release v2 的 600 条 Gold denotation 对照
 
 在 matching Base/Adapter 生成已经完整结束、两侧 safe report 与原始候选哈希均绑定到同一 final test、且 `completed` 标志存在后，离线审计器才读取测试集的 deterministic Gold SQL。审计器以同一 `SqlPolicy -> daa_analytics_reader -> ResultContract/ResultValidator` 重新执行 Gold；仅重放**原评测中已经 ResultContract valid** 的候选，并按结果列、行数、值（绝对/相对误差均为 `1e-6`）和顺序比较，顺序不一致时再做无序 bag 比较。报告不写入问题、候选 SQL、Gold SQL 或结果行。
