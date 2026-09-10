@@ -37,6 +37,7 @@
 - [`post-training/data/olist-queryspec-renderer-design-v1.md`](post-training/data/olist-queryspec-renderer-design-v1.md)：Olist 领域 SFT 中离线 QuerySpec 与 deterministic PostgreSQL Gold SQL renderer 的职责边界及实现状态；40 条 Gold 已准入，作为工程验收证据。
 - [`post-training/data/olist-pilot-v1-sft-data.md`](post-training/data/olist-pilot-v1-sft-data.md)：40 条工程验收集，记录真实运行时 Prompt、`24/8/8` family-isolated 验收和 `2304` 无截断长度合同；不作为正式训练规模。
 - [`post-training/data/olist-medium-v1-sft-data.md`](post-training/data/olist-medium-v1-sft-data.md)：正式中等规模领域 release 的 `720/240/240` 目标、准入和物化契约。
+- [`post-training/data/qwen35-olist-sft-template-contract-v1.md`](post-training/data/qwen35-olist-sft-template-contract-v1.md)：Qwen3.5-4B Instruct 的官方消息模板、SQL-only label 边界、EOT 停止条件和训练前 token 审计合同；复用 Olist Release v2 的既有训练/验证 split，不读取 TheLook。
 - [`post-training/data/olist-domain-sft-expansion-plan-v2.md`](post-training/data/olist-domain-sft-expansion-plan-v2.md)：基于 TheLook 错误证据的数据扩展、中文 surface-form 多样性、程序族切分和下一轮 `1600/400/400` release 方案。
 - [`post-training/data/thelook-cross-schema-workspace-v1.md`](post-training/data/thelook-cross-schema-workspace-v1.md)：第二电商 schema 的独立 PostgreSQL workspace、来源、最小权限与审计边界；它是 Olist LoRA 的未来零样本评测集，不参与当前训练。
 - [`post-training/data/thelook-queryspec-contract-v1.md`](post-training/data/thelook-queryspec-contract-v1.md)：TheLook 结构化 QuerySpec 字段、允许范围和 fail-closed 校验；不包含自然语言问题或 Gold SQL。
