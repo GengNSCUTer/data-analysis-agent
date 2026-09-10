@@ -1,7 +1,7 @@
 # TheLook v2 Base / Adapter matching 生成与评测合同 v1
 
-**状态：** 已冻结实现与本地回归；尚未启动 v2 的 Base 或 Adapter GPU 生成。  
-**评测集：** `thelook-cross-schema-final-test-v2`，600 条 protected cross-schema final test。  
+**状态：** 已冻结实现与本地回归；尚未启动 v2 的 Base 或 Adapter GPU 生成。
+**评测集：** `thelook-cross-schema-final-test-v2`，600 条 protected cross-schema final test。
 **唯一目标：** 在同一未见 TheLook 电商 Schema、同一服务器语义上下文和同一解码条件下，对比冻结 Olist LoRA Adapter 与其 bf16 Base 的候选 SQL 生成质量。
 
 这不是训练合同、模型接入合同或产品运行时变更。TheLook v2 的问题、QuerySpec、Gold SQL、原始候选、结果行与失败日志仍全部位于仓库外，不能进入 Olist train/validation/test、few-shot、Prompt 调优、Adapter 选择或错误驱动数据构造。
