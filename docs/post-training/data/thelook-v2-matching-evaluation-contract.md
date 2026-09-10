@@ -1,6 +1,7 @@
 # TheLook v2 Base / Adapter matching 生成与评测合同 v1
 
-**状态：** 已冻结实现与本地回归；尚未启动 v2 的 Base 或 Adapter GPU 生成。
+**状态：** Base / Adapter 生成、配对验证和 Gold 后置评测已完成；结果与限制见
+[`../experiments/thelook-v2-matching-v1.md`](../experiments/thelook-v2-matching-v1.md)。
 **评测集：** `thelook-cross-schema-final-test-v2`，600 条 protected cross-schema final test。
 **唯一目标：** 在同一未见 TheLook 电商 Schema、同一服务器语义上下文和同一解码条件下，对比冻结 Olist LoRA Adapter 与其 bf16 Base 的候选 SQL 生成质量。
 
@@ -58,6 +59,8 @@
 ```
 
 阶段 A 的 case 投影函数显式只读取 `case_id`、`question`、`query_spec` 与 `required_result_columns`。代码和回归测试都禁止它访问 `gold_sql` / `gold_sql_sha256`。阶段 C 若 marker 的版本、任一 hash、Base/Adapter 合同、600 条 case 顺序或 adapter 状态不匹配，会在读取 Gold 前拒绝。
+
+Policy 为没有显式 `LIMIT` 的候选添加的 200 行安全上限，不单独等于“结果已截断”：只有实际返回达到 200 行时才由 `ResultValidator` 标记截断。候选主动请求超过 200 行、被 Policy 压缩时，仍保守作为可能截断处理。这与生产 runner 的语义一致，避免把标量或少行查询系统性误判为 `needs_clarification`。
 
 ## 4. 实现入口与外部目录
 

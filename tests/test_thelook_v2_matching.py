@@ -35,8 +35,10 @@ from data_analysis_agent.thelook_v2_matching import (
 )
 from data_analysis_agent.thelook_v2_queryspec import TheLookV2QuerySpec
 from scripts.post_training.evaluation.evaluate_thelook_v2_matching_outputs import (
+    _policy_cap_may_have_truncated_candidate,
     denotation_state,
 )
+from data_analysis_agent.sql_policy import SqlPolicy
 
 
 class GoldForbiddenRow(dict[str, object]):
@@ -220,3 +222,25 @@ def test_denotation_state_distinguishes_ordered_bag_and_column_mismatches() -> N
     reordered = gold.iloc[::-1].reset_index(drop=True)
     assert denotation_state(reordered, gold) == "bag_denotation_match"
     assert denotation_state(pd.DataFrame({"other": [1.0]}), gold) == "column_mismatch"
+
+
+def test_v2_evaluator_distinguishes_default_and_explicit_policy_limits() -> None:
+    """A default guard is not truncation, but a capped requested limit is."""
+
+    policy = SqlPolicy(workspace=THELOOK_V2_WORKSPACE)
+
+    assert not _policy_cap_may_have_truncated_candidate(
+        "SELECT COUNT(*) AS completed_order_count FROM order_items",
+        policy=policy,
+        policy_limit_applied=True,
+    )
+    assert _policy_cap_may_have_truncated_candidate(
+        "SELECT COUNT(*) AS completed_order_count FROM order_items LIMIT 201",
+        policy=policy,
+        policy_limit_applied=True,
+    )
+    assert not _policy_cap_may_have_truncated_candidate(
+        "SELECT COUNT(*) AS completed_order_count FROM order_items LIMIT 20",
+        policy=policy,
+        policy_limit_applied=False,
+    )

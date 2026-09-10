@@ -23,6 +23,7 @@ from typing import Any
 import pandas as pd
 import psycopg2
 import psycopg2.extras
+from sqlglot import exp, parse_one
 
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE_ROOT = ROOT / "src"
@@ -152,6 +153,36 @@ def sha256_file_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _policy_cap_may_have_truncated_candidate(
+    sql: str, *, policy: SqlPolicy, policy_limit_applied: bool
+) -> bool:
+    """Return whether Policy tightened a model-authored row limit.
+
+    ``SqlPolicy`` adds the analyst's default LIMIT when a query has no LIMIT.
+    That is a transport safety rail, not proof that the returned relation was
+    truncated: a one-row scalar query still receives that syntactic LIMIT.
+    Conversely, when the candidate itself asks for more rows than Policy
+    allows, its intended result may have been shortened even if the first page
+    happens to contain fewer rows.  Keep that case fail-safe for the result
+    contract.
+
+    This mirrors the runtime runner's distinction while retaining the extra
+    evaluator guarantee for an explicitly over-budget candidate.  It is only
+    called after ``policy.evaluate`` has parsed and accepted the SQL.
+    """
+
+    if not policy_limit_applied:
+        return False
+    statement = parse_one(sql, read=policy.sql_dialect)
+    limit = statement.args.get("limit")
+    if limit is None:
+        # The limit was inserted by Policy, rather than requested by the
+        # candidate.  ``len(frame) >= max_rows`` remains the truncation guard.
+        return False
+    value = limit.expression
+    return isinstance(value, exp.Literal) and value.is_int and int(value.this) > policy.limits["analyst"]
+
+
 def _execute_sql(
     sql: str, policy: SqlPolicy
 ) -> tuple[str, pd.DataFrame | None, bool, str | None]:
@@ -171,13 +202,26 @@ def _execute_sql(
             cursor.execute("SET LOCAL statement_timeout = 5000")
             cursor.execute(decision.final_sql)
             rows = [dict(row) for row in cursor.fetchmany(200)]
-        return "accepted", pd.DataFrame(rows), decision.policy_limit_applied, None
+        return (
+            "accepted",
+            pd.DataFrame(rows),
+            _policy_cap_may_have_truncated_candidate(
+                sql,
+                policy=policy,
+                policy_limit_applied=decision.policy_limit_applied,
+            ),
+            None,
+        )
     except Exception:
         connection.rollback()
         return (
             "accepted",
             None,
-            decision.policy_limit_applied,
+            _policy_cap_may_have_truncated_candidate(
+                sql,
+                policy=policy,
+                policy_limit_applied=decision.policy_limit_applied,
+            ),
             "postgres_execution_error",
         )
     finally:
