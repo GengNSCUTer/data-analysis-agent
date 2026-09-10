@@ -1,6 +1,6 @@
 # TheLook v2 指标与业务场景候选矩阵
 
-**状态：** 画像完成、候选待冻结；不是 Catalog、QuerySpec、Gold SQL 或评测集合同。<br>
+**状态：** 历史画像与候选设计记录。其结论已用于冻结 v2 Catalog、QuerySpec、renderer 和 600 条 final test；当前合同以 [TheLook 指标 v2](../../metric-contracts/thelook-metrics-v2.md) 与 [final test v2](thelook-cross-schema-final-test-v2.md) 为准。<br>
 **画像日期：** 2026-09-10<br>
 **数据快照：** `thelook-kaggle-mirror-v1-20260908`<br>
 **读取边界：** `thelook_analytics.analytics` 的七个脱敏视图，事务内 `SET LOCAL ROLE daa_thelook_reader`；仅执行聚合，不导出原始行。<br>
@@ -14,7 +14,7 @@
 | 非目标 | 本轮不改 `thelook-catalog-v1`、v1 QuerySpec/renderer、206 条历史评测；不构造自然语言问题、Gold SQL、模型候选或训练数据。 |
 | 训练隔离 | TheLook 仍是 Olist LoRA 的 protected cross-schema holdout。任何 v2 SQL、问题、QuerySpec、数据画像结论都不得用于 Olist train/validation、few-shot、Prompt 调优或 Adapter 选择。 |
 | 通过标准 | 每项候选都明确：事实粒度、分子/分母或时间差、统计时间字段、允许维度、可组合范围、行数预算和已知不确定性。不能定义清楚的常见指标明确排除。 |
-| 下一步 | 用户审阅候选范围后，独立冻结 `thelook-catalog-v2` / QuerySpec v2 / renderer v2；先做小批准入，再构造 final evaluation-only v2。 |
+| 后续 | `thelook-catalog-v2` / QuerySpec v2 / renderer v2 与 final evaluation-only v2 已完成；如需模型质量结论，才单独冻结 matching 生成/评测合同，不能把本页画像或 final test 内容反馈进 Olist 训练/Prompt。 |
 
 ## 为什么 v1 不够
 
