@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit Olist Medium v1 candidate denotations against isolated Gold SQL.
+"""Audit a frozen Olist candidate pair against isolated Gold SQL.
 
 This command runs only after a completed Base/Adapter generation evaluation.
 Gold SQL is read only after generation has completed and is never exposed to a
@@ -95,10 +95,14 @@ def _read_jsonl(path: Path, label: str) -> list[dict[str, Any]]:
     return rows
 
 
-def _safe_records(report: Mapping[str, Any], label: str) -> dict[str, Mapping[str, Any]]:
+def _safe_records(
+    report: Mapping[str, Any], label: str, *, expected_count: int
+) -> dict[str, Mapping[str, Any]]:
     raw_records = report.get("records")
-    if not isinstance(raw_records, list) or len(raw_records) != 240:
-        raise GoldDenotationAuditError(f"{label} safe report must contain 240 records")
+    if not isinstance(raw_records, list) or len(raw_records) != expected_count:
+        raise GoldDenotationAuditError(
+            f"{label} safe report must contain {expected_count} records"
+        )
     records: dict[str, Mapping[str, Any]] = {}
     for record in raw_records:
         if not isinstance(record, Mapping):
@@ -143,8 +147,10 @@ def load_audit_inputs(
         raise GoldDenotationAuditError("generation evaluation is not marked completed")
     runtime_rows = load_test_contract(test_jsonl, runtime_candidates, split_audit)
     runtime_by_id = {str(row["seed_id"]): row for row in runtime_rows}
-    if len(runtime_by_id) != 240:
-        raise GoldDenotationAuditError("runtime final test does not contain 240 unique rows")
+    expected_count = len(runtime_by_id)
+    if expected_count < 1:
+        raise GoldDenotationAuditError("runtime final test is empty")
+    contract_case_count = None
 
     base_report = _read_json(base_safe_report, "base safe report")
     adapter_report = _read_json(adapter_safe_report, "adapter safe report")
@@ -155,6 +161,11 @@ def load_audit_inputs(
     contract = paired.get("comparison_contract")
     if not isinstance(contract, Mapping):
         raise GoldDenotationAuditError("paired safe reports lack a comparison contract")
+    contract_case_count = contract.get("test_case_count")
+    if contract_case_count != expected_count:
+        raise GoldDenotationAuditError(
+            "safe reports and final test disagree on case count"
+        )
     if contract.get("test_jsonl_sha256") != sha256_file(test_jsonl):
         raise GoldDenotationAuditError("safe reports do not bind the selected final test")
     if contract.get("runtime_candidates_sha256") != sha256_file(runtime_candidates):
@@ -164,8 +175,10 @@ def load_audit_inputs(
     if contract.get("gold_sql_read_for_generation") is not False:
         raise GoldDenotationAuditError("safe reports do not prove Gold isolation during generation")
 
-    base_records = _safe_records(base_report, "base")
-    adapter_records = _safe_records(adapter_report, "adapter")
+    base_records = _safe_records(base_report, "base", expected_count=expected_count)
+    adapter_records = _safe_records(
+        adapter_report, "adapter", expected_count=expected_count
+    )
     expected_ids = set(runtime_by_id)
     if set(base_records) != expected_ids or set(adapter_records) != expected_ids:
         raise GoldDenotationAuditError("safe report IDs differ from the final test")
@@ -375,7 +388,7 @@ async def run_audit(args: argparse.Namespace) -> dict[str, Any]:
     for source_id in sorted(runtime_by_id):
         candidates = {"base": (base_records[source_id], base_sql[source_id]), "adapter": (adapter_records[source_id], adapter_sql[source_id])}
         eligible = {label: bool(record["result_contract_satisfied"]) for label, (record, _) in candidates.items()}
-        states = {label: "not_result_contract_valid" for label in candidates}
+        states = dict.fromkeys(candidates, "not_result_contract_valid")
         if any(eligible.values()):
             gold_state, gold_frame = await _execute_trusted(
                 runner,
@@ -405,8 +418,8 @@ async def run_audit(args: argparse.Namespace) -> dict[str, Any]:
     report = {
         "report_version": "1",
         "scope": {
-            "mode": "post_generation_olist_medium_gold_denotation_audit",
-            "dataset": "olist_medium_v1_in_domain_test",
+            "mode": "post_generation_olist_gold_denotation_audit",
+            "dataset": comparison_contract.get("dataset", "olist_in_domain_test"),
             "case_count": len(records),
             "candidate_eligibility": "original_result_contract_valid_only",
             "gold_sql_read_only_after_generation": True,

@@ -2,6 +2,16 @@
 
 本台账只记录已完成实验和待评测的受控实验，不在这里讲通用概念。原始训练样本、SQL、预测、数据库、模型权重、checkpoint 和完整日志都留在仓库外；这里仅记录可复核的配置、哈希和聚合结果。当前学习顺序在上级目录的 `README.md` 中维护。
 
+## 2026-09-10：Olist Domain SFT Release v2 的 600 条 Gold denotation 对照
+
+在 matching Base/Adapter 生成已经完整结束、两侧 safe report 与原始候选哈希均绑定到同一 final test、且 `completed` 标志存在后，离线审计器才读取测试集的 deterministic Gold SQL。审计器以同一 `SqlPolicy -> daa_analytics_reader -> ResultContract/ResultValidator` 重新执行 Gold；仅重放**原评测中已经 ResultContract valid** 的候选，并按结果列、行数、值（绝对/相对误差均为 `1e-6`）和顺序比较，顺序不一致时再做无序 bag 比较。报告不写入问题、候选 SQL、Gold SQL 或结果行。
+
+本轮固定 Olist release v2 final test 为 600 条 QuerySpec/family-isolated 样本，每个 query instance 仅使用由 `sha256(seed_id) mod 5` 固定选出的一个中文主问法。Base 在运行时链路中只有 20/600 ResultContract valid，故只有 20 条具备 Gold 重放资格：其中 ordered denotation match `1/20`，column mismatch `9/20`，denotation mismatch `10/20`；另 580 条保持 `not_result_contract_valid`，不被反事实重放。最终 Olist LoRA Adapter 为 `600/600` ResultContract valid 且 `600/600` ordered denotation match，无 bag-only match、无候选重放失败和无 Base-valid -> Adapter-non-valid 退化。
+
+额外的 SQL 文本哈希审计显示 Adapter 的 600 条候选与对应 Gold SQL 均为逐字一致，Base 为 `0/600`。这不构成 Gold 泄露：生成输入不读取 Gold，Gold 只在 `completed` 后的审计阶段读取；但它表明该 in-domain 结果主要证明 Adapter 学会了当前 Olist `Catalog + QuerySpec + ResultContract -> canonical SQL` 的确定性编译协议。由于 train/validation/test 仍共用 Olist workspace、指标合同和 renderer 语法，不能把 `600/600` 表述为开放式自然语言 Text-to-SQL 的 100% 准确率、跨 schema 泛化或生产默认接入资格。跨 schema 结论仍须以隔离的 TheLook 评测为准。
+
+外部脱敏报告：`experiments/qwen25coder15b-olist-domain-sft-release-v2-base-adapter-finaltest-v1-20260909/analysis/gold-denotation-audit-release-v2.json`，SHA-256 为 `895a33a348ce660af4505b887c3c3528494e7b886414cc5c884b0c7c1fb75319`。
+
 ## 2026-09-07：Olist Medium v1 运行时边界修复与正式 matching 重跑
 
 修复 `unwrap_sql_completion()` 对 `Query`/`Query Plan`/`Code` 精确单行展示前缀的安全归一化；补齐 `ResultContract.as_evidence()` 的 `result_time_column_aliases`，并将 runtime prompt 资产升级为 v3、重建 1,200 条（final test 240 条）。在不读取 Gold 参与生成的正式 matching 链路中，Adapter 为 `240/240` Policy accepted、PostgreSQL executed、ResultContract valid；Base 为 `104/240`、`32/240`、`13/240`。生成后 Gold 对照：Adapter `240/240` ordered denotation match；Base 原始有效候选 `0/13` match，其他 227 条按合同不进入 Gold。该结果替代旧 runtime 资产的表面失败统计，仍只代表当前 Olist final test 和冻结合同，不代表跨数据集泛化或生产默认接入。报告均在仓库外 `qwen25coder15b-olist-medium-base-adapter-finaltest-v2b-20260907/`。

@@ -38,7 +38,7 @@ def test_final_test_runtime_contract_requires_matching_prompt_and_identity(tmp_p
     audit_path.write_text(json.dumps({
         "checks": {"status": "pass", "in_domain_test_forbidden_for_training": True},
         "outputs": {"in_domain_test_jsonl": str(test_path)},
-        "splits": {"in_domain_test": {"rows": 240, "sha256": hashlib.sha256(test_path.read_bytes()).hexdigest()}},
+        "splits": {"in_domain_test": {"rows": 1, "sha256": hashlib.sha256(test_path.read_bytes()).hexdigest()}},
     }), encoding="utf-8")
 
     rows = load_test_contract(test_path, runtime_path, audit_path)
@@ -52,7 +52,49 @@ def test_final_test_runtime_contract_rejects_prompt_hash_drift(tmp_path: Path) -
     runtime_path = tmp_path / "runtime.jsonl"
     _write_jsonl(runtime_path, [{"seed_id": "test-001", "split": "in_domain_test", "prompt": "### SQL", "prompt_sha256": "bad", "query_plan": {}, "result_contract": {}, "route": {"state": "answerable"}}])
     audit_path = tmp_path / "audit.json"
-    audit_path.write_text(json.dumps({"checks": {"status": "pass", "in_domain_test_forbidden_for_training": True}, "outputs": {"in_domain_test_jsonl": str(test_path)}, "splits": {"in_domain_test": {"rows": 240, "sha256": hashlib.sha256(test_path.read_bytes()).hexdigest()}}}), encoding="utf-8")
+    audit_path.write_text(json.dumps({"checks": {"status": "pass", "in_domain_test_forbidden_for_training": True}, "outputs": {"in_domain_test_jsonl": str(test_path)}, "splits": {"in_domain_test": {"rows": 1, "sha256": hashlib.sha256(test_path.read_bytes()).hexdigest()}}}), encoding="utf-8")
 
     with pytest.raises(MediumEvaluationError, match="prompt hash"):
         load_test_contract(test_path, runtime_path, audit_path)
+
+
+def test_final_test_contract_selects_the_frozen_primary_surface_variant(tmp_path: Path) -> None:
+    test_path = tmp_path / "final_evaluation_only" / "in_domain_test.jsonl"
+    test_path.parent.mkdir()
+    prompt = "### Task\n### SQL"
+    _write_jsonl(
+        test_path,
+        [{
+            "seed_id": "test-001",
+            "split": {"name": "in_domain_test"},
+            "primary_variant_id": "test-001-v3",
+            "rendered_prompt": prompt,
+        }],
+    )
+    runtime_path = tmp_path / "runtime_candidates.jsonl"
+    _write_jsonl(
+        runtime_path,
+        [
+            {
+                "seed_id": "test-001", "split": "in_domain_test", "variant_id": "test-001-v1",
+                "prompt": "### Other\n### SQL", "prompt_sha256": hashlib.sha256(b"### Other\n### SQL").hexdigest(),
+                "query_plan": {}, "result_contract": {}, "route": {"state": "answerable"},
+            },
+            {
+                "seed_id": "test-001", "split": "in_domain_test", "variant_id": "test-001-v3",
+                "prompt": prompt, "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                "query_plan": {}, "result_contract": {}, "route": {"state": "answerable"},
+            },
+        ],
+    )
+    audit_path = tmp_path / "split_audit.json"
+    audit_path.write_text(json.dumps({
+        "checks": {"status": "pass", "in_domain_test_forbidden_for_training": True},
+        "outputs": {"in_domain_test_jsonl": str(test_path)},
+        "splits": {"in_domain_test": {"rows": 1, "sha256": hashlib.sha256(test_path.read_bytes()).hexdigest()}},
+    }), encoding="utf-8")
+
+    rows = load_test_contract(test_path, runtime_path, audit_path)
+
+    assert len(rows) == 1
+    assert rows[0]["variant_id"] == "test-001-v3"

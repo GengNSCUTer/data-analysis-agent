@@ -28,7 +28,7 @@ from data_analysis_agent.candidate_sql_generator import OLIST_CANDIDATE_SQL_PROM
 from data_analysis_agent.olist_queryspec import WorkspacePin  # noqa: E402
 
 
-CONTRACT_VERSION = "olist-release-sft-v1"
+CONTRACT_VERSION = "olist-release-sft-v2"
 # Olist's production Catalog + QueryPlan prompt is materially longer than the
 # historical SQLite benchmark prompt. Pilot v1 fit 2,304, but the ten-metric
 # Medium v1 maximum is 2,915; 3,072 is the smallest practical 256-aligned cap
@@ -154,15 +154,32 @@ def _query_spec_id(row: Mapping[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+PRIMARY_VARIANT_SELECTION_POLICY = "sha256_seed_modulo_five_v1"
+
+
+def select_primary_variant(seed_id: str, variants: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pick one of five reviewed forms reproducibly, without duplicating semantics.
+
+    This is deliberately pseudo-random rather than process-random: a stable
+    seed ID gives the same primary form on every machine and rebuild.  The
+    other four forms remain runtime-overlay evidence, not extra SFT rows.
+    """
+    expected_ids = {f"{seed_id}-v{index}" for index in range(1, 6)}
+    by_id = {str(row.get("variant_id")): row for row in variants}
+    if len(variants) != 5 or set(by_id) != expected_ids:
+        raise ValueError(f"runtime seed {seed_id} must contain v1-v5 exactly once")
+    digest = hashlib.sha256(f"{PRIMARY_VARIANT_SELECTION_POLICY}:{seed_id}".encode()).digest()
+    return by_id[f"{seed_id}-v{digest[0] % 5 + 1}"]
+
+
 def build_rows(admitted: list[dict[str, Any]], runtime: list[dict[str, Any]], tokenizer: Any, max_seq_length: int, expected_splits: Mapping[str, int]) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
     if max_seq_length <= 0:
         raise ValueError("max_seq_length must be positive")
     admitted_by_seed = {str(row.get("seed_id")): row for row in admitted}
     # Runtime materialization deliberately contains five surface forms per
-    # query instance.  SFT must keep one semantic row per instance; silently
+    # query instance. SFT must keep one semantic row per instance; silently
     # taking the last dict entry would make the chosen form depend on JSONL
-    # ordering.  Require the v3 cardinality and select the explicit -v1
-    # primary variant deterministically.
+    # ordering. Require v1-v5 exactly once and choose one with a stable hash.
     runtime_by_seed: dict[str, list[dict[str, Any]]] = {}
     for row in runtime:
         runtime_by_seed.setdefault(str(row.get("seed_id")), []).append(row)
@@ -171,12 +188,7 @@ def build_rows(admitted: list[dict[str, Any]], runtime: list[dict[str, Any]], to
         raise ValueError("admission/runtime seed sets must be identical release sets")
     primary_by_seed: dict[str, dict[str, Any]] = {}
     for seed_id, variants in runtime_by_seed.items():
-        if len(variants) != 5:
-            raise ValueError(f"runtime seed {seed_id} must contain exactly five surface variants")
-        primary = [row for row in variants if str(row.get("variant_id", "")).endswith("-v1")]
-        if len(primary) != 1:
-            raise ValueError(f"runtime seed {seed_id} must contain exactly one v1 primary variant")
-        primary_by_seed[seed_id] = primary[0]
+        primary_by_seed[seed_id] = select_primary_variant(seed_id, variants)
     splits = {name: [] for name in expected_splits}
     exclusions: list[dict[str, Any]] = []
     families_by_split: dict[str, set[str]] = {name: set() for name in expected_splits}
@@ -237,6 +249,7 @@ def build_rows(admitted: list[dict[str, Any]], runtime: list[dict[str, Any]], to
             "primary_variant_id": runtime_row["variant_id"],
             "surface_variant_count": 5,
             "surface_form_policy": "five_forms_one_query_instance",
+            "primary_variant_selection_policy": PRIMARY_VARIANT_SELECTION_POLICY,
             "rendered_prompt": prompt,
             "candidate_sql": sql.strip(),
             "training_text": training_text,
@@ -323,6 +336,8 @@ def materialize(assembly_dir: Path, runtime_dir: Path, tokenizer_dir: Path, outp
                 "primary_group": "family_id",
                 "test_storage": "final_evaluation_only",
                 "test_forbidden_for_training": True,
+                "surface_form_policy": "five_forms_one_query_instance",
+                "primary_variant_selection_policy": PRIMARY_VARIANT_SELECTION_POLICY,
             },
             "splits": split_metadata,
             "outputs": {

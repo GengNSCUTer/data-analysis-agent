@@ -520,7 +520,7 @@ def materialize(
                 "input_seeds": len(raw_seeds),
                 "accepted_rows": len(accepted),
                 "query_specs": len(seen_query_specs),
-            "families": len(seen_families),
+                "families": len(seen_families),
                 "sql_programs": len(program_splits),
                 "canonical_sql_hashes": len(seen_sql_hashes),
                 "rejections_by_reason": dict(sorted(Counter(row["reason_code"] for row in rejections).items())),

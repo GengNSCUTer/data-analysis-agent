@@ -512,6 +512,15 @@ def latest_metric(log_history: list[dict[str, Any]], key: str) -> float | None:
     return float(values[-1]) if values else None
 
 
+def current_gpu_identity() -> tuple[Any, str]:
+    """Return the visible process-local GPU and its normalized UUID."""
+    gpu = torch.cuda.get_device_properties(0)
+    gpu_uuid = str(gpu.uuid)
+    if not gpu_uuid.startswith("GPU-"):
+        gpu_uuid = "GPU-" + gpu_uuid
+    return gpu, gpu_uuid
+
+
 def main() -> int:
     """主训练流水线"""
     args = parse_args()
@@ -523,6 +532,14 @@ def main() -> int:
     # 环境合法性校验
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for SFT smoke")
+    # Fail closed before model allocation when a launcher selected the wrong
+    # logical CUDA device for its physical-GPU UUID guard.
+    gpu, gpu_uuid = current_gpu_identity()
+    if args.expected_gpu_uuid is not None and gpu_uuid != args.expected_gpu_uuid:
+        raise RuntimeError(
+            "CUDA device UUID does not match launcher guard: "
+            f"expected {args.expected_gpu_uuid}, got {gpu_uuid}"
+        )
     if args.max_seq_length <= 0:
         raise ValueError("max sequence length must be positive")
     # max‑steps / epochs 二选一配置校验
@@ -693,17 +710,6 @@ def main() -> int:
 
     # 读取模型下载清单，写入审计报告溯源基座版本
     model_manifest = json.loads((args.model_dir / "download_manifest.json").read_text(encoding="utf-8"))
-    gpu = torch.cuda.get_device_properties(0)
-    gpu_uuid = str(gpu.uuid)
-    if not gpu_uuid.startswith("GPU-"):
-        gpu_uuid = "GPU-" + gpu_uuid
-    # GPU‑UUID校验，如果指定了预期显卡，则必须匹配，防止任务跑错设备
-    if args.expected_gpu_uuid is not None and gpu_uuid != args.expected_gpu_uuid:
-        raise RuntimeError(
-            "CUDA device UUID does not match launcher guard: "
-            f"expected {args.expected_gpu_uuid}, got {gpu_uuid}"
-        )
-
     # 生成完整实验证据清单 sft_smoke.json，记录全部超参、数据集哈希、硬件、指标，实现全链路可复现
     evidence = {
         "experiment_type": "adapter_sft_coverage_ablation",

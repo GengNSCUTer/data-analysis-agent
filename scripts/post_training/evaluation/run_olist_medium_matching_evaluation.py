@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate matching Base/Adapter Olist Medium v1 candidate SQL generation.
+"""Evaluate matching Base/Adapter Olist candidate SQL generation.
 
 Generation consumes only the physically isolated in-domain test runtime prompts
 and their server-owned QueryPlan/ResultContract metadata. Gold SQL is not read
@@ -45,7 +45,10 @@ EXPECTED_SPLIT = "in_domain_test"
 
 
 class MediumEvaluationError(ValueError):
-    """The frozen Olist Medium v1 evaluation contract was violated."""
+    """A frozen Olist matching-generation evaluation contract was violated.
+
+    The name remains for compatibility with the original Medium v1 test module.
+    """
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,6 +60,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-label", choices=("base", "adapter"), required=True)
     parser.add_argument("--adapter-dir", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--evaluation-suite",
+        default="olist_medium_v1",
+        help="Stable dataset/suite identifier recorded in the safe report.",
+    )
     parser.add_argument("--max-input-tokens", type=int, default=3072)
     parser.add_argument("--max-new-tokens", type=int, default=768)
     parser.add_argument("--seed", type=int, default=20260904)
@@ -88,20 +96,40 @@ def load_test_contract(test_jsonl: Path, runtime_candidates: Path, split_audit: 
     if Path(str(outputs.get("in_domain_test_jsonl", ""))).resolve() != test_jsonl.resolve():
         raise MediumEvaluationError("test JSONL does not match split audit")
     metadata = audit.get("splits", {}).get(EXPECTED_SPLIT, {})
-    if metadata.get("rows") != 240 or metadata.get("sha256") != sha256_file(test_jsonl):
-        raise MediumEvaluationError("test rows or hash differ from the frozen audit")
+    if metadata.get("sha256") != sha256_file(test_jsonl):
+        raise MediumEvaluationError("test hash differs from the frozen audit")
 
     # This projection intentionally does not access candidate_sql/training_text.
-    test_ids: set[str] = set()
+    # A release that has five surface forms stores the one frozen test form here;
+    # we must use that exact runtime prompt rather than multiply each semantic
+    # case by all of its wording variants.
+    test_variants: dict[str, str | None] = {}
+    expected_prompt_hashes: dict[str, str | None] = {}
     for row in _read_jsonl(test_jsonl, "test JSONL"):
         if row.get("split", {}).get("name") != EXPECTED_SPLIT:
             raise MediumEvaluationError("test JSONL contains a non-test row")
         seed_id = row.get("seed_id")
-        if not isinstance(seed_id, str) or not seed_id or seed_id in test_ids:
+        if not isinstance(seed_id, str) or not seed_id or seed_id in test_variants:
             raise MediumEvaluationError("test JSONL has invalid seed IDs")
-        test_ids.add(seed_id)
+        primary_variant_id = row.get("primary_variant_id")
+        if primary_variant_id is not None and (
+            not isinstance(primary_variant_id, str) or not primary_variant_id
+        ):
+            raise MediumEvaluationError("test JSONL has an invalid primary variant ID")
+        rendered_prompt = row.get("rendered_prompt")
+        if rendered_prompt is not None and not isinstance(rendered_prompt, str):
+            raise MediumEvaluationError("test JSONL has an invalid rendered prompt")
+        test_variants[seed_id] = primary_variant_id
+        expected_prompt_hashes[seed_id] = (
+            hashlib.sha256(rendered_prompt.encode("utf-8")).hexdigest()
+            if isinstance(rendered_prompt, str)
+            else None
+        )
+    if metadata.get("rows") != len(test_variants):
+        raise MediumEvaluationError("test row count differs from the frozen audit")
 
     selected: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
     for row in _read_jsonl(runtime_candidates, "runtime candidates"):
         if row.get("split") != EXPECTED_SPLIT:
             continue
@@ -109,20 +137,29 @@ def load_test_contract(test_jsonl: Path, runtime_candidates: Path, split_audit: 
         required = {"seed_id", "prompt", "prompt_sha256", "query_plan", "result_contract", "route"}
         if not isinstance(seed_id, str) or set(row) < required:
             raise MediumEvaluationError("runtime test candidate has missing required fields")
-        if seed_id not in test_ids:
+        if seed_id not in test_variants:
             raise MediumEvaluationError("runtime candidate is not in final test")
+        expected_variant_id = test_variants[seed_id]
+        if expected_variant_id is not None and row.get("variant_id") != expected_variant_id:
+            continue
         prompt = row["prompt"]
         if not isinstance(prompt, str) or not prompt.endswith("### SQL"):
             raise MediumEvaluationError("runtime candidate has invalid SQL prompt")
-        if row["prompt_sha256"] != hashlib.sha256(prompt.encode("utf-8")).hexdigest():
+        prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        if row["prompt_sha256"] != prompt_hash:
             raise MediumEvaluationError("runtime prompt hash mismatch")
+        if expected_prompt_hashes[seed_id] not in {None, prompt_hash}:
+            raise MediumEvaluationError("runtime prompt differs from frozen test prompt")
         route = row["route"]
         if not isinstance(route, Mapping) or route.get("state") != "answerable":
             raise MediumEvaluationError("final test must contain answerable database routes")
         if not isinstance(row["query_plan"], Mapping) or not isinstance(row["result_contract"], Mapping):
             raise MediumEvaluationError("runtime candidate lacks server-owned metadata")
+        if seed_id in selected_ids:
+            raise MediumEvaluationError("runtime test has duplicate selected seed IDs")
+        selected_ids.add(seed_id)
         selected.append(row)
-    if len(selected) != len(test_ids) or {row["seed_id"] for row in selected} != test_ids:
+    if len(selected) != len(test_variants) or selected_ids != set(test_variants):
         raise MediumEvaluationError("runtime/test seed identities differ")
     return sorted(selected, key=lambda row: str(row["seed_id"]))
 
@@ -206,13 +243,17 @@ def main() -> int:
         raise MediumEvaluationError("output directory must be new")
     adapter_dir = ensure_path_outside_repository(args.adapter_dir, ROOT) if args.adapter_dir else None
     rows = load_test_contract(args.test_jsonl, args.runtime_candidates, args.split_audit)
-    random.seed(args.seed); np.random.seed(args.seed); set_seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    set_seed(args.seed)
     tokenizer, model, adapter, model_manifest = load_model(args.model_dir, args.run_label, adapter_dir)
     gpu = torch.cuda.get_device_properties(0)
-    gpu_uuid = str(gpu.uuid); gpu_uuid = gpu_uuid if gpu_uuid.startswith("GPU-") else "GPU-" + gpu_uuid
+    gpu_uuid = str(gpu.uuid)
+    gpu_uuid = gpu_uuid if gpu_uuid.startswith("GPU-") else "GPU-" + gpu_uuid
     if gpu_uuid != args.expected_gpu_uuid:
         raise MediumEvaluationError("CUDA UUID differs from the frozen guard")
-    torch.cuda.empty_cache(); torch.cuda.reset_peak_memory_stats()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
     output_dir.mkdir(parents=True)
     raw_path = output_dir / "raw-candidates.jsonl"
     settings = PostgresConnectionSettings.from_environment()
@@ -224,13 +265,27 @@ def main() -> int:
         try:
             sql, tokens, elapsed = generate(tokenizer, model, row["prompt"], args.max_input_tokens, args.max_new_tokens)
         except (CandidateSqlGenerationError, MediumEvaluationError):
-            records.append(CandidateEvaluationRecord(source_id, "answerable", "failed", None, None, "not_run", "not_run", None, False, "generation_error")); continue
+            records.append(
+                CandidateEvaluationRecord(
+                    source_id,
+                    "answerable",
+                    "failed",
+                    None,
+                    None,
+                    "not_run",
+                    "not_run",
+                    None,
+                    False,
+                    "generation_error",
+                )
+            )
+            continue
         with raw_path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({"source_id": source_id, "candidate_sql": sql}, ensure_ascii=False) + "\n")
         policy, execution, validation, valid, failure = asyncio.run(execute(runner, sql, row, source_id, args.run_label))
         records.append(CandidateEvaluationRecord(source_id, "answerable", "generated", tokens, elapsed, policy, execution, validation, valid, failure))
-    contract = {"dataset": "olist_medium_v1_in_domain_test", "test_jsonl_sha256": sha256_file(args.test_jsonl), "runtime_candidates_sha256": sha256_file(args.runtime_candidates), "split_audit_sha256": sha256_file(args.split_audit), "model_id": model_manifest["model_id"], "model_revision": model_manifest["revision"], "base_weight_mode": "bf16_lora", "prompt_version": EXPECTED_PROMPT_VERSION, "decode": {"do_sample": False, "num_beams": 1, "max_input_tokens": args.max_input_tokens, "max_new_tokens": args.max_new_tokens, "seed": args.seed}, "gold_sql_read_for_generation": False}
-    report = build_safe_report(report_metadata={"experiment_type": "olist_medium_matching_base_adapter_evaluation", "run_label": args.run_label, "started_at": started.replace(microsecond=0).isoformat(), "finished_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(), "comparison_contract": contract, "adapter": adapter, "gpu": {"cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"), "physical_nvidia_smi_device": args.physical_nvidia_smi_device, "name": gpu.name, "uuid": gpu_uuid, "peak_allocated_bytes": torch.cuda.max_memory_allocated(), "peak_reserved_bytes": torch.cuda.max_memory_reserved()}, "raw_artifacts": {"raw_candidates_sha256": sha256_file(raw_path) if raw_path.exists() else None, "raw_candidates_outside_repository": True}, "boundaries": {"production_default_unchanged": True, "gold_sql_read_for_generation": False, "raw_candidate_sql_in_repository": False, "raw_result_rows_in_repository": False}}, records=records)
+    contract = {"dataset": f"{args.evaluation_suite}_in_domain_test", "test_case_count": len(rows), "test_jsonl_sha256": sha256_file(args.test_jsonl), "runtime_candidates_sha256": sha256_file(args.runtime_candidates), "split_audit_sha256": sha256_file(args.split_audit), "model_id": model_manifest["model_id"], "model_revision": model_manifest["revision"], "base_weight_mode": "bf16_lora", "prompt_version": EXPECTED_PROMPT_VERSION, "decode": {"do_sample": False, "num_beams": 1, "max_input_tokens": args.max_input_tokens, "max_new_tokens": args.max_new_tokens, "seed": args.seed}, "gold_sql_read_for_generation": False}
+    report = build_safe_report(report_metadata={"experiment_type": "olist_matching_base_adapter_evaluation", "evaluation_suite": args.evaluation_suite, "run_label": args.run_label, "started_at": started.replace(microsecond=0).isoformat(), "finished_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(), "comparison_contract": contract, "adapter": adapter, "gpu": {"cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"), "physical_nvidia_smi_device": args.physical_nvidia_smi_device, "name": gpu.name, "uuid": gpu_uuid, "peak_allocated_bytes": torch.cuda.max_memory_allocated(), "peak_reserved_bytes": torch.cuda.max_memory_reserved()}, "raw_artifacts": {"raw_candidates_sha256": sha256_file(raw_path) if raw_path.exists() else None, "raw_candidates_outside_repository": True}, "boundaries": {"production_default_unchanged": True, "gold_sql_read_for_generation": False, "raw_candidate_sql_in_repository": False, "raw_result_rows_in_repository": False}}, records=records)
     (output_dir / "safe-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"run_label": args.run_label, "summary": report["summary"]}, ensure_ascii=False))
     return 0
