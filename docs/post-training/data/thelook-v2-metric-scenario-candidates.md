@@ -1,9 +1,9 @@
 # TheLook v2 指标与业务场景候选矩阵
 
-**状态：** 画像完成、候选待冻结；不是 Catalog、QuerySpec、Gold SQL 或评测集合同。  
-**画像日期：** 2026-09-10  
-**数据快照：** `thelook-kaggle-mirror-v1-20260908`  
-**读取边界：** `thelook_analytics.analytics` 的七个脱敏视图，事务内 `SET LOCAL ROLE daa_thelook_reader`；仅执行聚合，不导出原始行。  
+**状态：** 画像完成、候选待冻结；不是 Catalog、QuerySpec、Gold SQL 或评测集合同。<br>
+**画像日期：** 2026-09-10<br>
+**数据快照：** `thelook-kaggle-mirror-v1-20260908`<br>
+**读取边界：** `thelook_analytics.analytics` 的七个脱敏视图，事务内 `SET LOCAL ROLE daa_thelook_reader`；仅执行聚合，不导出原始行。<br>
 **关联版本：** 已冻结的 v1 资产见 [TheLook workspace v1](thelook-cross-schema-workspace-v1.md)、[首批指标合同](../../metric-contracts/thelook-metrics-v1.md) 与 [206 条 final test v1](thelook-cross-schema-final-test-v1.md)。
 
 ## 任务卡
