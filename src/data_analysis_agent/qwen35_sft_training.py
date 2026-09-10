@@ -76,10 +76,14 @@ def select_bounded_rows(
         raise Qwen35SftFormatError(f"{label} sample limit must be in [1, {len(rows)}]")
     if selection == "first":
         return rows[:limit]
-    if selection == "shortest_sequence":
+    if selection in {"shortest_sequence", "longest_sequence"}:
         ranked = sorted(
             ((int(sequence_length(row)), index, row) for index, row in enumerate(rows)),
-            key=lambda item: (item[0], item[1]),
+            key=(
+                (lambda item: (item[0], item[1]))
+                if selection == "shortest_sequence"
+                else (lambda item: (-item[0], item[1]))
+            ),
         )
         return [row for _, _, row in ranked[:limit]]
     raise Qwen35SftFormatError(f"unsupported {label} sample selection: {selection}")

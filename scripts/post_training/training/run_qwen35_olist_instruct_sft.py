@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train a bf16 LoRA adapter for Qwen3.5-4B on frozen Olist SFT inputs.
+"""Train a bf16 LoRA adapter for a frozen Qwen3.5 Instruct model on Olist SFT.
 
 The trainer is intentionally separate from the historical Qwen2.5 Coder Base
 entry.  It consumes the Qwen3.5 official chat-template layout audit, trains
@@ -51,12 +51,17 @@ from scripts.post_training.training.run_post_training_sft_smoke import (
 )
 
 
-EXPECTED_MODEL_ID = "Qwen/Qwen3.5-4B"
+DEFAULT_EXPECTED_MODEL_ID = "Qwen/Qwen3.5-4B"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", type=Path, required=True)
+    parser.add_argument(
+        "--expected-model-id",
+        default=DEFAULT_EXPECTED_MODEL_ID,
+        help="Frozen model identity required in the model manifest and layout audit.",
+    )
     parser.add_argument("--train-jsonl", type=Path, required=True)
     parser.add_argument("--validation-jsonl", type=Path, required=True)
     parser.add_argument("--split-audit", type=Path, required=True)
@@ -69,7 +74,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-validation-samples", type=int, default=None)
     parser.add_argument(
         "--sample-selection",
-        choices=("first", "shortest_sequence"),
+        choices=("first", "shortest_sequence", "longest_sequence"),
         default="first",
         help=(
             "How a deliberately bounded smoke subset is selected. Formal runs "
@@ -117,6 +122,7 @@ def validate_layout_audit(
     validation_jsonl: Path,
     split_audit: Path,
     max_seq_length: int,
+    expected_model_id: str,
 ) -> None:
     """Bind parameter-update inputs to the completed Qwen3.5 CPU preflight."""
 
@@ -133,7 +139,7 @@ def validate_layout_audit(
         or template.get("official_chat_template") is not True
         or template.get("enable_thinking") is not False
         or template.get("silent_truncation") is not False
-        or model.get("id") != EXPECTED_MODEL_ID
+        or model.get("id") != expected_model_id
         or model.get("id") != manifest.get("model_id")
         or model.get("revision") != manifest.get("revision")
         or model.get("download_manifest_sha256") != sha256_file(model_dir / "download_manifest.json")
@@ -292,6 +298,7 @@ def main() -> int:
         validation_jsonl=args.validation_jsonl,
         split_audit=args.split_audit,
         max_seq_length=args.max_seq_length,
+        expected_model_id=args.expected_model_id,
     )
     split_audit = _read_json(args.split_audit, "Olist split audit")
     validate_split_audit(split_audit, args.train_jsonl, args.validation_jsonl)

@@ -38,6 +38,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validation-jsonl", type=Path, required=True)
     parser.add_argument("--split-audit", type=Path, required=True)
     parser.add_argument("--max-seq-length", type=int, required=True)
+    parser.add_argument(
+        "--expected-model-id",
+        default="Qwen/Qwen3.5-4B",
+        help="Frozen Qwen3.5 Instruct model identity bound into the audit.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
@@ -154,8 +159,8 @@ def main() -> int:
 
     processor = AutoProcessor.from_pretrained(args.model_dir, local_files_only=True)
     manifest = json.loads((args.model_dir / "download_manifest.json").read_text(encoding="utf-8"))
-    if not isinstance(manifest, Mapping) or manifest.get("model_id") != "Qwen/Qwen3.5-4B":
-        raise Qwen35SftFormatError("audit requires the frozen Qwen3.5-4B Instruct model")
+    if not isinstance(manifest, Mapping) or manifest.get("model_id") != args.expected_model_id:
+        raise Qwen35SftFormatError("audit model identity differs from expected Qwen3.5 Instruct model")
     report = {
         "report_schema_version": "qwen35-olist-sft-layout-audit-v1",
         "template": {

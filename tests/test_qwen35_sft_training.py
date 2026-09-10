@@ -56,3 +56,17 @@ def test_bounded_rows_shortest_sequence_is_stable_and_only_for_limited_runs() ->
         selection="shortest_sequence",
         sequence_length=lambda row: row["tokens"],
     ) is rows
+
+
+def test_bounded_rows_longest_sequence_is_stable() -> None:
+    rows = [{"tokens": 8}, {"tokens": 10}, {"tokens": 10}, {"tokens": 5}]
+
+    selected = select_bounded_rows(
+        rows,
+        limit=2,
+        label="validation",
+        selection="longest_sequence",
+        sequence_length=lambda row: row["tokens"],
+    )
+
+    assert selected == [{"tokens": 10}, {"tokens": 10}]
