@@ -1,6 +1,6 @@
 # Qwen2.5-Coder-1.5B-Instruct：TheLook v2 直接基座对照合同 v1
 
-**状态：** 已冻结评测设计与模型 revision；尚未启动 GPU 生成。
+**状态：** 已冻结评测设计与模型 revision；阶段 A 的 GPU 生成正在运行，尚未读取 Gold 或数据库行。
 **唯一问题：** 官方 `Qwen/Qwen2.5-Coder-1.5B-Instruct` 在同一受保护 TheLook v2
 候选 SQL 任务上，是否比当前历史 `Qwen/Qwen2.5-Coder-1.5B` Base 更适合后续
 Schema-aware Program SFT 的候选基座。
