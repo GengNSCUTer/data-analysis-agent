@@ -89,7 +89,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--matching-marker", type=Path, required=True)
     parser.add_argument(
         "--matching-profile",
-        choices=("qwen25coder15b", "qwen35_2b"),
+        choices=("qwen25coder15b", "qwen35_2b", "qwen35_4b"),
         default="qwen25coder15b",
         help="Frozen Base/Adapter generation contract used to create the marker.",
     )
@@ -441,10 +441,15 @@ def main() -> int:
     adapter_report = _read_json(args.adapter_safe_report, "adapter safe report")
     verifier = verify_matching_generation
     verifier_kwargs: dict[str, Any] = {}
-    if args.matching_profile == "qwen35_2b":
-        from data_analysis_agent.qwen35_thelook_v2_matching import (
-            verify_matching_generation as verify_qwen35_matching_generation,
-        )
+    if args.matching_profile in {"qwen35_2b", "qwen35_4b"}:
+        if args.matching_profile == "qwen35_4b":
+            from data_analysis_agent.qwen35_4b_thelook_v2_matching import (
+                verify_matching_generation as verify_qwen35_matching_generation,
+            )
+        else:
+            from data_analysis_agent.qwen35_thelook_v2_matching import (
+                verify_matching_generation as verify_qwen35_matching_generation,
+            )
 
         verifier = verify_qwen35_matching_generation
         frozen_manifest = _read_json(args.manifest, "TheLook v2 manifest")

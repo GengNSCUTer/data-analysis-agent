@@ -210,4 +210,11 @@ in-domain test、数据库、模型或 GPU。2026-09-11 的真实 audit 通过�
 其中 `3,000` pair、Task A/B 各 `2,400/600`、交错 event `4,800/1,200`、length exclusion `0`，且 source
 hash、family/QuerySpec isolation、Task A byte identity、Task B re-derivation 与 pairing/order 均为 `true`。物化结果位于
 `/disk2/gengnan/data-analysis-agent-data/experiments/olist-schema-aware-program-sft-v1-materialization-20260911c/`。
-仍未读取 TheLook、不训练、不访问 GPU。下一步是先完成 Olist-only 有界分层 review，再为 Trainer 增加读取该 audit 和成对事件的入口。
+随后 Olist-only 有界分层 review 通过：train/validation 分别有 `2,400/600` 个 instance、
+`914/600` 个 family；当前十个冻结指标、scalar/state/category/time-series 四种形态和十条
+Join program 都有覆盖。Task B token 的 min/p50/max 为 train `1,272/2,484/3,046`、validation
+`1,268/2,535/3,025`，均未越过 `3,072`。review 仅保存计数、形态/Join/长度分布和哈希型
+pair/plan ID，不保存问题、Prompt、SQL、plan JSON 或结果行；报告位于
+`/disk2/gengnan/data-analysis-agent-data/experiments/olist-schema-aware-program-sft-v1-review-20260911/review-report.json`。
+仍未读取 TheLook、不训练、不访问 GPU。Phase 1 数据准备现已完成；下一步才为 Trainer 增加读取
+已审计 pair、按 Task A/Task B 分别记录 validation loss 的入口。
