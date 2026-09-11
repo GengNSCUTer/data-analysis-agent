@@ -1,6 +1,6 @@
 # Olist Schema-aware Program SFT 数据合同 v1
 
-**状态：** Phase 1 的接口、确定性 `SchemaLinkPlan` registry / derive / validate 与单元回归已完成；尚未物化新训练行、尚未改 Trainer、尚未启动 GPU。<br>
+**状态：** Phase 1 的接口、确定性 `SchemaLinkPlan` registry / derive / validate、Task A/B 外部物化与单元回归已完成；尚未改 Trainer、尚未启动 GPU。<br>
 **训练基座：** `Qwen/Qwen2.5-Coder-1.5B@df3ce67c0e24480f20468b6ef2894622d69eb73b` 的新 LoRA Adapter。<br>
 **基座决策：** 1.5B Instruct 在同一 TheLook v2 任务内容下提高了 Policy/执行通过数，却没有提高最终 Gold 语义正确率；且其 chat-template 包装不同，不能作为严格单变量替换证据。为与历史 SQL-only Adapter 保持可比，本轮冻结既有 Qwen2.5-Coder 1.5B Base。
 
@@ -170,6 +170,8 @@ Task A 必须复用 `olist-candidate-sql-v1` 的 Prompt 字节、SQL target、EO
 
 SQL 与 JSON 不拼在同一 assistant target。默认是每个 train query instance 一个 Task A event 加一个 Task B event，稳定排序交错；验证也成对生成并分别报告 SQL / program loss。重新做 token audit，任何超长行进入外部 exclusion manifest，绝不静默截断。
 
+Task B 的 prompt 从同一条已验证 runtime prompt 中确定性提取 Semantic Catalog、Query Plan 和 Question 三个语义上下文，并在前后加入固定的 training-only selector，明确“不要生成 SQL、只输出 canonical JSON”。它不改写或重建 Task A 的任何 prompt 字节，也保留结果合同所需的列、粒度和时间信息；去掉重复的 SQL 生成前言，避免两个 `### SQL` 选择器互相干扰。Task B 的 target 是包含稳定 `schema_link_plan_id` 的完整 plan JSON（排序键、紧凑编码）；其中不得出现 SQL 字段或 SQL target。所有 Task A/B 都由同一个 `sample_id` 派生稳定 `pair_id`，并在 length audit 中逐一记录是否成对可训练；存在任一超长 event 时，物化审计为 blocked，Trainer 不得启动。
+
 ## 8. 评测与停止条件
 
 新 Adapter 必须从原始 Base 重新训练；当前 SQL-only Adapter 只保留为对照，不能作为父 Adapter。后续对照为：
@@ -193,8 +195,19 @@ Catalog 脱节。模块不导入 renderer、不读取数据库、不调用 LLM�
 
 `tests/test_olist_schema_link_plan.py` 覆盖十个 scalar 指标、scalar 多指标、州分组 review、品类
 分组 item、AOV 订单级中间粒度、时间序列多指标、mapping 往返、immutable、篡改、跨 QuerySpec
-复用与直接 SQL 字段拒绝。连同现有 QuerySpec 回归，`66 passed`；Ruff、compile 和 diff 检查通过。
+复用与直接 SQL 字段拒绝。materializer / auditor 回归额外覆盖 Task A 字节保持、Task B canonical
+target、source Gold 漂移、family 与 QuerySpec 跨 split 泄漏、过长不静默截断、完整 event sequence、
+重写文件哈希后的内容漂移和重派生隔离失败。相关集合为 `82 passed`；Ruff、compile 和 diff 检查通过。
 
-下一小步是单独设计/实现 **外部 Task A/Task B materializer**：只读取已准入 Olist Release v2 的
-train/validation，逐行派生 plan，保持 Task A Prompt/SQL 字节不变，建立 pairing/provenance/length
-audit。它仍不读取 TheLook、不训练、不访问 GPU。
+外部 Task A/Task B materializer 已完成一次真实 Olist Release v2 train/validation 物化：
+`2,400 + 600` 个 query instance 形成 `3,000` 个稳定 pair、`6,000` 个训练事件，Task A
+Prompt/SQL 字节哈希与源 release 一致，Task B 全部由 QuerySpec/Catalog 确定性派生并通过
+plan validator。紧凑的结构上下文使 Task B 最大长度为 `3,046`（上限 `3,072`），无超长排除。
+物化后的独立只读 audit 会再次从可信 Olist Release v2 输入重建 3,000 个 instance，并比较所有
+6,000 个 Task A/B event、pairing、source hash、length accounting 与交错顺序；它不会读取 TheLook、
+in-domain test、数据库、模型或 GPU。2026-09-11 的真实 audit 通过，报告位于
+`/disk2/gengnan/data-analysis-agent-data/experiments/olist-schema-aware-program-sft-v1-audit-20260911/audit-report.json`，
+其中 `3,000` pair、Task A/B 各 `2,400/600`、交错 event `4,800/1,200`、length exclusion `0`，且 source
+hash、family/QuerySpec isolation、Task A byte identity、Task B re-derivation 与 pairing/order 均为 `true`。物化结果位于
+`/disk2/gengnan/data-analysis-agent-data/experiments/olist-schema-aware-program-sft-v1-materialization-20260911c/`。
+仍未读取 TheLook、不训练、不访问 GPU。下一步是先完成 Olist-only 有界分层 review，再为 Trainer 增加读取该 audit 和成对事件的入口。

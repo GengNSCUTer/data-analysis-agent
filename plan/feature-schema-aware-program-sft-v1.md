@@ -49,8 +49,8 @@ data/interface contract in `docs/post-training/data/`.
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-004 | Add `scripts/post_training/data/materialize_olist_schema_aware_program_sft.py`; accept only admitted external Olist Release v2 train/validation artifacts; atomically write Task A/Task B records and provenance outside Git. |  |  |
-| TASK-005 | Add `scripts/post_training/data/audit_olist_schema_aware_program_sft.py` plus tests for family isolation, Task A prompt identity, pairing, provenance, plan JSON, and no-truncation accounting. |  |  |
+| TASK-004 | Add `scripts/post_training/data/materialize_olist_schema_aware_program_sft.py`; accept only admitted external Olist Release v2 train/validation artifacts; atomically write Task A/Task B records and provenance outside Git. | Yes | 2026-09-11 |
+| TASK-005 | Add `scripts/post_training/data/audit_olist_schema_aware_program_sft.py` plus tests for family isolation, Task A prompt identity, pairing, provenance, plan JSON, and no-truncation accounting. | Yes | 2026-09-11 |
 | TASK-006 | Materialize Olist-only data and produce a bounded stratified review report without reading TheLook. |  |  |
 
 ### Implementation Phase 3
