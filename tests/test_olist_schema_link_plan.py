@@ -8,6 +8,7 @@ from data_analysis_agent.olist_queryspec import (
     METRIC_SQL_REGISTRY,
     QuerySpec,
     QueryTime,
+    WorkspacePin,
 )
 from data_analysis_agent.olist_schema_link_plan import (
     SCHEMA_LINK_PLAN_SCHEMA_VERSION,
@@ -17,6 +18,7 @@ from data_analysis_agent.olist_schema_link_plan import (
     derive_schema_link_plan,
     validate_schema_link_plan,
 )
+from data_analysis_agent.semantic_catalog import CatalogLoader
 
 
 ALL_METRICS = (
@@ -194,6 +196,34 @@ def test_plan_cannot_be_reused_for_a_different_validated_query_spec() -> None:
     state = _spec(metric_ids=("gmv",), result_shape="state_grouped")
 
     _rejected(derive_schema_link_plan(scalar), state, "schema_link_plan_mismatch")
+
+
+def test_workspace_version_drift_is_rejected_before_plan_derivation() -> None:
+    stale_workspace = dataclasses.replace(
+        WorkspacePin.current(), catalog_version="olist-catalog-stale"
+    )
+    stale_spec = QuerySpec.create(
+        metric_ids=("gmv",), result_shape="scalar", workspace=stale_workspace
+    )
+
+    with pytest.raises(SchemaLinkPlanValidationError) as exc_info:
+        derive_schema_link_plan(stale_spec)
+
+    assert exc_info.value.reason_code == "workspace_version_mismatch"
+
+
+def test_catalog_join_drift_is_rejected_even_when_catalog_versions_match() -> None:
+    catalog = CatalogLoader().load()
+    missing_join_catalog = dataclasses.replace(
+        catalog,
+        joins=tuple(join for join in catalog.joins if join.join_id != "orders_items"),
+    )
+    spec = _spec(metric_ids=("gmv",), result_shape="scalar")
+
+    with pytest.raises(SchemaLinkPlanValidationError) as exc_info:
+        derive_schema_link_plan(spec, missing_join_catalog)
+
+    assert exc_info.value.reason_code == "registry_catalog_mismatch"
 
 
 def test_unknown_or_direct_sql_fields_are_rejected_at_mapping_boundary() -> None:
