@@ -2,6 +2,16 @@
 
 本台账只记录已完成实验和待评测的受控实验，不在这里讲通用概念。原始训练样本、SQL、预测、数据库、模型权重、checkpoint 和完整日志都留在仓库外；这里仅记录可复核的配置、哈希和聚合结果。当前学习顺序在上级目录的 `README.md` 中维护。
 
+## 2026-09-11：Qwen3.5-2B Olist LoRA 在 protected TheLook v2 的 600 条跨 schema 对照
+
+Qwen3.5-2B 的 Olist Release v2 LoRA Adapter 已在物理 GPU `1`（RTX 3090）完成 TheLook v2 的 `600/600` greedy candidate generation。此前物理 GPU `3`（RTX 4090）上的 `73/600` 中断输出被原样保留为日志证据、没有与本轮混用；本轮从 case 001 在独立仓库外目录完整重跑。Base 的既有 `600/600` completion 经同一 case/manifest、模型 revision、Prompt bundle、bf16、官方 Qwen3.5 non-thinking template、greedy decode 与 case order 重核验后复用。pair marker 已在任何 Gold SQL 或数据库行读取前通过，绑定了 Base/Adapter raw completion 与 safe report 的 SHA-256；随后才执行统一的 `unwrap_sql_completion -> SqlPolicy -> daa_thelook_reader -> ResultContract/ResultValidator -> Gold denotation` 后置链路。
+
+两侧均 `600/600` 生成成功。Base 的 Policy accepted / PostgreSQL executed / ResultContract valid 分别为 `172 / 78 / 58`（`28.67% / 13.00% / 9.67%`）；Adapter 为 `388 / 206 / 196`（`64.67% / 34.33% / 32.67%`），净变化为 `+216 / +128 / +138`。在完整 600 条上，Gold ordered-or-bag denotation match 由 `23/600`（`3.83%`）提升到 `118/600`（`19.67%`），净增 `95` 条；ResultContract valid case 中的 Gold match 比例由 `23/58` 提升到 `118/196`。状态迁移中，`171` 条由 non-valid 变为 valid，同时仍有 `33` 条由 valid 变为 non-valid，因而不是无回退结果。
+
+主要失败层级也必须保留：Base 有 `428` 条 Policy rejection、`94` 条 PostgreSQL execution error、`20` 条 ResultContract rejection；Adapter 分别为 `212`、`182`、`10`。Adapter 减少了 Policy/合同层失败，但因为更多候选通过 Policy，也暴露出更多 PostgreSQL 层的 schema、表关系或 SQL 语义错误。Adapter 的 196 条合同有效结果中仍有 `71` 条 denotation mismatch、`7` 条 row-count mismatch；因此该结果只证明冻结 Olist 领域训练对一个未见电商 schema 的候选生成存在正向离线迁移证据，绝不等价于开放式 Text-to-SQL 正确率、无回退质量门或生产接入资格。TheLook 的问题、Gold SQL、行结果和原始候选均继续留在仓库外，且不回流到 Olist SFT、Prompt 示例或运行时默认路径。
+
+外部聚合报告为 `experiments/qwen35-2b-thelook-v2-matching-v1-20260911-3090/execution-evaluation/evaluation-report.json`；pair marker 为同目录 `matching-marker.json`。
+
 ## 2026-09-11：Qwen3.5-2B 两 epoch SFT 完成；TheLook v2 Adapter 对照入口已冻结
 
 `Qwen/Qwen3.5-2B@15852e8c...` 在冻结的 Olist Release v2 `2,400/600` train/validation 上完成两 epoch、`1,200` optimizer steps 的 bf16 LoRA。配置为 micro batch `1`、gradient accumulation `4`、effective batch `4`、`max_seq_length=3072`、`adamw_torch`、`lr=1e-4`、weight decay `0.01`、LoRA `r=16/alpha=32/dropout=0.05`。最后记录 train loss 为 `6.2283907e-06`、validation loss 为 `6.5841509e-06`，重新加载 bf16 Base 与最终磁盘 Adapter 后的 validation loss 为 `7.7904206e-06`；最终 Adapter SHA-256 为 `19b9a3f68f4494c38f9bcbef176b68336e9a625c8947b9324b03054fe599faf3`。完整训练耗时约 3 小时 20 分，峰值 allocated/reserved 约 `12.53/14.06 GiB`。
