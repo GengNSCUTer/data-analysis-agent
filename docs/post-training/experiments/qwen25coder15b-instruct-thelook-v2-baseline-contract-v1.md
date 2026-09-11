@@ -1,6 +1,6 @@
 # Qwen2.5-Coder-1.5B-Instruct：TheLook v2 直接基座对照合同 v1
 
-**状态：** 已冻结评测设计与模型 revision；阶段 A 的 GPU 生成正在运行，尚未读取 Gold 或数据库行。
+**状态：** 已完成。600 条生成、生成证据回读和生成后 Policy / reader / ResultContract / Gold denotation 评测均已结束；TheLook 仍保持 protected。
 **唯一问题：** 官方 `Qwen/Qwen2.5-Coder-1.5B-Instruct` 在同一受保护 TheLook v2
 候选 SQL 任务上，是否比当前历史 `Qwen/Qwen2.5-Coder-1.5B` Base 更适合后续
 Schema-aware Program SFT 的候选基座。
@@ -57,6 +57,26 @@ Schema-aware Program SFT 准备 Instruct 训练入口。
     -> Gold denotation（唯一读取 Gold 的阶段）
 ```
 
-结果不得用于 TheLook 反向造 Olist 样本、few-shot、Prompt 改写、训练样本筛选或 checkpoint
-选择。若 Instruct 更好，也只形成“可进入 Olist-only Schema-aware SFT 基座审阅”的前置证据，
-不代表可以接入产品默认路径。
+## 最终聚合结果与基座决策
+
+三条路线均在同一 600 条 protected TheLook v2 case 上经 `SqlPolicy -> readonly
+PostgreSQL -> ResultContract -> Gold denotation` 后置链路统计。历史 Base / Olist Adapter 是
+严格 matching pair；Instruct 使用官方 chat template，因而只是基座方案对照，不能视作单变量
+消融。
+
+| 路线 | Policy accepted | PostgreSQL executed | ResultContract valid | ordered-or-bag Gold match |
+| --- | ---: | ---: | ---: | ---: |
+| 历史 Qwen2.5-Coder 1.5B Base | 259/600 (43.2%) | 173/600 (28.8%) | 127/600 (21.2%) | 67/600 (11.2%) |
+| Qwen2.5-Coder 1.5B-Instruct，无 Adapter | 354/600 (59.0%) | 228/600 (38.0%) | 159/600 (26.5%) | 64/600 (10.7%) |
+| 历史 Qwen2.5-Coder 1.5B Base + Olist Adapter | 467/600 (77.8%) | 335/600 (55.8%) | 313/600 (52.2%) | 225/600 (37.5%) |
+
+Instruct 比历史 Base 多通过了前序 Policy / 执行 / 合同闸门，但最终 Gold 正确数没有实用提升，
+且其合同有效候选中的 ordered-or-bag match 为 `64/159 (40.3%)`，低于 Base 的 `67/127
+(52.8%)`。特别是 Instruct 有 `42` 条 column mismatch（Base 为 `5`），表明结果 alias / 列合同和
+schema binding 仍是主问题。故下一阶段不为 Instruct 新建训练入口，选择原始
+`Qwen/Qwen2.5-Coder-1.5B@df3ce67c0e24480f20468b6ef2894622d69eb73b` 作为新的
+Schema-aware Program LoRA 的受控起点；当前 Olist Adapter 仅保留为固定对照。
+
+外部运行证据：`experiments/qwen25coder15b-instruct-thelook-v2-baseline-v1-20260911/` 下的
+`generation/safe-report.json` 与 `execution-evaluation/evaluation-report.json`。没有回读或修改
+TheLook case 来构造 Olist 数据、few-shot、Prompt、checkpoint 选择或错误驱动规则。

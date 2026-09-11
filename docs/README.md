@@ -40,6 +40,7 @@
 - [`post-training/data/qwen35-olist-sft-template-contract-v1.md`](post-training/data/qwen35-olist-sft-template-contract-v1.md)：Qwen3.5-4B Instruct 的官方消息模板、SQL-only label 边界、EOT 停止条件和训练前 token 审计合同；复用 Olist Release v2 的既有训练/验证 split，不读取 TheLook。
 - [`post-training/experiments/qwen35-4b-olist-instruct-sft-smoke-v1.md`](post-training/experiments/qwen35-4b-olist-instruct-sft-smoke-v1.md)：Qwen3.5-4B bf16 LoRA 的 target 审阅、单步训练/保存/fresh reload 证据与正式训练显存资源门。
 - [`post-training/data/olist-domain-sft-expansion-plan-v2.md`](post-training/data/olist-domain-sft-expansion-plan-v2.md)：基于 TheLook 错误证据的数据扩展、中文 surface-form 多样性、程序族切分和下一轮 `1600/400/400` release 方案。
+- [`post-training/data/schema-aware-program-sft-contract-v1.md`](post-training/data/schema-aware-program-sft-contract-v1.md)：新的 Olist Schema-aware Program SFT 合同；训练期从 QuerySpec 确定性派生表列、Join、grain、时间和 alias 结构监督，线上仍只生成一次 SQL。
 - [`post-training/data/thelook-cross-schema-workspace-v1.md`](post-training/data/thelook-cross-schema-workspace-v1.md)：第二电商 schema 的独立 PostgreSQL workspace、来源、最小权限与审计边界；它是 Olist LoRA 的未来零样本评测集，不参与当前训练。
 - [`post-training/data/thelook-queryspec-contract-v1.md`](post-training/data/thelook-queryspec-contract-v1.md)：TheLook 结构化 QuerySpec 字段、允许范围和 fail-closed 校验；不包含自然语言问题或 Gold SQL。
 - [`post-training/data/thelook-renderer-contract-v1.md`](post-training/data/thelook-renderer-contract-v1.md)：TheLook deterministic PostgreSQL Gold SQL renderer 的固定公式、粒度边界和真实 reader 执行证据。

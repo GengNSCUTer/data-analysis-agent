@@ -2,6 +2,16 @@
 
 本台账只记录已完成实验和待评测的受控实验，不在这里讲通用概念。原始训练样本、SQL、预测、数据库、模型权重、checkpoint 和完整日志都留在仓库外；这里仅记录可复核的配置、哈希和聚合结果。当前学习顺序在上级目录的 `README.md` 中维护。
 
+## 2026-09-11：Qwen2.5-Coder-1.5B-Instruct TheLook v2 基座方案对照完成
+
+官方 `Qwen/Qwen2.5-Coder-1.5B-Instruct@2e1fd397ee46e1388853d2af2c993145b0f1098a` 以 bf16、无 Adapter、官方 chat template 在 protected TheLook v2 的 600 条 case 完成 generation-only 阶段；生成阶段没有读取 Gold SQL 或数据库行。safe report 回读确认模型 revision、download manifest、服务器 Prompt、官方模板、chat Prompt、decode、case/manifest、raw completion 和 token preflight 均未漂移后，才运行 `SqlPolicy -> daa_thelook_reader -> ResultContract/ResultValidator -> Gold denotation`。
+
+Instruct 的 Policy accepted / PostgreSQL executed / ResultContract valid 为 `354/228/159`，高于历史同规模 Qwen2.5-Coder Base 的 `259/173/127`；但 ordered Gold match 仅 `64/600`，没有 bag-only match，最终 ordered-or-bag 为 `64/600 (10.7%)`，没有超过历史 Base 的 `67/600 (11.2%)`。Instruct 的 `42` 条 column mismatch 明显高于 Base 的 `5` 条，且合同有效候选的 Gold match 比例为 `64/159 (40.3%)`，低于 Base 的 `67/127 (52.8%)`。因 Instruct 同时改变了权重和官方 chat-template 包装，这不是严格单变量消融；但没有证据支持为下一轮 schema-aware 训练放弃已经具备严格 Base/Adapter 可比证据的 Qwen2.5-Coder Base。下一轮将从原始 Base 新建 Adapter，并保留当前 SQL-only Adapter 为固定基准。TheLook 仍不进入任何训练、Prompt、few-shot、checkpoint 或错误驱动数据构造。
+
+外部聚合报告为 `experiments/qwen25coder15b-instruct-thelook-v2-baseline-v1-20260911/execution-evaluation/evaluation-report.json`；生成安全证据为同目录 `generation/safe-report.json`。专项合同见 [`qwen25coder15b-instruct-thelook-v2-baseline-contract-v1.md`](qwen25coder15b-instruct-thelook-v2-baseline-contract-v1.md)。
+
+同日启动 Schema-aware Program SFT 的第一个不使用 GPU 的实现单元：新增 `SchemaLinkPlan` 的独立静态 registry、canonical `slp_` ID、QuerySpec-derived plan 和 fail-closed validator。它从已验证的 Olist QuerySpec/Catalog/指标注册表派生 relation/alias、真实 Catalog Join ID、grain、time owner、filter/dedup、group key、CTE merge 和 result alias；不解析 renderer SQL、不调用 LLM 或数据库。实施中发现草案 Join 名称与 Olist Catalog 的实际 join ID 不一致，已在任何训练数据物化前更正为 `orders_items`、`orders_customers`、`orders_reviews`、`items_products`，并加入 Catalog 一致性守卫。十指标、四类形态、AOV、中间 grain、mapping、tamper 与跨 QuerySpec 回归连同既有 QuerySpec 共 `66 passed`。未读取 TheLook、未物化 Task A/B、未训练或修改运行时。
+
 ## 2026-09-11：Qwen3.5-2B Olist LoRA 在 protected TheLook v2 的 600 条跨 schema 对照
 
 Qwen3.5-2B 的 Olist Release v2 LoRA Adapter 已在物理 GPU `1`（RTX 3090）完成 TheLook v2 的 `600/600` greedy candidate generation。此前物理 GPU `3`（RTX 4090）上的 `73/600` 中断输出被原样保留为日志证据、没有与本轮混用；本轮从 case 001 在独立仓库外目录完整重跑。Base 的既有 `600/600` completion 经同一 case/manifest、模型 revision、Prompt bundle、bf16、官方 Qwen3.5 non-thinking template、greedy decode 与 case order 重核验后复用。pair marker 已在任何 Gold SQL 或数据库行读取前通过，绑定了 Base/Adapter raw completion 与 safe report 的 SHA-256；随后才执行统一的 `unwrap_sql_completion -> SqlPolicy -> daa_thelook_reader -> ResultContract/ResultValidator -> Gold denotation` 后置链路。
