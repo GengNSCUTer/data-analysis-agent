@@ -2,6 +2,12 @@
 
 本台账只记录已完成实验和待评测的受控实验，不在这里讲通用概念。原始训练样本、SQL、预测、数据库、模型权重、checkpoint 和完整日志都留在仓库外；这里仅记录可复核的配置、哈希和聚合结果。当前学习顺序在上级目录的 `README.md` 中维护。
 
+## 2026-09-11：Qwen3.5-2B 两 epoch SFT 完成；TheLook v2 Adapter 对照入口已冻结
+
+`Qwen/Qwen3.5-2B@15852e8c...` 在冻结的 Olist Release v2 `2,400/600` train/validation 上完成两 epoch、`1,200` optimizer steps 的 bf16 LoRA。配置为 micro batch `1`、gradient accumulation `4`、effective batch `4`、`max_seq_length=3072`、`adamw_torch`、`lr=1e-4`、weight decay `0.01`、LoRA `r=16/alpha=32/dropout=0.05`。最后记录 train loss 为 `6.2283907e-06`、validation loss 为 `6.5841509e-06`，重新加载 bf16 Base 与最终磁盘 Adapter 后的 validation loss 为 `7.7904206e-06`；最终 Adapter SHA-256 为 `19b9a3f68f4494c38f9bcbef176b68336e9a625c8947b9324b03054fe599faf3`。完整训练耗时约 3 小时 20 分，峰值 allocated/reserved 约 `12.53/14.06 GiB`。
+
+该结果证明的是当前 Olist 共享 Catalog、QuerySpec、ResultContract、Prompt 和 deterministic renderer 条件下的协议拟合，而不是跨 schema/开放 SQL 语义正确率或生产接入资格。TheLook v2 不进入训练、验证、Prompt 修改或模型选择。此前已完成的 Qwen3.5-2B Base `600/600` completion 被新的只读复用器重新核验：同一 case/manifest/服务器 Prompt hash、模型 revision、bf16、官方 Qwen3.5 chat template（关闭 thinking）、greedy decode、case 顺序和 completion hash 均保持一致；因此不重新消耗 GPU 生成 Base。新的 Adapter generator、pair verifier、Gold 后置 evaluator profile 和 screen launcher 已通过 5 条无 GPU 回归、Ruff、compileall 与 shell syntax；Adapter 生成尚未启动，至此未读取 TheLook Gold SQL、未连接 TheLook PostgreSQL。
+
 ## 2026-09-10：Qwen3.5-4B Instruct bf16 LoRA Trainer smoke
 
 新增独立的 Qwen3.5 Trainer，复用 Olist Release v2 的 2,400/600 训练/验证输入与已冻结 Qwen3.5 chat-template audit；不读取 TheLook v2 或 Olist final test。Trainer 在模型加载前回读 model/source/split/layout hash，并仅将 LoRA 注入 `model.language_model.layers.*` 实际枚举到的 128 个 projection，避免 hybrid/multimodal 模型按 suffix 意外注入。1-step GPU smoke 在逻辑 CUDA 0 / 物理 GPU 2 的 RTX 4090 完成：train loss `0.503757`、eval loss `0.506993`、fresh Base + Adapter reload loss `0.504594` 均有限，LoRA 参数 `21,233,664 / 4,560,499,200`，峰值 allocated/reserved `12,204.7/13,384.0 MiB`。checkpoint、最终 adapter、聚合 run evidence 与日志均在仓库外 `experiments/qwen35-4b-olist-instruct-sft-smoke-v2-20260910/`。

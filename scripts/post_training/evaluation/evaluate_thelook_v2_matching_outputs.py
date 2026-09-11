@@ -87,6 +87,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-completions", type=Path, required=True)
     parser.add_argument("--adapter-completions", type=Path, required=True)
     parser.add_argument("--matching-marker", type=Path, required=True)
+    parser.add_argument(
+        "--matching-profile",
+        choices=("qwen25coder15b", "qwen35_2b"),
+        default="qwen25coder15b",
+        help="Frozen Base/Adapter generation contract used to create the marker.",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
 
@@ -433,7 +439,20 @@ def main() -> int:
     expected_ids = [case.case_id for case in generation_cases]
     base_report = _read_json(args.base_safe_report, "base safe report")
     adapter_report = _read_json(args.adapter_safe_report, "adapter safe report")
-    expected_marker = verify_matching_generation(
+    verifier = verify_matching_generation
+    verifier_kwargs: dict[str, Any] = {}
+    if args.matching_profile == "qwen35_2b":
+        from data_analysis_agent.qwen35_thelook_v2_matching import (
+            verify_matching_generation as verify_qwen35_matching_generation,
+        )
+
+        verifier = verify_qwen35_matching_generation
+        frozen_manifest = _read_json(args.manifest, "TheLook v2 manifest")
+        workspace = frozen_manifest.get("workspace")
+        if not isinstance(workspace, Mapping):
+            raise TheLookV2MatchingError("TheLook v2 manifest lacks workspace pin")
+        verifier_kwargs["workspace"] = workspace
+    expected_marker = verifier(
         base_report=base_report,
         adapter_report=adapter_report,
         base_completions=args.base_completions,
@@ -441,6 +460,7 @@ def main() -> int:
         expected_case_ids=expected_ids,
         expected_cases_sha256=sha256_file(args.cases_jsonl),
         expected_manifest_sha256=sha256_file(args.manifest),
+        **verifier_kwargs,
     )
     actual_marker = _read_json(args.matching_marker, "matching marker")
     if (
