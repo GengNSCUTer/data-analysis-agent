@@ -59,7 +59,7 @@ data/interface contract in `docs/post-training/data/`.
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-007 | Add a Qwen2.5-Coder-1.5B bf16 LoRA Trainer profile that validates Task A/Task B manifests and reports separate SQL/program validation losses. |  |  |
+| TASK-007 | Add a Qwen2.5-Coder-1.5B bf16 LoRA Trainer profile that validates Task A/Task B manifests and reports separate SQL/program validation losses. | Yes (entry + logical tests; no GPU run) | 2026-09-13 |
 | TASK-008 | Run a minimal GPU smoke from original Base, then run the full frozen Olist train/validation job only after materialization/layout audit passes. |  |  |
 | TASK-009 | Run matching Olist and protected TheLook v2 evaluation only after generation evidence freezes; compare with original Base and existing SQL-only Olist adapter. |  |  |
 

@@ -1,6 +1,6 @@
 # Olist Schema-aware Program SFT 数据合同 v1
 
-**状态：** Phase 1 的接口、确定性 `SchemaLinkPlan` registry / derive / validate、Task A/B 外部物化与单元回归已完成；尚未改 Trainer、尚未启动 GPU。<br>
+**状态：** Phase 1 的接口、确定性 `SchemaLinkPlan` registry / derive / validate、Task A/B 外部物化与单元回归已完成；Phase 2 的 1.5B Base pair-aware Trainer 入口已实现并通过逻辑回归，尚未启动 GPU smoke 或完整训练。<br>
 **训练基座：** `Qwen/Qwen2.5-Coder-1.5B@df3ce67c0e24480f20468b6ef2894622d69eb73b` 的新 LoRA Adapter。<br>
 **基座决策：** 1.5B Instruct 在同一 TheLook v2 任务内容下提高了 Policy/执行通过数，却没有提高最终 Gold 语义正确率；且其 chat-template 包装不同，不能作为严格单变量替换证据。为与历史 SQL-only Adapter 保持可比，本轮冻结既有 Qwen2.5-Coder 1.5B Base。
 
@@ -218,3 +218,22 @@ pair/plan ID，不保存问题、Prompt、SQL、plan JSON 或结果行；报告�
 `/disk2/gengnan/data-analysis-agent-data/experiments/olist-schema-aware-program-sft-v1-review-20260911/review-report.json`。
 仍未读取 TheLook、不训练、不访问 GPU。Phase 1 数据准备现已完成；下一步才为 Trainer 增加读取
 已审计 pair、按 Task A/Task B 分别记录 validation loss 的入口。
+
+### 9.1 TASK-007 Trainer 入口
+
+实现位于 [`scripts/post_training/training/run_qwen25coder_schema_aware_sft.py`](../../../scripts/post_training/training/run_qwen25coder_schema_aware_sft.py)。入口只接受仓库外的 materialization、audit 和 review 路径，并在加载模型前检查：
+
+- audit/review 版本与 `pass` 状态、物化目录绑定、event 文件 SHA-256、2,400/600 pair 数量；
+- 每个 pair 恰好一个 Task A 与一个 Task B、split 标记、3,072 token 上限和 Prompt/target 边界；
+- Qwen2.5-Coder-1.5B Base 的 model ID/revision 与 download manifest；
+- TheLook、in-domain test、数据库、LLM 与 GPU 未参与数据准备的证据。
+
+训练使用 bf16、冻结 Base、LoRA、`adamw_torch`、weight decay、gradient checkpointing 和真实的
+gradient accumulation。Task A/B 事件按物化文件的稳定顺序交错训练；验证阶段额外分别在 SQL-only
+和 SchemaLinkPlan-only 子集上计算 `sql_loss` / `schema_link_plan_loss`，避免总 loss 掩盖某一任务退化。
+标签只监督各自 target 与 EOS，Prompt 和动态 padding 使用 `-100`，不静默截断。
+
+本入口的逻辑回归为 `tests/test_qwen25coder_schema_aware_sft.py`（4 passed，使用 Dummy tokenizer，
+覆盖 Prompt mask、EOS、空 target、超长拒绝和 right-padding）。下一小步是先用已经绑定的真实外部
+materialization 做最小 GPU smoke，确认显存、LoRA 注入和两类 validation loss 都有限，再由用户确认是否
+启动完整训练；本轮尚未启动任何 GPU 训练。
