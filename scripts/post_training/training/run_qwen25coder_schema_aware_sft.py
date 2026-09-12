@@ -27,8 +27,11 @@ from torch.utils.data import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments, set_seed
 
 ROOT = Path(__file__).resolve().parents[3]
+SOURCE_ROOT = ROOT / "src"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
 
 from data_analysis_agent.external_artifacts import ensure_path_outside_repository  # noqa: E402
 from scripts.post_training.training.run_post_training_sft_smoke import (  # noqa: E402
@@ -60,6 +63,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-seq-length", type=int, default=3072)
     parser.add_argument("--max-steps", type=int, default=-1)
     parser.add_argument("--num-train-epochs", type=float, default=None)
+    parser.add_argument("--max-train-samples", type=int, default=None,
+                        help="Optional bounded smoke subset; formal runs must omit it.")
+    parser.add_argument("--max-validation-samples", type=int, default=None,
+                        help="Optional bounded smoke subset; formal runs must omit it.")
+    parser.add_argument("--sample-selection", choices=("first", "longest_pair"), default="first",
+                        help="Smoke subset selection; formal runs use the default with no sample limit.")
     parser.add_argument("--seed", type=int, default=20260912)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=0.01)
@@ -252,6 +261,42 @@ def _load_model(model_dir: Path) -> Any:
     return model
 
 
+def _select_rows(
+    rows: list[dict[str, Any]], limit: int | None, label: str, selection: str = "first"
+) -> list[dict[str, Any]]:
+    if limit is None:
+        return rows
+    if limit <= 0:
+        raise SchemaAwareTrainerError(f"{label} sample limit must be positive")
+    # Keep complete A/B pairs in a smoke subset.  The materializer's stable
+    # event order is SQL then SchemaLinkPlan for each pair.
+    pair_order: list[str] = []
+    pair_max_tokens: dict[str, int] = {}
+    for row in rows:
+        pair_id = row["pair_id"]
+        if pair_id not in pair_max_tokens:
+            pair_order.append(pair_id)
+            pair_max_tokens[pair_id] = 0
+        if selection == "longest_pair":
+            try:
+                sequence_tokens = int(row["token_length"]["sequence_tokens"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise SchemaAwareTrainerError(
+                    f"{label} longest-pair selection requires token length evidence"
+                ) from exc
+            pair_max_tokens[pair_id] = max(pair_max_tokens[pair_id], sequence_tokens)
+    if limit > len(pair_order):
+        raise SchemaAwareTrainerError(f"{label} sample limit exceeds available pairs")
+    if selection == "first":
+        pair_ids = pair_order[:limit]
+    elif selection == "longest_pair":
+        pair_ids = sorted(pair_order, key=lambda pair: (-pair_max_tokens[pair], pair))[:limit]
+    else:
+        raise SchemaAwareTrainerError(f"unsupported {label} sample selection")
+    allowed = set(pair_ids)
+    return [row for row in rows if row["pair_id"] in allowed]
+
+
 def _evaluate_by_task(trainer: Trainer, datasets: dict[str, PairEventDataset]) -> dict[str, float]:
     result: dict[str, float] = {}
     for task, dataset in datasets.items():
@@ -262,6 +307,11 @@ def _evaluate_by_task(trainer: Trainer, datasets: dict[str, PairEventDataset]) -
 
 def main() -> int:
     args = parse_args()
+    # A single visible RTX 40-series card still reaches Accelerate's NCCL
+    # environment validation.  Match the established single-GPU training
+    # entry points and avoid unsupported P2P/IB discovery.
+    os.environ.setdefault("NCCL_P2P_DISABLE", "1")
+    os.environ.setdefault("NCCL_IB_DISABLE", "1")
     if not torch.cuda.is_available():
         raise SchemaAwareTrainerError("CUDA is required for this Trainer")
     if args.max_seq_length <= 0 or args.learning_rate <= 0 or args.weight_decay < 0:
@@ -293,8 +343,10 @@ def main() -> int:
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
-    train_rows = events["train"]
-    validation_rows = events["validation"]
+    train_rows = _select_rows(events["train"], args.max_train_samples, "train", args.sample_selection)
+    validation_rows = _select_rows(
+        events["validation"], args.max_validation_samples, "validation", args.sample_selection
+    )
     train_dataset = PairEventDataset(train_rows, tokenizer, args.max_seq_length)
     validation_all = PairEventDataset(validation_rows, tokenizer, args.max_seq_length)
     validation_by_task = {
@@ -346,6 +398,10 @@ def main() -> int:
                  "train_events_sha256": sha256_file(materialization / "train_events.jsonl"),
                  "validation_events_sha256": sha256_file(materialization / "validation_events.jsonl"),
                  "train": train_dataset.stats, "validation": validation_all.stats,
+                 "max_train_samples": args.max_train_samples,
+                 "max_validation_samples": args.max_validation_samples,
+                 "sample_selection": args.sample_selection,
+                 "bounded_smoke": args.max_train_samples is not None or args.max_validation_samples is not None,
                  "thelook_used": False, "in_domain_test_used": False, "raw_question_or_sql_saved": False},
         "training": {"seed": args.seed, "max_seq_length": args.max_seq_length, "max_steps": args.max_steps,
                      "num_train_epochs": args.num_train_epochs, "per_device_train_batch_size": args.per_device_train_batch_size,
