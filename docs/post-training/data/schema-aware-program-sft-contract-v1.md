@@ -1,6 +1,6 @@
 # Olist Schema-aware Program SFT 数据合同 v1
 
-**状态：** Phase 1 的接口、确定性 `SchemaLinkPlan` registry / derive / validate、Task A/B 外部物化与单元回归已完成；Phase 2 的 1.5B Base pair-aware Trainer 入口已实现并通过逻辑回归，尚未启动 GPU smoke 或完整训练。<br>
+**状态：** Phase 1 的接口、确定性 `SchemaLinkPlan` registry / derive / validate、Task A/B 外部物化与单元回归已完成；Phase 2 的 1.5B Base pair-aware Trainer 已通过最长序列 GPU smoke，完整两 epoch 训练已在外部 screen 中启动，尚未结束或评测。<br>
 **训练基座：** `Qwen/Qwen2.5-Coder-1.5B@df3ce67c0e24480f20468b6ef2894622d69eb73b` 的新 LoRA Adapter。<br>
 **基座决策：** 1.5B Instruct 在同一 TheLook v2 任务内容下提高了 Policy/执行通过数，却没有提高最终 Gold 语义正确率；且其 chat-template 包装不同，不能作为严格单变量替换证据。为与历史 SQL-only Adapter 保持可比，本轮冻结既有 Qwen2.5-Coder 1.5B Base。
 
@@ -237,3 +237,27 @@ gradient accumulation。Task A/B 事件按物化文件的稳定顺序交错训�
 覆盖 Prompt mask、EOS、空 target、超长拒绝和 right-padding）。下一小步是先用已经绑定的真实外部
 materialization 做最小 GPU smoke，确认显存、LoRA 注入和两类 validation loss 都有限，再由用户确认是否
 启动完整训练；本轮尚未启动任何 GPU 训练。
+
+### 9.2 GPU smoke 与完整训练启动
+
+2026-09-13 以 `CUDA_VISIBLE_DEVICES=1`（逻辑设备 1、物理 `nvidia-smi` 设备 3、RTX 4090、
+UUID `GPU-10863af0-8588-7625-5609-640ba794f64b`）完成三次有界 smoke：首次修复了入口的
+`src/` import 路径，第二次补回 RTX 40 系单卡所需的 `NCCL_P2P_DISABLE=1` /
+`NCCL_IB_DISABLE=1`，两者均未进入有效训练；随后正式成功的 smoke 使用真实、已审计输入，且均
+不读取 TheLook 或 Olist final test。
+
+- `smoke-v4`：两个完整 pair（4 event）覆盖 micro batch 1、梯度累积 4 后的一次 optimizer step；
+  train / aggregate validation / SQL validation / program validation loss 分别为 `0.7474` /
+  `0.8456` / `0.2985` / `1.3928`，均有限；
+- `smoke-v5`：按 pair 最大 token 选择最长训练样本，实际到达 `3,046 / 3,072` token；train /
+  aggregate validation / SQL validation / program validation loss 为 `0.5859` / `0.4831` /
+  `0.1209` / `0.8454`，均有限，峰值 allocated/reserved 为 `8.46 / 14.88 GiB`。
+
+smoke 的 adapter、checkpoint、日志与证据在仓库外
+`/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder-schema-aware-sft-smoke-v{3,4,5}-20260913/`。
+最长样本 smoke 通过后，完整训练已以 `screen` 会话 `qwen25-schema-aware-full-v1` 启动，输出目录为
+`/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder-schema-aware-sft-full-v1-20260913/`：
+Olist train `4,800` event、validation `1,200` event、2 epoch、micro batch 1、accumulation 4、
+有效 batch 4，预期 2,400 optimizer step；每 300 step 做 aggregate validation、每 600 step 保存
+checkpoint。训练完成前不声明质量提升、不改生产默认路径；后续须先检查训练证据和独立 Base/Adapter
+matching，再运行 Olist / protected TheLook 后评测。
