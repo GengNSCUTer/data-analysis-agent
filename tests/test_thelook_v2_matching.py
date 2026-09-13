@@ -35,6 +35,10 @@ from data_analysis_agent.thelook_v2_matching import (
 )
 from data_analysis_agent.thelook_v2_queryspec import TheLookV2QuerySpec
 from scripts.post_training.evaluation.evaluate_thelook_v2_matching_outputs import (
+    ExecutionAttempt,
+    FullCase,
+    _classify_postgres_failure,
+    _gold_frame,
     _policy_cap_may_have_truncated_candidate,
     denotation_state,
 )
@@ -244,3 +248,69 @@ def test_v2_evaluator_distinguishes_default_and_explicit_policy_limits() -> None
         policy=policy,
         policy_limit_applied=False,
     )
+
+
+class _DatabaseErrorWithSqlState(Exception):
+    def __init__(self, pgcode: str) -> None:
+        self.pgcode = pgcode
+
+
+@pytest.mark.parametrize(
+    ("pgcode", "expected_category", "expected_retryable"),
+    [
+        ("57014", "postgres_timeout", True),
+        ("42501", "postgres_permission_error", False),
+        ("08006", "postgres_connection_error", True),
+        ("42703", "postgres_query_error", False),
+    ],
+)
+def test_v2_evaluator_classifies_database_failures_without_error_text(
+    pgcode: str, expected_category: str, expected_retryable: bool
+) -> None:
+    category, sqlstate_class, retryable = _classify_postgres_failure(
+        _DatabaseErrorWithSqlState(pgcode)
+    )
+
+    assert category == expected_category
+    assert sqlstate_class == pgcode[:2]
+    assert retryable is expected_retryable
+
+
+def test_gold_replay_retries_only_a_classified_transient_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.post_training.evaluation import evaluate_thelook_v2_matching_outputs as module
+
+    attempts = iter(
+        [
+            ExecutionAttempt(
+                "accepted", None, False, "postgres_timeout", "57", True
+            ),
+            ExecutionAttempt(
+                "accepted", None, False, "postgres_timeout", "57", True
+            ),
+        ]
+    )
+    monkeypatch.setattr(module, "_execute_sql", lambda _sql, _policy: next(attempts))
+    diagnostics = []
+
+    with pytest.raises(
+        TheLookV2MatchingError,
+        match="Gold SQL replay failed for thelook-final-v2-001: postgres_timeout",
+    ):
+        _gold_frame(
+            FullCase("thelook-final-v2-001", None, "SELECT 1"),  # type: ignore[arg-type]
+            SqlPolicy(workspace=THELOOK_V2_WORKSPACE),
+            diagnostics,
+        )
+
+    assert [diagnostic.as_dict() for diagnostic in diagnostics] == [
+        {
+            "case_id": "thelook-final-v2-001",
+            "gold_sql_sha256": "e004ebd5b5532a4b85984a62f8ad48a81aa3460c1ca07701f386135d72cdecf5",
+            "attempt_count": 2,
+            "status": "failed",
+            "failure_category": "postgres_timeout",
+            "sqlstate_class": "57",
+        }
+    ]

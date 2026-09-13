@@ -62,6 +62,7 @@ from data_analysis_agent.thelook_v2_queryspec import (
 
 ABSOLUTE_NUMERIC_TOLERANCE = Decimal("0.000001")
 RELATIVE_NUMERIC_TOLERANCE = Decimal("0.000001")
+GOLD_EXECUTION_MAX_ATTEMPTS = 2
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,40 @@ class CandidateOutcome:
     record: CandidateEvaluationRecord
     frame: pd.DataFrame | None
     normalized_sql: str | None
+
+
+@dataclass(frozen=True)
+class ExecutionAttempt:
+    """A SQL execution outcome without SQL text or database result rows."""
+
+    policy_status: str
+    frame: pd.DataFrame | None
+    limit_applied: bool
+    failure_category: str | None
+    sqlstate_class: str | None
+    retryable: bool
+
+
+@dataclass(frozen=True)
+class GoldExecutionDiagnostic:
+    """A safe, classifiable Gold replay trace retained outside the repository."""
+
+    case_id: str
+    gold_sql_sha256: str
+    attempt_count: int
+    status: str
+    failure_category: str | None
+    sqlstate_class: str | None
+
+    def as_dict(self) -> dict[str, str | int | None]:
+        return {
+            "case_id": self.case_id,
+            "gold_sql_sha256": self.gold_sql_sha256,
+            "attempt_count": self.attempt_count,
+            "status": self.status,
+            "failure_category": self.failure_category,
+            "sqlstate_class": self.sqlstate_class,
+        }
 
 
 def parse_args() -> argparse.Namespace:
@@ -189,18 +224,45 @@ def _policy_cap_may_have_truncated_candidate(
     return isinstance(value, exp.Literal) and value.is_int and int(value.this) > policy.limits["analyst"]
 
 
-def _execute_sql(
-    sql: str, policy: SqlPolicy
-) -> tuple[str, pd.DataFrame | None, bool, str | None]:
+def _classify_postgres_failure(exc: Exception) -> tuple[str, str | None, bool]:
+    """Return a bounded, SQL-text-free database failure classification."""
+
+    pgcode = getattr(exc, "pgcode", None)
+    sqlstate_class = pgcode[:2] if isinstance(pgcode, str) and len(pgcode) >= 2 else None
+    if pgcode == "57014":
+        return "postgres_timeout", sqlstate_class, True
+    if pgcode == "42501" or sqlstate_class == "28":
+        return "postgres_permission_error", sqlstate_class, False
+    if sqlstate_class == "08" or isinstance(exc, (psycopg2.OperationalError, OSError)):
+        return "postgres_connection_error", sqlstate_class, True
+    return "postgres_query_error", sqlstate_class, False
+
+
+def _execute_sql(sql: str, policy: SqlPolicy) -> ExecutionAttempt:
     """Policy-check and execute one candidate using the protected reader role."""
 
     try:
         decision = policy.evaluate(sql, role="analyst")
     except PolicyViolation:
-        return "rejected", None, False, "policy_rejected"
-    connection = psycopg2.connect(
-        host="/tmp", port=35434, database="thelook_analytics", user="postgres"
-    )
+        return ExecutionAttempt("rejected", None, False, "policy_rejected", None, False)
+    try:
+        connection = psycopg2.connect(
+            host="/tmp", port=35434, database="thelook_analytics", user="postgres"
+        )
+    except Exception as exc:
+        failure_category, sqlstate_class, retryable = _classify_postgres_failure(exc)
+        return ExecutionAttempt(
+            "accepted",
+            None,
+            _policy_cap_may_have_truncated_candidate(
+                sql,
+                policy=policy,
+                policy_limit_applied=decision.policy_limit_applied,
+            ),
+            failure_category,
+            sqlstate_class,
+            retryable,
+        )
     try:
         connection.set_session(readonly=True, autocommit=False)
         with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
@@ -208,7 +270,7 @@ def _execute_sql(
             cursor.execute("SET LOCAL statement_timeout = 5000")
             cursor.execute(decision.final_sql)
             rows = [dict(row) for row in cursor.fetchmany(200)]
-        return (
+        return ExecutionAttempt(
             "accepted",
             pd.DataFrame(rows),
             _policy_cap_may_have_truncated_candidate(
@@ -217,10 +279,13 @@ def _execute_sql(
                 policy_limit_applied=decision.policy_limit_applied,
             ),
             None,
+            None,
+            False,
         )
-    except Exception:
+    except Exception as exc:
         connection.rollback()
-        return (
+        failure_category, sqlstate_class, retryable = _classify_postgres_failure(exc)
+        return ExecutionAttempt(
             "accepted",
             None,
             _policy_cap_may_have_truncated_candidate(
@@ -228,7 +293,9 @@ def _execute_sql(
                 policy=policy,
                 policy_limit_applied=decision.policy_limit_applied,
             ),
-            "postgres_execution_error",
+            failure_category,
+            sqlstate_class,
+            retryable,
         )
     finally:
         connection.close()
@@ -279,8 +346,8 @@ def _candidate_outcome(
             None,
             None,
         )
-    policy_status, frame, limit_applied, failure = _execute_sql(normalized_sql, policy)
-    if frame is None:
+    attempt = _execute_sql(normalized_sql, policy)
+    if attempt.frame is None:
         return CandidateOutcome(
             CandidateEvaluationRecord(
                 case.case_id,
@@ -288,17 +355,17 @@ def _candidate_outcome(
                 "generated",
                 None,
                 None,
-                policy_status,
-                "not_run" if policy_status == "rejected" else "error",
+                attempt.policy_status,
+                "not_run" if attempt.policy_status == "rejected" else "error",
                 None,
                 False,
-                failure,
+                attempt.failure_category,
             ),
             None,
             normalized_sql,
         )
     validation_state, valid = _validate(
-        frame, case.query_spec, limit_applied=limit_applied
+        attempt.frame, case.query_spec, limit_applied=attempt.limit_applied
     )
     return CandidateOutcome(
         CandidateEvaluationRecord(
@@ -307,13 +374,13 @@ def _candidate_outcome(
             "generated",
             None,
             None,
-            policy_status,
+            attempt.policy_status,
             "executed",
             validation_state,
             valid,
             None if valid else "result_contract_rejected",
         ),
-        frame,
+        attempt.frame,
         normalized_sql,
     )
 
@@ -376,16 +443,59 @@ def denotation_state(candidate: pd.DataFrame, gold: pd.DataFrame) -> str:
     return "denotation_mismatch"
 
 
-def _gold_frame(case: FullCase, policy: SqlPolicy) -> pd.DataFrame:
-    policy_status, frame, limit_applied, failure = _execute_sql(case.gold_sql, policy)
-    if policy_status != "accepted" or frame is None or failure is not None:
-        raise TheLookV2MatchingError(f"Gold SQL did not execute for {case.case_id}")
-    state, valid = _validate(frame, case.query_spec, limit_applied=limit_applied)
+def _gold_frame(
+    case: FullCase,
+    policy: SqlPolicy,
+    diagnostics: list[GoldExecutionDiagnostic],
+) -> pd.DataFrame:
+    """Replay a static Gold query with bounded retries and a safe trace."""
+
+    gold_sql_sha256 = sha256_file_text(case.gold_sql)
+    attempt: ExecutionAttempt | None = None
+    for attempt_count in range(1, GOLD_EXECUTION_MAX_ATTEMPTS + 1):
+        attempt = _execute_sql(case.gold_sql, policy)
+        if attempt.frame is not None and attempt.failure_category is None:
+            break
+        if not attempt.retryable or attempt_count == GOLD_EXECUTION_MAX_ATTEMPTS:
+            diagnostics.append(
+                GoldExecutionDiagnostic(
+                    case.case_id,
+                    gold_sql_sha256,
+                    attempt_count,
+                    "failed",
+                    attempt.failure_category,
+                    attempt.sqlstate_class,
+                )
+            )
+            raise TheLookV2MatchingError(
+                "Gold SQL replay failed for "
+                f"{case.case_id}: {attempt.failure_category or 'unknown_failure'}"
+            )
+    if attempt is None or attempt.frame is None:
+        raise AssertionError("Gold replay must return an execution attempt")
+    state, valid = _validate(
+        attempt.frame, case.query_spec, limit_applied=attempt.limit_applied
+    )
     if not valid:
-        raise TheLookV2MatchingError(
-            f"Gold SQL failed ResultValidator for {case.case_id}: {state}"
+        diagnostics.append(
+            GoldExecutionDiagnostic(
+                case.case_id,
+                gold_sql_sha256,
+                attempt_count,
+                "result_contract_rejected",
+                "gold_result_contract_rejected",
+                None,
+            )
         )
-    return frame
+        raise TheLookV2MatchingError(
+            f"Gold SQL replay failed ResultValidator for {case.case_id}: {state}"
+        )
+    diagnostics.append(
+        GoldExecutionDiagnostic(
+            case.case_id, gold_sql_sha256, attempt_count, "valid", None, None
+        )
+    )
+    return attempt.frame
 
 
 def _execution_report(
@@ -415,6 +525,27 @@ def _normalised_rows(outcomes: Sequence[CandidateOutcome]) -> list[dict[str, str
         for outcome in outcomes
         if outcome.normalized_sql is not None
     ]
+
+
+def _write_gold_execution_diagnostics(
+    output_dir: Path, diagnostics: Sequence[GoldExecutionDiagnostic]
+) -> None:
+    """Persist a SQL-text-free replay trace even if the evaluation stops early."""
+
+    report = {
+        "report_schema_version": "thelook-v2-gold-execution-diagnostics-v1",
+        "diagnostic_count": len(diagnostics),
+        "diagnostics": [diagnostic.as_dict() for diagnostic in diagnostics],
+        "boundaries": {
+            "raw_gold_sql_in_report": False,
+            "raw_result_rows_in_report": False,
+            "raw_artifacts_outside_repository": True,
+        },
+    }
+    (output_dir / "gold-execution-diagnostics.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main() -> int:
@@ -477,6 +608,7 @@ def main() -> int:
         )
 
     # Gold access begins here, and only after the validated marker above.
+    output_dir.mkdir(parents=True)
     cases = _load_full_cases_after_marker(
         args.cases_jsonl, expected_case_ids=expected_ids
     )
@@ -501,17 +633,28 @@ def main() -> int:
     base_by_id = {outcome.record.source_id: outcome for outcome in base_outcomes}
     adapter_by_id = {outcome.record.source_id: outcome for outcome in adapter_outcomes}
     gold_cache: dict[str, pd.DataFrame] = {}
+    gold_execution_diagnostics: list[GoldExecutionDiagnostic] = []
     denotation: dict[str, dict[str, str]] = {"base": {}, "adapter": {}}
-    for case_id in expected_ids:
-        for label, outcome in (
-            ("base", base_by_id[case_id]),
-            ("adapter", adapter_by_id[case_id]),
-        ):
-            if not outcome.record.result_contract_satisfied or outcome.frame is None:
-                denotation[label][case_id] = "not_result_contract_valid"
-                continue
-            gold = gold_cache.setdefault(case_id, _gold_frame(cases[case_id], policy))
-            denotation[label][case_id] = denotation_state(outcome.frame, gold)
+    try:
+        for case_id in expected_ids:
+            for label, outcome in (
+                ("base", base_by_id[case_id]),
+                ("adapter", adapter_by_id[case_id]),
+            ):
+                if not outcome.record.result_contract_satisfied or outcome.frame is None:
+                    denotation[label][case_id] = "not_result_contract_valid"
+                    continue
+                if case_id not in gold_cache:
+                    gold_cache[case_id] = _gold_frame(
+                        cases[case_id], policy, gold_execution_diagnostics
+                    )
+                denotation[label][case_id] = denotation_state(
+                    outcome.frame, gold_cache[case_id]
+                )
+    except TheLookV2MatchingError:
+        _write_gold_execution_diagnostics(output_dir, gold_execution_diagnostics)
+        raise
+    _write_gold_execution_diagnostics(output_dir, gold_execution_diagnostics)
 
     base_execution = _execution_report("base", base_outcomes)
     adapter_execution = _execution_report("adapter", adapter_outcomes)
@@ -520,7 +663,6 @@ def main() -> int:
         f"{denotation['base'][case_id]} -> {denotation['adapter'][case_id]}"
         for case_id in expected_ids
     )
-    output_dir.mkdir(parents=True)
     for label, outcomes in (("base", base_outcomes), ("adapter", adapter_outcomes)):
         with (output_dir / f"{label}-normalized-candidates.jsonl").open(
             "x", encoding="utf-8"
@@ -548,6 +690,13 @@ def main() -> int:
                 output_dir / "adapter-normalized-candidates.jsonl"
             ),
             "raw_artifacts_outside_repository": True,
+        },
+        "gold_execution_diagnostics": {
+            "path": "gold-execution-diagnostics.json",
+            "sha256": sha256_file(output_dir / "gold-execution-diagnostics.json"),
+            "valid_gold_replays": sum(
+                diagnostic.status == "valid" for diagnostic in gold_execution_diagnostics
+            ),
         },
         "boundaries": {
             "gold_sql_read_only_after_matching_marker": True,

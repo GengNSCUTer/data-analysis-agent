@@ -6,6 +6,25 @@
 
 这是一份受冻结 TheLook 快照、Catalog、Prompt 和 greedy 解码约束的离线候选 SQL 证据。它支持“当前 Olist 领域 Adapter 对这个未见电商 schema 存在正向迁移信号”，不支持将 Adapter 接入产品默认路径，更不等价于开放式 Text-to-SQL、生产安全或任意业务指标的泛化结论。
 
+### 2026-09-14：Schema-aware Program Adapter 的输出协议修复后重评
+
+新 Schema-aware Program Adapter 与上表的历史 SQL-only Adapter 是不同的 Olist LoRA 产物。它的原始 `600` 条 completion 中，`120` 条直接以 `SELECT/WITH` 开头，另有 `480` 条是“短单行展示标题 + 紧随其后的 SQL”；标题本身不是 SQL，也不是 SchemaLinkPlan JSON。旧的精确标题白名单不认识这种输出，因而把它们交给 AST 解析并造成大量格式性假阴性。
+
+`unwrap_sql_completion()` 现只在严格条件同时满足时删除**首行**：标题最多两词、长度不超过 64、没有分号/反引号/注释标记、不是 SQL opener，且下一条非空行明确以 `SELECT` 或 `WITH` 开始；原 SQL、其他 prose 与所有安全审查都保持不变。该规则不是 SQL 修复器，清洗后的文本仍须通过原 `SqlPolicy -> daa_thelook_reader -> ResultContract/ResultValidator` 链路。它在新的仓库外阶段 C 输出目录重放既有 Base / Schema-aware raw completion，未调用模型、未训练、未让 TheLook 反向进入 Olist 数据、Prompt 或 Adapter 选择。
+
+| 门 / 结果 | Base | 历史 SQL-only Adapter | Schema-aware 原始链路 | Schema-aware 规范化后 |
+| --- | ---: | ---: | ---: | ---: |
+| SqlPolicy 通过 | 259 | 467 | 107 | 457 |
+| PostgreSQL 执行成功 | 173 | 335 | 75 | 296 |
+| ResultContract valid | 127 | 313 | 72 | 284 |
+| Gold ordered match | 59 | 207 | 43 | 200 |
+| Gold bag match | 8 | 18 | 0 | 5 |
+| ordered-or-bag match | 67 | 225 | 43 | 205 |
+
+因此，Schema-aware 原始退化的首要来源是输出包装协议漂移，而不是“生成 SQL 全面失效”：只做有界标题归一化就恢复 `350` 条 Policy acceptance，最终较 Base 多 `138` 条 ordered-or-bag match。它仍比历史 SQL-only Adapter 少 `10` 条 Policy、`29` 条执行/合同有效和 `20` 条 Gold match，故当前没有理由以它替换 SQL-only Adapter 或接入生产默认路径。其合同有效后的 Gold match 为 `205/284 (72.2%)`，接近历史 SQL-only Adapter 的 `225/313 (71.9%)`；剩余差距主要在能否生成可通过 Policy、连接与结果合同的 SQL，而不能用这份 protected holdout 反向构造训练样本。
+
+此前 Gold 重放在 case `449` 只给出“未执行”的泛化错误。本轮为评测器补充了不含 SQL/结果行的分类诊断与有限两次瞬态重试：`policy_rejected`、连接、超时、权限、查询和 Gold 结果合同失败分别记录。此次具备 Gold 重放资格的 `305` 个唯一 case 全部为 `valid`，没有 Gold 层失败；因此旧错误更可能是瞬态环境状态，不能据此归咎于模型或修改 Gold。脱敏报告和诊断位于仓库外 `qwen25coder-schema-aware-thelook-v2-matching-v1-20260913/evaluation-presentation-normalizer-v1-20260914/` 的 `evaluation-report.json` 与 `gold-execution-diagnostics.json`。
+
 ## 对照条件与边界
 
 - final test：`thelook-cross-schema-final-test-v2`，600 个唯一 protected QuerySpec/family；问题、Gold SQL、raw completion、结果行和失败日志均留在仓库外。

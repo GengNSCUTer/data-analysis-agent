@@ -1,6 +1,6 @@
 # Olist Schema-aware Program SFT 数据合同 v1
 
-**状态：** Phase 1 的接口、确定性 `SchemaLinkPlan` registry / derive / validate、Task A/B 外部物化与单元回归已完成；Phase 2 的 1.5B Base pair-aware Trainer 已通过最长序列 GPU smoke，完整两 epoch 训练已在外部 screen 中启动，尚未结束或评测。<br>
+**状态：** Phase 1 的接口、确定性 `SchemaLinkPlan` registry / derive / validate、Task A/B 外部物化与单元回归已完成；Phase 2 的 1.5B Base pair-aware Trainer 已完成两 epoch，并已在 protected TheLook v2 做完不读取 Gold 的成对生成及 Gold 后置重评。<br>
 **训练基座：** `Qwen/Qwen2.5-Coder-1.5B@df3ce67c0e24480f20468b6ef2894622d69eb73b` 的新 LoRA Adapter。<br>
 **基座决策：** 1.5B Instruct 在同一 TheLook v2 任务内容下提高了 Policy/执行通过数，却没有提高最终 Gold 语义正确率；且其 chat-template 包装不同，不能作为严格单变量替换证据。为与历史 SQL-only Adapter 保持可比，本轮冻结既有 Qwen2.5-Coder 1.5B Base。
 
@@ -292,3 +292,9 @@ Base 加载磁盘 Adapter，对一条 SQL / 一条 SchemaLinkPlan validation eve
 projection 与 Gold 后置隔离，分别对 Olist final test 和 protected TheLook v2 做 matching
 Base / 历史 SQL-only Adapter / 本 Schema-aware Adapter 生成评测；评测才用于判断 Task B 是否改善
 schema linking、Join、粒度、时间归属、去重与结果别名。
+
+### 9.4 Schema-aware Adapter 的 TheLook v2 后置结果（2026-09-14）
+
+在与历史 Base/SQL-only Adapter 相同的 protected TheLook v2 600 条 case、Catalog、Prompt、decode、marker 和 Gold 后置边界下，新 Schema-aware Adapter 的原始 completion 有 `480/600` 在合法 SQL 前额外输出单行展示标题。它不是 Task B JSON 回显，也没有证据表明标题文本直接来自 Task B target；但 Task A/B 联合监督确实改变了 SQL-only 输出协议，这是需要由 Olist-only validation 消融验证的训练设计风险。
+
+在不改动 completion 内容、只按运行时通用有界规则删除“短标题且下一行是 SELECT/WITH”的首行后，Schema-aware Adapter 的 Policy / PostgreSQL / ResultContract valid / Gold ordered-or-bag 为 `457/296/284/205`，高于相同 Base 的 `259/173/127/67`，但低于历史 SQL-only Adapter 的 `467/335/313/225`。故本轮结论是：输出包装问题已被定位并得到泛化修复；Schema-aware 的 SQL 有效候选质量没有显示全面崩溃，但当前证据不支持替换 SQL-only Adapter、接入生产或根据 TheLook case 反向扩训练。下一次实验必须在 Olist train/validation 内预注册 Task B 的 sampling/loss weight 或 task selector 消融、保存 validation-best checkpoint，并保持 TheLook 仅作最终一次性检查。

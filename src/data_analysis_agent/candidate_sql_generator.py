@@ -9,6 +9,7 @@ intentionally has no Transformers, PEFT, database, or repair dependency.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from .question_router import QuestionRoute
 
@@ -22,6 +23,8 @@ OLIST_CANDIDATE_SQL_PROMPT_VERSION = "olist-candidate-sql-v1"
 # prompt asks for SQL only.  These are exact, bounded headings; normalization
 # never strips arbitrary prose or repairs SQL.
 _DISPLAY_PREFIXES = frozenset({"Query", "Query Plan", "Code", "Selection", "Solution"})
+_SQL_OPENING = re.compile(r"^(?:SELECT|WITH)\b", flags=re.IGNORECASE)
+_PRESENTATION_WORD = re.compile(r"^[\w-]+$", flags=re.UNICODE)
 
 
 class CandidateSqlGenerationError(ValueError):
@@ -89,7 +92,7 @@ def render_candidate_sql_prompt(context: CandidateSqlContext) -> str:
 
 
 def unwrap_sql_completion(completion: str) -> str:
-    """Remove only a single supported presentation wrapper; never repair SQL.
+    """Remove a bounded leading presentation wrapper; never repair SQL.
 
     The returned content deliberately remains untouched when it contains prose,
     multiple statements, DDL/DML, invalid identifiers, or an unsupported dialect.
@@ -105,7 +108,7 @@ def unwrap_sql_completion(completion: str) -> str:
     if value[:4].lower() == "sql:":
         value = value[4:].lstrip()
     lines = value.splitlines()
-    if lines and lines[0].strip() in _DISPLAY_PREFIXES:
+    if lines and _is_leading_presentation_label(lines):
         value = "\n".join(lines[1:]).strip()
     else:
         # Support the same exact heading when the model places it on the SQL
@@ -126,3 +129,41 @@ def unwrap_sql_completion(completion: str) -> str:
     if not value:
         raise CandidateSqlGenerationError("model generated only an empty SQL wrapper")
     return value
+
+
+def _is_leading_presentation_label(lines: list[str]) -> bool:
+    """Recognize one short display title only when a SQL query immediately follows.
+
+    This is intentionally not a general prose-to-SQL extractor.  It removes at
+    most the first line, requires the next non-empty line to be a ``SELECT`` or
+    ``WITH`` query opener, and accepts only a narrow title grammar.  Everything
+    else is returned unchanged for the AST policy to reject or accept.
+    """
+
+    title = lines[0].strip()
+    if not title or len(title) > 64 or _SQL_OPENING.match(title):
+        return False
+    if any(marker in title for marker in (";", "`", "--", "/*", "*/")):
+        return False
+
+    words = title.split()
+    is_known_title = title in _DISPLAY_PREFIXES
+    # Generalize beyond a fixed vocabulary without accepting arbitrary prose:
+    # a title is one word ("Proposal", "Answer") or a two-word SQL-labelled
+    # heading ("SQL Query").  Existing exact multiword prefixes stay supported.
+    is_generic_title = (
+        1 <= len(words) <= 2
+        and all(_PRESENTATION_WORD.fullmatch(word) for word in words)
+        and (len(words) == 1 or any(word.lower() == "sql" for word in words))
+    )
+    if not (is_known_title or is_generic_title):
+        return False
+
+    for next_line in lines[1:]:
+        candidate = next_line.strip()
+        if not candidate:
+            continue
+        if candidate[:4].lower() == "sql:":
+            candidate = candidate[4:].lstrip()
+        return bool(_SQL_OPENING.match(candidate))
+    return False

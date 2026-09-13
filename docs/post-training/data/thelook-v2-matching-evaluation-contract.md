@@ -52,13 +52,15 @@
 
 阶段 C：候选执行与 Gold denotation（唯一 Gold 读取点）
   marker 复核成功
-    -> unwrap_sql_completion() 统一前缀/代码栏清洗
+    -> unwrap_sql_completion() 有界展示包装归一化
     -> SqlPolicy -> daa_thelook_reader -> ResultValidator
     -> 仅对 ResultContract valid 的候选重放 Gold 并比较列、行数、数值和顺序
     -> 外部 normalized candidates + 不含 SQL/问题/结果行的 evaluation-report.json
 ```
 
 阶段 A 的 case 投影函数显式只读取 `case_id`、`question`、`query_spec` 与 `required_result_columns`。代码和回归测试都禁止它访问 `gold_sql` / `gold_sql_sha256`。阶段 C 若 marker 的版本、任一 hash、Base/Adapter 合同、600 条 case 顺序或 adapter 状态不匹配，会在读取 Gold 前拒绝。
+
+展示包装归一化只允许移除最前面的一行短标题，且其下一条非空行必须明确以 `SELECT` 或 `WITH` 开始；标题长度最多 64、最多两个词，不能含 SQL opener、分号、反引号或 SQL 注释标记。它不会在文本中搜索 SQL、删除中间 prose、补别名、修复 JOIN 或放宽 AST Policy。评测输出还会将 Gold 重放失败归为 Policy、连接、超时、权限、查询或结果合同类别，最多对明确可重试的 Gold 瞬态失败尝试两次；报告不记录 SQL 文本、异常正文或结果行。
 
 Policy 为没有显式 `LIMIT` 的候选添加的 200 行安全上限，不单独等于“结果已截断”：只有实际返回达到 200 行时才由 `ResultValidator` 标记截断。候选主动请求超过 200 行、被 Policy 压缩时，仍保守作为可能截断处理。这与生产 runner 的语义一致，避免把标量或少行查询系统性误判为 `needs_clarification`。
 

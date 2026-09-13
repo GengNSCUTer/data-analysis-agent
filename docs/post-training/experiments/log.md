@@ -2,6 +2,14 @@
 
 本台账只记录已完成实验和待评测的受控实验，不在这里讲通用概念。原始训练样本、SQL、预测、数据库、模型权重、checkpoint 和完整日志都留在仓库外；这里仅记录可复核的配置、哈希和聚合结果。当前学习顺序在上级目录的 `README.md` 中维护。
 
+## 2026-09-14：Schema-aware Program Adapter 的 TheLook v2 输出协议重评
+
+新 Schema-aware Program Adapter 已复用冻结的 Base / Adapter `600/600` raw completion、既有 generation-safe matching marker 和 protected TheLook v2；本轮没有调用模型、训练、改动 Olist 数据、Prompt 或默认运行时。只修改阶段 C 的共享 `unwrap_sql_completion()`：除了既有代码栏、`SQL:` 与精确标题外，它只会删除最前面一条满足严格条件的展示标题（最多两词/64 字符、无 SQL 标记，且紧随的非空行明确以 `SELECT`/`WITH` 开始）。不会搜索/修复 SQL，所有清洗后文本仍经原 `SqlPolicy -> daa_thelook_reader -> ResultContract/ResultValidator`。
+
+原始 Adapter 有 `480/600` completion 以短展示标题 `Proposal` 开头；旧精确白名单将其作为 SQL 解析，导致 Policy 通过仅 `107/600`。新规则将 Schema-aware Adapter 的 Policy / PostgreSQL / ResultContract valid 从 `107/75/72` 恢复为 `457/296/284`，Gold ordered-or-bag 从 `43/600` 恢复为 `205/600`；Base 保持 `259/173/127/67`。这确认首要退化是输出包装协议漂移，而不是 SQL 全面失效，但 Schema-aware 仍低于历史 SQL-only Adapter 的 `467/335/313/225`，不能替换默认候选模型或用 TheLook 错误驱动训练。
+
+同轮为 Gold 重放补齐仅含 case ID、Gold SQL hash、有限失败类别/SQLSTATE class 和次数的仓库外诊断，并仅对连接/超时类明确瞬态错误最多重试一次。此前在 case 449 的无分类失败未复现：本次进入 Gold 的 `305` 个唯一 case 均 valid，零 Gold 层失败。外部脱敏产物位于 `experiments/qwen25coder-schema-aware-thelook-v2-matching-v1-20260913/evaluation-presentation-normalizer-v1-20260914/`；`evaluation-report.json` SHA-256 为 `22a1ecc4ef610af916a03ab3bf9c49ae010af133ad124caa55a3bd91f31df786`，`gold-execution-diagnostics.json` SHA-256 为 `23b82e161a2721fbe1d831ddf4535edb7a11e848ad6153b3369ddfa638f8dd58`。
+
 ## 2026-09-13：Qwen2.5-Coder-1.5B Schema-aware Program SFT 完整训练完成
 
 从冻结的 `Qwen/Qwen2.5-Coder-1.5B@df3ce67c0e24480f20468b6ef2894622d69eb73b` 新建 bf16 LoRA Adapter 的完整训练已正常结束。训练只读取 Olist Release v2 的 train/validation materialization、独立 audit/review 和 Base download manifest；TheLook v2、Olist in-domain final test、数据库与 LLM 没有进入训练、checkpoint 选择或数据构造。每个业务 query instance 保持一条语义查询，训练期分别产生 Task A（真实 runtime Prompt → canonical PostgreSQL SQL）与 Task B（紧凑结构上下文 → canonical SchemaLinkPlan JSON）两个交错 event，不能把 `6,000` event 表述成 `6,000` 个独立业务问题。
