@@ -255,9 +255,40 @@ UUID `GPU-10863af0-8588-7625-5609-640ba794f64b`）完成三次有界 smoke：首
 
 smoke 的 adapter、checkpoint、日志与证据在仓库外
 `/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder-schema-aware-sft-smoke-v{3,4,5}-20260913/`。
-最长样本 smoke 通过后，完整训练已以 `screen` 会话 `qwen25-schema-aware-full-v1` 启动，输出目录为
+最长样本 smoke 通过后，完整训练曾以 `screen` 会话 `qwen25-schema-aware-full-v1` 启动，输出目录为
 `/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder-schema-aware-sft-full-v1-20260913/`：
 Olist train `4,800` event、validation `1,200` event、2 epoch、micro batch 1、accumulation 4、
 有效 batch 4，预期 2,400 optimizer step；每 300 step 做 aggregate validation、每 600 step 保存
-checkpoint。训练完成前不声明质量提升、不改生产默认路径；后续须先检查训练证据和独立 Base/Adapter
-matching，再运行 Olist / protected TheLook 后评测。
+checkpoint。
+
+### 9.3 完整训练结果（2026-09-13）
+
+完整训练已正常结束，`sft_run.json` 记录 `2,400` optimizer step、`2.0` epoch 和
+`5,834.33` 秒（约 `97.2` 分钟）。最终 Adapter 位于仓库外
+`.../qwen25coder-schema-aware-sft-full-v1-20260913/adapter_final/`；
+`adapter_model.safetensors` 为 `71 MiB`，SHA-256 为
+`87b4be23b50becf9d094fd34b5330138562d1427acd8998d57e7c32cb9bdffac`。
+
+| 证据 | 最终值 | 正确含义 |
+| --- | ---: | --- |
+| train loss | `0.114698` | 两类 train event 混合的训练末值，不是 SQL 正确率。 |
+| aggregate validation loss | `0.100952` | SQL Task A 与 SchemaLinkPlan Task B 的混合 validation loss。 |
+| SQL validation loss | `0.00001549` | 对 `600` 条 Task A 的 canonical SQL token 拟合极强。 |
+| SchemaLinkPlan validation loss | `0.201889` | 对 `600` 条 Task B canonical JSON 的独立 loss；该结构输出更长、更复杂，不能与 SQL loss 直接平均。 |
+
+aggregate validation loss 在 step `300/600/900/1200/1500/1800/2100/2400` 分别为
+`0.101553/0.100075/0.100075/0.100171/0.100441/0.100492/0.100013/0.100952`。
+训练在前 300 step 快速下降，后续基本平台；step 2100 是记录到的最低 aggregate loss，但由于
+`save_steps=600`、`save_total_limit=2`，并未保留 step 2100 checkpoint。现存 checkpoint 只有
+step 1800 和 2400，当前交付的是完整两 epoch 的 final Adapter，而不是宣称的 validation-best Adapter。
+下一轮应使保存与评估步频对齐，并启用 `load_best_model_at_end` / `metric_for_best_model`。
+
+训练峰值 allocated/reserved 显存为 `8.60/18.80 GiB`；无 OOM、NaN 或 Inf。另以新加载的 bf16
+Base 加载磁盘 Adapter，对一条 SQL / 一条 SchemaLinkPlan validation event 做 masked forward，loss
+分别为 `0.00001294` / `0.275678`，证明最终磁盘 Adapter 可以独立回读，不能只靠训练进程内存解释。
+
+这组 loss 只证明 Olist 共享 Catalog、QuerySpec、ResultContract 与 deterministic renderer 协议内的
+拟合，不证明开放式 Text-to-SQL 泛化、业务语义正确或生产接入资格。后续必须保持 generation-safe
+projection 与 Gold 后置隔离，分别对 Olist final test 和 protected TheLook v2 做 matching
+Base / 历史 SQL-only Adapter / 本 Schema-aware Adapter 生成评测；评测才用于判断 Task B 是否改善
+schema linking、Join、粒度、时间归属、去重与结果别名。

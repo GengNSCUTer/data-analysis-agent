@@ -2,6 +2,18 @@
 
 本台账只记录已完成实验和待评测的受控实验，不在这里讲通用概念。原始训练样本、SQL、预测、数据库、模型权重、checkpoint 和完整日志都留在仓库外；这里仅记录可复核的配置、哈希和聚合结果。当前学习顺序在上级目录的 `README.md` 中维护。
 
+## 2026-09-13：Qwen2.5-Coder-1.5B Schema-aware Program SFT 完整训练完成
+
+从冻结的 `Qwen/Qwen2.5-Coder-1.5B@df3ce67c0e24480f20468b6ef2894622d69eb73b` 新建 bf16 LoRA Adapter 的完整训练已正常结束。训练只读取 Olist Release v2 的 train/validation materialization、独立 audit/review 和 Base download manifest；TheLook v2、Olist in-domain final test、数据库与 LLM 没有进入训练、checkpoint 选择或数据构造。每个业务 query instance 保持一条语义查询，训练期分别产生 Task A（真实 runtime Prompt → canonical PostgreSQL SQL）与 Task B（紧凑结构上下文 → canonical SchemaLinkPlan JSON）两个交错 event，不能把 `6,000` event 表述成 `6,000` 个独立业务问题。
+
+训练在逻辑 CUDA `0`、物理 `nvidia-smi` GPU `3` 的 RTX 4090（UUID `GPU-10863af0-8588-7625-5609-640ba794f64b`）完成，设置为冻结 bf16 Base、LoRA `r=16/alpha=32/dropout=0.05`、`adamw_torch`、weight decay `0.01`、学习率 `1e-4`、micro batch `1`、梯度累计 `4`、有效 batch `4`、最大 `3072` token、gradient checkpointing。完整运行 `2.0` epoch / `2,400` optimizer step，耗时 `5,834.33` 秒；峰值 allocated/reserved 显存为 `8.60/18.80 GiB`，无 OOM、NaN 或 Inf。
+
+最终 train loss 为 `0.114698`，aggregate validation loss 为 `0.100952`；分别对两类 validation event 计算的 SQL loss / SchemaLinkPlan loss 为 `0.00001549 / 0.201889`。SQL loss 说明模型对共享 Olist Catalog、QuerySpec、ResultContract 与 deterministic renderer 的 canonical SQL 协议拟合很强；Task B 是包含 relation/alias、join、grain、time owner、dedup、group key、CTE merge、result alias 和 plan ID 的较长 canonical JSON，loss 高于 SQL 不等于训练失败。两者不应直接平均，更不等价于 SQL 业务准确率或跨 schema 泛化。
+
+aggregate validation loss 在 step 2100 的记录最低（`0.100013`），但 `save_steps=600`、`save_total_limit=2` 只保留了 step 1800 / 2400 checkpoint，因此最终冻结的是完整两 epoch 的 step 2400 Adapter，而非 validation-best checkpoint；这是下一轮应补上 `load_best_model_at_end` 与保存/评估步频对齐的训练工程改进点。最终 `adapter_model.safetensors`（71 MiB）的 SHA-256 为 `87b4be23b50becf9d094fd34b5330138562d1427acd8998d57e7c32cb9bdffac`，并已从新加载 bf16 Base 独立 fresh reload，在 SQL / Task B 样本上得到有限 loss `0.00001294 / 0.275678`。
+
+本轮没有改动生产默认候选生成。下一步不是继续调低 loss，而是在 generation-safe projection、matching marker 和 Gold 后置隔离下，对 Olist final test 和 protected TheLook v2 分别比较 Base、历史 SQL-only Adapter 与 Schema-aware Adapter，检查 Task B 是否真正改善 schema linking、Join、聚合粒度、时间归属、去重和结果别名。完整合同与仓库外证据路径见 [`data/schema-aware-program-sft-contract-v1.md`](../data/schema-aware-program-sft-contract-v1.md)。
+
 ## 2026-09-11：Qwen2.5-Coder-1.5B-Instruct TheLook v2 基座方案对照完成
 
 官方 `Qwen/Qwen2.5-Coder-1.5B-Instruct@2e1fd397ee46e1388853d2af2c993145b0f1098a` 以 bf16、无 Adapter、官方 chat template 在 protected TheLook v2 的 600 条 case 完成 generation-only 阶段；生成阶段没有读取 Gold SQL 或数据库行。safe report 回读确认模型 revision、download manifest、服务器 Prompt、官方模板、chat Prompt、decode、case/manifest、raw completion 和 token preflight 均未漂移后，才运行 `SqlPolicy -> daa_thelook_reader -> ResultContract/ResultValidator -> Gold denotation`。
