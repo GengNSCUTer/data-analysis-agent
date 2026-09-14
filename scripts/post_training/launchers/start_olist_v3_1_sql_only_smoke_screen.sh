@@ -6,7 +6,8 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 PYTHON="${TRAIN_PYTHON:-/disk2/gengnan/conda_envs/data-analysis-agent-qlora/bin/python}"
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-2}"
+# The host CUDA order differs from nvidia-smi: logical CUDA 0 is physical 2.
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
 export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"
 export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
@@ -18,7 +19,7 @@ MODEL_DIR="${MODEL_DIR:-/disk2/gengnan/data-analysis-agent-data/models/qwen2.5-c
 SFT_DIR="${SFT_DIR:-/disk2/gengnan/data-analysis-agent-data/evals/olist-v3-balanced-release-v1.1/sft-release-v1.1}"
 PREFLIGHT_DIR="${PREFLIGHT_DIR:-/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-olist-v3_1-sql-only-preflight-v1-20260915}"
 PREFLIGHT_SHA256="${PREFLIGHT_SHA256:-ff5a71ec50bf96c9b47ac1a601999e1c909475c38eabf4fad74876f83b460944}"
-RUN_DIR="${RUN_DIR:-/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-olist-v3_1-sql-only-bf16-lora-smoke-v1-20260915}"
+RUN_DIR="${RUN_DIR:-/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-olist-v3_1-sql-only-bf16-lora-smoke-v1-rerun-20260915}"
 
 for required_path in \
   "${PYTHON}" \
