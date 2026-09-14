@@ -456,11 +456,20 @@ AST Policy 回归均保持 v2/v3 版本隔离；`average_items_per_order` 明确
 [`evals/results/olist-metrics-v3-proposal-golden.yaml`](evals/results/olist-metrics-v3-proposal-golden.yaml)。
 
 同日将下一版数据设计从相互重叠的“family 桶”改为 8 个互斥主类别、300 个新增 family：单指标/多
-指标标量、单指标/多指标维度分组、购买/评价单指标时间序列、多指标时间序列、结构难例。新增 family
-按 `200/50/50` 分入 train/validation/test，每 family 最多 8 个同 split 时间实例，形成新增
-`1600/400/400` 行；与当前 Release v2 合并后的目标为 `4000/1000/1000`，共 6,000 个 QuerySpec
-instance。中文 overlay 不增加 family 或主训练行数。尚未生成任何 v3 family/正式 JSONL、未训练或
-接入生产；下一步只做时间/分组/空窗口 Gold 回归和高风险指标口径抽审，再生成 family seed。
+指标标量、单指标/多指标维度分组、购买/评价单指标时间序列、多指标时间序列、结构难例。对历史
+Release v2 的真实 QuerySpec 统计发现，它的 2,400 条 train **不均衡**：`JP09`/`JP10`/`JP11` 三类
+合计 `2,347/2,400=97.8%`，多指标购买时间序列单类 `1,049/2,400=43.7%`，而商品品类在 test 为 0。
+因此废弃“直接追加 v3 行后得到 6,000 行”的方案；最终 release 必须从 v2/v3 合法候选重新物化，
+目标为 `train/validation/test=3,000/750/750`。新 release 同时以 family 覆盖保证稀缺能力，以行曝光
+上限限制多指标时间序列约 25%，日期窗口与中文改写均不冒充独立能力。
+
+v3 指标的真实 PostgreSQL Gold 回归已进一步覆盖客户州/商品品类分组、购买/评价时间序列、订单级
+二层聚合和空时间窗口：`RUN_PROJECT_DB=1` 下 `37 passed`。空时间窗口的 `COUNT` 标量可展示为 0；
+`AVG` 标量为 NULL 时必须拒绝；空分组/时间序列必须澄清，不能伪造结果。基于这些门，已冻结
+[`olist_v3_coverage_family_seeds_v1.jsonl`](data/fixtures/olist_v3_coverage_family_seeds_v1.jsonl)：300 个
+不含问题、Prompt、SQL 或结果的结构化 family seed，split 为 `200/50/50`。它只是后续 QuerySpec/Gold
+物化的施工卡，不是训练样本；当前尚未生成正式 JSONL、启动训练或接入生产。下一步仅进行小批 v3
+seed 的 QuerySpec/Gold SQL 准入与执行证据留存。
 
 ### 2026-09-14：Text-to-SQL 训练组织方式与 Schema-aware Task B 调研
 

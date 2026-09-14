@@ -1,7 +1,8 @@
 # Olist 业务指标合同 v3 Proposal
 
 **状态：** 已实现离线 Catalog、QuerySpec、deterministic Gold renderer、SchemaLinkPlan、
-reader-role 与 ResultContract 最小回归；尚未成为默认运行时 Catalog，尚未进入正式训练集。
+reader-role 与 ResultContract 回归，并已冻结静态 coverage family seed；尚未成为默认运行时
+Catalog，尚未进入正式训练集。
 
 **隔离快照：** `olist-catalog-v3` / `metric_version=0.3-proposal` /
 `olist-kaggle-v2-2026-08-03` / PostgreSQL / `sql-policy-v1`。
@@ -41,19 +42,25 @@ renderer 或中文问法隐式放开。
 - renderer 对 `average_items_per_order` 使用命名的订单级中间 CTE；
 - SchemaLinkPlan 为 9 个指标分别记录关系、Join、字段、去重和聚合规则；
 - `tests/test_olist_v3_metrics.py` 覆盖全部 v3 scalar Gold、受控别名检索、客户去重、二层聚合、
-  时长非负边界和商品品类分组；在 `RUN_PROJECT_DB=1` 时，9 项标量 Gold 均经 `SqlPolicy`、
-  `daa_analytics_reader` 和 ResultContract/ResultValidator 验证通过；
+  时长非负边界和商品品类分组；在 `RUN_PROJECT_DB=1` 时，9 项标量 Gold，以及客户州/商品品类分组、
+  购买/评价时间序列和空时间窗口，均经 `SqlPolicy`、`daa_analytics_reader` 和
+  ResultContract/ResultValidator 验证通过（2026-09-14 共 37 项）；
 - [`evals/sql/verify_olist_metrics_v3_proposal.sql`](../../evals/sql/verify_olist_metrics_v3_proposal.sql)
   和 [`evals/results/olist-metrics-v3-proposal-golden.yaml`](../../evals/results/olist-metrics-v3-proposal-golden.yaml)
   固定当前数据快照的聚合基线；2026-09-14 对本机 PostgreSQL 执行返回 `DO`。
 
-## 4. 尚未完成的门
+## 4. 当前准入状态与剩余门
 
-本轮已经完成全量标量的数据库基线和 ResultContract 证据，但尚未完成完整 v3 release 准入。进入
-family seed 之前，还必须完成：
+2026-09-14 已完成 v3 指标的确定性准入回归：全量标量、客户州/商品品类分组、购买/评价时间序列、
+二层聚合和空时间窗口均实际由 reader role 执行。空窗口行为也被固定：`COUNT` 标量返回一行 `0`
+并可展示；`AVG` 标量返回 `NULL` 时必须拒绝，不能伪装为 `0`；空分组/时间序列必须
+`needs_clarification`，不能凭空补 bucket。
 
-1. 为每类时间序列、客户州/商品品类分组和空时间窗口运行 Gold 级 reader-role/ResultContract 回归；
-2. 对高风险的客户去重、二层聚合、状态计数和时长指标做分层人工口径审核；
-3. 将通过项的 v3 Catalog、SQL hash、数据快照与证据写入 release manifest。
+这允许进入静态 family seed 阶段，但不等于完整 v3 release 已准入。后续仍必须：
 
-在上述门完成前，v3 仅是离线训练数据构造候选，不能接入默认 Agent。
+1. 将 seed 小批物化为具体 QuerySpec/Gold SQL，逐条通过 Policy、reader role 和结果合同；
+2. 对客户去重、二层聚合、状态计数和时长指标做分层人工口径审核（可使用 LLM 作为 advisory，不替代签字）；
+3. 为通过的具体 artifact 记录 Catalog、SQL hash、数据快照与执行证据，形成 release manifest；
+4. 完成中文 surface、Prompt/长度和 split 审计后，才可物化正式 SFT JSONL。
+
+无论上述哪一步完成，v3 都不得静默替换默认 Agent 的 v2 workspace；运行时接入是独立决策。

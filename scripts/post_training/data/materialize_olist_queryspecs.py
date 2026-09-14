@@ -285,6 +285,16 @@ def family_payload(spec: QuerySpec) -> dict[str, Any]:
     注意：故意剔除起止日期；业务逻辑相同、仅时间范围不同的查询属于同一个查询家族
     """
     """Semantic identity intentionally excludes date endpoints and language."""
+    # Keep every historical v2 family ID byte-for-byte stable: protected
+    # summaries and prior experiment manifests contain those IDs.  A v3
+    # QuerySpec has a different workspace pin already, but recording its
+    # actual metric contract here avoids producing a misleading v2-labelled
+    # family artifact during the isolated v3 construction phase.
+    aggregation_contract = (
+        "olist-metrics-v2"
+        if spec.workspace.metric_version == "0.2-frozen"
+        else f"olist-metrics-{spec.workspace.metric_version}"
+    )
     return {
         "family_schema_version": FAMILY_SCHEMA_VERSION,
         "workspace": spec.workspace.as_dict(),
@@ -297,7 +307,7 @@ def family_payload(spec: QuerySpec) -> dict[str, Any]:
         "time_mode": spec.time.mode,
         "time_grain": spec.time.grain,
         "join_program_id": spec.join_program_id,
-        "aggregation_contract": "olist-metrics-v2",
+        "aggregation_contract": aggregation_contract,
     }
 
 

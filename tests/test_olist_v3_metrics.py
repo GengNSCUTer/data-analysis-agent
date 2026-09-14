@@ -193,6 +193,166 @@ def test_average_item_price_is_the_only_new_category_safe_metric(catalog) -> Non
 
 
 @pytest.mark.postgres
+@pytest.mark.parametrize(
+    ("case_id", "metric_ids", "result_shape", "query_time", "expected_state", "expected_rows"),
+    [
+        (
+            "distinct_customer_by_state",
+            ("unique_customer_count",),
+            "state_grouped",
+            QueryTime("absolute_range", "2017-01-01", "2018-01-01"),
+            "valid",
+            27,
+        ),
+        (
+            "review_count_by_state",
+            ("review_count",),
+            "state_grouped",
+            QueryTime("absolute_range", "2017-01-01", "2018-01-01"),
+            "valid",
+            27,
+        ),
+        (
+            "average_item_price_by_category",
+            ("average_item_price",),
+            "category_grouped",
+            QueryTime("absolute_range", "2017-01-01", "2018-01-01"),
+            "valid",
+            72,
+        ),
+        (
+            "two_stage_average_items_by_state",
+            ("average_items_per_order",),
+            "state_grouped",
+            QueryTime("absolute_range", "2017-01-01", "2018-01-01"),
+            "valid",
+            27,
+        ),
+        (
+            "two_stage_average_items_monthly",
+            ("average_items_per_order",),
+            "time_series",
+            QueryTime("series", "2017-01-01", "2018-01-01", "month"),
+            "valid",
+            12,
+        ),
+        (
+            "purchase_latency_pair_quarterly",
+            ("approval_latency_days", "carrier_handoff_days"),
+            "time_series",
+            QueryTime("series", "2017-01-01", "2018-01-01", "quarter"),
+            "valid",
+            4,
+        ),
+        (
+            "review_metrics_monthly",
+            ("review_count", "average_review_score"),
+            "time_series",
+            QueryTime("series", "2017-01-01", "2018-01-01", "month"),
+            "valid",
+            12,
+        ),
+        # A scalar COUNT over an empty range is a known zero, and is safe to
+        # show. It must not be conflated with an empty grouped/time series.
+        (
+            "empty_window_scalar_count_is_zero",
+            ("canceled_order_count",),
+            "scalar",
+            QueryTime("absolute_range", "2025-01-01", "2025-02-01"),
+            "valid",
+            1,
+        ),
+        # AVG over an empty range returns one NULL-bearing aggregate row. The
+        # ResultValidator must reject it rather than inventing a zero.
+        (
+            "empty_window_scalar_average_is_refused",
+            ("average_item_price",),
+            "scalar",
+            QueryTime("absolute_range", "2025-01-01", "2025-02-01"),
+            "refuse",
+            1,
+        ),
+        # A grouped time series has no buckets in an empty range, therefore
+        # the correct user-facing state is clarification, not a numeric zero.
+        (
+            "empty_window_series_requires_clarification",
+            ("canceled_order_count",),
+            "time_series",
+            QueryTime("series", "2025-01-01", "2025-02-01", "month"),
+            "needs_clarification",
+            0,
+        ),
+    ],
+)
+def test_v3_gold_regression_covers_grouping_series_and_empty_windows(
+    case_id: str,
+    metric_ids: tuple[str, ...],
+    result_shape: str,
+    query_time: QueryTime,
+    expected_state: str,
+    expected_rows: int,
+    catalog,
+) -> None:
+    """Exercise the entire deterministic v3 Gold path against PostgreSQL.
+
+    The case table is deliberately small and structural: it protects every
+    newly introduced fact path, the order-level intermediate, legal direct
+    dimensions, both time families, and the distinct empty-result semantics.
+    It is a release gate for future coverage seeds, not a training set.
+    """
+    if os.getenv("RUN_PROJECT_DB") != "1":
+        pytest.skip("set RUN_PROJECT_DB=1 to validate v3 Gold against the project database")
+
+    spec = _spec(
+        catalog,
+        metric_ids=metric_ids,
+        result_shape=result_shape,
+        time=query_time,
+    )
+    artifact = render_gold_sql(spec, catalog)
+    policy = SqlPolicy(workspace=OLIST_V3_WORKSPACE).evaluate(artifact.sql, role="analyst")
+
+    assert policy.status == "allowed", case_id
+    assert tuple(artifact.required_result_columns) == spec.required_result_columns
+
+    connection = psycopg2.connect(
+        host="/tmp",
+        port=35434,
+        database="data_analysis_agent",
+        user="daa_analytics_reader",
+    )
+    connection.set_session(readonly=True, autocommit=False)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(policy.final_sql)
+            frame = pd.DataFrame(cursor.fetchall(), columns=[item.name for item in cursor.description])
+    finally:
+        connection.close()
+
+    validation = ResultValidator(max_rows=200).validate(
+        frame,
+        required_columns=artifact.required_result_columns,
+        metric_columns=metric_ids,
+        time_column="time" if result_shape == "time_series" else None,
+        time_bucket_grain=query_time.grain if result_shape == "time_series" else None,
+        requested_start=query_time.start,
+        requested_end=query_time.end_exclusive,
+        exact_columns=True,
+        metric_value_constraints={
+            metric_id: catalog.metrics_by_id[metric_id].result_value_constraints
+            for metric_id in metric_ids
+        },
+    )
+
+    assert len(frame) == expected_rows, case_id
+    assert validation.state == expected_state, case_id
+    if case_id == "empty_window_scalar_count_is_zero":
+        assert frame.iloc[0]["canceled_order_count"] == 0
+    if case_id == "empty_window_scalar_average_is_refused":
+        assert validation.null_metric_columns == ("average_item_price",)
+
+
+@pytest.mark.postgres
 def test_v3_scalar_gold_executes_as_reader_and_satisfies_result_contract(catalog) -> None:
     if os.getenv("RUN_PROJECT_DB") != "1":
         pytest.skip("set RUN_PROJECT_DB=1 to validate v3 Gold against the project database")

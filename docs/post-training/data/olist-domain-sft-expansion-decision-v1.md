@@ -9,9 +9,9 @@
 3. 中文 surface form 如何增加表达覆盖，同时不改变 QuerySpec 语义；
 4. 以上三项之间的先后顺序、准入门槛和停止条件。
 
-本轮不修改 `olist-metrics-v2.md`，不生成 QuerySpec/Gold SQL/训练行，不启动 GPU。v2 是已用于
-Release v2 的不可变实验快照；本文是下一版设计决策，正式编码前仍需把每个指标落成 Catalog、
-`METRIC_SQL_REGISTRY`、renderer 和回归测试。
+本轮不修改 `olist-metrics-v2.md`，不生成正式 SFT 训练行，不启动 GPU。v2 是已用于 Release v2 的
+不可变实验快照；本文是下一版设计决策。v3 指标已落成隔离 Catalog、`METRIC_SQL_REGISTRY`、renderer
+和回归测试；当前仅冻结不含自然语言、SQL 或结果的静态 family seed。
 
 本轮设计结论已确认。v3 指标已经写入**隔离的离线** `olist-catalog-v3 / 0.3-proposal`，并通过标量
 Gold 的 Policy、reader-role 和 ResultContract 回归；默认运行时仍固定在 v2。因此新增指标仍不能
@@ -90,45 +90,73 @@ family 是结构语义单元，不是中文问法数量。每条 family 绑定�
 `distinct`、`two_stage_aggregate`、`status_filter`、`null_boundary`）可以附加在 family 上，
 但不另算 family 类别。
 
-下面的配额是**新增 Coverage Repair v1 family**，不是把现有 2,400/600/600 行重新命名。
+下面的配额是**新增 Coverage Repair v3 family**，不是把现有 2,400/600/600 行重新命名。
 每个 family 只归入一个主结构桶；指标覆盖是独立的标签约束，可以覆盖多个桶但不重复计 family。
 
-本轮确定新增 **300 个 family，分为 8 个互斥的主类别**。每个 family 在所属 split 内生成 8 个
-不同日期窗口的 QuerySpec instance；8 个 instance 共享同一个 family 和主结构，只用于增加时间
-边界覆盖，不把它们当作 8 种独立能力。后续如果某个 family 不适合 8 个窗口，应减少实例并在
-manifest 中记录，不能用重复 SQL 补齐数量。
+2026-09-14 对 Release v2 的实际 QuerySpec 重新统计后，原先设想的“八类各占 10%--15%”被否决。
+原因不是数据量不足，而是合法 family 空间本来就不对称：在当前 19 项指标、无自由筛选、family
+跨 split 隔离的合同下，单指标标量总共最多只有 `19 × (all_time + absolute_range) = 38` 个 family；
+单指标品类分组更只有 4 个商品行指标 × 2 个时间模式 = 8 个 family。将它们强行扩成与多指标组合
+同样多的行，只会反复复制同一语义，制造虚假的“均衡”。
+
+因此本轮采用两个不同口径：
+
+1. **family 覆盖配额**优先保证稀缺结构和新指标在 train/validation/test 都有代表；
+2. **正式训练行曝光配额**在后续物化阶段限制多指标购买时间序列的占比，不把 v2 的历史偏置直接
+   拼接进新 release。
+
+本轮冻结 **300 个 v3 workspace family，8 个互斥主类别**。family seed 只是一条没有问题、Prompt、
+SQL 或结果的结构化施工卡：它固定 split、主类别、风险标签和一个已验证的 QuerySpec 原型；之后才由
+物化器在同 split 内派生最多 8 个合法日期实例。日期实例共享 family，不算 8 种独立能力；无法形成
+合法窗口时必须减少实例并写入 manifest，不能复制 SQL 补齐数量。
 
 ### 2.2 新增 300 family 的主结构配额
 
 | 主类别（互斥） | 占比 | 总 family | train | validation | test | 重点补什么 |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| 单指标标量 | 15% | 45 | 30 | 7 | 8 | 为 19 个指标提供独立 scalar 入口，优先补 v3 指标 |
-| 多指标标量 | 15% | 45 | 30 | 7 | 8 | 2--4 指标的独立 CTE 与 cross join |
-| 单指标维度分组 | 15% | 45 | 30 | 7 | 8 | 客户州和商品品类的合法直接归属 |
-| 多指标维度分组 | 10% | 30 | 20 | 5 | 5 | 同一维度下的多指标合并，不跨未冻结归属 |
-| 单指标购买时间序列 | 15% | 45 | 30 | 7 | 8 | 日/月/季度/年购买时间分桶 |
-| 单指标评价时间序列 | 5% | 15 | 10 | 2 | 3 | 评价率、评分和评价数量 |
-| 多指标时间序列 | 15% | 45 | 30 | 8 | 7 | 同一时间域内的金额、订单、状态和时长组合 |
-| 结构难例 | 10% | 30 | 20 | 7 | 3 | 二层聚合、DISTINCT、状态分母、NULL/负时长边界 |
+| 单指标标量 | 6.0% | 18 | 12 | 3 | 3 | 9 个新指标 × 全量/绝对时间两种有限合法 family |
+| 多指标标量 | 18.0% | 54 | 38 | 9 | 7 | 2--4 指标独立 CTE 与标量合并 |
+| 单指标维度分组 | 6.7% | 20 | 12 | 3 | 5 | 客户州；并保留 8 个有限商品品类 family，test 固定 5 个 |
+| 多指标维度分组 | 14.0% | 42 | 28 | 7 | 7 | 同一客户州下多指标合并，不跨未冻结归属 |
+| 单指标购买时间序列 | 13.3% | 40 | 27 | 6 | 7 | 8 个新增购买域指标 × 5 种时间粒度 |
+| 单指标评价时间序列 | 1.7% | 5 | 3 | 1 | 1 | `review_count` × 5 种时间粒度；空间天然有限 |
+| 多指标时间序列 | 25.0% | 75 | 50 | 13 | 12 | 同时间域的购买/评价多指标组合；评价组合单独保留 |
+| 结构难例 | 15.3% | 46 | 30 | 8 | 8 | DISTINCT、二层聚合、状态过滤、NULL/非负时长边界 |
 | **合计** | **100%** | **300** | **200** | **50** | **50** | — |
 
 上表的 train/validation/test 是新增 family 的分配，三者比例约为 `2:0.5:0.5`。类别互斥的
 判定优先级是：如果一个 QuerySpec 的主要学习目标是二层聚合、去重/分母或空值边界，就归入
 “结构难例”；否则按结果形态、指标数量和时间域归入前七类。`distinct`、`status_filter`、
-`review_fact` 等是标签，不会再把同一个 family 重复计入其他类别。
+`review_fact` 等是标签，不会再把同一个 family 重复计入其他类别。为修复 Release v2 的品类
+测试空白，`single_dimension` 中允许 8 个位于 **v3 workspace** 的商品行品类 family：其中三个是
+继承 v2 公式，`average_item_price` 是新增公式；它们不是新的指标合同，但必须进入新的结构测试边界。
 
-每个新增 family 默认生成 8 个 instance，因此新增数据量预算为：
+300 个 family 的理论日期实例上限为 2,400，但这是容量上限而不是必须凑满的目标。最终 v3 release
+不能做 `Release v2 + 新行` 的字节级拼接：v2 train 的多指标购买时间序列已经是 1,049/2,400（43.7%），
+追加 1,600 行后仍不可能得到相对均衡的训练分布。v2 是不可变历史实验；新 release 从 v2 与 v3 的
+合法候选中重新按 family 选择、物化和审计。
 
-| split | 新增 family | 每 family instance | 新增 QuerySpec/JSONL 行 | 与当前 v2 合并后的目标 |
-| --- | ---: | ---: | ---: | ---: |
-| train | 200 | 8 | 1,600 | **4,000**（当前 2,400 + 1,600） |
-| validation | 50 | 8 | 400 | **1,000**（当前 600 + 400） |
-| test | 50 | 8 | 400 | **1,000**（当前 600 + 400） |
-| **合计** | **300** | **8** | **2,400** | **6,000** |
+冻结的**正式发布目标**为 `train=3,000 / validation=750 / final test=750`，总计 4,500 行。这个规模
+满足中等规模 LoRA SFT 的需求，也避免为了达到 6,000 行而无意义重复稀缺单指标 family。后续物化器
+必须遵循以下行曝光上限/目标；这是一种可行的相对均衡，而不是要求数学上八等分：
 
-这里的“行”是 QuerySpec instance，不是中文变体数量。每行只随机选择一个中文问法；其余受控
-问法作为同一 instance 的 overlay 或 robustness 评测。最终 manifest 必须同时报告 300 个新增
-family、2,400 个新增 QuerySpec、SQL skeleton 数、每类占比和每个 split 的哈希。
+| 主类别 | train | validation | test | 总行数 | 总占比 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 单指标标量 | 110 | 25 | 25 | 160 | 3.6% |
+| 多指标标量 | 600 | 150 | 150 | 900 | 20.0% |
+| 单指标维度分组 | 134 | 33 | 33 | 200 | 4.4% |
+| 多指标维度分组 | 466 | 117 | 117 | 700 | 15.6% |
+| 单指标购买时间序列 | 400 | 100 | 100 | 600 | 13.3% |
+| 单指标评价时间序列 | 72 | 19 | 19 | 110 | 2.4% |
+| 多指标时间序列 | 750 | 188 | 187 | 1,125 | 25.0% |
+| 结构难例 | 468 | 118 | 119 | 805 | 17.9% |
+| **合计** | **3,000** | **750** | **750** | **4,500** | **100%** |
+
+单指标类占比低并不是缺口被忽略，而是受有限合法 family 数限制；其覆盖强度应由“每种指标/粒度/
+维度 family 是否存在”衡量，而不能由复制次数衡量。多指标购买时间序列在新 release 中最多 25%，不再
+允许重现 v2 的 43.7% 偏置。每行只选择一条中文主问法，其他受控问法仅作为 overlay/robustness
+评测；最终 manifest 同时报告行数、family 数、QuerySpec 数、SQL skeleton、类别占比、指标覆盖和
+每个 split 的 hash。
 
 ### 2.3 指标覆盖最低门槛
 
@@ -139,11 +167,12 @@ family、2,400 个新增 QuerySpec、SQL skeleton 数、每类占比和每个 sp
 - `unique_customer_count`、`average_items_per_order`、`approval_latency_days`、`carrier_handoff_days`
   至少各有 2 个粒度难例 family；
 - `review_count` 至少进入 3 个评价时间 family；
-- `average_item_price` 至少进入 3 个商品品类 family；
+- 受 v3 合同限制，`average_item_price` 只有全量/绝对时间两个独立品类 family；不得人为伪造第 3 个。
+  它与继承商品行指标共同保证 8 个 v3 workspace 品类 family，其中 test 固定 5 个；
 - 现有 `positive_review_rate` 和 `average_review_score` 各新增至少 5 个 validation/test family，
   不再只靠订单指标的多指标组合带出它们；
-- `category_grouped` test 至少包含 5 个独立 family；这 5 个 family 必须来自“单指标维度分组”
-  或“多指标维度分组”，不能从日期改写得到；
+- `category_grouped` test 固定包含 5 个独立 family；它们来自“单指标维度分组”，而不是同一 family
+  的日期改写；
 - 任何没有 test family 的新指标/新程序，都只能写成“训练覆盖”，不能写成“已评测覆盖”。
 
 ## 3. 中文 Query surface contract
@@ -234,6 +263,8 @@ v3 指标合同 proposal
 覆盖门槛未通过之前，不增加训练行数；在 Gold admission、长度和 split 审计未通过之前，不启动
 GPU 训练。
 
-本文件的“指标合同 → family 配额 → 中文 surface contract”设计已经完成；v3 scalar 指标的最小
-实现和数据库基线也已经完成。下一项只补时间序列、分组和空窗口的 v3 Gold 回归及高风险口径抽审，
-通过后才创建 300 个 family coverage seed；不同时生成正式 JSONL 或启动训练。
+本文件的“指标合同 → family 配额 → 中文 surface contract”设计已经完成。v3 指标的 Gold 回归已覆盖
+时间序列、分组、二层聚合和空窗口，静态 coverage seed 也已冻结为
+[`olist_v3_coverage_family_seeds_v1.jsonl`](../../../data/fixtures/olist_v3_coverage_family_seeds_v1.jsonl)：
+300 个跨 split 隔离的 family（train/validation/test=`200/50/50`）。下一项只将其中小批 seed 物化为
+具体 QuerySpec/Gold SQL，验证完整执行与结果合同；不同时生成正式 JSONL 或启动训练。
