@@ -38,7 +38,7 @@ done
 read -r gpu_used gpu_total < <(
   nvidia-smi -i "${PHYSICAL_NVIDIA_SMI_DEVICE}" \
     --query-gpu=memory.used,memory.total --format=csv,noheader,nounits \
-    | awk -F ',' '{gsub(/ /, "", $1); gsub(/ /, "", $2); print $1, $2}'
+    | awk -F ',' '{gsub(/[^0-9]/, "", $1); gsub(/[^0-9]/, "", $2); print $1, $2}'
 )
 gpu_free=$((gpu_total - gpu_used))
 (( gpu_free >= MIN_FREE_MIB )) || {
