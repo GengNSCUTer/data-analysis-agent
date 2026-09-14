@@ -441,6 +441,27 @@ v1 不引入 Redis。
 
 ## 11. 变更记录
 
+### 2026-09-14：Olist v3 指标合同实现与 SQL-only 扩展规模冻结
+
+在不改写默认 `olist-catalog-v2 / 0.2-frozen` 运行时快照的前提下，新增隔离的
+`olist-catalog-v3 / 0.3-proposal` 与 `OLIST_V3_WORKSPACE`，实现并注册 9 个 Olist 领域指标：
+去重客户数、有效评价数、取消/送达/不可用订单数、平均每单商品件数、平均商品成交价、订单确认
+时长和交承运商时长。离线 QuerySpec、deterministic PostgreSQL Gold renderer、SchemaLinkPlan 和
+AST Policy 回归均保持 v2/v3 版本隔离；`average_items_per_order` 明确采用订单级二层聚合，客户
+去重仅将敏感标识用于 `COUNT(DISTINCT)`，两项时长均排除空值和负区间。发现“取消订单数”被泛化
+“订单数”同时召回的真实 alias overlap 后，Catalog Retriever 增加通用的长短受控别名覆盖消歧：仅当
+泛化别名所有出现位置均被更长的已注册指标别名覆盖时才抑制；“有效订单数和取消订单数”仍保留为
+两个指标。v3 专项静态/运行时测试 `126 passed, 1 skipped`，启用项目数据库后 `26 passed`；9 项
+标量 Gold 也以 `daa_analytics_reader` 在本机 PostgreSQL 通过，聚合基线见
+[`evals/results/olist-metrics-v3-proposal-golden.yaml`](evals/results/olist-metrics-v3-proposal-golden.yaml)。
+
+同日将下一版数据设计从相互重叠的“family 桶”改为 8 个互斥主类别、300 个新增 family：单指标/多
+指标标量、单指标/多指标维度分组、购买/评价单指标时间序列、多指标时间序列、结构难例。新增 family
+按 `200/50/50` 分入 train/validation/test，每 family 最多 8 个同 split 时间实例，形成新增
+`1600/400/400` 行；与当前 Release v2 合并后的目标为 `4000/1000/1000`，共 6,000 个 QuerySpec
+instance。中文 overlay 不增加 family 或主训练行数。尚未生成任何 v3 family/正式 JSONL、未训练或
+接入生产；下一步只做时间/分组/空窗口 Gold 回归和高风险指标口径抽审，再生成 family seed。
+
 ### 2026-09-14：Text-to-SQL 训练组织方式与 Schema-aware Task B 调研
 
 新增 [`docs/post-training/research/text-to-sql-training-organizations-v1.md`](docs/post-training/research/text-to-sql-training-organizations-v1.md)，基于 IRNet、RAT-SQL、RESDSQL、CodeS、PICARD、DAIL-SQL、MAC-SQL、CHESS、AutoLink、FINER-SQL、SQL-R1、SHARE 和 SLM-SQL 的论文/官方代码核对，区分了可编译中间表示、内部/独立 schema linking、约束解码、提示/多 Agent 分解和执行反馈训练。结论是当前 Task B 属于与 Task A 交错的辅助多任务 LM SFT，并没有形成模型可消费的 `Plan → SQL` 条件路径；Task B 目标更长且占约 59% 监督 token，并伴随 TheLook 输出协议漂移，因此暂不作为默认训练目标或生产能力。下一步优先保持 SQL-only 线上一致目标，研究输入侧 schema filtering/轻量结构 head，所有实验仍须 Olist train/validation-only 预注册，TheLook v2 只做最终后置验证。本轮未启动消融或重新训练，未修改生产运行时。

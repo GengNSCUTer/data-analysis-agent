@@ -17,7 +17,15 @@
 
 学习顺序从现在开始以 [`learning/code-review-guide-v1.md`](learning/code-review-guide-v1.md) 和 [`learning/walkthrough-v1.md`](learning/walkthrough-v1.md) 为主。先亲自审阅真实代码、测试与边界，再由用户确认后进入下一步；不再自动连续启动训练或完整评测。
 
-Text-to-SQL 训练范式、Schema linking、显式中间表示和当前 Schema-aware Task B 的诊断见 [`research/text-to-sql-training-organizations-v1.md`](research/text-to-sql-training-organizations-v1.md)。该文档是研究判断，不代表已经运行新的实验或改变生产默认路径。
+Text-to-SQL 训练范式、Schema linking、显式中间表示和当前 Schema-aware Task B 的诊断见 [`research/text-to-sql-training-organizations-v1.md`](research/text-to-sql-training-organizations-v1.md)。该文档是研究判断，不代表已经运行新的实验或改变生产默认路径。结合 1.5B/2B/4B 真实结果形成的 SQL-only 优化优先级见 [`research/sql-only-sft-optimization-v1.md`](research/sql-only-sft-optimization-v1.md)；它是下一阶段的研究与实验设计入口。
+
+当前 SQL-only 数据结构审查见 [`data/olist-sql-only-release-v2-audit-v1.md`](data/olist-sql-only-release-v2-audit-v1.md)；候选关系型电商数据集与许可证/接入角色比较见 [`research/ecommerce-datasets-for-sql-only-sft-v1.md`](research/ecommerce-datasets-for-sql-only-sft-v1.md)。这两份文档只支持数据设计决策，不表示已经接入第二个 workspace 或启动新训练。
+
+Olist 原始表、分析层粒度、十项项目指标和下一批 Coverage Repair 设计见 [`data/olist-domain-sft-expansion-analysis-v3.md`](data/olist-domain-sft-expansion-analysis-v3.md)。该文档把“原始字段”“项目指标合同”和“训练样本构造”分开，扩展前以它作为解释和审查入口。
+
+扩展决策（新增指标、family 配额和中文 surface contract）见 [`data/olist-domain-sft-expansion-decision-v1.md`](data/olist-domain-sft-expansion-decision-v1.md)。该文件冻结设计顺序，不代表 v3 指标已经写入运行时 Catalog 或训练数据已经生成。
+
+新增九项 Olist v3 指标的隔离 Catalog、公式、代码边界和数据库回归前置门见 [`../metric-contracts/olist-metrics-v3-proposal.md`](../metric-contracts/olist-metrics-v3-proposal.md)。v3 目前只服务于离线数据构造，默认运行时仍固定在 v2。
 
 ## 先看这一页
 

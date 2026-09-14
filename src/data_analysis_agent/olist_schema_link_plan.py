@@ -22,6 +22,7 @@ from .olist_queryspec import (
     QuerySpecValidationError,
     QueryTime,
     WorkspacePin,
+    _workspace_profile_for_pin,
     validate_query_spec,
 )
 from .semantic_catalog import Catalog, CatalogLoader
@@ -360,6 +361,49 @@ def _registry() -> dict[str, SchemaLinkMetricDefinition]:
             "count_distinct_order_id",
             "count_distinct_order_id",
         ),
+        "unique_customer_count": SchemaLinkMetricDefinition(
+            "customer",
+            (_ORDERS, _CUSTOMERS),
+            ("orders_customers",),
+            (
+                "o.order_id",
+                "o.customer_id",
+                "o.order_status",
+                "o.order_purchase_timestamp",
+                "c.customer_id",
+                "c.customer_unique_id",
+            ),
+            ("exclude_canceled_unavailable", "require_customer_unique_id"),
+            "count_distinct_customer_unique_id",
+            "count_distinct_customer_unique_id",
+        ),
+        "canceled_order_count": SchemaLinkMetricDefinition(
+            "order",
+            (_ORDERS,),
+            (),
+            ("o.order_id", "o.order_status", "o.order_purchase_timestamp"),
+            ("canceled_status", "require_purchase_timestamp"),
+            "count_distinct_order_id",
+            "count_distinct_order_id",
+        ),
+        "delivered_order_count": SchemaLinkMetricDefinition(
+            "order",
+            (_ORDERS,),
+            (),
+            ("o.order_id", "o.order_status", "o.order_purchase_timestamp"),
+            ("delivered_status", "require_purchase_timestamp"),
+            "count_distinct_order_id",
+            "count_distinct_order_id",
+        ),
+        "unavailable_order_count": SchemaLinkMetricDefinition(
+            "order",
+            (_ORDERS,),
+            (),
+            ("o.order_id", "o.order_status", "o.order_purchase_timestamp"),
+            ("unavailable_status", "require_purchase_timestamp"),
+            "count_distinct_order_id",
+            "count_distinct_order_id",
+        ),
         "average_delivery_days": SchemaLinkMetricDefinition(
             "order",
             (_ORDERS,),
@@ -383,6 +427,36 @@ def _registry() -> dict[str, SchemaLinkMetricDefinition]:
             ("exclude_canceled_unavailable",),
             "preaggregate_order_price",
             "average_order_total",
+        ),
+        "average_items_per_order": SchemaLinkMetricDefinition(
+            "order_item_count",
+            (_ORDERS, _ITEMS),
+            ("orders_items",),
+            (
+                "o.order_id",
+                "o.order_status",
+                "o.order_purchase_timestamp",
+                "i.order_id",
+                "i.order_item_id",
+            ),
+            ("exclude_canceled_unavailable",),
+            "preaggregate_order_item_count",
+            "average_order_item_count",
+        ),
+        "average_item_price": SchemaLinkMetricDefinition(
+            "order_item",
+            (_ORDERS, _ITEMS),
+            ("orders_items",),
+            (
+                "o.order_id",
+                "o.order_status",
+                "o.order_purchase_timestamp",
+                "i.order_id",
+                "i.price",
+            ),
+            ("exclude_canceled_unavailable",),
+            "none",
+            "average_item_price",
         ),
         "on_time_delivery_rate": SchemaLinkMetricDefinition(
             "order",
@@ -424,6 +498,33 @@ def _registry() -> dict[str, SchemaLinkMetricDefinition]:
             ("valid_review_score",),
             "none",
             "average_review_score",
+        ),
+        "review_count": SchemaLinkMetricDefinition(
+            "review",
+            (_REVIEWS,),
+            (),
+            ("r.review_score", "r.review_creation_date"),
+            ("valid_review_score",),
+            "none",
+            "count_review_rows",
+        ),
+        "approval_latency_days": SchemaLinkMetricDefinition(
+            "order",
+            (_ORDERS,),
+            (),
+            ("o.order_purchase_timestamp", "o.order_approved_at"),
+            ("require_purchase_timestamp", "require_approved_timestamp", "nonnegative_approval_latency"),
+            "none",
+            "average_approval_latency_days",
+        ),
+        "carrier_handoff_days": SchemaLinkMetricDefinition(
+            "order",
+            (_ORDERS,),
+            (),
+            ("o.order_purchase_timestamp", "o.order_delivered_carrier_date"),
+            ("require_purchase_timestamp", "require_carrier_timestamp", "nonnegative_carrier_handoff"),
+            "none",
+            "average_carrier_handoff_days",
         ),
     }
 
@@ -598,7 +699,7 @@ def derive_schema_link_plan(
 ) -> SchemaLinkPlan:
     """Derive a plan from a validated Olist QuerySpec without SQL execution."""
 
-    active_catalog = catalog or CatalogLoader().load()
+    active_catalog = catalog or CatalogLoader(workspace=_workspace_profile_for_pin(spec.workspace)).load()
     try:
         validated = validate_query_spec(spec, active_catalog)
     except QuerySpecValidationError as exc:

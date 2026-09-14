@@ -18,8 +18,9 @@ from types import MappingProxyType
 from typing import Any, Literal, Mapping, Sequence
 
 from .candidate_sql_generator import OLIST_CANDIDATE_SQL_PROMPT_VERSION
-from .metric_context import OLIST_WORKSPACE
+from .metric_context import OLIST_V3_WORKSPACE, OLIST_WORKSPACE
 from .semantic_catalog import Catalog, CatalogLoader
+from .workspace import WorkspaceProfile
 
 
 QUERY_SPEC_SCHEMA_VERSION = "olist-query-spec-v1"
@@ -28,18 +29,26 @@ _MAX_METRICS = 4
 _DATE_RE = re.compile(r"^20\d{2}-\d{2}-\d{2}$")
 _GRAINS = frozenset({"day", "week", "month", "quarter", "year"})
 _SHAPES = frozenset({"scalar", "state_grouped", "category_grouped", "time_series"})
-_ITEM_METRICS = frozenset({"gmv", "item_count", "freight_amount"})
-_REVIEW_METRICS = frozenset({"positive_review_rate", "average_review_score"})
+_ITEM_METRICS = frozenset({"gmv", "item_count", "freight_amount", "average_item_price"})
+_REVIEW_METRICS = frozenset({"positive_review_rate", "average_review_score", "review_count"})
 _PURCHASE_METRICS = frozenset(
     {
         "gmv",
         "item_count",
         "freight_amount",
+        "average_item_price",
         "paid_order_count",
         "average_delivery_days",
         "average_order_value",
         "on_time_delivery_rate",
         "cancellation_rate",
+        "unique_customer_count",
+        "canceled_order_count",
+        "delivered_order_count",
+        "unavailable_order_count",
+        "average_items_per_order",
+        "approval_latency_days",
+        "carrier_handoff_days",
     }
 )
 _DIMENSION_FOR_SHAPE = {
@@ -75,15 +84,16 @@ class WorkspacePin:
     dialect: str = "postgres"
 
     @classmethod
-    def current(cls) -> "WorkspacePin":
+    def current(cls, workspace: WorkspaceProfile | None = None) -> "WorkspacePin":
+        profile = workspace or OLIST_WORKSPACE
         return cls(
-            workspace_id=OLIST_WORKSPACE.workspace_id,
-            catalog_version=OLIST_WORKSPACE.catalog_version,
-            dataset_version=OLIST_WORKSPACE.dataset_version,
-            metric_version=OLIST_WORKSPACE.metric_version,
-            policy_version=OLIST_WORKSPACE.policy_version,
+            workspace_id=profile.workspace_id,
+            catalog_version=profile.catalog_version,
+            dataset_version=profile.dataset_version,
+            metric_version=profile.metric_version,
+            policy_version=profile.policy_version,
             prompt_version=OLIST_CANDIDATE_SQL_PROMPT_VERSION,
-            dialect=OLIST_WORKSPACE.sql_dialect,
+            dialect=profile.sql_dialect,
         )
 
     def as_dict(self) -> dict[str, str]:
@@ -96,6 +106,26 @@ class WorkspacePin:
             "prompt_version": self.prompt_version,
             "dialect": self.dialect,
         }
+
+
+def _workspace_profile_for_pin(pin: WorkspacePin) -> WorkspaceProfile:
+    """Resolve only the two server-owned Olist construction snapshots."""
+
+    if (
+        pin.catalog_version == OLIST_V3_WORKSPACE.catalog_version
+        and pin.metric_version == OLIST_V3_WORKSPACE.metric_version
+    ):
+        return OLIST_V3_WORKSPACE
+    return OLIST_WORKSPACE
+
+
+def _workspace_profile_for_catalog(catalog: Catalog | None) -> WorkspaceProfile:
+    if catalog is not None and (
+        catalog.catalog_version == OLIST_V3_WORKSPACE.catalog_version
+        and catalog.metric_version == OLIST_V3_WORKSPACE.metric_version
+    ):
+        return OLIST_V3_WORKSPACE
+    return OLIST_WORKSPACE
 
 
 @dataclass(frozen=True)
@@ -254,6 +284,15 @@ def _metric_definitions() -> dict[str, MetricSqlDefinition]:
         "cancellation_rate": MetricSqlDefinition("cancellation_rate", purchase, "purchase", ("fact_orders",), "AVG(CASE WHEN o.order_status = 'canceled' THEN 1.0 ELSE 0.0 END)", "AVG(CASE WHEN o.order_status = 'canceled' THEN 1.0 ELSE 0.0 END)", ("o.order_purchase_timestamp IS NOT NULL",), "canceled over all purchased orders"),
         "positive_review_rate": MetricSqlDefinition("positive_review_rate", "r.review_creation_date", "review", ("fact_reviews",), "AVG(CASE WHEN r.review_score >= 4 THEN 1.0 ELSE 0.0 END)", "AVG(CASE WHEN r.review_score >= 4 THEN 1.0 ELSE 0.0 END)", ("r.review_score BETWEEN 1 AND 5",), "review rows with score >= 4"),
         "average_review_score": MetricSqlDefinition("average_review_score", "r.review_creation_date", "review", ("fact_reviews",), "AVG(r.review_score)", "AVG(r.review_score)", ("r.review_score BETWEEN 1 AND 5",), "valid review rows"),
+        "unique_customer_count": MetricSqlDefinition("unique_customer_count", purchase, "purchase", ("fact_orders", "dim_customers"), "COUNT(DISTINCT c.customer_unique_id)", "COUNT(DISTINCT c.customer_unique_id)", (status, "c.customer_unique_id IS NOT NULL"), "distinct customers on valid orders"),
+        "review_count": MetricSqlDefinition("review_count", "r.review_creation_date", "review", ("fact_reviews",), "COUNT(*)", "COUNT(*)", ("r.review_score BETWEEN 1 AND 5",), "valid review rows"),
+        "canceled_order_count": MetricSqlDefinition("canceled_order_count", purchase, "purchase", ("fact_orders",), "COUNT(DISTINCT o.order_id)", "COUNT(DISTINCT o.order_id)", ("o.order_status = 'canceled'", "o.order_purchase_timestamp IS NOT NULL"), "canceled orders"),
+        "delivered_order_count": MetricSqlDefinition("delivered_order_count", purchase, "purchase", ("fact_orders",), "COUNT(DISTINCT o.order_id)", "COUNT(DISTINCT o.order_id)", ("o.order_status = 'delivered'", "o.order_purchase_timestamp IS NOT NULL"), "delivered orders"),
+        "unavailable_order_count": MetricSqlDefinition("unavailable_order_count", purchase, "purchase", ("fact_orders",), "COUNT(DISTINCT o.order_id)", "COUNT(DISTINCT o.order_id)", ("o.order_status = 'unavailable'", "o.order_purchase_timestamp IS NOT NULL"), "unavailable orders"),
+        "average_items_per_order": MetricSqlDefinition("average_items_per_order", purchase, "purchase", ("fact_orders", "fact_order_items"), "AVG(order_item_totals.item_count)", "AVG(order_item_totals.item_count)", (status,), "order-level item count then average"),
+        "average_item_price": MetricSqlDefinition("average_item_price", purchase, "purchase", ("fact_orders", "fact_order_items"), "AVG(i.price)", "AVG(i.price)", (status,), "valid item-row price average"),
+        "approval_latency_days": MetricSqlDefinition("approval_latency_days", purchase, "purchase", ("fact_orders",), "AVG(EXTRACT(EPOCH FROM (o.order_approved_at - o.order_purchase_timestamp)) / 86400.0)", "AVG(EXTRACT(EPOCH FROM (o.order_approved_at - o.order_purchase_timestamp)) / 86400.0)", ("o.order_purchase_timestamp IS NOT NULL", "o.order_approved_at IS NOT NULL", "o.order_approved_at >= o.order_purchase_timestamp"), "nonnegative approval latency"),
+        "carrier_handoff_days": MetricSqlDefinition("carrier_handoff_days", purchase, "purchase", ("fact_orders",), "AVG(EXTRACT(EPOCH FROM (o.order_delivered_carrier_date - o.order_purchase_timestamp)) / 86400.0)", "AVG(EXTRACT(EPOCH FROM (o.order_delivered_carrier_date - o.order_purchase_timestamp)) / 86400.0)", ("o.order_purchase_timestamp IS NOT NULL", "o.order_delivered_carrier_date IS NOT NULL", "o.order_delivered_carrier_date >= o.order_purchase_timestamp"), "nonnegative carrier handoff latency"),
     }
 
 
@@ -321,7 +360,8 @@ def validate_query_spec(spec: QuerySpec, catalog: Catalog | None = None) -> Quer
         raise QuerySpecValidationError("invalid_query_spec", "expected QuerySpec")
     if spec.schema_version != QUERY_SPEC_SCHEMA_VERSION:
         raise QuerySpecValidationError("workspace_version_mismatch", "unsupported QuerySpec schema version")
-    expected_workspace = WorkspacePin.current()
+    active_catalog = catalog or CatalogLoader(workspace=_workspace_profile_for_pin(spec.workspace)).load()
+    expected_workspace = WorkspacePin.current(_workspace_profile_for_catalog(active_catalog))
     if spec.workspace != expected_workspace:
         raise QuerySpecValidationError("workspace_version_mismatch", "workspace/catalog/prompt versions do not match the pinned snapshot")
     if spec.workspace.dialect != "postgres":
@@ -330,7 +370,6 @@ def validate_query_spec(spec: QuerySpec, catalog: Catalog | None = None) -> Quer
         raise QuerySpecValidationError("invalid_metric_ids", "metric_ids must contain 1-4 unique metrics")
     if any(not isinstance(metric, str) or not re.fullmatch(r"[a-z][a-z0-9_]+", metric) for metric in spec.metric_ids):
         raise QuerySpecValidationError("invalid_metric_ids", "metric_ids must be safe identifiers")
-    active_catalog = catalog or CatalogLoader().load()
     catalog_snapshot = (
         active_catalog.catalog_version,
         active_catalog.dataset_version,
@@ -464,8 +503,18 @@ def _metric_cte(metric_id: str, spec: QuerySpec, index: int) -> str:
     group_expr = _dimension_expr(dimension, "")
     group_parts = [part for part in (group_expr, time_expr) if part]
     select_parts = [f"{part} AS {'time' if part == time_expr else dimension}" for part in group_parts]
-    if metric_id == "average_order_value":
-        inner_select = ["o.order_id", "SUM(i.price) AS order_total"]
+    if metric_id in {"average_order_value", "average_items_per_order"}:
+        if metric_id == "average_order_value":
+            inner_expression = "SUM(i.price)"
+            inner_alias = "order_total"
+            outer_alias = f"aov_order_totals_{index:02d}"
+            outer_column = "order_total"
+        else:
+            inner_expression = "COUNT(i.order_item_id)"
+            inner_alias = "item_count"
+            outer_alias = f"items_per_order_{index:02d}"
+            outer_column = "item_count"
+        inner_select = ["o.order_id", f"{inner_expression} AS {inner_alias}"]
         if group_expr:
             inner_select.insert(0, f"{group_expr} AS {dimension}")
         if time_expr:
@@ -485,18 +534,17 @@ def _metric_cte(metric_id: str, spec: QuerySpec, index: int) -> str:
             f"SELECT {', '.join(inner_select)} FROM analytics.fact_orders AS o {joins} "
             f"WHERE {_where(filters)} GROUP BY {', '.join(inner_group)}"
         )
-        outer_alias = f"aov_order_totals_{index:02d}"
         outer_select = [
             *([f"{outer_alias}.customer_state"] if dimension else []),
             *([f"{outer_alias}.time"] if time_expr else []),
-            f"AVG({outer_alias}.order_total) AS {metric_id}",
+            f"AVG({outer_alias}.{outer_column}) AS {metric_id}",
         ]
         outer_group = [value.split(".")[-1] for value in outer_select[:-1]]
-        # Keep the order-level intermediate as a named CTE.  Besides making
-        # the grain boundary explicit, this gives the AST policy a declared
-        # output schema for the derived `order_total` column.
-        inner_cte = f"aov_order_totals_{index:02d} AS ({body})"
-        outer_query = f"SELECT {', '.join(outer_select)} FROM aov_order_totals_{index:02d}"
+        # Keep the order-level intermediate as a named CTE. Besides making the
+        # grain boundary explicit, this gives the AST policy a declared output
+        # schema for the derived order-level column.
+        inner_cte = f"{outer_alias} AS ({body})"
+        outer_query = f"SELECT {', '.join(outer_select)} FROM {outer_alias}"
         if outer_group:
             outer_query += f" GROUP BY {', '.join(outer_group)}"
         return f"m{index:02d}_{metric_id} AS (WITH {inner_cte} {outer_query})"
@@ -512,7 +560,7 @@ def _metric_cte(metric_id: str, spec: QuerySpec, index: int) -> str:
         joins = ""
         if "fact_order_items" in definition.base_tables:
             joins = " JOIN analytics.fact_order_items AS i ON o.order_id = i.order_id"
-        if dimension == "customer_state":
+        if dimension == "customer_state" or "dim_customers" in definition.base_tables:
             joins += " JOIN analytics.dim_customers AS c ON o.customer_id = c.customer_id"
         if dimension == "product_category_name":
             joins += " JOIN analytics.dim_products AS p ON i.product_id = p.product_id"

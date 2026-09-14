@@ -822,6 +822,19 @@ def _tokens(value: str) -> tuple[str, ...]:
     return tuple(_WORD.findall(_normalize(value)))
 
 
+def _occurrences(text: str, phrase: str) -> tuple[int, ...]:
+    """Return every non-empty phrase position, including overlapping ones."""
+
+    if not phrase:
+        return ()
+    positions: list[int] = []
+    start = text.find(phrase)
+    while start >= 0:
+        positions.append(start)
+        start = text.find(phrase, start + 1)
+    return tuple(positions)
+
+
 def _role_for_user(user: User | None) -> str:
     if user is not None and "admin" in user.group_memberships:
         return "admin"
@@ -1120,11 +1133,73 @@ class CatalogRetriever:
     def _rank_metrics(
         self, question: str, metrics: Sequence[MetricDefinition]
     ) -> list[tuple[MetricDefinition, float, tuple[str, ...]]]:
+        question_norm = _normalize(question)
         ranked = []
         for metric in metrics:
             score, terms = self._score(question, (*metric.aliases, metric.metric_id, metric.name))
             ranked.append((metric, score, terms))
-        return sorted(ranked, key=lambda item: (-item[1], item[0].metric_id))
+        ranked.sort(key=lambda item: (-item[1], item[0].metric_id))
+        # Chinese metric names frequently contain one another: for example,
+        # “取消订单数” contains the generic “订单数”, and “平均每单商品件数”
+        # contains “商品件数”.  A raw substring scorer would incorrectly turn a
+        # single-metric request into two metrics.  Suppress only a weaker
+        # metric whose *every occurrence* is covered by a longer, separately
+        # registered metric phrase.  If the generic phrase also occurs outside
+        # the specific phrase ("订单数和取消订单数"), it remains a real second
+        # request and is not suppressed.
+        return [
+            item
+            for item in ranked
+            if not self._metric_is_fully_shadowed(item, ranked, question_norm)
+        ]
+
+    @staticmethod
+    def _metric_aliases(metric: MetricDefinition) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                alias_norm
+                for alias in (*metric.aliases, metric.metric_id, metric.name)
+                if (alias_norm := _normalize(alias))
+            )
+        )
+
+    @classmethod
+    def _metric_is_fully_shadowed(
+        cls,
+        candidate: tuple[MetricDefinition, float, tuple[str, ...]],
+        ranked: Sequence[tuple[MetricDefinition, float, tuple[str, ...]]],
+        question_norm: str,
+    ) -> bool:
+        metric, score, _ = candidate
+        own_aliases = tuple(
+            alias for alias in cls._metric_aliases(metric) if alias in question_norm
+        )
+        if not own_aliases:
+            return False
+        stronger_aliases = tuple(
+            alias
+            for other, other_score, _ in ranked
+            if other.metric_id != metric.metric_id and other_score > score
+            for alias in cls._metric_aliases(other)
+            if len(alias) > 1 and alias in question_norm
+        )
+        if not stronger_aliases:
+            return False
+        for own_alias in own_aliases:
+            start = question_norm.find(own_alias)
+            while start >= 0:
+                end = start + len(own_alias)
+                if not any(
+                    longer != own_alias
+                    and len(longer) > len(own_alias)
+                    and longer_start <= start
+                    and end <= longer_start + len(longer)
+                    for longer in stronger_aliases
+                    for longer_start in _occurrences(question_norm, longer)
+                ):
+                    return False
+                start = question_norm.find(own_alias, start + 1)
+        return True
 
     def _rank_tables(
         self, question: str, tables: Sequence[CatalogTable]

@@ -70,6 +70,7 @@
 - 不静默截断 Prompt 或 SQL；超长样本进入脱敏 exclusion manifest，除非合同明确允许并记录原因。
 - 中等规模数据必须同时报告行数、QuerySpec 数、family 数、程序族覆盖和每个 split 的哈希；行数不能替代独立语义能力。
 - 自动生成的大批量样本使用确定性 renderer 和全量确定性契约检查；对高风险指标/粒度做分层人工或模型辅助抽样，不为低风险重复样本逐条制造昂贵人工流程。
+- Olist SQL-only 扩展必须按闸门推进：先冻结新增指标合同，再冻结 family/program 配额，再冻结受控中文 surface contract；只有小批 QuerySpec/Gold 准入、语义身份和 split 审计通过后，才允许物化完整 train/validation/test。中文改写不增加 family 计数，日期窗口不替代独立程序覆盖。
 
 ## 9. 变更停止条件
 

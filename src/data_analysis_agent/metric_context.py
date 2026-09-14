@@ -17,6 +17,9 @@ from .workspace import WorkspaceProfile
 METRIC_VERSION = "0.2-frozen"
 DATASET_VERSION = "olist-kaggle-v2-2026-08-03"
 PROMPT_VERSION = "trusted-olist-prompt-v2"
+METRIC_V3_VERSION = "0.3-proposal"
+CATALOG_V3_VERSION = "olist-catalog-v3"
+OLIST_V3_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "catalog" / "olist_catalog_v3.yaml"
 
 # Olist is the first adapter used by the demo and regression fixtures.  The
 # policy, catalog, memory, contract and validation components consume the
@@ -36,6 +39,26 @@ OLIST_WORKSPACE = WorkspaceProfile(
     analyst_tables=ANALYST_TABLES,
     sensitive_projection_columns=SENSITIVE_PROJECTION_COLUMNS,
     catalog_path=Path(CATALOG_PATH),
+)
+
+# v3 is an isolated construction workspace.  It is intentionally not the
+# default runtime workspace until its registry, Gold SQL, database and result
+# contract regressions are complete.
+OLIST_V3_WORKSPACE = WorkspaceProfile(
+    workspace_id="olist-demo-v3",
+    dataset_id="olist-brazilian-ecommerce",
+    dataset_version=DATASET_VERSION,
+    metric_version=METRIC_V3_VERSION,
+    catalog_version=CATALOG_V3_VERSION,
+    policy_version=POLICY_VERSION,
+    sql_dialect="postgres",
+    analytics_schema="analytics",
+    reader_role="daa_analytics_reader",
+    writer_role="daa_app_writer",
+    allowed_columns=ANALYTICS_COLUMNS,
+    analyst_tables=ANALYST_TABLES,
+    sensitive_projection_columns=SENSITIVE_PROJECTION_COLUMNS,
+    catalog_path=OLIST_V3_CATALOG_PATH,
 )
 
 SYSTEM_PROMPT = f"""
@@ -90,5 +113,21 @@ METRIC_EVIDENCE = {
         {"metric_id": "on_time_delivery_rate", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders"]},
         {"metric_id": "cancellation_rate", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders"]},
         {"metric_id": "freight_amount", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders", "fact_order_items"]},
+    ],
+}
+
+METRIC_V3_EVIDENCE = {
+    "dataset_version": DATASET_VERSION,
+    "metric_version": METRIC_V3_VERSION,
+    "metrics": [
+        {"metric_id": "unique_customer_count", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders", "dim_customers"]},
+        {"metric_id": "review_count", "time_field": "review_creation_date", "source_tables": ["fact_reviews"]},
+        {"metric_id": "canceled_order_count", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders"]},
+        {"metric_id": "delivered_order_count", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders"]},
+        {"metric_id": "unavailable_order_count", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders"]},
+        {"metric_id": "average_items_per_order", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders", "fact_order_items"]},
+        {"metric_id": "average_item_price", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders", "fact_order_items"]},
+        {"metric_id": "approval_latency_days", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders"]},
+        {"metric_id": "carrier_handoff_days", "time_field": "order_purchase_timestamp", "source_tables": ["fact_orders"]},
     ],
 }

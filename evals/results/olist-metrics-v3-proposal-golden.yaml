@@ -1,0 +1,31 @@
+result_version: "0.3-proposal"
+generated_at: "2026-09-14"
+dataset_version_id: olist-kaggle-v2-2026-08-03
+transform_version: olist-analytics-v1
+schema: analytics
+catalog_version: "olist-catalog-v3"
+metric_version: "0.3-proposal"
+database:
+  engine: PostgreSQL
+  version: "12.20"
+results:
+  unique_customer_count: {value: 94990, type: integer}
+  review_count: {value: 99224, type: integer}
+  canceled_order_count: {value: 625, type: integer}
+  delivered_order_count: {value: 96478, type: integer}
+  unavailable_order_count: {value: 609, type: integer}
+  average_items_per_order: {value: "1.141569669752", type: decimal_items_rounded_12}
+  average_item_price: {value: "120.377166483796", type: decimal_brl_rounded_12}
+  approval_latency_days: {value: "0.434128929247", type: decimal_days_rounded_12}
+  carrier_handoff_days: {value: "3.241404306346", type: decimal_days_rounded_12}
+evidence:
+  valid_order_count: 98207
+  valid_review_row_count: 99224
+  canceled_order_count: 625
+  delivered_order_count: 96478
+  unavailable_order_count: 609
+notes:
+  - The values are a reproducible data/formula baseline for the v3 proposal, not an online Text-to-SQL accuracy result.
+  - average_items_per_order first aggregates order-item rows per eligible order, then averages those order-level values.
+  - Both latency metrics exclude null timestamps and negative intervals.
+  - This proposal does not replace the frozen olist-catalog-v2 / 0.2-frozen runtime snapshot.
