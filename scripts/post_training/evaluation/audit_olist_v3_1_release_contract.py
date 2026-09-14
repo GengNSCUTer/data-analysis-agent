@@ -48,6 +48,8 @@ from scripts.post_training.evaluation.admit_olist_v3_balanced_gold_release impor
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse paths for a CPU-only Olist v3.1 release-contract audit."""
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--structural-dir", type=Path, required=True)
     parser.add_argument("--admission-dir", type=Path, required=True)
@@ -261,7 +263,112 @@ def _load_sft(sft_dir: Path) -> tuple[dict[str, Any], dict[str, list[dict[str, A
         "in_domain_test": 750,
     }:
         raise ValueError("SFT split sizes drifted")
+    metadata = audit.get("splits")
+    if not isinstance(metadata, Mapping):
+        raise ValueError("SFT audit has no split metadata")
+    expected_roles = {
+        "train": "parameter_updates",
+        "validation": "validation_only",
+        "in_domain_test": "final_evaluation_only",
+    }
+    for split, path in paths.items():
+        split_metadata = metadata.get(split)
+        if (
+            not isinstance(split_metadata, Mapping)
+            or split_metadata.get("rows") != len(splits[split])
+            or split_metadata.get("sha256") != sha256_file(path)
+            or split_metadata.get("role") != expected_roles[split]
+        ):
+            raise ValueError(f"SFT {split} file does not match its split audit")
     return audit, splits
+
+
+def _query_spec_id(row: Mapping[str, Any]) -> str | None:
+    """Read a canonical QuerySpec ID without accepting an unbound surrogate."""
+
+    direct = row.get("query_spec_id")
+    if isinstance(direct, str) and direct:
+        return direct
+    query_spec = row.get("query_spec")
+    value = query_spec.get("query_spec_id") if isinstance(query_spec, Mapping) else None
+    return value if isinstance(value, str) and value else None
+
+
+def _verify_sft_split_identity(
+    sft_splits: Mapping[str, list[dict[str, Any]]],
+    admitted_by_seed: Mapping[str, Mapping[str, Any]],
+    runtime_by_variant: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Recompute SFT identity/isolation instead of trusting upstream audit claims."""
+
+    seen_seed_splits: dict[str, str] = {}
+    seen_family_splits: dict[str, str] = {}
+    seen_query_spec_splits: dict[str, str] = {}
+    seen_gold_hash_splits: dict[str, str] = {}
+    for split, rows in sft_splits.items():
+        for row in rows:
+            seed_id = row.get("seed_id")
+            variant_id = row.get("primary_variant_id")
+            if not isinstance(seed_id, str) or not isinstance(variant_id, str):
+                raise ValueError("SFT row lacks seed or primary-variant identity")
+            admitted_row = admitted_by_seed.get(seed_id)
+            runtime = runtime_by_variant.get(variant_id)
+            if admitted_row is None or runtime is None:
+                raise ValueError("SFT row does not bind a runtime/admitted record")
+            if seen_seed_splits.setdefault(seed_id, split) != split:
+                raise ValueError("SFT seed ID occurs across multiple splits")
+            admitted_split = admitted_row.get("split")
+            if admitted_split != split or row.get("split", {}).get("name") != split:
+                raise ValueError(f"SFT/admission split identity drifted for {seed_id}")
+            family_id = row.get("family_id")
+            if (
+                family_id != admitted_row.get("family_id")
+                or family_id != runtime.get("family_id")
+                or runtime.get("split") != split
+                or not isinstance(family_id, str)
+            ):
+                raise ValueError(f"SFT/admission family identity drifted for {seed_id}")
+            query_spec_id = row.get("query_spec_id")
+            if (
+                not isinstance(query_spec_id, str)
+                or query_spec_id != _query_spec_id(admitted_row)
+                or query_spec_id != _query_spec_id(runtime)
+            ):
+                raise ValueError(f"SFT QuerySpec identity drifted for {seed_id}")
+            candidate_sql = row.get("candidate_sql")
+            gold_sql = admitted_row.get("gold_sql")
+            gold_sql_sha256 = admitted_row.get("gold_sql_sha256")
+            if (
+                not isinstance(candidate_sql, str)
+                or candidate_sql != gold_sql
+                or not isinstance(gold_sql_sha256, str)
+                or hashlib.sha256(candidate_sql.encode("utf-8")).hexdigest()
+                != gold_sql_sha256
+            ):
+                raise ValueError(
+                    f"SFT canonical Gold SQL identity drifted for {seed_id}"
+                )
+            for label, identity, seen in (
+                ("family", family_id, seen_family_splits),
+                ("QuerySpec", query_spec_id, seen_query_spec_splits),
+                ("canonical Gold SQL", gold_sql_sha256, seen_gold_hash_splits),
+            ):
+                if seen.setdefault(identity, split) != split:
+                    raise ValueError(
+                        f"SFT {label} identity occurs across multiple splits"
+                    )
+            if (
+                row.get("language_variant_id") != variant_id
+                or row.get("language_variant_kind") != runtime.get("variant_kind")
+                or row.get("rendered_prompt") != runtime.get("prompt")
+                or row.get("primary_bucket") != admitted_row.get("primary_bucket")
+                or row.get("surface_variant_count") != OLIST_V3_1_VARIANTS_PER_SEED
+            ):
+                raise ValueError(
+                    f"SFT runtime/Gold/surface identity drifted for {seed_id}"
+                )
+    if set(seen_seed_splits) != set(admitted_by_seed):
+        raise ValueError("SFT seed set differs from the admitted release")
 
 
 def audit_release(
@@ -341,28 +448,9 @@ def audit_release(
         raise ValueError(
             "release layer manifests are not hash-bound to their direct inputs"
         )
-    primary_surface = primary_variant_selection_report(sft_splits)
     runtime_by_variant = {str(row["variant_id"]): row for row in runtime_rows}
-    for split, rows in sft_splits.items():
-        for row in rows:
-            seed_id = str(row.get("seed_id"))
-            variant_id = row.get("primary_variant_id")
-            runtime = runtime_by_variant.get(str(variant_id))
-            admitted_row = admitted_by_seed.get(seed_id)
-            if runtime is None or admitted_row is None:
-                raise ValueError("SFT row does not bind a runtime/admitted record")
-            if (
-                row.get("language_variant_id") != variant_id
-                or row.get("language_variant_kind") != runtime.get("variant_kind")
-                or row.get("rendered_prompt") != runtime.get("prompt")
-                or row.get("candidate_sql") != admitted_row.get("gold_sql")
-                or row.get("primary_bucket") != admitted_row.get("primary_bucket")
-                or row.get("surface_variant_count") != OLIST_V3_1_VARIANTS_PER_SEED
-                or row.get("split", {}).get("name") != split
-            ):
-                raise ValueError(
-                    f"SFT runtime/Gold/surface identity drifted for {seed_id}"
-                )
+    _verify_sft_split_identity(sft_splits, admitted_by_seed, runtime_by_variant)
+    primary_surface = primary_variant_selection_report(sft_splits)
 
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = output_dir.parent / f".{output_dir.name}.staging-{uuid.uuid4().hex}"
@@ -398,6 +486,8 @@ def audit_release(
                 "primary_surface_split_quotas_exact": True,
                 "primary_surface_bucket_balance_at_most_one": True,
                 "sft_runtime_gold_identity_bound": True,
+                "sft_split_files_hash_bound": True,
+                "sft_split_identity_recomputed": True,
                 "sql_executed": False,
                 "model_called": False,
                 "gpu_used": False,
@@ -434,6 +524,8 @@ def audit_release(
 
 
 def main() -> int:
+    """Run the release audit and print the safe aggregate report."""
+
     args = parse_args()
     report = audit_release(
         structural_dir=args.structural_dir,

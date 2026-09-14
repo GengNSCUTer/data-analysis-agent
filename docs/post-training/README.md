@@ -27,7 +27,7 @@ Olist 原始表、分析层粒度、十项项目指标和下一批 Coverage Repa
 
 新增九项 Olist v3 指标的隔离 Catalog、公式、代码边界和数据库回归前置门见 [`../metric-contracts/olist-metrics-v3-proposal.md`](../metric-contracts/olist-metrics-v3-proposal.md)。v3 目前只服务于离线数据构造，默认运行时仍固定在 v2。
 
-当前 Olist SQL-only 数据入口是 [`data/olist-v3-balanced-release-v1-1.md`](data/olist-v3-balanced-release-v1-1.md)：当前 v3.1 release 已完成 `3,000/750/750` JSONL、4,500/4,500 确定性 Gold admission、36,000 条八类纯中文运行时问法/PROMPT overlay、分层精确主问法配额和 3,072 token 无截断审计。48 条 advisory 复核为 45 条 pass、3 条 provider timeout；后者明确记录为非阻塞 advisory 错误，不替代确定性准入。它是训练数据和受控执行证据，不是 Adapter 质量结论；下一步才是单独审阅 v3.1 trainer 与 matching Base/Adapter 评测合同。
+当前 Olist SQL-only 数据入口是 [`data/olist-v3-balanced-release-v1-1.md`](data/olist-v3-balanced-release-v1-1.md)：当前 v3.1 release 已完成 `3,000/750/750` JSONL、4,500/4,500 确定性 Gold admission、36,000 条八类纯中文运行时问法/PROMPT overlay、分层精确主问法配额和 3,072 token 无截断审计。48 条 advisory 复核为 45 条 pass、3 条 provider timeout；后者明确记录为非阻塞 advisory 错误，不替代确定性准入。发布级审计现会重算最终 SFT 文件 hash 与 split 身份隔离。训练与 matching Base/Adapter 的冻结协议见 [`data/olist-v3-1-sql-only-training-evaluation-contract.md`](data/olist-v3-1-sql-only-training-evaluation-contract.md)：尚未启动 CPU/GPU smoke、训练或评测。
 
 ## 先看这一页
 

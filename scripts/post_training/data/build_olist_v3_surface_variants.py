@@ -3,7 +3,7 @@
 
 This is deliberately a surface-only stage: it consumes an already passing
 Gold-admission release and writes no SQL, Prompt, model output, or training
-examples.  Five paraphrases remain overlays of one QuerySpec instance.
+examples.  Eight controlled forms remain overlays of one QuerySpec instance.
 """
 
 from __future__ import annotations

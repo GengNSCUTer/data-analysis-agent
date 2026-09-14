@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -142,7 +143,9 @@ def test_v3_question_variants_require_five_cases_per_seed(tmp_path):
     assert len(load_question_variant_cases_v3(path, {"seed-a"})) == 5
 
 
-def test_v4_question_variants_require_eight_typed_pure_chinese_cases_per_seed(tmp_path):
+def test_v4_question_variants_require_eight_typed_pure_chinese_cases_per_seed(
+    tmp_path: Path,
+) -> None:
     from data_analysis_agent.olist_surface_contract import (
         OLIST_V3_1_VARIANT_IDS,
         OLIST_V3_1_VARIANT_KIND_BY_ID,

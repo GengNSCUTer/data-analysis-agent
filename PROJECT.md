@@ -497,9 +497,15 @@ semantic review block。完整 release、外部证据路径、hash 和准确解�
 [`docs/post-training/data/olist-v3-balanced-release-v1-1.md`](docs/post-training/data/olist-v3-balanced-release-v1-1.md)
 与 [`docs/post-training/data/olist-v3-1-balance-and-surface-repair-contract.md`](docs/post-training/data/olist-v3-1-balance-and-surface-repair-contract.md)。
 
-当前 v3.1 release **尚未启动训练**、未替换默认 Vanna/SiliconFlow 候选路径；它证明受控训练输入和 Gold
-执行链路完整，不证明模型提升、开放式业务语义准确率、跨 schema 泛化或生产接入资格。下一步是单独审阅
-v3.1 SQL-only LoRA trainer 与 matching Base/Adapter 评测合同，再由用户决定是否启动 GPU 训练。
+P1 审阅后，release audit 已进一步直接重算最终三个 SFT JSONL 的 SHA-256，并将每行的 split、family、
+QuerySpec、runtime Prompt 和 canonical Gold SQL 与 admission 记录绑定，重算跨 split 零交集；复跑仍为 pass，
+且不调用模型、GPU 或数据库。v3.1 SQL-only LoRA 的输入/标签模板、bf16 LoRA/optimizer、validation-best
+checkpoint 与三阶段 matching Base/Adapter 协议已冻结于
+[`docs/post-training/data/olist-v3-1-sql-only-training-evaluation-contract.md`](docs/post-training/data/olist-v3-1-sql-only-training-evaluation-contract.md)。
+
+当前 v3.1 release **尚未启动 CPU/GPU smoke、训练或评测**，也未替换默认 Vanna/SiliconFlow 候选路径；它证明
+受控训练输入和 Gold 执行链路完整，不证明模型提升、开放式业务语义准确率、跨 schema 泛化或生产接入资格。下一步
+仅为 CPU preflight；之后仍需用户确认，才可做一次 GPU smoke。
 
 ### 2026-09-14：Text-to-SQL 训练组织方式与 Schema-aware Task B 调研
 

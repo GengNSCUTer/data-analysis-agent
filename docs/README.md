@@ -38,6 +38,7 @@
 - [`post-training/data/olist-pilot-v1-sft-data.md`](post-training/data/olist-pilot-v1-sft-data.md)：40 条工程验收集，记录真实运行时 Prompt、`24/8/8` family-isolated 验收和 `2304` 无截断长度合同；不作为正式训练规模。
 - [`post-training/data/olist-medium-v1-sft-data.md`](post-training/data/olist-medium-v1-sft-data.md)：正式中等规模领域 release 的 `720/240/240` 目标、准入和物化契约。
 - [`post-training/data/olist-v3-balanced-release-v1-1.md`](post-training/data/olist-v3-balanced-release-v1-1.md)：当前 Olist v3.1 平衡、纯中文 SQL-only SFT release 的 `3000/750/750` 资产、八问法分层配额、全量 Gold 执行证据、Prompt 重建、长度合同和 SHA-256 指纹；尚未训练。v3.0 的五问法版本保留为历史证据。
+- [`post-training/data/olist-v3-1-sql-only-training-evaluation-contract.md`](post-training/data/olist-v3-1-sql-only-training-evaluation-contract.md)：v3.1 训练前冻结的真实运行时 Prompt/SQL/EOS 标签布局、bf16 LoRA/optimizer、validation-best checkpoint 与 generation → pair marker → Gold 后置 matching 协议；尚未启动 smoke、训练或评测。
 - [`post-training/data/qwen35-olist-sft-template-contract-v1.md`](post-training/data/qwen35-olist-sft-template-contract-v1.md)：Qwen3.5-4B Instruct 的官方消息模板、SQL-only label 边界、EOT 停止条件和训练前 token 审计合同；复用 Olist Release v2 的既有训练/验证 split，不读取 TheLook。
 - [`post-training/experiments/qwen35-4b-olist-instruct-sft-smoke-v1.md`](post-training/experiments/qwen35-4b-olist-instruct-sft-smoke-v1.md)：Qwen3.5-4B bf16 LoRA 的 target 审阅、单步训练/保存/fresh reload 证据与正式训练显存资源门。
 - [`post-training/data/olist-domain-sft-expansion-plan-v2.md`](post-training/data/olist-domain-sft-expansion-plan-v2.md)：基于 TheLook 错误证据的数据扩展、中文 surface-form 多样性、程序族切分和下一轮 `1600/400/400` release 方案。
@@ -75,7 +76,7 @@
 后训练文档已经完成目录化，唯一规范入口是 [`post-training/README.md`](post-training/README.md)：
 
 - `post-training/learning/`：概念、代码审阅和用户问答；当前重点是逐小单元审查真实训练代码。项目进度和实验状态不放入学习笔记，统一看 `PROJECT.md` 及飞书项目文档。
-- `post-training/data/`：数据协议、holdout 隔离、领域训练接口合同和覆盖矩阵；当前 Olist 领域数据以 [v3.1 平衡纯中文 release](post-training/data/olist-v3-balanced-release-v1-1.md)、[v3.1 修复合同](post-training/data/olist-v3-1-balance-and-surface-repair-contract.md)、[v3 指标合同](metric-contracts/olist-metrics-v3-proposal.md) 和 [QuerySpec/renderer 设计](post-training/data/olist-queryspec-renderer-design-v1.md) 为入口。四指标 v1 矩阵与 v3.0 release 保留为历史快照，不能作为当前物化输入。
+- `post-training/data/`：数据协议、holdout 隔离、领域训练接口合同和覆盖矩阵；当前 Olist 领域数据以 [v3.1 平衡纯中文 release](post-training/data/olist-v3-balanced-release-v1-1.md)、[v3.1 修复合同](post-training/data/olist-v3-1-balance-and-surface-repair-contract.md)、[训练/评测冻结合同](post-training/data/olist-v3-1-sql-only-training-evaluation-contract.md)、[v3 指标合同](metric-contracts/olist-metrics-v3-proposal.md) 和 [QuerySpec/renderer 设计](post-training/data/olist-queryspec-renderer-design-v1.md) 为入口。四指标 v1 矩阵与 v3.0 release 保留为历史快照，不能作为当前物化输入。
 - `post-training/experiments/`：实验台账，只记录配置、聚合结果和结论。
 - `post-training/archive/`：不再作为实时状态依据的旧路线和旧笔记。
 

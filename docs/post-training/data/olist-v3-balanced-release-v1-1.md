@@ -130,5 +130,20 @@ JSONL 的 SHA-256 链路一起验证，而不只验证单个模板函数。它�
 报告 SHA-256：
 `8fa7f4efab2c4d730aec5ce168a877ca7dad6e8650cd43d48303b8f513203133`。
 
-下一件独立任务是审阅并冻结适配 v3.1 的 SQL-only LoRA Trainer 与 matching Base/Adapter 评测合同；只在
-用户确认 GPU 资源后才可训练。Gold admission 通过不构成 Adapter 提升或生产接入的证据。
+之后针对 v3.1 P1 审阅发现，审计器已增加对**最终 SFT 文件本体**的 hash 复算以及逐行 split/family/QuerySpec/
+canonical Gold SQL 身份验证；它不再只信任 `split_audit.json` 自报的隔离结论。新实现对同一外部 release 的复跑
+仍为 `pass`，并显式记录 `sft_split_files_hash_bound=true` 与 `sft_split_identity_recomputed=true`：
+
+```text
+/disk2/gengnan/data-analysis-agent-data/evals/
+  olist-v3-balanced-release-v1.1/
+    release-contract-audit-20260914-v3_1-recomputed/release_contract_audit.json
+```
+
+该复跑报告 SHA-256 为
+`58cc0aea5eb26e07bf7ef1bb751eb43ab15360b9f8f028bfb7c0f8313b88384a`；没有调用模型、GPU 或数据库。
+
+训练入口、标签模板、optimizer、validation-best checkpoint 与三阶段 matching 评测协议现已冻结于
+[`olist-v3-1-sql-only-training-evaluation-contract.md`](olist-v3-1-sql-only-training-evaluation-contract.md)。下一件
+独立任务是 CPU preflight；只在用户确认后才可做一次 GPU smoke。Gold admission 通过不构成 Adapter 提升或生产
+接入的证据。

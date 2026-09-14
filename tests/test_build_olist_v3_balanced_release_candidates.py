@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 from data_analysis_agent.metric_context import OLIST_V3_WORKSPACE
 from data_analysis_agent.olist_queryspec import QuerySpec, QueryTime, WorkspacePin
 from data_analysis_agent.semantic_catalog import CatalogLoader
@@ -128,8 +130,16 @@ def test_supplemental_pool_is_v3_valid_and_keeps_high_risk_singletons_explicit()
     assert len(_instance_specs(time_series, catalog)) == 8
 
 
+@pytest.mark.integration
 def test_v3_1_selection_enforces_metric_category_and_time_balance_contracts() -> None:
     """Exercise real candidate capacity, not just hard-coded target constants."""
+    required_artifacts = (
+        V2_QUERY_SPECS,
+        PROTECTED_SUMMARY,
+        PROTECTED_EVIDENCE,
+    )
+    if not all(path.is_file() for path in required_artifacts):
+        pytest.skip("requires the external frozen Olist v2 source artifacts")
     catalog = CatalogLoader(workspace=OLIST_V3_WORKSPACE).load()
     v3 = load_v3_seed_candidates(
         SEEDS, catalog, split_overrides=V3_1_SEED_SPLIT_OVERRIDES

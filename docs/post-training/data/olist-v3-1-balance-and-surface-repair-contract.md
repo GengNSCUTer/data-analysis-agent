@@ -142,7 +142,8 @@ family、QuerySpec 或训练行计数。
 - 36,000 条 overlay 无 exact/normalized duplicate，每条主中文问题无 Latin token；
 - 每一个 split 与每一个 `split × primary_bucket` 均有 8 类 form；全 split 是精确配额，bucket 内最大差为 1；
 - Router → Catalog → QueryPlan → ResultContract 的指标、维度、时间范围、结果列与 QuerySpec 一致；
-- 结构/Gold/Prompt 绑定、family/querySpec/SQL hash split isolation、3,072 token 无截断合同均通过；
+- 审计器重算最终 SFT JSONL 的每 split SHA-256，并将 `seed_id`、`family_id`、`query_spec_id`、canonical Gold SQL hash 与 admission/runtime 逐行绑定，确认它们跨 split 零交集；不得只信任上游 `split_audit.json` 的自报结论；
+- 结构/Gold/Prompt 绑定与 3,072 token 无截断合同均通过；
 - 第 3 节所有指标、品类、时间粒度分布都达到下限，并写入 structural manifest；
 - 全量 Gold 真实 reader-role 准入通过后，才允许物化 SFT JSONL；本合同本身不授权训练。
 
