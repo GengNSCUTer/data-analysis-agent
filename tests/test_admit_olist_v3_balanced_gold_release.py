@@ -8,6 +8,7 @@ import pytest
 from scripts.post_training.evaluation.admit_olist_v3_balanced_gold_release import (
     EXPECTED_ROWS,
     SEMANTIC_REVIEW_SAMPLE_SIZE,
+    is_advisory_provider_error,
     load_full_v3_gold_rows,
     semantic_review_seed_ids,
 )
@@ -27,8 +28,12 @@ def test_full_v3_release_loader_accepts_hash_bound_materialization() -> None:
     assert len({row["gold_artifact"]["sql_sha256"] for row in rows}) == EXPECTED_ROWS
 
 
-def test_full_v3_release_loader_fails_closed_when_gold_hash_drifts(tmp_path: Path) -> None:
-    source_manifest = json.loads((STRUCTURAL_DIR / "materialization_manifest.json").read_text())
+def test_full_v3_release_loader_fails_closed_when_gold_hash_drifts(
+    tmp_path: Path,
+) -> None:
+    source_manifest = json.loads(
+        (STRUCTURAL_DIR / "materialization_manifest.json").read_text()
+    )
     source_queries = (STRUCTURAL_DIR / "query_specs.jsonl").read_text()
     source_gold = (STRUCTURAL_DIR / "gold_sql.jsonl").read_text()
     (tmp_path / "materialization_manifest.json").write_text(json.dumps(source_manifest))
@@ -48,3 +53,21 @@ def test_semantic_review_selection_is_deterministic_and_bounded() -> None:
     assert first == second
     assert len(first) == SEMANTIC_REVIEW_SAMPLE_SIZE
     assert first <= {row["seed_id"] for row in rows}
+
+
+def test_provider_timeout_is_an_advisory_transport_failure_not_a_semantic_objection() -> (
+    None
+):
+    assert is_advisory_provider_error(
+        {
+            "verdict": "needs_human_review",
+            "issues": ["review_provider_error:APITimeoutError"],
+        }
+    )
+    assert not is_advisory_provider_error(
+        {
+            "verdict": "needs_human_review",
+            "issues": ["metric denominator does not match contract"],
+        }
+    )
+    assert not is_advisory_provider_error({"verdict": "pass", "issues": []})

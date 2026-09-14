@@ -471,22 +471,35 @@ v3 指标的真实 PostgreSQL Gold 回归已进一步覆盖客户州/商品品�
 Gold 准入：12/12 在 `SqlPolicy -> daa_analytics_reader -> ResultContract/ResultValidator` 下 admitted。
 
 随后以 v2 的**结构候选**（不是复制旧 SQL/Prompt/SFT 行）、v3 family seed 和有限补充模板，重新 pin、
-校验、渲染并物化 v3 平衡 release。最终为 `3,000/750/750=4,500` 条 QuerySpec / canonical Gold SQL：
+校验、渲染并物化 v3.0 平衡 release。最终为 `3,000/750/750=4,500` 条 QuerySpec / canonical Gold SQL：
 family、QuerySpec 与 canonical SQL hash 跨 split 均零交集，750 条 test 物理隔离为
 `final_evaluation_only`。其中单指标维度分组的真实可用容量是 `122/33/33=188`，少于初始目标的 12 条
 train 行已转给多指标维度分组，未用重复 SQL 或中文改写凑数。
 
-全部 4,500 条 Gold SQL 已在实际 PostgreSQL 中通过 `SqlPolicy -> daa_analytics_reader ->
-ResultContract/ResultValidator`，结果为 `4,500 admitted / 0 needs_human_review / 0 rejected`；每条都保留
-Gold SQL hash、Policy 最终 SQL hash、reader-role 执行和结果摘要 hash。另有 48 条分层 DeepSeek advisory
-语义复核全部通过，但该抽样不替代确定性准入。每个 QuerySpec 生成 5 个受控中文问法，共 22,500 条
-runtime overlay，均重新经过 Router/Catalog/QueryPlan/ResultContract；训练主数据按稳定 hash 每实例仅选
-一条主问法。最终 SFT JSONL 在 `3072` token 上限下无排除、无静默截断。完整 release、外部证据路径、
-hash 和准确解释见 [`docs/post-training/data/olist-v3-balanced-release-v1.md`](docs/post-training/data/olist-v3-balanced-release-v1.md)。
+2026-09-14 随后完成 v3.1 数据平衡与中文 surface 修复，旧 v3.0 外部资产保留而不重写。当前 release
+仍为 `3,000/750/750=4,500` 条 QuerySpec / canonical Gold SQL，family、QuerySpec 与 canonical SQL hash
+跨 split 均为零交集，750 条 final test 物理隔离为 `final_evaluation_only`。新 release 全部 4,500 条 Gold
+SQL 已在实际 PostgreSQL 中通过 `SqlPolicy -> daa_analytics_reader -> ResultContract/ResultValidator`，结果为
+`4,500 admitted / 0 needs_human_review / 0 rejected`；每条都保留 Gold SQL hash、Policy 最终 SQL hash、
+reader-role 执行和结果摘要 hash。
 
-该 release **尚未启动训练**、未替换默认 Vanna/SiliconFlow 候选路径；它证明受控训练输入和 Gold 执行
-链路完整，不证明模型提升、开放式业务语义准确率、跨 schema 泛化或生产接入资格。下一步是单独审阅
-v3 SQL-only LoRA trainer 与 matching Base/Adapter 评测合同，再由用户决定是否启动 GPU 训练。
+v3.1 每个 QuerySpec 生成 8 个受控**纯中文**问法，共 36,000 条 runtime overlay，均重新经过
+Router/Catalog/QueryPlan/ResultContract；正式 SFT 每实例仍只选一条主问法，但由 split×主 bucket 的稳定
+SHA-256 排名分层精确配额选择，而非 `hash % 5`。train 的 3,000 条中每类 375；validation/final-test 的
+750 条中 v1–v6 各 94、v7–v8 各 93。所有主问法过滤 ASCII Latin token，英文指标别名不混入中文主集。
+新增 9 个 v3 指标在 train 均至少 230 行且至少 20 个 family；`category_grouped` train 由 9 提升至 17 行；
+validation/final-test 的 day/week/month/quarter/year 时序均至少 70 行。最终 SFT JSONL 在 `3072` token
+上限下无排除、无静默截断。
+
+分层抽取的 48 条 DeepSeek advisory 语义复核中，45 条 pass、3 条为 `APITimeoutError`。三个 timeout 已在
+审计中保留为非阻塞 provider-error advisory；它们不覆盖或替代 4,500/4,500 的确定性准入，且没有真实
+semantic review block。完整 release、外部证据路径、hash 和准确解释见
+[`docs/post-training/data/olist-v3-balanced-release-v1-1.md`](docs/post-training/data/olist-v3-balanced-release-v1-1.md)
+与 [`docs/post-training/data/olist-v3-1-balance-and-surface-repair-contract.md`](docs/post-training/data/olist-v3-1-balance-and-surface-repair-contract.md)。
+
+当前 v3.1 release **尚未启动训练**、未替换默认 Vanna/SiliconFlow 候选路径；它证明受控训练输入和 Gold
+执行链路完整，不证明模型提升、开放式业务语义准确率、跨 schema 泛化或生产接入资格。下一步是单独审阅
+v3.1 SQL-only LoRA trainer 与 matching Base/Adapter 评测合同，再由用户决定是否启动 GPU 训练。
 
 ### 2026-09-14：Text-to-SQL 训练组织方式与 Schema-aware Task B 调研
 

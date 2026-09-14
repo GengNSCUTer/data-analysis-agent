@@ -1,4 +1,7 @@
-# Olist v3 Balanced SQL-only SFT Release v1
+# Olist v3 Balanced SQL-only SFT Release v1（历史版本）
+
+> **状态：已被 v3.1 替代。** 本文保留 2026-09-14 的 v3.0 物化事实与证据路径，不再作为当前训练输入。
+> 当前入口为 [`olist-v3-balanced-release-v1-1.md`](olist-v3-balanced-release-v1-1.md)：它修复了五问法/八问法不一致、`hash % 5` 非配额选择和英文别名混入中文主集的问题，并增加发布级合同审计。v3.0 的外部资产不删除、不重写。
 
 ## 1. 结论与边界
 

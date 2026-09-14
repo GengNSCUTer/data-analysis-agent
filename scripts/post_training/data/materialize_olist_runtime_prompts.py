@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import sys
 import uuid
@@ -33,7 +34,19 @@ from data_analysis_agent.candidate_sql_generator import (  # noqa: E402
     require_database_route,
 )
 from data_analysis_agent.metric_context import OLIST_V3_WORKSPACE, OLIST_WORKSPACE  # noqa: E402
-from data_analysis_agent.olist_queryspec import QuerySpec, WorkspacePin, validate_query_spec  # noqa: E402
+from data_analysis_agent.olist_queryspec import (
+    QuerySpec,
+    WorkspacePin,
+    validate_query_spec,
+)  # noqa: E402
+from data_analysis_agent.olist_surface_contract import (  # noqa: E402
+    OLIST_V3_1_VARIANT_IDS,
+    OLIST_V3_1_VARIANT_KIND_BY_ID,
+    OLIST_V3_1_VARIANT_POLICY,
+    OLIST_V3_1_VARIANT_SCHEMA_VERSION,
+    OLIST_V3_1_VARIANTS_PER_SEED,
+    contains_latin_token,
+)
 from data_analysis_agent.query_plan import QueryPlan  # noqa: E402
 from data_analysis_agent.question_router import QuestionRouter  # noqa: E402
 from data_analysis_agent.semantic_catalog import (  # noqa: E402
@@ -55,7 +68,7 @@ OVERLAY_SCHEMA_VERSION = "1"
 # 3,600 query instances and five reviewed surface forms per instance; keep the
 # guard, but size it for that explicit release contract.
 MAX_SEEDS = 5000
-MAX_VARIANTS = 25000
+MAX_VARIANTS = 40000
 
 
 class RuntimePromptInputError(ValueError):
@@ -76,7 +89,9 @@ def workspace_for_admitted_records(records: list[dict[str, Any]]):
         try:
             pins.add(QuerySpec.from_mapping(row["query_spec"]).workspace)
         except (KeyError, TypeError, ValueError) as exc:
-            raise RuntimePromptInputError("admission record has an invalid QuerySpec") from exc
+            raise RuntimePromptInputError(
+                "admission record has an invalid QuerySpec"
+            ) from exc
     if len(pins) != 1:
         raise RuntimePromptInputError("admission records mix workspace pins")
     pin = next(iter(pins))
@@ -84,7 +99,9 @@ def workspace_for_admitted_records(records: list[dict[str, Any]]):
         return OLIST_WORKSPACE
     if pin == WorkspacePin.current(OLIST_V3_WORKSPACE):
         return OLIST_V3_WORKSPACE
-    raise RuntimePromptInputError("admission records use an unsupported Olist workspace pin")
+    raise RuntimePromptInputError(
+        "admission records use an unsupported Olist workspace pin"
+    )
 
 
 def sha256_file(path: Path) -> str:
@@ -99,7 +116,9 @@ def _read_jsonl(path: Path, label: str) -> list[dict[str, Any]]:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        raise RuntimePromptInputError(f"{label} does not exist or is unreadable: {path}") from exc
+        raise RuntimePromptInputError(
+            f"{label} does not exist or is unreadable: {path}"
+        ) from exc
     rows: list[dict[str, Any]] = []
     for line_number, line in enumerate(lines, 1):
         if not line.strip():
@@ -107,9 +126,13 @@ def _read_jsonl(path: Path, label: str) -> list[dict[str, Any]]:
         try:
             value = json.loads(line)
         except json.JSONDecodeError as exc:
-            raise RuntimePromptInputError(f"{label} has invalid JSON at line {line_number}") from exc
+            raise RuntimePromptInputError(
+                f"{label} has invalid JSON at line {line_number}"
+            ) from exc
         if not isinstance(value, dict):
-            raise RuntimePromptInputError(f"{label} line {line_number} must be an object")
+            raise RuntimePromptInputError(
+                f"{label} line {line_number} must be an object"
+            )
         rows.append(value)
     return rows
 
@@ -126,9 +149,13 @@ def _external_existing(path: Path, label: str) -> Path:
 def _external_new_dir(path: Path) -> Path:
     resolved = path.resolve()
     if resolved.is_relative_to(ROOT):
-        raise RuntimePromptInputError("runtime prompt output must stay outside the Git worktree")
+        raise RuntimePromptInputError(
+            "runtime prompt output must stay outside the Git worktree"
+        )
     if resolved.exists():
-        raise RuntimePromptInputError(f"runtime prompt output already exists: {resolved}")
+        raise RuntimePromptInputError(
+            f"runtime prompt output already exists: {resolved}"
+        )
     return resolved
 
 
@@ -137,17 +164,30 @@ def _validate_admission_assembly(records_path: Path, manifest_path: Path) -> Non
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise RuntimePromptInputError("admission assembly manifest must be valid JSON") from exc
-    if not isinstance(manifest, Mapping) or manifest.get("checks", {}).get("status") != "pass":
+        raise RuntimePromptInputError(
+            "admission assembly manifest must be valid JSON"
+        ) from exc
+    if (
+        not isinstance(manifest, Mapping)
+        or manifest.get("checks", {}).get("status") != "pass"
+    ):
         raise RuntimePromptInputError("admission assembly manifest did not pass")
     output = manifest.get("output", {}).get("admitted_records_jsonl", {})
     if not isinstance(output, Mapping):
-        raise RuntimePromptInputError("admission assembly manifest has no records evidence")
+        raise RuntimePromptInputError(
+            "admission assembly manifest has no records evidence"
+        )
     rows = output.get("rows")
     if not isinstance(rows, int) or not 1 <= rows <= MAX_SEEDS:
-        raise RuntimePromptInputError("admission assembly records have an unsupported row count")
-    if rows != len(_read_jsonl(records_path, "admission records")) or output.get("sha256") != sha256_file(records_path):
-        raise RuntimePromptInputError("admission assembly records do not match its manifest")
+        raise RuntimePromptInputError(
+            "admission assembly records have an unsupported row count"
+        )
+    if rows != len(_read_jsonl(records_path, "admission records")) or output.get(
+        "sha256"
+    ) != sha256_file(records_path):
+        raise RuntimePromptInputError(
+            "admission assembly records do not match its manifest"
+        )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -168,32 +208,51 @@ def load_question_variants(path: Path, source_ids: set[str]) -> dict[str, str]:
     if not isinstance(payload, Mapping):
         raise RuntimePromptInputError("question variants must be a JSON object")
     if set(payload) != {"schema_version", "language", "prompt_version", "cases"}:
-        raise RuntimePromptInputError("question variants have unsupported top-level fields")
-    if payload["schema_version"] != OVERLAY_SCHEMA_VERSION or payload["language"] != "zh":
-        raise RuntimePromptInputError("question variants must be schema 1 and language zh")
+        raise RuntimePromptInputError(
+            "question variants have unsupported top-level fields"
+        )
+    if (
+        payload["schema_version"] != OVERLAY_SCHEMA_VERSION
+        or payload["language"] != "zh"
+    ):
+        raise RuntimePromptInputError(
+            "question variants must be schema 1 and language zh"
+        )
     if payload["prompt_version"] != OLIST_CANDIDATE_SQL_PROMPT_VERSION:
-        raise RuntimePromptInputError("question variants prompt version differs from runtime contract")
+        raise RuntimePromptInputError(
+            "question variants prompt version differs from runtime contract"
+        )
     raw_cases = payload["cases"]
     if not isinstance(raw_cases, list) or len(raw_cases) != len(source_ids):
-        raise RuntimePromptInputError("question variants must contain exactly one case per admitted seed")
+        raise RuntimePromptInputError(
+            "question variants must contain exactly one case per admitted seed"
+        )
     result: dict[str, str] = {}
     for item in raw_cases:
         if not isinstance(item, Mapping) or set(item) != {"seed_id", "question"}:
-            raise RuntimePromptInputError("each question variant requires only seed_id and question")
+            raise RuntimePromptInputError(
+                "each question variant requires only seed_id and question"
+            )
         seed_id, question = item["seed_id"], item["question"]
         if not isinstance(seed_id, str) or not seed_id.strip():
             raise RuntimePromptInputError("question variant seed_id must be non-empty")
         if seed_id in result or seed_id not in source_ids:
-            raise RuntimePromptInputError(f"question variant seed_id is duplicate or unknown: {seed_id}")
+            raise RuntimePromptInputError(
+                f"question variant seed_id is duplicate or unknown: {seed_id}"
+            )
         if not isinstance(question, str) or not question.strip():
             raise RuntimePromptInputError(f"question variant is empty: {seed_id}")
         result[seed_id] = question.strip()
     if set(result) != source_ids:
-        raise RuntimePromptInputError("question variant IDs must exactly match admitted seeds")
+        raise RuntimePromptInputError(
+            "question variant IDs must exactly match admitted seeds"
+        )
     return result
 
 
-def load_question_variant_cases(path: Path, source_ids: set[str]) -> list[dict[str, str]]:
+def load_question_variant_cases(
+    path: Path, source_ids: set[str]
+) -> list[dict[str, str]]:
     """Load the v2 overlay: exactly two reviewed paraphrases per seed."""
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -201,37 +260,79 @@ def load_question_variant_cases(path: Path, source_ids: set[str]) -> list[dict[s
         raise RuntimePromptInputError("question variants must be valid JSON") from exc
     if not isinstance(payload, Mapping):
         raise RuntimePromptInputError("question variants must be a JSON object")
-    if set(payload) != {"schema_version", "language", "prompt_version", "variant_policy", "cases"}:
-        raise RuntimePromptInputError("v2 question variants have unsupported top-level fields")
+    if set(payload) != {
+        "schema_version",
+        "language",
+        "prompt_version",
+        "variant_policy",
+        "cases",
+    }:
+        raise RuntimePromptInputError(
+            "v2 question variants have unsupported top-level fields"
+        )
     if payload["schema_version"] != "2" or payload["language"] != "zh":
-        raise RuntimePromptInputError("v2 question variants must be schema 2 and language zh")
+        raise RuntimePromptInputError(
+            "v2 question variants must be schema 2 and language zh"
+        )
     if payload["prompt_version"] != OLIST_CANDIDATE_SQL_PROMPT_VERSION:
-        raise RuntimePromptInputError("question variants prompt version differs from runtime contract")
+        raise RuntimePromptInputError(
+            "question variants prompt version differs from runtime contract"
+        )
     raw_cases = payload["cases"]
     if not isinstance(raw_cases, list) or len(raw_cases) != len(source_ids) * 2:
-        raise RuntimePromptInputError("v2 question variants must contain exactly two cases per admitted seed")
+        raise RuntimePromptInputError(
+            "v2 question variants must contain exactly two cases per admitted seed"
+        )
     cases: list[dict[str, str]] = []
     seen_variant_ids: set[str] = set()
     counts: dict[str, int] = dict.fromkeys(source_ids, 0)
     for item in raw_cases:
-        if not isinstance(item, Mapping) or set(item) != {"variant_id", "seed_id", "question"}:
-            raise RuntimePromptInputError("each v2 question variant requires only variant_id, seed_id and question")
-        variant_id, seed_id, question = item["variant_id"], item["seed_id"], item["question"]
-        if not isinstance(variant_id, str) or not variant_id.strip() or variant_id in seen_variant_ids:
-            raise RuntimePromptInputError(f"question variant variant_id is empty or duplicate: {variant_id}")
+        if not isinstance(item, Mapping) or set(item) != {
+            "variant_id",
+            "seed_id",
+            "question",
+        }:
+            raise RuntimePromptInputError(
+                "each v2 question variant requires only variant_id, seed_id and question"
+            )
+        variant_id, seed_id, question = (
+            item["variant_id"],
+            item["seed_id"],
+            item["question"],
+        )
+        if (
+            not isinstance(variant_id, str)
+            or not variant_id.strip()
+            or variant_id in seen_variant_ids
+        ):
+            raise RuntimePromptInputError(
+                f"question variant variant_id is empty or duplicate: {variant_id}"
+            )
         if not isinstance(seed_id, str) or seed_id not in source_ids:
-            raise RuntimePromptInputError(f"question variant seed_id is unknown: {seed_id}")
+            raise RuntimePromptInputError(
+                f"question variant seed_id is unknown: {seed_id}"
+            )
         if not isinstance(question, str) or not question.strip():
             raise RuntimePromptInputError(f"question variant is empty: {variant_id}")
         seen_variant_ids.add(variant_id)
         counts[seed_id] += 1
-        cases.append({"variant_id": variant_id.strip(), "seed_id": seed_id, "question": question.strip()})
+        cases.append(
+            {
+                "variant_id": variant_id.strip(),
+                "seed_id": seed_id,
+                "question": question.strip(),
+            }
+        )
     if any(count != 2 for count in counts.values()):
-        raise RuntimePromptInputError("v2 question variants must contain exactly two cases per admitted seed")
+        raise RuntimePromptInputError(
+            "v2 question variants must contain exactly two cases per admitted seed"
+        )
     return cases
 
 
-def load_question_variant_cases_v3(path: Path, source_ids: set[str]) -> list[dict[str, str]]:
+def load_question_variant_cases_v3(
+    path: Path, source_ids: set[str]
+) -> list[dict[str, str]]:
     """Load a review-pilot overlay: exactly five controlled forms per seed.
 
     This is intentionally a distinct version rather than loosening v2, so a
@@ -241,34 +342,191 @@ def load_question_variant_cases_v3(path: Path, source_ids: set[str]) -> list[dic
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise RuntimePromptInputError("question variants must be valid JSON") from exc
-    expected_fields = {"schema_version", "language", "prompt_version", "variant_policy", "cases"}
+    expected_fields = {
+        "schema_version",
+        "language",
+        "prompt_version",
+        "variant_policy",
+        "cases",
+    }
     if not isinstance(payload, Mapping) or set(payload) != expected_fields:
-        raise RuntimePromptInputError("v3 question variants have unsupported top-level fields")
+        raise RuntimePromptInputError(
+            "v3 question variants have unsupported top-level fields"
+        )
     if payload["schema_version"] != "3" or payload["language"] != "zh":
-        raise RuntimePromptInputError("v3 question variants must be schema 3 and language zh")
+        raise RuntimePromptInputError(
+            "v3 question variants must be schema 3 and language zh"
+        )
     if payload["prompt_version"] != OLIST_CANDIDATE_SQL_PROMPT_VERSION:
-        raise RuntimePromptInputError("question variants prompt version differs from runtime contract")
+        raise RuntimePromptInputError(
+            "question variants prompt version differs from runtime contract"
+        )
     raw_cases = payload["cases"]
     if not isinstance(raw_cases, list) or len(raw_cases) != len(source_ids) * 5:
-        raise RuntimePromptInputError("v3 question variants must contain exactly five cases per admitted seed")
+        raise RuntimePromptInputError(
+            "v3 question variants must contain exactly five cases per admitted seed"
+        )
     cases: list[dict[str, str]] = []
     seen_variant_ids: set[str] = set()
     counts: dict[str, int] = dict.fromkeys(source_ids, 0)
     for item in raw_cases:
-        if not isinstance(item, Mapping) or set(item) != {"variant_id", "seed_id", "question"}:
-            raise RuntimePromptInputError("each v3 question variant requires only variant_id, seed_id and question")
-        variant_id, seed_id, question = item["variant_id"], item["seed_id"], item["question"]
-        if not isinstance(variant_id, str) or not variant_id.strip() or variant_id in seen_variant_ids:
-            raise RuntimePromptInputError(f"question variant variant_id is empty or duplicate: {variant_id}")
+        if not isinstance(item, Mapping) or set(item) != {
+            "variant_id",
+            "seed_id",
+            "question",
+        }:
+            raise RuntimePromptInputError(
+                "each v3 question variant requires only variant_id, seed_id and question"
+            )
+        variant_id, seed_id, question = (
+            item["variant_id"],
+            item["seed_id"],
+            item["question"],
+        )
+        if (
+            not isinstance(variant_id, str)
+            or not variant_id.strip()
+            or variant_id in seen_variant_ids
+        ):
+            raise RuntimePromptInputError(
+                f"question variant variant_id is empty or duplicate: {variant_id}"
+            )
         if not isinstance(seed_id, str) or seed_id not in source_ids:
-            raise RuntimePromptInputError(f"question variant seed_id is unknown: {seed_id}")
+            raise RuntimePromptInputError(
+                f"question variant seed_id is unknown: {seed_id}"
+            )
         if not isinstance(question, str) or not question.strip():
             raise RuntimePromptInputError(f"question variant is empty: {variant_id}")
         seen_variant_ids.add(variant_id)
         counts[seed_id] += 1
-        cases.append({"variant_id": variant_id.strip(), "seed_id": seed_id, "question": question.strip()})
+        cases.append(
+            {
+                "variant_id": variant_id.strip(),
+                "seed_id": seed_id,
+                "question": question.strip(),
+            }
+        )
     if any(count != 5 for count in counts.values()):
-        raise RuntimePromptInputError("v3 question variants must contain exactly five cases per admitted seed")
+        raise RuntimePromptInputError(
+            "v3 question variants must contain exactly five cases per admitted seed"
+        )
+    return cases
+
+
+def load_question_variant_cases_v4(
+    path: Path, source_ids: set[str]
+) -> list[dict[str, str]]:
+    """Load the v3.1 release overlay: eight typed, pure-Chinese forms per seed.
+
+    Version four is intentionally fail-closed instead of treating the old v3
+    five-form pilot as compatible.  The loader validates the actual surface
+    contract so a syntactically valid JSON file cannot quietly downgrade it.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimePromptInputError("question variants must be valid JSON") from exc
+    expected_fields = {
+        "schema_version",
+        "language",
+        "prompt_version",
+        "variant_policy",
+        "cases",
+    }
+    if not isinstance(payload, Mapping) or set(payload) != expected_fields:
+        raise RuntimePromptInputError(
+            "v4 question variants have unsupported top-level fields"
+        )
+    if (
+        payload["schema_version"] != OLIST_V3_1_VARIANT_SCHEMA_VERSION
+        or payload["language"] != "zh"
+        or payload["variant_policy"] != OLIST_V3_1_VARIANT_POLICY
+    ):
+        raise RuntimePromptInputError(
+            "v4 question variants do not match the frozen Chinese surface contract"
+        )
+    if payload["prompt_version"] != OLIST_CANDIDATE_SQL_PROMPT_VERSION:
+        raise RuntimePromptInputError(
+            "question variants prompt version differs from runtime contract"
+        )
+    raw_cases = payload["cases"]
+    if (
+        not isinstance(raw_cases, list)
+        or len(raw_cases) != len(source_ids) * OLIST_V3_1_VARIANTS_PER_SEED
+    ):
+        raise RuntimePromptInputError(
+            "v4 question variants must contain exactly eight cases per admitted seed"
+        )
+    cases: list[dict[str, str]] = []
+    seen_variant_ids: set[str] = set()
+    by_seed: dict[str, dict[str, dict[str, str]]] = {
+        seed_id: {} for seed_id in source_ids
+    }
+    for item in raw_cases:
+        if not isinstance(item, Mapping) or set(item) != {
+            "variant_id",
+            "variant_kind",
+            "seed_id",
+            "question",
+        }:
+            raise RuntimePromptInputError(
+                "each v4 question variant requires variant_id, variant_kind, seed_id and question"
+            )
+        variant_id = item["variant_id"]
+        variant_kind = item["variant_kind"]
+        seed_id = item["seed_id"]
+        question = item["question"]
+        if (
+            not isinstance(variant_id, str)
+            or not variant_id.strip()
+            or variant_id in seen_variant_ids
+        ):
+            raise RuntimePromptInputError(
+                f"question variant variant_id is empty or duplicate: {variant_id}"
+            )
+        if not isinstance(seed_id, str) or seed_id not in by_seed:
+            raise RuntimePromptInputError(
+                f"question variant seed_id is unknown: {seed_id}"
+            )
+        if (
+            not isinstance(question, str)
+            or not question.strip()
+            or contains_latin_token(question)
+        ):
+            raise RuntimePromptInputError(
+                f"v4 question must be a non-empty pure-Chinese surface: {variant_id}"
+            )
+        expected_id_prefix = f"{seed_id}-"
+        if not variant_id.startswith(expected_id_prefix):
+            raise RuntimePromptInputError(
+                f"v4 variant_id does not bind its seed: {variant_id}"
+            )
+        form_id = variant_id[len(expected_id_prefix) :]
+        if (
+            form_id not in OLIST_V3_1_VARIANT_KIND_BY_ID
+            or variant_kind != OLIST_V3_1_VARIANT_KIND_BY_ID[form_id]
+        ):
+            raise RuntimePromptInputError(
+                f"v4 variant identity/kind does not match the surface contract: {variant_id}"
+            )
+        if form_id in by_seed[seed_id]:
+            raise RuntimePromptInputError(
+                f"v4 seed has duplicate surface form: {variant_id}"
+            )
+        row = {
+            "variant_id": variant_id.strip(),
+            "variant_kind": variant_kind,
+            "seed_id": seed_id,
+            "question": question.strip(),
+        }
+        seen_variant_ids.add(variant_id)
+        by_seed[seed_id][form_id] = row
+        cases.append(row)
+    expected_forms = set(OLIST_V3_1_VARIANT_IDS)
+    if any(set(forms) != expected_forms for forms in by_seed.values()):
+        raise RuntimePromptInputError(
+            "v4 question variants must contain v1-v8 exactly once per admitted seed"
+        )
     return cases
 
 
@@ -282,7 +540,9 @@ def _expected_shape(spec: QuerySpec) -> str:
     return "scalar"
 
 
-def _compare_contract(spec: QuerySpec, plan: QueryPlan, contract: ResultContract) -> list[str]:
+def _compare_contract(
+    spec: QuerySpec, plan: QueryPlan, contract: ResultContract
+) -> list[str]:
     mismatches: list[str] = []
     if set(plan.metric_ids) != set(spec.metric_ids):
         mismatches.append("metric_ids")
@@ -291,17 +551,24 @@ def _compare_contract(spec: QuerySpec, plan: QueryPlan, contract: ResultContract
         mismatches.append("dimensions")
     if plan.time_grain != spec.time.grain:
         mismatches.append("time_grain")
-    expected_range = None if spec.time.mode == "all_time" else {
-        "start": spec.time.start,
-        "end": spec.time.end_exclusive,
-    }
+    expected_range = (
+        None
+        if spec.time.mode == "all_time"
+        else {
+            "start": spec.time.start,
+            "end": spec.time.end_exclusive,
+        }
+    )
     if plan.time_range != expected_range:
         mismatches.append("time_range")
     if set(plan.required_result_columns) != set(spec.required_result_columns):
         mismatches.append("plan_required_result_columns")
     if set(contract.required_result_columns) != set(spec.required_result_columns):
         mismatches.append("contract_required_result_columns")
-    if _expected_shape(spec) == "state_grouped" and plan.plan_type not in {"single_metric", "grouped_multi_metric"}:
+    if _expected_shape(spec) == "state_grouped" and plan.plan_type not in {
+        "single_metric",
+        "grouped_multi_metric",
+    }:
         mismatches.append("plan_type")
     if plan.warnings:
         mismatches.append("plan_warnings")
@@ -318,32 +585,48 @@ def materialize(
     admission_records = _external_existing(admission_records, "admission records")
     records = _read_jsonl(admission_records, "admission records")
     if not records or len(records) > MAX_SEEDS:
-        raise RuntimePromptInputError(f"admission records must contain 1-{MAX_SEEDS} rows")
+        raise RuntimePromptInputError(
+            f"admission records must contain 1-{MAX_SEEDS} rows"
+        )
     if admission_assembly_manifest is None:
-        raise RuntimePromptInputError("runtime materialization requires an admission assembly manifest")
+        raise RuntimePromptInputError(
+            "runtime materialization requires an admission assembly manifest"
+        )
     _validate_admission_assembly(admission_records, admission_assembly_manifest)
     admitted = [row for row in records if row.get("admission_status") == "admitted"]
     if len(admitted) != len(records):
-        raise RuntimePromptInputError("runtime materialization accepts admitted rows only")
+        raise RuntimePromptInputError(
+            "runtime materialization accepts admitted rows only"
+        )
     seed_ids = {str(row.get("seed_id")) for row in admitted}
     if None in seed_ids or "" in seed_ids or len(seed_ids) != len(admitted):
-        raise RuntimePromptInputError("admission records must have unique non-empty seed IDs")
+        raise RuntimePromptInputError(
+            "admission records must have unique non-empty seed IDs"
+        )
     variants_path = _external_existing(variants_path, "question variants")
     variant_payload = json.loads(variants_path.read_text(encoding="utf-8"))
     if variant_payload.get("schema_version") == "1":
         questions = load_question_variants(variants_path, seed_ids)
         variant_cases = [
-            {"variant_id": f"v1-{seed_id}", "seed_id": seed_id, "question": questions[seed_id]}
+            {
+                "variant_id": f"v1-{seed_id}",
+                "seed_id": seed_id,
+                "question": questions[seed_id],
+            }
             for seed_id in sorted(seed_ids)
         ]
     elif variant_payload.get("schema_version") == "2":
         variant_cases = load_question_variant_cases(variants_path, seed_ids)
     elif variant_payload.get("schema_version") == "3":
         variant_cases = load_question_variant_cases_v3(variants_path, seed_ids)
+    elif variant_payload.get("schema_version") == OLIST_V3_1_VARIANT_SCHEMA_VERSION:
+        variant_cases = load_question_variant_cases_v4(variants_path, seed_ids)
     else:
-        raise RuntimePromptInputError("question variants schema must be 1, 2 or 3")
+        raise RuntimePromptInputError("question variants schema must be 1, 2, 3 or 4")
     if len(variant_cases) > MAX_VARIANTS:
-        raise RuntimePromptInputError(f"question variants must contain at most {MAX_VARIANTS} cases")
+        raise RuntimePromptInputError(
+            f"question variants must contain at most {MAX_VARIANTS} cases"
+        )
     admission_by_seed = {str(row["seed_id"]): row for row in admitted}
     output = _external_new_dir(output_dir)
 
@@ -366,7 +649,9 @@ def materialize(
             route = router.classify(question, user=user, selection=selection)
             require_database_route(route)
             memory = WorkingMemory().apply(question, route)
-            plan = QueryPlan.from_selection(selection, question, route, memory.as_dict())
+            plan = QueryPlan.from_selection(
+                selection, question, route, memory.as_dict()
+            )
             contract = ResultContract.from_selection(
                 selection,
                 question,
@@ -379,7 +664,9 @@ def materialize(
             )
             mismatches = _compare_contract(spec, plan, contract)
             if mismatches:
-                raise RuntimePromptInputError("runtime contract mismatch: " + ", ".join(mismatches))
+                raise RuntimePromptInputError(
+                    "runtime contract mismatch: " + ", ".join(mismatches)
+                )
             context = CandidateSqlContext(
                 question=question,
                 catalog_prompt=selection.prompt,
@@ -387,27 +674,38 @@ def materialize(
                 required_result_columns=contract.required_result_columns,
             )
             prompt = render_candidate_sql_prompt(context)
-            runtime_rows.append({
-                "seed_id": seed_id,
-                "variant_id": variant["variant_id"],
-                "split": row.get("split"),
-                "family_id": row.get("family_id"),
-                "sql_program_id": row.get("sql_program_id"),
-                "query_spec_id": spec.query_spec_id,
-                "question": question,
-                "route": route.as_dict(),
-                "selection_trace": selection.trace.as_dict(),
-                "query_plan": plan.as_dict(),
-                "result_contract": contract.as_evidence(),
-                "prompt": prompt,
-                "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
-            })
+            runtime_rows.append(
+                {
+                    "seed_id": seed_id,
+                    "variant_id": variant["variant_id"],
+                    "variant_kind": variant.get("variant_kind"),
+                    "split": row.get("split"),
+                    "family_id": row.get("family_id"),
+                    "sql_program_id": row.get("sql_program_id"),
+                    "primary_bucket": row.get("primary_bucket"),
+                    "query_spec_id": spec.query_spec_id,
+                    "question": question,
+                    "route": route.as_dict(),
+                    "selection_trace": selection.trace.as_dict(),
+                    "query_plan": plan.as_dict(),
+                    "result_contract": contract.as_evidence(),
+                    "prompt": prompt,
+                    "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                }
+            )
         except Exception as exc:
-            failures.append({"seed_id": seed_id, "status": "rejected", "reason": str(exc)[:500]})
+            failures.append(
+                {"seed_id": seed_id, "status": "rejected", "reason": str(exc)[:500]}
+            )
 
     if failures:
-        raise RuntimePromptInputError("runtime prompt materialization rejected one or more rows: " + json.dumps(failures, ensure_ascii=False))
-    generated_at = generated_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        raise RuntimePromptInputError(
+            "runtime prompt materialization rejected one or more rows: "
+            + json.dumps(failures, ensure_ascii=False)
+        )
+    generated_at = (
+        generated_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = output.parent / f".{output.name}.staging-{uuid.uuid4().hex}"
     try:
@@ -415,7 +713,9 @@ def materialize(
         runtime_path = staging / "runtime_candidates.jsonl"
         with runtime_path.open("x", encoding="utf-8") as handle:
             for item in runtime_rows:
-                handle.write(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n")
+                handle.write(
+                    json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n"
+                )
         manifest = {
             "schema_version": SCHEMA_VERSION,
             "generated_at": generated_at,
@@ -437,7 +737,11 @@ def materialize(
                 "policy_version": catalog.policy_version,
                 "prompt_version": OLIST_CANDIDATE_SQL_PROMPT_VERSION,
             },
-            "counts": {"input_rows": len(records), "materialized_rows": len(runtime_rows), "rejected_rows": 0},
+            "counts": {
+                "input_rows": len(records),
+                "materialized_rows": len(runtime_rows),
+                "rejected_rows": 0,
+            },
             "checks": {
                 "router_rebuilt": True,
                 "catalog_rebuilt": True,
@@ -448,10 +752,16 @@ def materialize(
                 "gpu_used": False,
                 "protected_holdout_read": False,
             },
-            "output": {"runtime_candidates_jsonl": {"rows": len(runtime_rows), "sha256": sha256_file(runtime_path)}},
+            "output": {
+                "runtime_candidates_jsonl": {
+                    "rows": len(runtime_rows),
+                    "sha256": sha256_file(runtime_path),
+                }
+            },
         }
         (staging / "runtime_prompt_manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
         )
         staging.replace(output)
     except Exception:

@@ -45,7 +45,8 @@ from scripts.post_training.data.materialize_olist_queryspecs import (  # noqa: E
 )
 
 
-RELEASE_VERSION = "olist-v3-balanced-structural-release-v1"
+LEGACY_RELEASE_VERSION = "olist-v3-balanced-structural-release-v1"
+RELEASE_VERSION = "olist-v3-balanced-structural-release-v1.1"
 SEED_SCHEMA_VERSION = "olist-v3-coverage-family-seed-v1"
 SPLITS = ("train", "validation", "in_domain_test")
 BUCKETS = (
@@ -89,7 +90,71 @@ DATE_WINDOWS = (
     ("2018-04-01", "2018-07-01"),
     ("2018-07-01", "2018-10-01"),
 )
-DEFAULT_SEED_FIXTURE = ROOT / "data" / "fixtures" / "olist_v3_coverage_family_seeds_v1.jsonl"
+DEFAULT_SEED_FIXTURE = (
+    ROOT / "data" / "fixtures" / "olist_v3_coverage_family_seeds_v1.jsonl"
+)
+
+# v3.1 does not rewrite the frozen v1 seed fixture or its already-admitted
+# release.  It makes one explicit new-release allocation: the finite
+# freight/category absolute-range family (eight legal windows) moves from test
+# to train.  This raises category-grouped train exposure from 9 to 17 while
+# retaining four distinct category families and all four item metrics in the
+# final test.  No order/review category attribution is introduced.
+V3_1_SEED_SPLIT_OVERRIDES: Mapping[str, str] = {
+    "olist-v3-coverage-in_domain_test-031": "train",
+}
+
+NEW_V3_METRICS = frozenset(
+    {
+        "unique_customer_count",
+        "review_count",
+        "canceled_order_count",
+        "delivered_order_count",
+        "unavailable_order_count",
+        "average_items_per_order",
+        "average_item_price",
+        "approval_latency_days",
+        "carrier_handoff_days",
+    }
+)
+
+# Row exposure is not a substitute for independent programs, so both row and
+# family floors are enforced.  The thresholds deliberately raise the nine new
+# metrics above the old 151--180 train-row range without requiring equal metric
+# frequency or duplicate SQL.  Validation/test retain meaningful but smaller
+# coverage because they are model-selection/evaluation sets, not exposure pools.
+NEW_V3_METRIC_ROW_MINIMA: Mapping[str, Mapping[str, int]] = {
+    "train": dict.fromkeys(NEW_V3_METRICS, 230),
+    "validation": dict.fromkeys(NEW_V3_METRICS, 50),
+    "in_domain_test": dict.fromkeys(NEW_V3_METRICS, 50),
+}
+NEW_V3_METRIC_FAMILY_MINIMA: Mapping[str, Mapping[str, int]] = {
+    "train": dict.fromkeys(NEW_V3_METRICS, 20),
+    "validation": dict.fromkeys(NEW_V3_METRICS, 5),
+    "in_domain_test": dict.fromkeys(NEW_V3_METRICS, 5),
+}
+
+# Category grouping is genuinely finite under the no-attribution contract.
+# These are row/family targets that can be met by the eight legal item-grain
+# families; they are not an excuse to group order/review metrics by category.
+CATEGORY_GROUPED_ROW_MINIMA: Mapping[str, int] = {
+    "train": 17,
+    "validation": 8,
+    "in_domain_test": 11,
+}
+CATEGORY_GROUPED_FAMILY_MINIMA: Mapping[str, int] = {
+    "train": 3,
+    "validation": 1,
+    "in_domain_test": 4,
+}
+
+# Enforce a lower bound per time grain in the smaller splits.  The train split
+# is already large and is still reported, but its quota is not made needlessly
+# rigid.  This specifically repairs validation-month and test-day starvation.
+TIME_GRAIN_ROW_MINIMA: Mapping[str, Mapping[str, int]] = {
+    "validation": dict.fromkeys(("day", "week", "month", "quarter", "year"), 70),
+    "in_domain_test": dict.fromkeys(("day", "week", "month", "quarter", "year"), 70),
+}
 
 _ITEM_METRICS = frozenset(
     metric_id
@@ -152,13 +217,17 @@ def _read_jsonl(path: Path, label: str) -> list[dict[str, Any]]:
     if not path.is_file():
         raise FileNotFoundError(f"{label} does not exist: {path}")
     rows: list[dict[str, Any]] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
         if not line.strip():
             continue
         try:
             row = json.loads(line)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"{label} has invalid JSON at {path}:{line_number}") from exc
+            raise ValueError(
+                f"{label} has invalid JSON at {path}:{line_number}"
+            ) from exc
         if not isinstance(row, dict):
             raise ValueError(f"{label} row {line_number} must be an object")
         rows.append(row)
@@ -185,7 +254,9 @@ def _external_new_dir(path: Path) -> Path:
     return resolved
 
 
-def _load_protected_fingerprints(summary_path: Path, evidence_path: Path) -> frozenset[str]:
+def _load_protected_fingerprints(
+    summary_path: Path, evidence_path: Path
+) -> frozenset[str]:
     summary_path = _external_existing_file(summary_path, "protected family summary")
     evidence_path = _external_existing_file(evidence_path, "protected family evidence")
     try:
@@ -193,7 +264,9 @@ def _load_protected_fingerprints(summary_path: Path, evidence_path: Path) -> fro
         evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError("protected family inputs must be valid JSON") from exc
-    fingerprints = summary.get("family_fingerprints") if isinstance(summary, dict) else None
+    fingerprints = (
+        summary.get("family_fingerprints") if isinstance(summary, dict) else None
+    )
     if (
         not isinstance(fingerprints, list)
         or summary.get("summary_version") != "olist-protected-family-summary-v1"
@@ -221,7 +294,11 @@ def _risk_tags(spec: QuerySpec, *, structural_focus: bool = False) -> tuple[str,
         tags.add("direct_dimension_grouping")
     if "unique_customer_count" in metrics:
         tags.add("count_distinct_customer")
-    if metrics & {"canceled_order_count", "delivered_order_count", "unavailable_order_count"}:
+    if metrics & {
+        "canceled_order_count",
+        "delivered_order_count",
+        "unavailable_order_count",
+    }:
         tags.add("status_filter_and_distinct_order")
     if metrics & {"average_items_per_order", "average_order_value"}:
         tags.add("two_stage_order_aggregation")
@@ -246,7 +323,11 @@ def classify_bucket(spec: QuerySpec) -> str:
         if len(spec.metric_ids) > 1:
             return "multi_time_series"
         metric = spec.metric_ids[0]
-        return "single_review_series" if metric in _REVIEW_METRICS else "single_purchase_series"
+        return (
+            "single_review_series"
+            if metric in _REVIEW_METRICS
+            else "single_purchase_series"
+        )
     raise AssertionError(f"unsupported result shape: {spec.result_shape}")
 
 
@@ -270,7 +351,9 @@ def _make_v3_spec(
     )
 
 
-def _with_window(spec: QuerySpec, start: str, end_exclusive: str, catalog: Catalog) -> QuerySpec:
+def _with_window(
+    spec: QuerySpec, start: str, end_exclusive: str, catalog: Catalog
+) -> QuerySpec:
     return _make_v3_spec(
         metric_ids=spec.metric_ids,
         result_shape=spec.result_shape,
@@ -323,29 +406,59 @@ def _candidate(
     }
 
 
-def load_v3_seed_candidates(path: Path, catalog: Catalog) -> list[dict[str, Any]]:
-    """Expand every frozen v3 family into at most eight same-split instances."""
+def load_v3_seed_candidates(
+    path: Path,
+    catalog: Catalog,
+    *,
+    split_overrides: Mapping[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Expand frozen v3 families, with explicit successor-release split overrides.
+
+    ``split_overrides`` is intentionally an argument rather than a mutation of
+    the v1 seed fixture.  It keeps old releases reproducible while making a
+    v3.1 allocation change visible in the new release manifest and tests.
+    """
     rows = _read_jsonl(path.resolve(), "v3 coverage seed fixture")
+    overrides = dict(split_overrides or {})
+    raw_seed_ids = {str(row.get("seed_id")) for row in rows}
+    if set(overrides) - raw_seed_ids or any(
+        split not in SPLITS for split in overrides.values()
+    ):
+        raise ValueError(
+            "v3 seed split overrides reference an unknown seed or unsupported split"
+        )
     expected_pin = WorkspacePin.current(OLIST_V3_WORKSPACE)
     output: list[dict[str, Any]] = []
     seen_seed_ids: set[str] = set()
     seen_family_ids: set[str] = set()
     for raw in rows:
         if set(raw) != {
-            "seed_schema_version", "seed_id", "split", "primary_bucket", "family_id",
-            "risk_tags", "instance_window_policy", "query_spec",
+            "seed_schema_version",
+            "seed_id",
+            "split",
+            "primary_bucket",
+            "family_id",
+            "risk_tags",
+            "instance_window_policy",
+            "query_spec",
         }:
             raise ValueError("v3 coverage seed has unsupported fields")
         if raw["seed_schema_version"] != SEED_SCHEMA_VERSION:
             raise ValueError("v3 coverage seed schema version drifted")
         seed_id = raw["seed_id"]
-        split = raw["split"]
-        if not isinstance(seed_id, str) or seed_id in seen_seed_ids or split not in SPLITS:
+        split = overrides.get(str(raw["seed_id"]), raw["split"])
+        if (
+            not isinstance(seed_id, str)
+            or seed_id in seen_seed_ids
+            or split not in SPLITS
+        ):
             raise ValueError("v3 coverage seed identity is invalid")
         seen_seed_ids.add(seed_id)
         spec = QuerySpec.from_mapping(raw["query_spec"])
         if spec.workspace != expected_pin or validate_query_spec(spec, catalog) != spec:
-            raise ValueError(f"v3 coverage seed {seed_id} has workspace or QuerySpec drift")
+            raise ValueError(
+                f"v3 coverage seed {seed_id} has workspace or QuerySpec drift"
+            )
         family = family_id(spec)
         if raw["family_id"] != family or family in seen_family_ids:
             raise ValueError(f"v3 coverage seed {seed_id} has family identity drift")
@@ -369,7 +482,9 @@ def load_v3_seed_candidates(path: Path, catalog: Catalog) -> list[dict[str, Any]
                 )
             )
     if len(seen_seed_ids) != 300:
-        raise ValueError("v3 coverage fixture no longer has its frozen 300-family budget")
+        raise ValueError(
+            "v3 coverage fixture no longer has its frozen 300-family budget"
+        )
     return output
 
 
@@ -389,7 +504,9 @@ def load_v2_reconstructed_candidates(
     protected_fingerprints: frozenset[str],
 ) -> tuple[list[dict[str, Any]], Counter[str]]:
     """Use only v2 structural identity, keeping its original family split."""
-    rows = _read_jsonl(_external_existing_file(path, "v2 QuerySpec source"), "v2 QuerySpec source")
+    rows = _read_jsonl(
+        _external_existing_file(path, "v2 QuerySpec source"), "v2 QuerySpec source"
+    )
     output: list[dict[str, Any]] = []
     skipped: Counter[str] = Counter()
     seen_seed_ids: set[str] = set()
@@ -397,7 +514,11 @@ def load_v2_reconstructed_candidates(
     for raw in rows:
         seed_id = raw.get("seed_id")
         split = raw.get("split")
-        if not isinstance(seed_id, str) or seed_id in seen_seed_ids or split not in SPLITS:
+        if (
+            not isinstance(seed_id, str)
+            or seed_id in seen_seed_ids
+            or split not in SPLITS
+        ):
             raise ValueError("v2 QuerySpec source has invalid seed or split identity")
         seen_seed_ids.add(seed_id)
         old_spec = QuerySpec.from_mapping(raw.get("query_spec", {}))
@@ -432,7 +553,9 @@ def load_v2_reconstructed_candidates(
                     # release targets without duplicating a program.
                     split=split if split == "in_domain_test" else None,
                     bucket=bucket,
-                    risk_tags=_risk_tags(instance, structural_focus=bucket == "structural_hard"),
+                    risk_tags=_risk_tags(
+                        instance, structural_focus=bucket == "structural_hard"
+                    ),
                     spec=instance,
                     allowed_splits=("in_domain_test",)
                     if split == "in_domain_test"
@@ -440,7 +563,9 @@ def load_v2_reconstructed_candidates(
                 )
             )
     if len(seen_seed_ids) != 3600:
-        raise ValueError("v2 source does not match the frozen 3,600-row structural release")
+        raise ValueError(
+            "v2 source does not match the frozen 3,600-row structural release"
+        )
     return output, skipped
 
 
@@ -448,7 +573,12 @@ def build_supplemental_candidates(catalog: Catalog) -> list[dict[str, Any]]:
     """Enumerate a finite v3-valid repair pool; it has no split assignment yet."""
     bases: dict[str, QuerySpec] = {}
 
-    def add(metric_ids: tuple[str, ...], shape: str, time: QueryTime, dimension: str | None = None) -> None:
+    def add(
+        metric_ids: tuple[str, ...],
+        shape: str,
+        time: QueryTime,
+        dimension: str | None = None,
+    ) -> None:
         try:
             spec = _make_v3_spec(
                 metric_ids=metric_ids,
@@ -474,10 +604,18 @@ def build_supplemental_candidates(catalog: Catalog) -> list[dict[str, Any]]:
             add((metric,), "category_grouped", query_time, "product_category_name")
     for metric in _PURCHASE_METRICS:
         for grain in grains:
-            add((metric,), "time_series", QueryTime("series", "2017-01-01", "2018-01-01", grain))
+            add(
+                (metric,),
+                "time_series",
+                QueryTime("series", "2017-01-01", "2018-01-01", grain),
+            )
     for metric in _REVIEW_METRICS:
         for grain in grains:
-            add((metric,), "time_series", QueryTime("series", "2017-01-01", "2018-01-01", grain))
+            add(
+                (metric,),
+                "time_series",
+                QueryTime("series", "2017-01-01", "2018-01-01", grain),
+            )
 
     # Two-metric programs are sufficient to repair the small residual in the
     # multi-scalar bucket.  The same finite legal grid also gives robust
@@ -488,10 +626,18 @@ def build_supplemental_candidates(catalog: Catalog) -> list[dict[str, Any]]:
             add(metrics, "state_grouped", query_time, "customer_state")
     for metrics in itertools.combinations(_PURCHASE_METRICS, 2):
         for grain in grains:
-            add(metrics, "time_series", QueryTime("series", "2017-01-01", "2018-01-01", grain))
+            add(
+                metrics,
+                "time_series",
+                QueryTime("series", "2017-01-01", "2018-01-01", grain),
+            )
     for metrics in itertools.combinations(_REVIEW_METRICS, 2):
         for grain in grains:
-            add(metrics, "time_series", QueryTime("series", "2017-01-01", "2018-01-01", grain))
+            add(
+                metrics,
+                "time_series",
+                QueryTime("series", "2017-01-01", "2018-01-01", grain),
+            )
 
     output: list[dict[str, Any]] = []
     for spec in sorted(bases.values(), key=lambda value: _stable_key(value.as_dict())):
@@ -505,7 +651,9 @@ def build_supplemental_candidates(catalog: Catalog) -> list[dict[str, Any]]:
                     source_rank=2,
                     split=None,
                     bucket=bucket,
-                    risk_tags=_risk_tags(instance, structural_focus=bucket == "structural_hard"),
+                    risk_tags=_risk_tags(
+                        instance, structural_focus=bucket == "structural_hard"
+                    ),
                     spec=instance,
                 )
             )
@@ -554,17 +702,168 @@ def _remove_source_conflicts(
     return v3_candidates, accepted_v2, exclusions
 
 
+def _empty_coverage_state() -> dict[str, Any]:
+    return {
+        "metric_rows": {split: Counter() for split in SPLITS},
+        "metric_families": {
+            split: {metric: set() for metric in NEW_V3_METRICS} for split in SPLITS
+        },
+        "category_rows": Counter(),
+        "category_families": {split: set() for split in SPLITS},
+        "time_grain_rows": {split: Counter() for split in SPLITS},
+    }
+
+
+def _record_coverage(state: Mapping[str, Any], row: Mapping[str, Any]) -> None:
+    """Mutate one preallocated coverage state after a candidate is selected."""
+    split = str(row["split"])
+    family = str(row["family_id"])
+    spec = row["query_spec"]
+    if isinstance(spec, Mapping):
+        spec = QuerySpec.from_mapping(spec)
+    if not isinstance(spec, QuerySpec):
+        raise ValueError("coverage row has an invalid QuerySpec")
+    for metric in spec.metric_ids:
+        if metric in NEW_V3_METRICS:
+            state["metric_rows"][split][metric] += 1
+            state["metric_families"][split][metric].add(family)
+    if spec.result_shape == "category_grouped":
+        state["category_rows"][split] += 1
+        state["category_families"][split].add(family)
+    if spec.time.mode == "series" and spec.time.grain is not None:
+        state["time_grain_rows"][split][spec.time.grain] += 1
+
+
+def _coverage_state(selected: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Aggregate the v3.1 balance dimensions from selected rows."""
+    state = _empty_coverage_state()
+    for row in selected:
+        _record_coverage(state, row)
+    return state
+
+
+def _coverage_priority(
+    candidate: Mapping[str, Any], split: str, state: Mapping[str, Any]
+) -> int:
+    """Score a candidate by unsatisfied v3.1 balance requirements.
+
+    Family coverage is weighted above row exposure so eight date windows from
+    one family cannot satisfy a requirement intended to broaden programs.
+    """
+    spec = candidate["query_spec"]
+    assert isinstance(spec, QuerySpec)
+    family = str(candidate["family_id"])
+    score = 0
+    metric_rows = state["metric_rows"][split]
+    metric_families = state["metric_families"][split]
+    for metric in sorted(set(spec.metric_ids) & NEW_V3_METRICS):
+        if (
+            len(metric_families[metric]) < NEW_V3_METRIC_FAMILY_MINIMA[split][metric]
+            and family not in metric_families[metric]
+        ):
+            score += 10_000
+        if metric_rows[metric] < NEW_V3_METRIC_ROW_MINIMA[split][metric]:
+            score += 1_000
+    if spec.result_shape == "category_grouped":
+        if (
+            family not in state["category_families"][split]
+            and len(state["category_families"][split])
+            < CATEGORY_GROUPED_FAMILY_MINIMA[split]
+        ):
+            score += 500
+        if state["category_rows"][split] < CATEGORY_GROUPED_ROW_MINIMA[split]:
+            score += 100
+    if (
+        split in TIME_GRAIN_ROW_MINIMA
+        and spec.time.mode == "series"
+        and spec.time.grain is not None
+    ):
+        if (
+            state["time_grain_rows"][split][spec.time.grain]
+            < TIME_GRAIN_ROW_MINIMA[split][spec.time.grain]
+        ):
+            score += 25
+    return score
+
+
+def balance_coverage_report(selected: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Return a JSON-serializable report and fail closed on v3.1 minima."""
+    rows = list(selected)
+    state = _coverage_state(rows)
+    report: dict[str, Any] = {
+        "new_v3_metrics": {},
+        "category_grouped": {},
+        "time_grains": {},
+    }
+    failures: list[str] = []
+    for split in SPLITS:
+        metrics = {}
+        for metric in sorted(NEW_V3_METRICS):
+            row_count = state["metric_rows"][split][metric]
+            family_count = len(state["metric_families"][split][metric])
+            metrics[metric] = {
+                "rows": row_count,
+                "families": family_count,
+                "row_minimum": NEW_V3_METRIC_ROW_MINIMA[split][metric],
+                "family_minimum": NEW_V3_METRIC_FAMILY_MINIMA[split][metric],
+            }
+            if (
+                row_count < NEW_V3_METRIC_ROW_MINIMA[split][metric]
+                or family_count < NEW_V3_METRIC_FAMILY_MINIMA[split][metric]
+            ):
+                failures.append(f"{split}/{metric}")
+        report["new_v3_metrics"][split] = metrics
+        category = {
+            "rows": state["category_rows"][split],
+            "families": len(state["category_families"][split]),
+            "row_minimum": CATEGORY_GROUPED_ROW_MINIMA[split],
+            "family_minimum": CATEGORY_GROUPED_FAMILY_MINIMA[split],
+        }
+        report["category_grouped"][split] = category
+        if (
+            category["rows"] < category["row_minimum"]
+            or category["families"] < category["family_minimum"]
+        ):
+            failures.append(f"{split}/category_grouped")
+        grains = {
+            grain: {
+                "rows": state["time_grain_rows"][split][grain],
+                "row_minimum": TIME_GRAIN_ROW_MINIMA.get(split, {}).get(grain),
+            }
+            for grain in ("day", "week", "month", "quarter", "year")
+        }
+        report["time_grains"][split] = grains
+        for grain, detail in grains.items():
+            if (
+                detail["row_minimum"] is not None
+                and detail["rows"] < detail["row_minimum"]
+            ):
+                failures.append(f"{split}/time_grain/{grain}")
+    report["status"] = "pass" if not failures else "fail"
+    report["failures"] = failures
+    if failures:
+        raise ValueError(
+            "v3.1 balance contract cannot be satisfied: " + ", ".join(failures)
+        )
+    return report
+
+
 def select_release_candidates(
     v3_candidates: list[dict[str, Any]],
     v2_candidates: list[dict[str, Any]],
     supplemental_candidates: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Select exact bucket quotas while enforcing family and QuerySpec isolation."""
-    v3_candidates, v2_candidates, _ = _remove_source_conflicts(v3_candidates, v2_candidates)
+    v3_candidates, v2_candidates, _ = _remove_source_conflicts(
+        v3_candidates, v2_candidates
+    )
     selected: list[dict[str, Any]] = []
     selected_query_spec_ids: set[str] = set()
-    selected_by_split_bucket: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    selected_by_split_bucket: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(
+        list
+    )
     family_split: dict[str, str] = {}
+    coverage_state = _empty_coverage_state()
 
     fixed_candidates = [*v3_candidates, *v2_candidates]
     for candidate in fixed_candidates:
@@ -595,18 +894,26 @@ def select_release_candidates(
         family_split[family] = split
         selected_query_spec_ids.add(spec.query_spec_id)
         selected_by_split_bucket[(split, bucket)].append(candidate)
-        selected.append({**candidate, "split": split})
+        selected_row = {**candidate, "split": split}
+        selected.append(selected_row)
+        _record_coverage(coverage_state, selected_row)
         return True
 
     # Every frozen v3 family receives one release instance before row exposure
     # is filled.  The per-bucket targets were intentionally chosen above these
     # required coverage counts.
-    mandatory = [candidate for candidate in v3_candidates if candidate["required_v3_seed"]]
+    mandatory = [
+        candidate for candidate in v3_candidates if candidate["required_v3_seed"]
+    ]
     if len(mandatory) != 300:
-        raise ValueError("all 300 frozen v3 families must contribute one required instance")
+        raise ValueError(
+            "all 300 frozen v3 families must contribute one required instance"
+        )
     for candidate in sorted(mandatory, key=_candidate_key):
         if not add(candidate, str(candidate["fixed_split"])):
-            raise ValueError("a frozen v3 family cannot be admitted to its release quota")
+            raise ValueError(
+                "a frozen v3 family cannot be admitted to its release quota"
+            )
 
     def fill_bucket(
         candidates: Iterable[dict[str, Any]],
@@ -645,7 +952,7 @@ def select_release_candidates(
             return None
 
         while len(selected_by_split_bucket[(split, bucket)]) < TARGETS[bucket][split]:
-            choices: list[tuple[int, tuple[int, str], str]] = []
+            choices: list[tuple[int, int, tuple[int, str], str]] = []
             for family in by_family:
                 prior = family_split.get(family)
                 if prior is not None and prior != split:
@@ -654,6 +961,7 @@ def select_release_candidates(
                 if candidate is not None:
                     choices.append(
                         (
+                            -_coverage_priority(candidate, split, coverage_state),
                             0 if prior == split else 1,
                             _candidate_key(candidate),
                             family,
@@ -667,7 +975,7 @@ def select_release_candidates(
                         f"{TARGETS[bucket][split]})"
                     )
                 return
-            _, _, family = min(choices)
+            _, _, _, family = min(choices)
             candidate = next_available(family)
             assert candidate is not None
             cursors[family] += 1
@@ -676,35 +984,51 @@ def select_release_candidates(
             # remains eligible without assigning the family incorrectly.
             add(candidate, split)
 
-    # First use compatible, fixed-split v3/v2 evidence.  This retains the
-    # historical holdout boundary and avoids creating supplementary structure
-    # when an already-audited structural source can fill the same bucket.
-    for split in ("in_domain_test", "validation", "train"):
-        for bucket in BUCKETS:
-            fill_bucket(
-                (
-                    candidate
-                    for candidate in fixed_candidates
-                    if candidate["primary_bucket"] == bucket
-                    and not candidate["required_v3_seed"]
-                ),
-                split=split,
-                bucket=bucket,
-                require_target=False,
-            )
-
-    # The held-out split claims remaining unassigned family space first.  This
-    # prevents a large train target from silently consuming finite singleton
-    # templates needed to keep validation/test representative.
-    supplemental_by_bucket: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for candidate in supplemental_candidates:
+    # Fill against one combined pool.  The old fixed-first ordering saturated
+    # quotas with legacy v2 programs before the new v3 metrics or underused
+    # time grains could compete.  The score above only changes selection while
+    # a documented balance floor is unmet; after that, source rank/family reuse
+    # retain the same deterministic low-risk preference.
+    candidates_by_bucket: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for candidate in [*fixed_candidates, *supplemental_candidates]:
+        if candidate["required_v3_seed"]:
+            continue
         family = str(candidate["family_id"])
-        if family not in family_split:
-            supplemental_by_bucket[str(candidate["primary_bucket"])].append(candidate)
+        if (
+            family in family_split
+            and family_split[family] not in candidate["allowed_splits"]
+        ):
+            continue
+        candidates_by_bucket[str(candidate["primary_bucket"])].append(candidate)
+    # Single-dimension has a proven finite capacity (especially after the
+    # explicit category split repair).  Let the pre-existing fixed family pool
+    # claim its allowed splits first, then use supplemental templates only for
+    # any residual.  Other buckets can safely let coverage requirements rank a
+    # combined pool from the start.
+    for split in ("in_domain_test", "validation", "train"):
+        fill_bucket(
+            (
+                candidate
+                for candidate in fixed_candidates
+                if candidate["primary_bucket"] == "single_dimension"
+                and not candidate["required_v3_seed"]
+            ),
+            split=split,
+            bucket="single_dimension",
+            require_target=False,
+        )
     for split in ("in_domain_test", "validation", "train"):
         for bucket in BUCKETS:
+            if bucket == "single_dimension":
+                pool = [
+                    candidate
+                    for candidate in supplemental_candidates
+                    if candidate["primary_bucket"] == bucket
+                ]
+            else:
+                pool = candidates_by_bucket[bucket]
             fill_bucket(
-                supplemental_by_bucket[bucket],
+                pool,
                 split=split,
                 bucket=bucket,
                 require_target=True,
@@ -716,13 +1040,21 @@ def select_release_candidates(
         }
         for split in SPLITS
     }
-    expected = {split: {bucket: TARGETS[bucket][split] for bucket in BUCKETS} for split in SPLITS}
-    if actual != expected or Counter(row["split"] for row in selected) != Counter(SPLIT_TARGETS):
+    expected = {
+        split: {bucket: TARGETS[bucket][split] for bucket in BUCKETS}
+        for split in SPLITS
+    }
+    if actual != expected or Counter(row["split"] for row in selected) != Counter(
+        SPLIT_TARGETS
+    ):
         raise AssertionError("selected release rows do not match the frozen quota")
-    if {row["source_seed_id"] for row in selected if row["candidate_source"] == "v3_frozen_seed"} != {
-        row["source_seed_id"] for row in mandatory
-    }:
+    if {
+        row["source_seed_id"]
+        for row in selected
+        if row["candidate_source"] == "v3_frozen_seed"
+    } != {row["source_seed_id"] for row in mandatory}:
         raise AssertionError("a frozen v3 family was lost after quota allocation")
+    balance_coverage_report(selected)
     return sorted(selected, key=lambda row: (str(row["split"]), str(row["seed_id"])))
 
 
@@ -732,7 +1064,9 @@ def _write_jsonl(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def _rows_for_output(selected: list[dict[str, Any]], catalog: Catalog) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _rows_for_output(
+    selected: list[dict[str, Any]], catalog: Catalog
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     query_rows: list[dict[str, Any]] = []
     gold_rows: list[dict[str, Any]] = []
     seen_sql_hashes: set[str] = set()
@@ -741,7 +1075,9 @@ def _rows_for_output(selected: list[dict[str, Any]], catalog: Catalog) -> tuple[
         assert isinstance(spec, QuerySpec)
         artifact = render_gold_sql(spec, catalog)
         if artifact.sql_sha256 in seen_sql_hashes:
-            raise ValueError("canonical Gold SQL hash is duplicated in selected release")
+            raise ValueError(
+                "canonical Gold SQL hash is duplicated in selected release"
+            )
         seen_sql_hashes.add(artifact.sql_sha256)
         common = {
             "seed_id": candidate["seed_id"],
@@ -754,7 +1090,9 @@ def _rows_for_output(selected: list[dict[str, Any]], catalog: Catalog) -> tuple[
             "risk_tags": candidate["risk_tags"],
         }
         query_rows.append({**common, "query_spec": spec.as_dict()})
-        gold_rows.append({**common, "gold_artifact": {**artifact.as_dict(), "sql": artifact.sql}})
+        gold_rows.append(
+            {**common, "gold_artifact": {**artifact.as_dict(), "sql": artifact.sql}}
+        )
     return query_rows, gold_rows
 
 
@@ -770,8 +1108,7 @@ def _split_overlap(rows: list[dict[str, Any]], field: str) -> list[str]:
         raise ValueError(f"row has no {field} identity")
 
     values = {
-        split: {value(row) for row in rows if row["split"] == split}
-        for split in SPLITS
+        split: {value(row) for row in rows if row["split"] == split} for split in SPLITS
     }
     return sorted(
         (values["train"] & values["validation"])
@@ -792,8 +1129,14 @@ def build_release(
     """Build an atomic, hash-bound 4,500-row v3 structural Gold release."""
     output_dir = _external_new_dir(output_dir)
     catalog = CatalogLoader(workspace=OLIST_V3_WORKSPACE).load()
-    protected = _load_protected_fingerprints(protected_summary_json, protected_evidence_json)
-    v3_candidates = load_v3_seed_candidates(v3_seeds_jsonl, catalog)
+    protected = _load_protected_fingerprints(
+        protected_summary_json, protected_evidence_json
+    )
+    v3_candidates = load_v3_seed_candidates(
+        v3_seeds_jsonl,
+        catalog,
+        split_overrides=V3_1_SEED_SPLIT_OVERRIDES,
+    )
     v2_candidates, v2_skips = load_v2_reconstructed_candidates(
         v2_query_specs_jsonl, catalog, protected
     )
@@ -803,15 +1146,21 @@ def build_release(
     selected = select_release_candidates(
         v3_candidates, v2_candidates, build_supplemental_candidates(catalog)
     )
+    balance_report = balance_coverage_report(selected)
     query_rows, gold_rows = _rows_for_output(selected, catalog)
     if len(query_rows) != len(gold_rows) != 4500:
-        raise AssertionError("release did not produce the expected 4,500 structural rows")
+        raise AssertionError(
+            "release did not produce the expected 4,500 structural rows"
+        )
     if _split_overlap(query_rows, "family_id"):
         raise AssertionError("family IDs cross formal splits")
     if _split_overlap(query_rows, "query_spec_id"):
         raise AssertionError("QuerySpec IDs cross formal splits")
     if _split_overlap(
-        [{**row, "gold_sql_sha256": row["gold_artifact"]["sql_sha256"]} for row in gold_rows],
+        [
+            {**row, "gold_sql_sha256": row["gold_artifact"]["sql_sha256"]}
+            for row in gold_rows
+        ],
         "gold_sql_sha256",
     ):
         raise AssertionError("canonical Gold SQL hashes cross formal splits")
@@ -862,37 +1211,71 @@ def build_release(
                 "v2_query_specs_jsonl": str(v2_query_specs_jsonl.resolve()),
                 "v2_query_specs_sha256": sha256_file(v2_query_specs_jsonl.resolve()),
                 "protected_summary_json": str(protected_summary_json.resolve()),
-                "protected_summary_sha256": sha256_file(protected_summary_json.resolve()),
+                "protected_summary_sha256": sha256_file(
+                    protected_summary_json.resolve()
+                ),
                 "protected_evidence_json": str(protected_evidence_json.resolve()),
-                "protected_evidence_sha256": sha256_file(protected_evidence_json.resolve()),
+                "protected_evidence_sha256": sha256_file(
+                    protected_evidence_json.resolve()
+                ),
                 "v2_skips": dict(sorted(v2_skips.items())),
                 "source_conflict_exclusions": dict(sorted(source_conflicts.items())),
+                "v3_1_seed_split_overrides": dict(
+                    sorted(V3_1_SEED_SPLIT_OVERRIDES.items())
+                ),
             },
             "window_contract": {"windows": [list(window) for window in DATE_WINDOWS]},
-            "targets": {split: {bucket: TARGETS[bucket][split] for bucket in BUCKETS} for split in SPLITS},
+            "targets": {
+                split: {bucket: TARGETS[bucket][split] for bucket in BUCKETS}
+                for split in SPLITS
+            },
             "counts": {
                 "rows": dict(Counter(row["split"] for row in query_rows)),
                 "families": {
-                    split: len({row["family_id"] for row in query_rows if row["split"] == split})
+                    split: len(
+                        {
+                            row["family_id"]
+                            for row in query_rows
+                            if row["split"] == split
+                        }
+                    )
                     for split in SPLITS
                 },
                 "query_specs": {
-                    split: len({row["query_spec"]["query_spec_id"] for row in query_rows if row["split"] == split})
+                    split: len(
+                        {
+                            row["query_spec"]["query_spec_id"]
+                            for row in query_rows
+                            if row["split"] == split
+                        }
+                    )
                     for split in SPLITS
                 },
-                "canonical_gold_sql_hashes": len({row["gold_artifact"]["sql_sha256"] for row in gold_rows}),
+                "canonical_gold_sql_hashes": len(
+                    {row["gold_artifact"]["sql_sha256"] for row in gold_rows}
+                ),
                 "v3_required_families": 300,
                 "by_bucket": bucket_counts,
-                "by_source": dict(Counter(row["candidate_source"] for row in query_rows)),
+                "by_source": dict(
+                    Counter(row["candidate_source"] for row in query_rows)
+                ),
+                "v3_1_balance": balance_report,
             },
             "outputs": {
-                "query_specs_jsonl": {"rows": len(query_rows), "sha256": sha256_file(query_path)},
-                "gold_sql_jsonl": {"rows": len(gold_rows), "sha256": sha256_file(gold_path)},
+                "query_specs_jsonl": {
+                    "rows": len(query_rows),
+                    "sha256": sha256_file(query_path),
+                },
+                "gold_sql_jsonl": {
+                    "rows": len(gold_rows),
+                    "sha256": sha256_file(gold_path),
+                },
                 "split_outputs": split_outputs,
             },
             "checks": {
                 "status": "pass",
-                "bucket_targets_exact": bucket_counts == {
+                "bucket_targets_exact": bucket_counts
+                == {
                     split: {bucket: TARGETS[bucket][split] for bucket in BUCKETS}
                     for split in SPLITS
                 },
@@ -900,6 +1283,7 @@ def build_release(
                 "query_spec_split_overlap": [],
                 "canonical_gold_sql_hash_split_overlap": [],
                 "all_v3_frozen_families_retained": True,
+                "v3_1_balance_contract": "pass",
                 "legacy_v2_reconstructed_under_v3": True,
                 "sql_executed": False,
                 "prompt_or_question_materialized": False,

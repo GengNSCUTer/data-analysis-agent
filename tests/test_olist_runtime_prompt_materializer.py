@@ -12,6 +12,7 @@ from scripts.post_training.data.materialize_olist_runtime_prompts import (
     load_question_variants,
     load_question_variant_cases,
     load_question_variant_cases_v3,
+    load_question_variant_cases_v4,
     workspace_for_admitted_records,
 )
 
@@ -76,9 +77,17 @@ def test_v2_question_variants_require_two_cases_per_seed(tmp_path):
             "variant_policy": "reviewed paraphrases",
             "cases": [
                 {"variant_id": "a-1", "seed_id": "seed-a", "question": "查询运费。"},
-                {"variant_id": "a-2", "seed_id": "seed-a", "question": "统计运费金额。"},
+                {
+                    "variant_id": "a-2",
+                    "seed_id": "seed-a",
+                    "question": "统计运费金额。",
+                },
                 {"variant_id": "b-1", "seed_id": "seed-b", "question": "查询订单数。"},
-                {"variant_id": "b-2", "seed_id": "seed-b", "question": "统计订单数量。"},
+                {
+                    "variant_id": "b-2",
+                    "seed_id": "seed-b",
+                    "question": "统计订单数量。",
+                },
             ],
         },
     )
@@ -96,9 +105,17 @@ def test_v2_question_variants_reject_uneven_seed_counts(tmp_path):
             "variant_policy": "reviewed paraphrases",
             "cases": [
                 {"variant_id": "a-1", "seed_id": "seed-a", "question": "查询运费。"},
-                {"variant_id": "a-2", "seed_id": "seed-a", "question": "统计运费金额。"},
+                {
+                    "variant_id": "a-2",
+                    "seed_id": "seed-a",
+                    "question": "统计运费金额。",
+                },
                 {"variant_id": "b-1", "seed_id": "seed-b", "question": "查询订单数。"},
-                {"variant_id": "b-2", "seed_id": "seed-b", "question": "统计订单数量。"},
+                {
+                    "variant_id": "b-2",
+                    "seed_id": "seed-b",
+                    "question": "统计订单数量。",
+                },
                 {"variant_id": "b-3", "seed_id": "seed-b", "question": "看订单量。"},
             ],
         },
@@ -125,7 +142,51 @@ def test_v3_question_variants_require_five_cases_per_seed(tmp_path):
     assert len(load_question_variant_cases_v3(path, {"seed-a"})) == 5
 
 
-def test_runtime_materializer_resolves_the_isolated_v3_catalog_from_admitted_queryspec() -> None:
+def test_v4_question_variants_require_eight_typed_pure_chinese_cases_per_seed(tmp_path):
+    from data_analysis_agent.olist_surface_contract import (
+        OLIST_V3_1_VARIANT_IDS,
+        OLIST_V3_1_VARIANT_KIND_BY_ID,
+        OLIST_V3_1_VARIANT_POLICY,
+    )
+
+    cases = [
+        {
+            "variant_id": f"seed-a-{form_id}",
+            "variant_kind": OLIST_V3_1_VARIANT_KIND_BY_ID[form_id],
+            "seed_id": "seed-a",
+            "question": f"查询指标第{index}种问法。",
+        }
+        for index, form_id in enumerate(OLIST_V3_1_VARIANT_IDS, 1)
+    ]
+    path = _write_json(
+        tmp_path,
+        {
+            "schema_version": "4",
+            "language": "zh",
+            "prompt_version": "olist-candidate-sql-v1",
+            "variant_policy": OLIST_V3_1_VARIANT_POLICY,
+            "cases": cases,
+        },
+    )
+    assert len(load_question_variant_cases_v4(path, {"seed-a"})) == 8
+    cases[0]["question"] = "查询 GMV。"
+    path = _write_json(
+        tmp_path,
+        {
+            "schema_version": "4",
+            "language": "zh",
+            "prompt_version": "olist-candidate-sql-v1",
+            "variant_policy": OLIST_V3_1_VARIANT_POLICY,
+            "cases": cases,
+        },
+    )
+    with pytest.raises(RuntimePromptInputError, match="pure-Chinese"):
+        load_question_variant_cases_v4(path, {"seed-a"})
+
+
+def test_runtime_materializer_resolves_the_isolated_v3_catalog_from_admitted_queryspec() -> (
+    None
+):
     spec = QuerySpec.create(
         workspace=WorkspacePin.current(OLIST_V3_WORKSPACE),
         metric_ids=("review_count",),
