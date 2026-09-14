@@ -4,11 +4,15 @@ import json
 
 import pytest
 
+from data_analysis_agent.metric_context import OLIST_V3_WORKSPACE
+from data_analysis_agent.olist_queryspec import QuerySpec, WorkspacePin
+
 from scripts.post_training.data.materialize_olist_runtime_prompts import (
     RuntimePromptInputError,
     load_question_variants,
     load_question_variant_cases,
     load_question_variant_cases_v3,
+    workspace_for_admitted_records,
 )
 
 
@@ -119,3 +123,15 @@ def test_v3_question_variants_require_five_cases_per_seed(tmp_path):
         },
     )
     assert len(load_question_variant_cases_v3(path, {"seed-a"})) == 5
+
+
+def test_runtime_materializer_resolves_the_isolated_v3_catalog_from_admitted_queryspec() -> None:
+    spec = QuerySpec.create(
+        workspace=WorkspacePin.current(OLIST_V3_WORKSPACE),
+        metric_ids=("review_count",),
+        result_shape="scalar",
+    )
+
+    workspace = workspace_for_admitted_records([{"query_spec": spec.as_dict()}])
+
+    assert workspace == OLIST_V3_WORKSPACE

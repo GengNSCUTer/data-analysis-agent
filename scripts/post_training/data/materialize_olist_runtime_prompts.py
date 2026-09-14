@@ -32,7 +32,8 @@ from data_analysis_agent.candidate_sql_generator import (  # noqa: E402
     render_candidate_sql_prompt,
     require_database_route,
 )
-from data_analysis_agent.olist_queryspec import QuerySpec, validate_query_spec  # noqa: E402
+from data_analysis_agent.metric_context import OLIST_V3_WORKSPACE, OLIST_WORKSPACE  # noqa: E402
+from data_analysis_agent.olist_queryspec import QuerySpec, WorkspacePin, validate_query_spec  # noqa: E402
 from data_analysis_agent.query_plan import QueryPlan  # noqa: E402
 from data_analysis_agent.question_router import QuestionRouter  # noqa: E402
 from data_analysis_agent.semantic_catalog import (  # noqa: E402
@@ -59,6 +60,31 @@ MAX_VARIANTS = 25000
 
 class RuntimePromptInputError(ValueError):
     """An external runtime prompt input violates the frozen contract."""
+
+
+def workspace_for_admitted_records(records: list[dict[str, Any]]):
+    """Resolve one explicit workspace pin; do not rebuild v3 rows via v2.
+
+    Historic releases used the default v2 Catalog.  The balanced release uses
+    an isolated v3 Catalog with new metric aliases and constraints, so mixed
+    or unsupported workspace pins must fail before retrieval and routing.
+    """
+    if not records:
+        raise RuntimePromptInputError("admission records must not be empty")
+    pins = set()
+    for row in records:
+        try:
+            pins.add(QuerySpec.from_mapping(row["query_spec"]).workspace)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimePromptInputError("admission record has an invalid QuerySpec") from exc
+    if len(pins) != 1:
+        raise RuntimePromptInputError("admission records mix workspace pins")
+    pin = next(iter(pins))
+    if pin == WorkspacePin.current(OLIST_WORKSPACE):
+        return OLIST_WORKSPACE
+    if pin == WorkspacePin.current(OLIST_V3_WORKSPACE):
+        return OLIST_V3_WORKSPACE
+    raise RuntimePromptInputError("admission records use an unsupported Olist workspace pin")
 
 
 def sha256_file(path: Path) -> str:
@@ -322,7 +348,8 @@ def materialize(
     output = _external_new_dir(output_dir)
 
     load_dotenv(ROOT / ".env")
-    catalog = CatalogLoader().load()
+    workspace = workspace_for_admitted_records(admitted)
+    catalog = CatalogLoader(workspace=workspace).load()
     retriever = CatalogRetriever(catalog)
     router = QuestionRouter(retriever)
     user = User(id="olist-runtime-prompt-materializer", group_memberships=["analyst"])
@@ -403,6 +430,7 @@ def materialize(
                 "admitted_seed_ids": sorted(seed_ids),
             },
             "workspace": {
+                "workspace_id": workspace.workspace_id,
                 "catalog_version": catalog.catalog_version,
                 "dataset_version": catalog.dataset_version,
                 "metric_version": catalog.metric_version,

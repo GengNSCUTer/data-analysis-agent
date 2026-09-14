@@ -441,7 +441,7 @@ v1 不引入 Redis。
 
 ## 11. 变更记录
 
-### 2026-09-14：Olist v3 指标合同实现与 SQL-only 扩展规模冻结
+### 2026-09-14：Olist v3 指标合同、平衡 SQL-only release 与全量准入
 
 在不改写默认 `olist-catalog-v2 / 0.2-frozen` 运行时快照的前提下，新增隔离的
 `olist-catalog-v3 / 0.3-proposal` 与 `OLIST_V3_WORKSPACE`，实现并注册 9 个 Olist 领域指标：
@@ -467,9 +467,26 @@ v3 指标的真实 PostgreSQL Gold 回归已进一步覆盖客户州/商品品�
 二层聚合和空时间窗口：`RUN_PROJECT_DB=1` 下 `37 passed`。空时间窗口的 `COUNT` 标量可展示为 0；
 `AVG` 标量为 NULL 时必须拒绝；空分组/时间序列必须澄清，不能伪造结果。基于这些门，已冻结
 [`olist_v3_coverage_family_seeds_v1.jsonl`](data/fixtures/olist_v3_coverage_family_seeds_v1.jsonl)：300 个
-不含问题、Prompt、SQL 或结果的结构化 family seed，split 为 `200/50/50`。它只是后续 QuerySpec/Gold
-物化的施工卡，不是训练样本；当前尚未生成正式 JSONL、启动训练或接入生产。下一步仅进行小批 v3
-seed 的 QuerySpec/Gold SQL 准入与执行证据留存。
+不含问题、Prompt、SQL 或结果的结构化 family seed，split 为 `200/50/50`。它们作为施工卡完成了小批
+Gold 准入：12/12 在 `SqlPolicy -> daa_analytics_reader -> ResultContract/ResultValidator` 下 admitted。
+
+随后以 v2 的**结构候选**（不是复制旧 SQL/Prompt/SFT 行）、v3 family seed 和有限补充模板，重新 pin、
+校验、渲染并物化 v3 平衡 release。最终为 `3,000/750/750=4,500` 条 QuerySpec / canonical Gold SQL：
+family、QuerySpec 与 canonical SQL hash 跨 split 均零交集，750 条 test 物理隔离为
+`final_evaluation_only`。其中单指标维度分组的真实可用容量是 `122/33/33=188`，少于初始目标的 12 条
+train 行已转给多指标维度分组，未用重复 SQL 或中文改写凑数。
+
+全部 4,500 条 Gold SQL 已在实际 PostgreSQL 中通过 `SqlPolicy -> daa_analytics_reader ->
+ResultContract/ResultValidator`，结果为 `4,500 admitted / 0 needs_human_review / 0 rejected`；每条都保留
+Gold SQL hash、Policy 最终 SQL hash、reader-role 执行和结果摘要 hash。另有 48 条分层 DeepSeek advisory
+语义复核全部通过，但该抽样不替代确定性准入。每个 QuerySpec 生成 5 个受控中文问法，共 22,500 条
+runtime overlay，均重新经过 Router/Catalog/QueryPlan/ResultContract；训练主数据按稳定 hash 每实例仅选
+一条主问法。最终 SFT JSONL 在 `3072` token 上限下无排除、无静默截断。完整 release、外部证据路径、
+hash 和准确解释见 [`docs/post-training/data/olist-v3-balanced-release-v1.md`](docs/post-training/data/olist-v3-balanced-release-v1.md)。
+
+该 release **尚未启动训练**、未替换默认 Vanna/SiliconFlow 候选路径；它证明受控训练输入和 Gold 执行
+链路完整，不证明模型提升、开放式业务语义准确率、跨 schema 泛化或生产接入资格。下一步是单独审阅
+v3 SQL-only LoRA trainer 与 matching Base/Adapter 评测合同，再由用户决定是否启动 GPU 训练。
 
 ### 2026-09-14：Text-to-SQL 训练组织方式与 Schema-aware Task B 调研
 

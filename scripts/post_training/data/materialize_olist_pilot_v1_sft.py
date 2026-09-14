@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from data_analysis_agent.candidate_sql_generator import OLIST_CANDIDATE_SQL_PROMPT_VERSION  # noqa: E402
+from data_analysis_agent.metric_context import OLIST_V3_WORKSPACE, OLIST_WORKSPACE  # noqa: E402
 from data_analysis_agent.olist_queryspec import WorkspacePin  # noqa: E402
 
 
@@ -120,16 +121,31 @@ def load_tokenizer(path: Path) -> Any:
     return tokenizer
 
 
-def _load_assembly(directory: Path, expected_rows: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _workspace_for_pin(raw: Any):
+    if not isinstance(raw, Mapping):
+        raise ValueError("admission assembly must contain a workspace pin")
+    try:
+        pin = WorkspacePin(**dict(raw))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("admission assembly workspace pin is invalid") from exc
+    if pin == WorkspacePin.current(OLIST_WORKSPACE):
+        return OLIST_WORKSPACE
+    if pin == WorkspacePin.current(OLIST_V3_WORKSPACE):
+        return OLIST_V3_WORKSPACE
+    raise ValueError("admission assembly workspace is unsupported")
+
+
+def _load_assembly(directory: Path, expected_rows: int) -> tuple[dict[str, Any], list[dict[str, Any]], Any]:
     directory = _external_existing_dir(directory, "admission assembly directory")
     manifest = _read_json(directory / "admission_assembly_manifest.json", "admission assembly manifest")
     records_path = _external_existing(directory / "admitted_records.jsonl", "admitted records")
     evidence = manifest.get("output", {}).get("admitted_records_jsonl", {})
-    if manifest.get("workspace") != WorkspacePin.current().as_dict() or manifest.get("checks", {}).get("status") != "pass":
+    workspace = _workspace_for_pin(manifest.get("workspace"))
+    if manifest.get("workspace") != WorkspacePin.current(workspace).as_dict() or manifest.get("checks", {}).get("status") != "pass":
         raise ValueError("admission assembly does not match the current passing workspace")
     if evidence.get("rows") != expected_rows or evidence.get("sha256") != sha256_file(records_path):
         raise ValueError("admission assembly records do not match manifest")
-    return manifest, _read_jsonl(records_path, "admitted records")
+    return manifest, _read_jsonl(records_path, "admitted records"), workspace
 
 
 def _load_runtime(directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -283,8 +299,16 @@ def materialize(assembly_dir: Path, runtime_dir: Path, tokenizer_dir: Path, outp
     output_dir = _external_new_dir(output_dir)
     if set(expected_splits) != {"train", "validation", "in_domain_test"} or any(value <= 0 for value in expected_splits.values()):
         raise ValueError("expected split counts must be positive train/validation/in_domain_test values")
-    assembly_manifest, admitted = _load_assembly(assembly_dir, sum(expected_splits.values()))
+    assembly_manifest, admitted, workspace = _load_assembly(assembly_dir, sum(expected_splits.values()))
     runtime_manifest, runtime = _load_runtime(runtime_dir)
+    runtime_workspace_id = runtime_manifest.get("workspace", {}).get("workspace_id")
+    # Old v2 prompt manifests predate an explicit workspace_id.  Keep their
+    # frozen compatibility only for the default v2 assembly; v3 must carry
+    # the explicit isolated workspace identity.
+    if runtime_workspace_id is None and workspace != OLIST_WORKSPACE:
+        raise ValueError("v3 runtime prompts must record an explicit workspace ID")
+    if runtime_workspace_id is not None and runtime_workspace_id != workspace.workspace_id:
+        raise ValueError("runtime prompts do not match the admitted workspace")
     tokenizer = load_tokenizer(tokenizer_dir)
     splits, exclusions = build_rows(admitted, runtime, tokenizer, max_seq_length, expected_splits)
     generated_at = generated_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -323,7 +347,7 @@ def materialize(assembly_dir: Path, runtime_dir: Path, tokenizer_dir: Path, outp
         audit = {
             "audit_version": CONTRACT_VERSION,
             "generated_at": generated_at,
-            "workspace": WorkspacePin.current().as_dict(),
+            "workspace": WorkspacePin.current(workspace).as_dict(),
             "prompt_version": OLIST_CANDIDATE_SQL_PROMPT_VERSION,
             "source": {
                 "admission_assembly_manifest_sha256": sha256_file(_external_existing(Path(assembly_dir) / "admission_assembly_manifest.json", "assembly manifest")),

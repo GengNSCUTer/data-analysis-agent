@@ -3,9 +3,12 @@ from __future__ import annotations
 from scripts.post_training.data.materialize_olist_pilot_v1_sft import (
     PRIMARY_VARIANT_SELECTION_POLICY,
     _query_spec_id,
+    _workspace_for_pin,
     build_rows,
     select_primary_variant,
 )
+from data_analysis_agent.metric_context import OLIST_V3_WORKSPACE
+from data_analysis_agent.olist_queryspec import WorkspacePin
 
 
 def test_query_spec_identity_supports_admission_and_runtime_record_shapes() -> None:
@@ -70,3 +73,7 @@ def test_primary_variant_selection_is_stable_and_uses_more_than_one_form() -> No
         assert select_primary_variant(seed_id, variants) == select_primary_variant(seed_id, variants)
         selected.append(select_primary_variant(seed_id, variants)["variant_id"].rsplit("-v", 1)[1])
     assert len(set(selected)) > 1
+
+
+def test_sft_materializer_resolves_isolated_v3_admission_workspace() -> None:
+    assert _workspace_for_pin(WorkspacePin.current(OLIST_V3_WORKSPACE).as_dict()) == OLIST_V3_WORKSPACE

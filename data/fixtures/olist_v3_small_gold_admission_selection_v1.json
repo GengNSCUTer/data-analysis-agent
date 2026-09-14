@@ -1,0 +1,51 @@
+{
+  "required_new_metric_ids": [
+    "approval_latency_days",
+    "average_item_price",
+    "average_items_per_order",
+    "canceled_order_count",
+    "carrier_handoff_days",
+    "delivered_order_count",
+    "review_count",
+    "unavailable_order_count",
+    "unique_customer_count"
+  ],
+  "required_primary_buckets": [
+    "multi_dimension",
+    "multi_scalar",
+    "multi_time_series",
+    "single_dimension",
+    "single_purchase_series",
+    "single_review_series",
+    "single_scalar",
+    "structural_hard"
+  ],
+  "required_risk_tags": [
+    "count_distinct_customer",
+    "nonnull_nonnegative_latency",
+    "review_fact_grain",
+    "status_filter_and_distinct_order",
+    "two_stage_order_aggregation"
+  ],
+  "required_split_counts": {
+    "in_domain_test": 4,
+    "train": 4,
+    "validation": 4
+  },
+  "seed_ids": [
+    "olist-v3-coverage-train-168",
+    "olist-v3-coverage-train-156",
+    "olist-v3-coverage-train-076",
+    "olist-v3-coverage-train-176",
+    "olist-v3-coverage-validation-032",
+    "olist-v3-coverage-validation-015",
+    "olist-v3-coverage-validation-036",
+    "olist-v3-coverage-validation-019",
+    "olist-v3-coverage-in_domain_test-035",
+    "olist-v3-coverage-in_domain_test-002",
+    "olist-v3-coverage-in_domain_test-049",
+    "olist-v3-coverage-in_domain_test-040"
+  ],
+  "selection_schema_version": "olist-v3-small-gold-admission-selection-v1",
+  "source_seed_fixture_sha256": "79beeabb07f07d1b618116887e1e251b49b610d93f4fa683f6a6a56a4245e925"
+}
