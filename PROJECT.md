@@ -441,6 +441,10 @@ v1 不引入 Redis。
 
 ## 11. 变更记录
 
+### 2026-09-14：Text-to-SQL 训练组织方式与 Schema-aware Task B 调研
+
+新增 [`docs/post-training/research/text-to-sql-training-organizations-v1.md`](docs/post-training/research/text-to-sql-training-organizations-v1.md)，基于 IRNet、RAT-SQL、RESDSQL、CodeS、PICARD、DAIL-SQL、MAC-SQL、CHESS、AutoLink、FINER-SQL、SQL-R1、SHARE 和 SLM-SQL 的论文/官方代码核对，区分了可编译中间表示、内部/独立 schema linking、约束解码、提示/多 Agent 分解和执行反馈训练。结论是当前 Task B 属于与 Task A 交错的辅助多任务 LM SFT，并没有形成模型可消费的 `Plan → SQL` 条件路径；Task B 目标更长且占约 59% 监督 token，并伴随 TheLook 输出协议漂移，因此暂不作为默认训练目标或生产能力。下一步优先保持 SQL-only 线上一致目标，研究输入侧 schema filtering/轻量结构 head，所有实验仍须 Olist train/validation-only 预注册，TheLook v2 只做最终后置验证。本轮未启动消融或重新训练，未修改生产运行时。
+
 下一阶段平台计划与 Text-to-SQL 专项调研分别见：
 
 - [`docs/AGENT_PLATFORM_NEXT_PLAN.md`](docs/AGENT_PLATFORM_NEXT_PLAN.md)
@@ -454,6 +458,7 @@ v1 不引入 Redis。
 - [`docs/post-training/learning/fundamentals.md`](docs/post-training/learning/fundamentals.md)
 - [`docs/post-training/data/protocol.md`](docs/post-training/data/protocol.md)
 - [`docs/post-training/experiments/log.md`](docs/post-training/experiments/log.md)
+- [`docs/post-training/research/text-to-sql-training-organizations-v1.md`](docs/post-training/research/text-to-sql-training-organizations-v1.md)
 - [`docs/post-training/archive/learning-notes-v1.md`](docs/post-training/archive/learning-notes-v1.md)
 - [`docs/post-training-base-adapter-analysis-v1.md`](docs/post-training-base-adapter-analysis-v1.md)
 - [`docs/post-training-spider-sft-v2-full-analysis.md`](docs/post-training-spider-sft-v2-full-analysis.md)

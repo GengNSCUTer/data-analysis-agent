@@ -17,6 +17,8 @@
 
 学习顺序从现在开始以 [`learning/code-review-guide-v1.md`](learning/code-review-guide-v1.md) 和 [`learning/walkthrough-v1.md`](learning/walkthrough-v1.md) 为主。先亲自审阅真实代码、测试与边界，再由用户确认后进入下一步；不再自动连续启动训练或完整评测。
 
+Text-to-SQL 训练范式、Schema linking、显式中间表示和当前 Schema-aware Task B 的诊断见 [`research/text-to-sql-training-organizations-v1.md`](research/text-to-sql-training-organizations-v1.md)。该文档是研究判断，不代表已经运行新的实验或改变生产默认路径。
+
 ## 先看这一页
 
 | 问题 | 结论 |

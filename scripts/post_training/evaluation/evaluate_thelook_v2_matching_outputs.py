@@ -446,10 +446,12 @@ def denotation_state(candidate: pd.DataFrame, gold: pd.DataFrame) -> str:
 def _gold_frame(
     case: FullCase,
     policy: SqlPolicy,
-    diagnostics: list[GoldExecutionDiagnostic],
+    diagnostics: list[GoldExecutionDiagnostic] | None = None,
 ) -> pd.DataFrame:
     """Replay a static Gold query with bounded retries and a safe trace."""
 
+    if diagnostics is None:
+        diagnostics = []
     gold_sql_sha256 = sha256_file_text(case.gold_sql)
     attempt: ExecutionAttempt | None = None
     for attempt_count in range(1, GOLD_EXECUTION_MAX_ATTEMPTS + 1):
