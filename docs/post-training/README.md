@@ -29,6 +29,11 @@ Olist 原始表、分析层粒度、十项项目指标和下一批 Coverage Repa
 
 当前 Olist SQL-only 数据入口是 [`data/olist-v3-balanced-release-v1-1.md`](data/olist-v3-balanced-release-v1-1.md)：当前 v3.1 release 已完成 `3,000/750/750` JSONL、4,500/4,500 确定性 Gold admission、36,000 条八类纯中文运行时问法/PROMPT overlay、分层精确主问法配额和 3,072 token 无截断审计。48 条 advisory 复核为 45 条 pass、3 条 provider timeout；后者明确记录为非阻塞 advisory 错误，不替代确定性准入。发布级审计现会重算最终 SFT 文件 hash 与 split 身份隔离。训练与 matching Base/Adapter 的冻结协议见 [`data/olist-v3-1-sql-only-training-evaluation-contract.md`](data/olist-v3-1-sql-only-training-evaluation-contract.md)：尚未启动 CPU/GPU smoke、训练或评测。
 
+TheLook 的下一版跨 Schema final test 目前只完成前置的 machine-readable coverage contract 与静态
+QuerySpec seed：[`data/thelook-v3-coverage-contract-v1.md`](data/thelook-v3-coverage-contract-v1.md)。它保持
+既有 20 项指标不变，先修正 v2 的事实域、时间粒度、维度和真实 scenario-family 覆盖偏斜；750 条 seed
+尚未渲染 Gold SQL、连接数据库、生成中文问题或调用任何模型，不能当作最终评测集或模型结果。
+
 ## 先看这一页
 
 | 问题 | 结论 |

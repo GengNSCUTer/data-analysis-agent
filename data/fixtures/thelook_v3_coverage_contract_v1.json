@@ -1,0 +1,199 @@
+{
+  "contract_version": "thelook-v3-coverage-contract-v1",
+  "release": {
+    "evaluation_version": "thelook-cross-schema-final-test-v3",
+    "target_cases": 750,
+    "split": "cross_schema_final_test",
+    "language": "zh"
+  },
+  "semantic_baseline": {
+    "workspace_id": "thelook-cross-schema-eval-v2",
+    "catalog_version": "thelook-catalog-v2",
+    "metric_version": "0.2-frozen",
+    "query_spec_schema_version": "thelook-query-spec-v2",
+    "renderer_version": "thelook-postgres-gold-renderer-v2",
+    "metric_change_policy": "keep_frozen_twenty_metrics",
+    "allowed_metric_ids": [
+      "completed_sale_amount",
+      "completed_item_count",
+      "completed_order_count",
+      "average_order_value",
+      "average_items_per_completed_order",
+      "cancelled_order_count",
+      "returned_order_count",
+      "average_fulfillment_days",
+      "average_dispatch_days",
+      "average_transit_days",
+      "average_post_delivery_return_days",
+      "return_rate",
+      "completed_customer_count",
+      "received_inventory_unit_count",
+      "sold_inventory_unit_count",
+      "current_unsold_inventory_unit_count",
+      "average_days_to_sale",
+      "event_count",
+      "unique_session_count",
+      "registered_user_count"
+    ]
+  },
+  "identity_and_isolation": {
+    "case_id_unique": true,
+    "query_spec_id_unique": true,
+    "canonical_gold_sql_sha256_unique": true,
+    "v2_query_spec_id_overlap": 0,
+    "v2_canonical_gold_sql_sha256_overlap": 0,
+    "v2_primary_question_normalized_overlap": 0,
+    "olist_training_or_model_selection_input": false,
+    "protected_after_release": true
+  },
+  "query_spec_invariants": {
+    "max_metrics_per_case": 4,
+    "same_fact_domain_for_multi_metric": true,
+    "allowed_result_shapes": [
+      "scalar",
+      "dimension_grouped",
+      "time_series"
+    ],
+    "max_display_rows": 200,
+    "allow_free_filters": false,
+    "allow_top_n_or_ranking": false,
+    "allow_cross_fact_metric_combinations": false
+  },
+  "case_quotas": {
+    "fact_domains": {
+      "order_items": 135,
+      "orders": 250,
+      "inventory_received": 60,
+      "inventory_sold": 100,
+      "inventory_snapshot": 0,
+      "events": 135,
+      "users": 70
+    },
+    "result_shapes": {
+      "scalar": 210,
+      "dimension_grouped": 285,
+      "time_series": 255
+    },
+    "time_series_grains": {
+      "day": 35,
+      "week": 45,
+      "month": 65,
+      "quarter": 60,
+      "year": 50
+    },
+    "dimension_grouped": {
+      "customer_state": 28,
+      "customer_city": 12,
+      "customer_traffic_source": 41,
+      "product_category": 31,
+      "product_brand": 12,
+      "product_department": 21,
+      "distribution_center": 35,
+      "event_type": 18,
+      "event_browser": 18,
+      "event_traffic_source": 18,
+      "user_country": 19,
+      "user_traffic_source": 19,
+      "user_state": 13
+    },
+    "metric_multiplicity": {
+      "one_metric": 500,
+      "two_metrics": 210,
+      "three_metrics": 35,
+      "four_metrics": 5,
+      "case_exposure_by_fact_domain": {
+        "order_items": {"minimum": 85, "maximum": 100},
+        "orders": {"minimum": 25, "maximum": 70},
+        "inventory_received": {"minimum": 60, "maximum": 60},
+        "inventory_sold": {"minimum": 55, "maximum": 75},
+        "inventory_snapshot": {"minimum": 0, "maximum": 0},
+        "events": {"minimum": 85, "maximum": 100},
+        "users": {"minimum": 70, "maximum": 70}
+      }
+    }
+  },
+  "risk_tag_minimum_case_counts": {
+    "distinct": 70,
+    "two_stage_aggregate": 90,
+    "status_filter": 120,
+    "duration_eligibility": 110,
+    "snapshot": 0,
+    "multi_metric_cte": 200,
+    "high_cardinality_window": 36,
+    "time_bucket": 255
+  },
+  "scenario_families": [
+    {"id": "sales_item_scalar_customer_range", "fact_domain": "order_items", "target_cases": 45},
+    {"id": "sales_item_dimension_group", "fact_domain": "order_items", "target_cases": 50},
+    {"id": "sales_item_series_pair", "fact_domain": "order_items", "target_cases": 40},
+    {"id": "completed_order_customer", "fact_domain": "orders", "target_cases": 45},
+    {"id": "order_level_two_stage_average", "fact_domain": "orders", "target_cases": 45},
+    {"id": "status_filtered_orders", "fact_domain": "orders", "target_cases": 45},
+    {"id": "fulfillment_stage_duration", "fact_domain": "orders", "target_cases": 60},
+    {"id": "return_rate_and_delay", "fact_domain": "orders", "target_cases": 35},
+    {"id": "orders_series_multi_metric", "fact_domain": "orders", "target_cases": 20},
+    {"id": "inventory_received_scalar_series", "fact_domain": "inventory_received", "target_cases": 25},
+    {"id": "inventory_received_group_multi", "fact_domain": "inventory_received", "target_cases": 35},
+    {"id": "inventory_sold_scalar_series", "fact_domain": "inventory_sold", "target_cases": 45},
+    {"id": "inventory_sold_group", "fact_domain": "inventory_sold", "target_cases": 35},
+    {"id": "inventory_sold_multi_metric", "fact_domain": "inventory_sold", "target_cases": 20},
+    {"id": "event_session_scalar_series", "fact_domain": "events", "target_cases": 40},
+    {"id": "event_low_cardinality_group", "fact_domain": "events", "target_cases": 45},
+    {"id": "event_series_multi_metric", "fact_domain": "events", "target_cases": 50},
+    {"id": "registration_foundation_range", "fact_domain": "users", "target_cases": 20},
+    {"id": "registration_geo_acquisition_group", "fact_domain": "users", "target_cases": 25},
+    {"id": "registration_time_series", "fact_domain": "users", "target_cases": 25}
+  ],
+  "surface_contract": {
+    "variant_count_per_query_spec": 8,
+    "variant_ids": ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8"],
+    "variant_kinds": [
+      "formal_request",
+      "colloquial_request",
+      "manager_request",
+      "concise_request",
+      "result_oriented_request",
+      "time_front_request",
+      "analysis_cut_front_request",
+      "catalog_alias_request"
+    ],
+    "primary_variant_global_quota": {
+      "v1": 94,
+      "v2": 94,
+      "v3": 94,
+      "v4": 94,
+      "v5": 94,
+      "v6": 94,
+      "v7": 93,
+      "v8": 93
+    },
+    "selection_policy": "sha256_ranked_family_shape_eight_way_quota_v1",
+    "primary_question_pure_chinese": true,
+    "overlay_counts_as_additional_cases": false
+  },
+  "seed_policy": {
+    "seed_schema_version": "thelook-v3-coverage-seed-v1",
+    "static_deterministic_seeds_only": true,
+    "llm_generates_query_spec_or_gold_sql": false,
+    "date_only_variants_count_as_new_scenario_family": false,
+    "high_cardinality_dimensions": [
+      "customer_city",
+      "product_brand",
+      "user_state"
+    ],
+    "high_cardinality_requires_runtime_admission": true
+  },
+  "v3_metric_exclusions": {
+    "current_unsold_inventory_unit_count": "The four legal all-time snapshot QuerySpecs already exist in protected v2. Reusing them would violate v2/v3 zero QuerySpec and Gold overlap; adding filters is out of scope for this no-semantic-change release."
+  },
+  "release_gates": [
+    "all_query_specs_validate_against_frozen_catalog",
+    "all_gold_sql_renders_deterministically",
+    "all_gold_sql_pass_sql_policy",
+    "all_gold_sql_execute_under_reader_role",
+    "all_result_contracts_pass_within_display_budget",
+    "all_coverage_quotas_exact",
+    "all_v2_overlap_checks_zero",
+    "all_primary_questions_are_pure_chinese_and_sql_free"
+  ]
+}

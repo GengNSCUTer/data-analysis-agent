@@ -441,6 +441,21 @@ v1 不引入 Redis。
 
 ## 11. 变更记录
 
+### 2026-09-15：TheLook v3 跨 Schema 评测静态覆盖合同与 seed 冻结
+
+为避免把历史 TheLook v2 的 `family_id == query_spec_id` 误当成场景覆盖，新增机器可读
+`thelook-v3-coverage-contract-v1`、独立 `scenario_family_id`、由 QuerySpec 派生的
+`program_signature` 和 `risk_tags`。v3 目标为 750 个静态、可复现 seed；冻结事实域
+`135/250/60/100/0/135/70`、shape `210/285/255`、日/周/月/季/年序列 `35/45/65/60/50`、
+13 个安全分组维度、20 个 scenario family、1--4 指标配额、风险下限和八类纯中文主问法配额。
+语义底座继续固定在 TheLook v2 的 20 项指标和 QuerySpec/renderer 版本；`current_unsold_inventory_unit_count`
+因当前仅 4 个合法 all-time QuerySpec 均已在 protected v2 出现，v3 暂显式配额为 0，不能为凑数量
+伪造新时间/过滤语义。静态构造器生成 750 条 QuerySpec-backed seed，精确满足上述分布，受保护 v2
+QuerySpec ID overlap 为 0；它未渲染 SQL、访问 PostgreSQL、生成问题或调用模型。静态合同/seed/测试见
+[`docs/post-training/data/thelook-v3-coverage-contract-v1.md`](docs/post-training/data/thelook-v3-coverage-contract-v1.md)。
+下一独立任务才是逐条 `QuerySpec -> renderer -> SqlPolicy -> reader role -> ResultContract` 准入；在那以前
+TheLook v3 不可用于模型评测、训练、Prompt、模型选择或错误回流。
+
 ### 2026-09-14：Olist v3 指标合同、平衡 SQL-only release 与全量准入
 
 在不改写默认 `olist-catalog-v2 / 0.2-frozen` 运行时快照的前提下，新增隔离的
