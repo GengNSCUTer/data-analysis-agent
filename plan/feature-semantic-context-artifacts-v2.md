@@ -69,6 +69,7 @@ Replace HistorySummary v1's provenance-only boundary with a bounded semantic sum
 - **DEP-001**: `ContextBudgetFilter`, `BudgetedChatHandler`, `WorkingMemory`, `ResultArtifact`, `TrustedRunSqlTool`, `PostgresConversationStore` and the trusted demo remain the integration points.
 - **DEP-002**: Exact accounting requires a local official tokenizer directory supplied through `DATA_ANALYSIS_TOKENIZER_PATH`; the current provider does not expose it in this workspace.
 - **DEP-003**: SiliconFlow currently exposes `deepseek-ai/DeepSeek-V4-Flash` in its model catalog but not a tokenizer endpoint or public tokenizer revision. Public DeepSeek-V3 assets use `LlamaTokenizerFast` and a 131072-token configuration; that is a documented fallback estimate for V4, not proof of identity.
+- **DEP-004**: The local `/disk2/gengnan/hf_models/Meta-Llama-3.1-8B-Instruct` tokenizer is configured as the current compatibility estimator. Runtime evidence must remain `local_tokenizer_estimate`; it must not be labeled `exact` for DeepSeek-V4-Flash.
 
 ## 5. Files
 
