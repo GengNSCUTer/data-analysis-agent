@@ -4,7 +4,10 @@ import json
 
 import pytest
 
-from data_analysis_agent.result_artifact_store import ResultArtifactStore
+from data_analysis_agent.result_artifact_store import (
+    ResultArtifactIntegrityError,
+    ResultArtifactStore,
+)
 
 
 def test_result_artifact_store_writes_csv_manifest_and_plotly(tmp_path) -> None:
@@ -31,6 +34,10 @@ def test_result_artifact_store_writes_csv_manifest_and_plotly(tmp_path) -> None:
     assert store.load_manifest(
         artifact_id="rta_test", user_id="user-a", workspace_id="olist_analytics"
     )["plotly_bytes"] > 0
+    verified = store.verify_manifest(
+        artifact_id="rta_test", user_id="user-a", workspace_id="olist_analytics"
+    )
+    assert verified["artifact_id"] == "rta_test"
 
 
 def test_result_artifact_store_scopes_users_and_workspaces(tmp_path) -> None:
@@ -54,3 +61,23 @@ def test_result_artifact_store_scopes_users_and_workspaces(tmp_path) -> None:
             artifact_id="rta_test", user_id="user-a", workspace_id="other"
         )
 
+
+def test_result_artifact_store_detects_payload_tampering(tmp_path) -> None:
+    store = ResultArtifactStore(tmp_path)
+    store.save_result_csv(
+        artifact_id="rta_test",
+        user_id="user-a",
+        workspace_id="olist_analytics",
+        columns=["gmv"],
+        rows=[{"gmv": 10}],
+        row_count=1,
+        dataset_version="v1",
+        metric_version="m1",
+    )
+    csv_path = store._scope("user-a", "olist_analytics", "rta_test") / "result.csv"
+    csv_path.write_text("gmv\n999\n", encoding="utf-8")
+
+    with pytest.raises(ResultArtifactIntegrityError, match="integrity"):
+        store.verify_manifest(
+            artifact_id="rta_test", user_id="user-a", workspace_id="olist_analytics"
+        )

@@ -11,6 +11,10 @@ import tempfile
 from typing import Any, Iterable, Mapping
 
 
+class ResultArtifactIntegrityError(ValueError):
+    """An external artifact no longer matches its persisted manifest."""
+
+
 class ResultArtifactStore:
     """Store complete validated results outside conversation metadata."""
 
@@ -99,6 +103,60 @@ class ResultArtifactStore:
             raise PermissionError("result artifact scope mismatch")
         return value
 
+    def verify_manifest(
+        self, *, artifact_id: str, user_id: str, workspace_id: str
+    ) -> dict[str, Any]:
+        """Recompute external payload integrity before a replay/export action.
+
+        The manifest is not itself evidence that a CSV or Plotly payload still
+        exists or was not modified after it was written.  This method verifies
+        the fixed file names and their persisted byte/hash values without
+        returning the payload content.
+        """
+        manifest = self.load_manifest(
+            artifact_id=artifact_id, user_id=user_id, workspace_id=workspace_id
+        )
+        scope = self._scope(user_id, workspace_id, artifact_id)
+        self._verify_file(
+            scope=scope,
+            ref=manifest.get("csv_ref"),
+            expected_ref="result.csv",
+            expected_sha256=manifest.get("csv_sha256"),
+            expected_bytes=manifest.get("csv_bytes"),
+        )
+        plotly_ref = manifest.get("plotly_ref")
+        if plotly_ref is not None:
+            self._verify_file(
+                scope=scope,
+                ref=plotly_ref,
+                expected_ref="chart.plotly.json",
+                expected_sha256=manifest.get("plotly_sha256"),
+                expected_bytes=manifest.get("plotly_bytes"),
+            )
+        return manifest
+
+    @staticmethod
+    def _verify_file(
+        *,
+        scope: Path,
+        ref: object,
+        expected_ref: str,
+        expected_sha256: object,
+        expected_bytes: object,
+    ) -> None:
+        if ref != expected_ref:
+            raise ResultArtifactIntegrityError("artifact manifest file reference is invalid")
+        if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
+            raise ResultArtifactIntegrityError("artifact manifest checksum is invalid")
+        if not isinstance(expected_bytes, int) or expected_bytes < 0:
+            raise ResultArtifactIntegrityError("artifact manifest byte count is invalid")
+        path = scope / expected_ref
+        if not path.is_file():
+            raise ResultArtifactIntegrityError("artifact payload is missing")
+        digest, size = _sha256_size(path)
+        if digest != expected_sha256 or size != expected_bytes:
+            raise ResultArtifactIntegrityError("artifact payload integrity check failed")
+
     def _scope(self, user_id: str, workspace_id: str, artifact_id: str) -> Path:
         if not all(isinstance(value, str) and value.strip() for value in (user_id, workspace_id, artifact_id)):
             raise ValueError("artifact scope identifiers must be non-empty")
@@ -139,4 +197,3 @@ def _sha256_size(path: Path) -> tuple[str, int]:
 
 def _csv_value(value: Any) -> str:
     return "" if value is None else str(value)
-

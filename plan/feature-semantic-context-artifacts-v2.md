@@ -2,9 +2,9 @@
 goal: Implement semantic history compression, verified analysis-state carry-over, durable result artifacts, and token-budgeted context
 version: 2.0
 date_created: 2026-09-20
-last_updated: 2026-09-20
+last_updated: 2026-09-21
 owner: gengnan
-status: In progress
+status: Complete
 tags: [feature, runtime, context, history, artifacts, token-budget]
 ---
 
@@ -55,8 +55,8 @@ Replace HistorySummary v1's provenance-only boundary with a bounded semantic sum
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
 | TASK-007 | Add isolated unit tests for token accounting, source-digest summary reuse/failure fallback, SQL-state non-authority, artifact checksum and owner/workspace isolation. | ✅ | 2026-09-21 |
-| TASK-008 | Add a small live long-conversation regression after the exact/estimated counter mode is recorded; report token budget, prompt reservation, summary generation latency and artifact references without leaking content. |  |  |
-| TASK-009 | Update `AGENTS.md`, architecture documentation, `PROJECT.md` and the safe-report contract to distinguish semantic summary, structured SQL state, result artifacts and token-accounting accuracy. |  |  |
+| TASK-008 | Add a small live long-conversation regression after the exact/estimated counter mode is recorded; report token budget, prompt reservation, summary generation latency and artifact references without leaking content. | ✅ | 2026-09-21 |
+| TASK-009 | Update `AGENTS.md`, architecture documentation, `PROJECT.md` and the safe-report contract to distinguish semantic summary, structured SQL state, result artifacts and token-accounting accuracy. | ✅ | 2026-09-21 |
 
 ## 3. Alternatives
 
@@ -86,6 +86,22 @@ Replace HistorySummary v1's provenance-only boundary with a bounded semantic sum
 - **TEST-003**: Prompt prose cannot update `WorkingMemory` metrics, dates, dimensions or filters without existing validated server paths.
 - **TEST-004**: A validated CSV/Plotly artifact has atomic external storage, immutable SHA-256 evidence and cannot be resolved by another user or workspace.
 - **TEST-005**: Context evidence states `exact` or `estimated` token mode and never exposes message/SQL/result content.
+
+### Phase 3 live evidence
+
+The isolated live service on `127.0.0.1:32012` used a temporary `1,200` history-token
+budget and the configured local tokenizer estimator. It was not the production
+`32010` service. The safe report is outside Git:
+
+`/disk2/gengnan/data-analysis-agent-data/evals/product-capability-baseline-v1/phase3-context-artifacts/safe-report-rerun.json`
+
+The six checks passed: validated CSV/Plotly manifest recovery, semantic summary
+generation and owner-scoped persistence, summary non-authority for SQL state,
+cross-user manifest isolation, summary-failure fallback regression, and artifact
+checksum-tamper regression. The final SQL turn completed with one allowed audit
+and a valid result contract. The live report records `local_tokenizer_estimate`,
+not exact provider tokenization. Raw SSE and screenshots remain external with
+mode `0600` where applicable.
 
 ## 7. Risks & Assumptions
 

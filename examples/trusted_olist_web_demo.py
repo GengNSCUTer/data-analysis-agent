@@ -48,7 +48,10 @@ from data_analysis_agent.postgres_runner import (
     SecurePostgresRunner,
 )
 from data_analysis_agent.result_validator import ResultValidator
-from data_analysis_agent.result_artifact_store import ResultArtifactStore
+from data_analysis_agent.result_artifact_store import (
+    ResultArtifactIntegrityError,
+    ResultArtifactStore,
+)
 from data_analysis_agent.semantic_catalog import (
     CatalogContextEnhancer,
     CatalogLoader,
@@ -290,31 +293,6 @@ def create_app() -> FastAPI:
         user = await role_resolver.resolve_user(
             RequestContext(cookies=dict(request.cookies))
         )
-
-    @app.get("/api/project/conversations/{conversation_id}/artifacts/{artifact_id}/manifest")
-    async def result_artifact_manifest(
-        conversation_id: str, artifact_id: str, request: Request
-    ) -> JSONResponse:
-        """Return only the scoped manifest; payload files stay external."""
-        user = await role_resolver.resolve_user(
-            RequestContext(cookies=dict(request.cookies))
-        )
-        conversation = await conversation_store.get_conversation(conversation_id, user)
-        if conversation is None:
-            return JSONResponse({"detail": "conversation not found"}, status_code=404)
-        memory = WorkingMemory.from_mapping(conversation.metadata.get("working_memory"))
-        artifact = memory.previous_result_artifact
-        if artifact is None or artifact.artifact_id != artifact_id:
-            return JSONResponse({"detail": "artifact not found"}, status_code=404)
-        try:
-            manifest = result_artifact_store.load_manifest(
-                artifact_id=artifact_id,
-                user_id=user.id,
-                workspace_id=conversation.metadata.get("workspace_id", OLIST_WORKSPACE.workspace_id),
-            )
-        except (FileNotFoundError, PermissionError, ValueError):
-            return JSONResponse({"detail": "artifact not found"}, status_code=404)
-        return JSONResponse(manifest)
         try:
             conversation = await conversation_store.get_conversation(
                 conversation_id, user
@@ -347,11 +325,41 @@ def create_app() -> FastAPI:
                     if message.role != "system"
                 ],
                 # This is a bounded replay card, not a SQL/result-table
-                # export.  The client may render it after a reload without
+                # export. The client may render it after a reload without
                 # triggering the model or database.
                 "trusted_result_artifact": artifact.as_dict() if artifact else None,
             }
         )
+
+    @app.get("/api/project/conversations/{conversation_id}/artifacts/{artifact_id}/manifest")
+    async def result_artifact_manifest(
+        conversation_id: str, artifact_id: str, request: Request
+    ) -> JSONResponse:
+        """Return only the scoped manifest; payload files stay external."""
+        user = await role_resolver.resolve_user(
+            RequestContext(cookies=dict(request.cookies))
+        )
+        conversation = await conversation_store.get_conversation(conversation_id, user)
+        if conversation is None:
+            return JSONResponse({"detail": "conversation not found"}, status_code=404)
+        memory = WorkingMemory.from_mapping(conversation.metadata.get("working_memory"))
+        artifact = memory.previous_result_artifact
+        if artifact is None or artifact.artifact_id != artifact_id:
+            return JSONResponse({"detail": "artifact not found"}, status_code=404)
+        workspace_id = conversation.metadata.get(
+            "workspace_id", OLIST_WORKSPACE.workspace_id
+        )
+        if artifact.workspace_id != workspace_id:
+            return JSONResponse({"detail": "artifact not found"}, status_code=404)
+        try:
+            manifest = result_artifact_store.verify_manifest(
+                artifact_id=artifact_id,
+                user_id=user.id,
+                workspace_id=workspace_id,
+            )
+        except (FileNotFoundError, PermissionError, ResultArtifactIntegrityError, ValueError):
+            return JSONResponse({"detail": "artifact not found"}, status_code=404)
+        return JSONResponse(manifest)
 
     @app.delete("/api/project/conversations/{conversation_id}")
     async def delete_conversation(

@@ -219,7 +219,10 @@ class TrustedRunSqlTool(RunSqlTool):
         if self.result_artifact_store is None:
             return
         validation = context.metadata.get("result_validation")
-        if isinstance(validation, dict) and validation.get("state") != "valid":
+        # A successful UI tool result alone is not evidence that the result
+        # satisfies the server-owned ResultContract.  Artifact persistence is
+        # deliberately fail-closed so unvalidated rows can never be replayed.
+        if not isinstance(validation, dict) or validation.get("state") != "valid":
             return
         columns = result.metadata.get("columns")
         rows = result.metadata.get("results")

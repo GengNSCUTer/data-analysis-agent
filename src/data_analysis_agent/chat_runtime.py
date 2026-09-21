@@ -17,7 +17,7 @@ from .metric_context import OLIST_WORKSPACE, PROMPT_VERSION
 from .question_router import QuestionRouter
 from .query_plan import QueryPlan
 from .result_artifact import ResultArtifact
-from .result_artifact_store import ResultArtifactStore
+from .result_artifact_store import ResultArtifactIntegrityError, ResultArtifactStore
 from .run_recorder import PostgresRunRecorder
 from .semantic_catalog import ResultContract
 from .working_memory import WorkingMemory
@@ -546,7 +546,7 @@ class BudgetedChatHandler(ChatHandler):
                 workspace_id=self.workspace.workspace_id,
                 figure=figure,
             )
-        except (FileNotFoundError, PermissionError, ValueError):
+        except (FileNotFoundError, PermissionError, ResultArtifactIntegrityError, ValueError):
             return
         usage.record_catalog({"result_artifact": _safe_artifact_manifest(manifest)})
 

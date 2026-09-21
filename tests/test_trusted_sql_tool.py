@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from data_analysis_agent.result_validator import ResultValidationError, ResultValidator
+from data_analysis_agent.result_artifact_store import ResultArtifactStore
 from data_analysis_agent.sql_policy import SqlPolicy
 from data_analysis_agent.sql_repair import SafeSqlExecutionError, SanitizedSqlError
 from data_analysis_agent.trusted_sql_tool import TrustedRunSqlTool
@@ -53,6 +54,13 @@ class SequenceRunner(SqlRunner):
         return frame
 
 
+class UnvalidatedRunner(SqlRunner):
+    """Deliberately bypasses validation to prove artifact persistence is closed."""
+
+    async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+        return pd.DataFrame({"paid_order_count": [7]})
+
+
 class FakeRepairProvider:
     def __init__(self, candidate: str | None):
         self.candidate = candidate
@@ -63,12 +71,19 @@ class FakeRepairProvider:
         return self.candidate
 
 
-def _tool(runner: SequenceRunner, provider: FakeRepairProvider | None, tmp_path):
+def _tool(
+    runner: SequenceRunner,
+    provider: FakeRepairProvider | None,
+    tmp_path,
+    *,
+    result_artifact_store: ResultArtifactStore | None = None,
+):
     return TrustedRunSqlTool(
         runner,
         repair_provider=provider,
         repair_policy=SqlPolicy(),
         file_system=LocalFileSystem(str(tmp_path)),
+        result_artifact_store=result_artifact_store,
     )
 
 
@@ -86,6 +101,24 @@ async def test_normal_query_passes_result_contract(tmp_path) -> None:
     assert runner.calls == [
         "SELECT COUNT(order_id) AS paid_order_count FROM fact_orders"
     ]
+
+
+@pytest.mark.asyncio
+async def test_result_artifact_requires_explicit_validated_result_contract(tmp_path) -> None:
+    runner = UnvalidatedRunner()
+    context = _context()
+    # Model/tool success must not be enough to externalize a result: this
+    # isolated runner intentionally never sets ResultValidator metadata.
+    store = ResultArtifactStore(tmp_path / "artifacts")
+    result = await _tool(
+        runner, None, tmp_path, result_artifact_store=store
+    ).execute(
+        context,
+        RunSqlToolArgs(sql="SELECT COUNT(order_id) AS paid_order_count FROM fact_orders"),
+    )
+
+    assert result.success is True
+    assert "result_artifact" not in context.metadata
 
 
 @pytest.mark.asyncio

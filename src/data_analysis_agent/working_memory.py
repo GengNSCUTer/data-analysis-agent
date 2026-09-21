@@ -7,6 +7,7 @@ import re
 from typing import Any, Mapping
 
 from .question_router import QuestionRoute
+from .result_artifact import ResultArtifact
 
 
 _DATE_RANGE = re.compile(
@@ -14,6 +15,7 @@ _DATE_RANGE = re.compile(
     r"(?P<end>20\d{2}-\d{2}-\d{2})"
 )
 _YEAR = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
+_CLEAR_DIMENSIONS = re.compile(r"不按|不要按|取消分组|不分组|总体|总计")
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,7 @@ class WorkingMemory:
     filters: tuple[str, ...] = ()
     comparison_baseline: str | None = None
     previous_result_summary: str | None = None
+    previous_result_artifact: ResultArtifact | None = None
     pending_question: str | None = None
     pending_missing: tuple[str, ...] = ()
     _MAX_TEXT: int = field(default=4000, init=False, repr=False)
@@ -59,7 +62,10 @@ class WorkingMemory:
             dimensions=strings("dimensions"),
             filters=strings("filters"),
             comparison_baseline=text("comparison_baseline", 120),
-            previous_result_summary=text("previous_result_summary", 1000),
+            previous_result_summary=text("previous_result_summary", 1_200),
+            previous_result_artifact=ResultArtifact.from_mapping(
+                value.get("previous_result_artifact")
+            ),
             pending_question=text("pending_question"),
             pending_missing=strings("pending_missing"),
         )
@@ -72,6 +78,11 @@ class WorkingMemory:
             "filters": list(self.filters),
             "comparison_baseline": self.comparison_baseline,
             "previous_result_summary": self.previous_result_summary,
+            "previous_result_artifact": (
+                self.previous_result_artifact.as_dict()
+                if self.previous_result_artifact
+                else None
+            ),
             "pending_question": self.pending_question,
             "pending_missing": list(self.pending_missing),
         }
@@ -109,6 +120,7 @@ class WorkingMemory:
             filters=self.filters,
             comparison_baseline=comparison,
             previous_result_summary=self.previous_result_summary,
+            previous_result_artifact=self.previous_result_artifact,
             pending_question=pending_question,
             pending_missing=tuple(pending_missing),
         )
@@ -128,20 +140,78 @@ class WorkingMemory:
             filters=self.filters,
             comparison_baseline=self.comparison_baseline,
             previous_result_summary=value,
+            previous_result_artifact=self.previous_result_artifact,
+            pending_question=self.pending_question,
+            pending_missing=self.pending_missing,
+        )
+
+    def with_result_artifact(self, artifact: ResultArtifact) -> "WorkingMemory":
+        """Persist the latest replayable artifact after ResultContract success."""
+        if not isinstance(artifact, ResultArtifact) or not artifact.summary:
+            raise ValueError("result artifact must contain a trusted summary")
+        return WorkingMemory(
+            metric_ids=self.metric_ids,
+            time_range=self.time_range,
+            dimensions=self.dimensions,
+            filters=self.filters,
+            comparison_baseline=self.comparison_baseline,
+            previous_result_summary=artifact.summary,
+            previous_result_artifact=artifact,
+            pending_question=self.pending_question,
+            pending_missing=self.pending_missing,
+        )
+
+    def with_query_plan_dimensions(
+        self, question: str, dimensions: tuple[str, ...] | list[str] | None
+    ) -> "WorkingMemory":
+        """Persist only a dimension explicitly resolved for this SQL turn.
+
+        ``QueryPlan`` is the server-owned source of truth for the current
+        request's dimensions.  This method deliberately does *not* make the
+        stored dimensions implicit SQL input for a later request: recording
+        state and silently inheriting a grouping are different product
+        decisions.  A later turn may therefore observe the state, while the
+        router still requires a new request to state a safe query shape.
+
+        An explicit new dimension replaces the old one.  A user can also
+        explicitly clear grouping (for example, “不按州，统计总 GMV”).
+        Questions that mention neither leave the previous state untouched.
+        """
+        resolved = tuple(
+            dict.fromkeys(
+                str(item).strip() for item in (dimensions or ()) if str(item).strip()
+            )
+        )[:16]
+        if resolved:
+            next_dimensions = resolved
+        elif _CLEAR_DIMENSIONS.search(question):
+            next_dimensions = ()
+        else:
+            next_dimensions = self.dimensions
+        return WorkingMemory(
+            metric_ids=self.metric_ids,
+            time_range=self.time_range,
+            dimensions=next_dimensions,
+            filters=self.filters,
+            comparison_baseline=self.comparison_baseline,
+            previous_result_summary=self.previous_result_summary,
+            previous_result_artifact=self.previous_result_artifact,
             pending_question=self.pending_question,
             pending_missing=self.pending_missing,
         )
 
     def retrieval_context(self, question: str) -> str:
-        """Return a bounded retrieval-only query, never persisted as trace text."""
+        """Return a bounded retrieval-only query, never persisted as trace text.
+
+        Current user wording is the authority for catalog metric selection. A
+        previous metric can help resolve a genuinely incomplete clarification
+        turn through ``pending_question``, but must not be appended here: doing
+        so turns an explicit new metric request into a false multi-metric
+        retrieval and can change the next QueryPlan.
+        """
         parts = [question.strip()]
         if self.pending_question and self.pending_question not in parts[0]:
             parts.append(self.pending_question)
-        parts.extend(self.metric_ids)
-        if self.time_range:
-            parts.extend(self.time_range.values())
-        if self.comparison_baseline:
-            parts.append(self.comparison_baseline)
         return " ".join(parts)[: self._MAX_TEXT]
 
     def prompt_context(self) -> str:
