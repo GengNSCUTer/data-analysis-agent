@@ -8,12 +8,14 @@ the injected runner reports a sanitized execution failure.
 from __future__ import annotations
 
 import re
+from hashlib import sha256
 from typing import Protocol
 
 from vanna.capabilities.sql_runner import RunSqlToolArgs
 from vanna.core.llm import LlmMessage, LlmRequest, LlmService
 from vanna.core.tool import ToolContext, ToolResult
 from vanna.tools import RunSqlTool
+from vanna.components import DataFrameComponent, SimpleTextComponent, UiComponent
 
 from .budget import CURRENT_BUDGET
 from .sql_policy import SqlPolicy
@@ -22,6 +24,8 @@ from .sql_repair import (
     SanitizedSqlError,
     SqlRepairOutcome,
 )
+from .result_presentation import display_records
+from .result_artifact_store import ResultArtifactStore
 
 
 class RepairCandidateProvider(Protocol):
@@ -86,6 +90,7 @@ class TrustedRunSqlTool(RunSqlTool):
         file_system=None,
         custom_tool_name: str | None = None,
         custom_tool_description: str | None = None,
+        result_artifact_store: ResultArtifactStore | None = None,
     ):
         super().__init__(
             sql_runner=sql_runner,
@@ -95,10 +100,12 @@ class TrustedRunSqlTool(RunSqlTool):
         )
         self.repair_provider = repair_provider
         self.repair_policy = repair_policy or getattr(sql_runner, "policy", None)
+        self.result_artifact_store = result_artifact_store
 
     async def execute(self, context: ToolContext, args: RunSqlToolArgs) -> ToolResult:
         result = await super().execute(context, args)
         if result.success:
+            self._replace_with_server_presentation(context, result)
             self._remember_result_artifact(context, result)
             return result
 
@@ -203,13 +210,39 @@ class TrustedRunSqlTool(RunSqlTool):
             detail="修复后的 SQL 仍未通过可信执行链，系统未输出未经验证的数字。",
         )
 
-    @staticmethod
-    def _remember_result_artifact(context: ToolContext, result: ToolResult) -> None:
+    def _remember_result_artifact(self, context: ToolContext, result: ToolResult) -> None:
         """Bind a chart to the one successful result emitted in this request."""
 
         output_file = result.metadata.get("output_file")
         if isinstance(output_file, str) and output_file:
             context.metadata["current_result_filename"] = output_file
+        if self.result_artifact_store is None:
+            return
+        validation = context.metadata.get("result_validation")
+        if isinstance(validation, dict) and validation.get("state") != "valid":
+            return
+        columns = result.metadata.get("columns")
+        rows = result.metadata.get("results")
+        if not isinstance(columns, list) or not isinstance(rows, list):
+            return
+        workspace_id = str(context.metadata.get("workspace_id") or "unknown")
+        artifact_id = "rta_" + sha256(context.request_id.encode("utf-8")).hexdigest()[:20]
+        contract = context.metadata.get("result_contract")
+        contract = contract if isinstance(contract, dict) else {}
+        manifest = self.result_artifact_store.save_result_csv(
+            artifact_id=artifact_id,
+            user_id=context.user.id,
+            workspace_id=workspace_id,
+            columns=columns,
+            rows=rows,
+            row_count=int(result.metadata.get("row_count") or len(rows)),
+            dataset_version=str(contract.get("dataset_version") or "unknown"),
+            metric_version=str(contract.get("metric_version") or "unknown"),
+        )
+        context.metadata["result_artifact"] = manifest
+        usage = CURRENT_BUDGET.get()
+        if usage is not None:
+            usage.record_catalog({"result_artifact": _safe_artifact_manifest(manifest)})
 
     @staticmethod
     def _evidence(outcome: SqlRepairOutcome) -> dict[str, object]:
@@ -286,3 +319,42 @@ class TrustedRunSqlTool(RunSqlTool):
             "terminal_reason": evidence.get("terminal_reason"),
         }
         return result
+
+    @staticmethod
+    def _replace_with_server_presentation(context: ToolContext, result: ToolResult) -> None:
+        """Format only the UI table after validation, never the result artifact."""
+        records = result.metadata.get("display_results")
+        columns = result.metadata.get("columns")
+        if not isinstance(records, list) or not isinstance(columns, list):
+            return
+        labels = context.metadata.get("result_column_labels")
+        if not isinstance(labels, dict):
+            labels = {}
+        display_rows, _ = display_records(records, columns=columns, labels=labels)
+        row_count = int(result.metadata.get("row_count") or len(display_rows))
+        display_truncated = bool(result.metadata.get("display_truncated"))
+        budget = int(result.metadata.get("display_row_budget") or len(display_rows))
+        result.ui_component = UiComponent(
+            rich_component=DataFrameComponent.from_records(
+                records=display_rows,
+                title="查询结果",
+                max_rows_displayed=budget,
+                description=(
+                    f"已通过结果合同：共 {row_count} 行、{len(columns)} 列"
+                    + (f"；界面仅预览前 {budget} 行" if display_truncated else "")
+                ),
+            ),
+            # Keep the model-facing summary and result filename unchanged. It
+            # remains a tool artifact, not a user-facing formatting source.
+            simple_component=SimpleTextComponent(text=result.result_for_llm),
+        )
+
+
+def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
+    """Keep only bounded artifact identity in request audit evidence."""
+    allowed = {
+        "version", "artifact_id", "workspace_id", "dataset_version",
+        "metric_version", "row_count", "columns", "csv_sha256", "csv_bytes",
+        "csv_ref", "plotly_sha256", "plotly_bytes", "plotly_ref",
+    }
+    return {key: manifest[key] for key in allowed if key in manifest}

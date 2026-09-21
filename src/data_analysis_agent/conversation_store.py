@@ -119,6 +119,7 @@ class PostgresConversationStore(ConversationStore):
                     "dataset_version_id": conversation_row["dataset_version_id"],
                     "metric_version": conversation_row["metric_version"],
                     "working_memory": conversation_row.get("working_memory") or {},
+                    "history_summary": (conversation_row.get("working_memory") or {}).get("__history_summary"),
                 },
             )
         finally:
@@ -135,6 +136,9 @@ class PostgresConversationStore(ConversationStore):
         try:
             with connection:
                 with connection.cursor() as cursor:
+                    stored_memory = dict(conversation.metadata.get("working_memory", {}))
+                    if conversation.metadata.get("history_summary"):
+                        stored_memory["__history_summary"] = conversation.metadata["history_summary"]
                     cursor.execute(
                         """
                         INSERT INTO app.conversations (
@@ -152,7 +156,7 @@ class PostgresConversationStore(ConversationStore):
                             dataset_version,
                             metric_version,
                             psycopg2.extras.Json(
-                                conversation.metadata.get("working_memory", {})
+                                stored_memory
                             ),
                             0,
                             self._utc(conversation.created_at),
@@ -212,7 +216,7 @@ class PostgresConversationStore(ConversationStore):
                             dataset_version,
                             metric_version,
                             psycopg2.extras.Json(
-                                conversation.metadata.get("working_memory", {})
+                                stored_memory
                             ),
                             conversation.id,
                         ),

@@ -12,14 +12,26 @@ from vanna.servers.base import ChatHandler
 from vanna.servers.base.models import ChatRequest, ChatStreamChunk
 
 from .budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
-from .chart_contract import ChartContract
+from .chart_contract import ChartContract, ChartContractError
 from .metric_context import OLIST_WORKSPACE, PROMPT_VERSION
 from .question_router import QuestionRouter
 from .query_plan import QueryPlan
+from .result_artifact import ResultArtifact
+from .result_artifact_store import ResultArtifactStore
 from .run_recorder import PostgresRunRecorder
 from .semantic_catalog import ResultContract
 from .working_memory import WorkingMemory
 from .workspace import WorkspaceProfile
+from .visualization import build_server_chart_component
+
+
+def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
+    allowed = {
+        "version", "artifact_id", "workspace_id", "dataset_version",
+        "metric_version", "row_count", "columns", "csv_sha256", "csv_bytes",
+        "csv_ref", "plotly_sha256", "plotly_bytes", "plotly_ref",
+    }
+    return {key: manifest[key] for key in allowed if key in manifest}
 
 
 TOOL_FREE_SYSTEM_PROMPT = """
@@ -41,12 +53,14 @@ class BudgetedChatHandler(ChatHandler):
         run_recorder: PostgresRunRecorder,
         question_router: QuestionRouter | None = None,
         workspace: WorkspaceProfile | None = None,
+        result_artifact_store: ResultArtifactStore | None = None,
     ):
         super().__init__(agent)
         self.budget = budget
         self.run_recorder = run_recorder
         self.question_router = question_router
         self.workspace = workspace or OLIST_WORKSPACE
+        self.result_artifact_store = result_artifact_store
 
     async def handle_stream(self, request: ChatRequest):
         conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:8]}"
@@ -61,6 +75,7 @@ class BudgetedChatHandler(ChatHandler):
         usage.set_input(request.message)
         tracker_token = CURRENT_BUDGET.set(usage)
         run = None
+        chart_contract: ChartContract | None = None
         try:
             user = await self.agent.user_resolver.resolve_user(request.request_context)
             is_starter_request = (
@@ -145,6 +160,13 @@ class BudgetedChatHandler(ChatHandler):
                         route,
                         updated_memory.as_dict(),
                     )
+                    # QueryPlan, not assistant prose or client metadata, owns
+                    # the resolved grouping for this turn.  Persist it only as
+                    # observable conversation state; future SQL generation
+                    # does not silently inherit it.
+                    updated_memory = updated_memory.with_query_plan_dimensions(
+                        request.message, query_plan.dimensions
+                    )
                     usage.set_query_plan(
                         query_plan.as_dict(), query_plan.prompt_context()
                     )
@@ -172,6 +194,7 @@ class BudgetedChatHandler(ChatHandler):
                 request.request_context.metadata.update(
                     result_contract.as_tool_metadata()
                 )
+                request.request_context.metadata["workspace_id"] = self.workspace.workspace_id
                 catalog_context = selection.prompt
                 if query_plan is not None:
                     catalog_context += query_plan.prompt_context()
@@ -186,6 +209,22 @@ class BudgetedChatHandler(ChatHandler):
                     **selection.trace.as_dict(),
                     "prompt_version": PROMPT_VERSION,
                     "result_contract": result_contract.as_evidence(),
+                    "route_intent": route.intent,
+                    "route_evidence_mode": route.evidence_mode,
+                    "route_state": route.state,
+                    "route_requires_database": route.requires_database,
+                    "route_reason_code": route.reason_code,
+                    "working_memory": {
+                        "metric_ids": list(updated_memory.metric_ids),
+                        "time_range": dict(updated_memory.time_range)
+                        if updated_memory.time_range
+                        else None,
+                        "dimensions": list(updated_memory.dimensions),
+                        "pending_missing": list(updated_memory.pending_missing),
+                        "previous_result_summary_present": bool(
+                            updated_memory.previous_result_summary
+                        ),
+                    },
                 }
                 if query_plan is not None:
                     request.request_context.metadata["query_plan"] = query_plan.as_dict()
@@ -228,11 +267,6 @@ class BudgetedChatHandler(ChatHandler):
                         title = "图表请求未执行"
                     yield self._budget_chunk(conversation_id, request_id, title, detail)
                     return
-
-                if chart_contract is not None and chart_contract.safe_to_visualize:
-                    # A server-valid chart contract permits exactly the next
-                    # visualization turn after a validated SQL result.
-                    usage.disable_deterministic_result_finalization()
 
                 if not route.should_generate_sql:
                     detail = route.direct_answer or route.clarification or "当前请求无法在受控数据范围内回答。"
@@ -277,18 +311,74 @@ class BudgetedChatHandler(ChatHandler):
 
             async for chunk in super().handle_stream(request):
                 yield chunk
+                if (
+                    chart_contract is not None
+                    and chart_contract.safe_to_visualize
+                    and usage.result_contract_satisfied
+                    and not usage.deterministic_chart_rendered
+                ):
+                    frame = usage.take_validated_chart_frame()
+                    if frame is not None:
+                        try:
+                            component = build_server_chart_component(chart_contract, frame)
+                        except (ChartContractError, ValueError) as exc:
+                            # A valid pre-query contract can still reject the
+                            # actual result shape (for example >200 chart rows).
+                            # Do not ask the model to repair or improvise a chart.
+                            yield self._budget_chunk(
+                                conversation_id,
+                                request_id,
+                                "图表未生成",
+                                str(exc),
+                            )
+                            usage.record_catalog(
+                                {"deterministic_chart": {"status": "rejected"}}
+                            )
+                        else:
+                            self._persist_chart_artifact(
+                                user=user,
+                                request_id=request_id,
+                                chart_component=component,
+                                usage=usage,
+                            )
+                            usage.mark_deterministic_chart_rendered()
+                            usage.record_catalog(
+                                {
+                                    "deterministic_chart": {
+                                        "status": "rendered",
+                                        "chart_contract_version": chart_contract.version,
+                                    }
+                                }
+                            )
+                            yield ChatStreamChunk.from_component(
+                                component, conversation_id, request_id
+                            )
+            try:
+                await self._persist_history_summary(conversation_id, user, usage)
+            except Exception:
+                usage.error_type = "history_summary_persistence"
             if usage.result_summary:
                 try:
-                    await self._persist_result_summary(
+                    await self._persist_result_artifact(
                         conversation_id,
                         user,
-                        usage.result_summary,
+                        request_id,
+                        usage,
                     )
                 except Exception:
                     # A result-memory write must never turn an already
                     # validated answer into an SSE failure.  The run still
                     # records the error type for diagnosis.
                     usage.error_type = "result_summary_persistence"
+            if usage.result_contract_satisfied:
+                # The model's natural-language answer and its tool call are
+                # separate SSE components.  Give the user a small, explicit
+                # provenance marker only after the server has validated the
+                # result artifact; never attach this marker to a candidate
+                # that merely executed or to a clarification/refusal.
+                yield self._trusted_result_evidence_chunk(
+                    conversation_id, request_id, usage
+                )
             if (
                 usage.termination_reason == "running"
                 and usage.llm_rounds_used >= self.budget.max_tool_iterations
@@ -328,6 +418,44 @@ class BudgetedChatHandler(ChatHandler):
         """Build a Markdown-capable deterministic response without an LLM call."""
         component = UiComponent(
             rich_component=RichTextComponent(content=content, markdown=True),
+            simple_component=SimpleTextComponent(text=content),
+        )
+        return ChatStreamChunk.from_component(component, conversation_id, request_id)
+
+    @staticmethod
+    def _trusted_result_evidence_chunk(
+        conversation_id: str, request_id: str, usage: BudgetUsage
+    ) -> ChatStreamChunk:
+        """Render a compact, server-derived answer-provenance card.
+
+        This intentionally exposes only Catalog/ResultContract identity—not
+        SQL text, result rows, sample values, user text, or model reasoning.
+        It helps users distinguish an answer based on a trusted result from
+        tool-free explanation without turning the card into another export
+        channel.
+        """
+        trace = usage.catalog_trace or {}
+        contract = trace.get("result_contract")
+        if not isinstance(contract, dict):
+            contract = {}
+        metric_ids = contract.get("metric_ids") or trace.get("selected_metrics") or ()
+        columns = contract.get("required_result_columns") or ()
+        metric_text = "、".join(str(item) for item in metric_ids[:8]) or "受控指标"
+        column_text = "、".join(str(item) for item in columns[:8]) or "受控结果字段"
+        dataset_version = str(contract.get("dataset_version") or trace.get("dataset_version") or "未知版本")
+        metric_version = str(contract.get("metric_version") or trace.get("metric_version") or "未知版本")
+        content = (
+            "本回答引用了本轮已通过服务器结果合同的查询结果。"
+            f"指标：{metric_text}；结果字段：{column_text}；"
+            f"数据版本：{dataset_version}；指标版本：{metric_version}。"
+        )
+        component = UiComponent(
+            rich_component=StatusCardComponent(
+                title="本次回答的数据依据",
+                status="success",
+                description=content,
+                icon="✓",
+            ),
             simple_component=SimpleTextComponent(text=content),
         )
         return ChatStreamChunk.from_component(component, conversation_id, request_id)
@@ -377,13 +505,64 @@ class BudgetedChatHandler(ChatHandler):
             return "当前无法生成通用解释；如果你要查询实际数据，请补充指标和时间范围。"
         return content
 
-    async def _persist_result_summary(self, conversation_id: str, user, summary: str) -> None:
-        """Persist only the trusted, bounded result summary into working memory."""
+    async def _persist_result_artifact(
+        self, conversation_id: str, user, request_id: str, usage: BudgetUsage
+    ) -> None:
+        """Persist a small trusted-result replay artifact into working memory."""
         conversation = await self.agent.conversation_store.get_conversation(
             conversation_id, user
         )
         if conversation is None:
             return
         memory = WorkingMemory.from_mapping(conversation.metadata.get("working_memory"))
-        conversation.metadata["working_memory"] = memory.with_result_summary(summary).as_dict()
+        artifact = ResultArtifact.from_trusted_usage(
+            request_id=request_id,
+            summary=usage.result_summary or "",
+            catalog_trace=usage.catalog_trace,
+            chart_rendered=usage.deterministic_chart_rendered,
+        )
+        conversation.metadata["working_memory"] = memory.with_result_artifact(
+            artifact
+        ).as_dict()
+        await self.agent.conversation_store.update_conversation(conversation)
+
+    def _persist_chart_artifact(
+        self, *, user, request_id: str, chart_component: UiComponent, usage: BudgetUsage
+    ) -> None:
+        if self.result_artifact_store is None:
+            return
+        trace = usage.catalog_trace or {}
+        external = trace.get("result_artifact")
+        if not isinstance(external, dict):
+            return
+        rich = chart_component.rich_component
+        figure = getattr(rich, "data", None)
+        if not isinstance(figure, dict):
+            return
+        try:
+            manifest = self.result_artifact_store.save_plotly_json(
+                artifact_id=str(external.get("artifact_id")),
+                user_id=user.id,
+                workspace_id=self.workspace.workspace_id,
+                figure=figure,
+            )
+        except (FileNotFoundError, PermissionError, ValueError):
+            return
+        usage.record_catalog({"result_artifact": _safe_artifact_manifest(manifest)})
+
+    async def _persist_history_summary(
+        self, conversation_id: str, user, usage: BudgetUsage
+    ) -> None:
+        """Persist only the bounded semantic summary in the owner-scoped session."""
+        if not usage.history_summary or not usage.history_summary_text:
+            return
+        conversation = await self.agent.conversation_store.get_conversation(
+            conversation_id, user
+        )
+        if conversation is None:
+            return
+        conversation.metadata["history_summary"] = {
+            **usage.history_summary,
+            "text": usage.history_summary_text,
+        }
         await self.agent.conversation_store.update_conversation(conversation)

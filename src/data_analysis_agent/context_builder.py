@@ -125,6 +125,9 @@ class ContextBudgetFilter(ConversationFilter):
                         source_tokens=summary.source_tokens,
                     )
                     self._summary_cache[summary.source_sha256] = summary
+            usage = self.usage or CURRENT_BUDGET.get()
+            if usage is not None and summary.semantic_text:
+                usage.record_history_summary(summary.as_evidence(), summary.semantic_text)
             candidate = [summary.as_message(), *_flatten(retained)]
             if (
                 len(candidate) <= self.max_messages

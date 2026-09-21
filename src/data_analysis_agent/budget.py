@@ -134,6 +134,8 @@ class BudgetUsage:
     total_tokens: int | None = None
     context_truncated: bool = False
     context_budget: dict[str, Any] | None = None
+    history_summary: dict[str, Any] | None = None
+    history_summary_text: str | None = None
     termination_reason: str = "running"
     error_type: str | None = None
     catalog_trace: dict[str, Any] | None = None
@@ -309,6 +311,17 @@ class BudgetUsage:
                     "source_tokens": _non_negative_int(summary.get("source_tokens")),
                 }
         self.context_budget = result
+
+    def record_history_summary(self, evidence: dict[str, Any], text: str | None) -> None:
+        """Keep a bounded semantic summary for conversation-state persistence.
+
+        The text is deliberately absent from ``as_dict`` and run evidence;
+        ``BudgetedChatHandler`` writes it only into the owner-scoped conversation.
+        """
+        if not isinstance(evidence, dict):
+            return
+        self.history_summary = dict(evidence)
+        self.history_summary_text = text[:6_000] if isinstance(text, str) and text else None
 
     def context_budget_evidence(self) -> dict[str, Any] | None:
         """Return a JSON-safe copy without exposing mutable internal state."""

@@ -44,9 +44,9 @@ Replace HistorySummary v1's provenance-only boundary with a bounded semantic sum
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-004 | Extend `WorkingMemory` and `BudgetUsage` with bounded semantic-summary provenance, but keep summary prose out of run evidence and SQL condition authority. |  |  |
-| TASK-005 | Add `result_artifact_store.py`; atomically persist validated CSV and optional server-rendered Plotly JSON under `/disk2/gengnan/data-analysis-agent-data/`, then extend `ResultArtifact` with opaque references and integrity hashes. |  |  |
-| TASK-006 | Wire `BudgetedChatHandler`, `TrustedRunSqlTool` and trusted-demo endpoints so only server-validated results enter the artifact store and authorized conversation owners can retrieve them. |  |  |
+| TASK-004 | Extend `WorkingMemory` and `BudgetUsage` with bounded semantic-summary provenance, but keep summary prose out of run evidence and SQL condition authority. | ✅ | 2026-09-21 |
+| TASK-005 | Add `result_artifact_store.py`; atomically persist validated CSV and optional server-rendered Plotly JSON under `/disk2/gengnan/data-analysis-agent-data/`, then extend `ResultArtifact` with opaque references and integrity hashes. | ✅ | 2026-09-21 |
+| TASK-006 | Wire `BudgetedChatHandler`, `TrustedRunSqlTool` and trusted-demo endpoints so only server-validated results enter the artifact store and authorized conversation owners can retrieve them. | ✅ | 2026-09-21 |
 
 ### Implementation Phase 3
 
@@ -54,7 +54,7 @@ Replace HistorySummary v1's provenance-only boundary with a bounded semantic sum
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-007 | Add isolated unit tests for token accounting, source-digest summary reuse/failure fallback, SQL-state non-authority, artifact checksum and owner/workspace isolation. |  |  |
+| TASK-007 | Add isolated unit tests for token accounting, source-digest summary reuse/failure fallback, SQL-state non-authority, artifact checksum and owner/workspace isolation. | ✅ | 2026-09-21 |
 | TASK-008 | Add a small live long-conversation regression after the exact/estimated counter mode is recorded; report token budget, prompt reservation, summary generation latency and artifact references without leaking content. |  |  |
 | TASK-009 | Update `AGENTS.md`, architecture documentation, `PROJECT.md` and the safe-report contract to distinguish semantic summary, structured SQL state, result artifacts and token-accounting accuracy. |  |  |
 

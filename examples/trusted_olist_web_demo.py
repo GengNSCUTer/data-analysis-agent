@@ -48,6 +48,7 @@ from data_analysis_agent.postgres_runner import (
     SecurePostgresRunner,
 )
 from data_analysis_agent.result_validator import ResultValidator
+from data_analysis_agent.result_artifact_store import ResultArtifactStore
 from data_analysis_agent.semantic_catalog import (
     CatalogContextEnhancer,
     CatalogLoader,
@@ -76,6 +77,12 @@ HOST_PAGE_PATH = REPOSITORY_ROOT / "examples" / "embedded_analyst_host.html"
 WEB_COMPONENT_DIST = REPOSITORY_ROOT / "frontends" / "webcomponent" / "dist"
 QUERY_RESULTS_DIRECTORY = Path(
     os.getenv("VANNA_QUERY_RESULTS_DIR", "/tmp/data-analysis-agent-vanna-query-results")
+)
+RESULT_ARTIFACT_DIRECTORY = Path(
+    os.getenv(
+        "DATA_ANALYSIS_RESULT_ARTIFACT_ROOT",
+        "/disk2/gengnan/data-analysis-agent-data/runtime/result-artifacts",
+    )
 )
 DEMO_PORT = int(os.getenv("DATA_ANALYSIS_DEMO_PORT", "32010"))
 
@@ -143,6 +150,7 @@ def create_app() -> FastAPI:
     role_resolver = DemoRoleResolver(signer)
     registry = BudgetedToolRegistry()
     query_file_system = LocalFileSystem(str(QUERY_RESULTS_DIRECTORY))
+    result_artifact_store = ResultArtifactStore(RESULT_ARTIFACT_DIRECTORY)
     provider_llm_service = OpenAILlmService(
         api_key=api_key,
         base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
@@ -160,6 +168,7 @@ def create_app() -> FastAPI:
             sql_runner=runner,
             repair_provider=LlmRepairCandidateProvider(llm_service),
             file_system=query_file_system,
+            result_artifact_store=result_artifact_store,
             custom_tool_description="Run a policy-checked, read-only PostgreSQL analytics query.",
         ),
         access_groups=["analyst", "admin"],
@@ -205,6 +214,7 @@ def create_app() -> FastAPI:
             run_recorder,
             question_router,
             workspace=OLIST_WORKSPACE,
+            result_artifact_store=result_artifact_store,
         ),
         config={"cdn_url": "/static/vanna-components.js"},
     )
@@ -280,6 +290,31 @@ def create_app() -> FastAPI:
         user = await role_resolver.resolve_user(
             RequestContext(cookies=dict(request.cookies))
         )
+
+    @app.get("/api/project/conversations/{conversation_id}/artifacts/{artifact_id}/manifest")
+    async def result_artifact_manifest(
+        conversation_id: str, artifact_id: str, request: Request
+    ) -> JSONResponse:
+        """Return only the scoped manifest; payload files stay external."""
+        user = await role_resolver.resolve_user(
+            RequestContext(cookies=dict(request.cookies))
+        )
+        conversation = await conversation_store.get_conversation(conversation_id, user)
+        if conversation is None:
+            return JSONResponse({"detail": "conversation not found"}, status_code=404)
+        memory = WorkingMemory.from_mapping(conversation.metadata.get("working_memory"))
+        artifact = memory.previous_result_artifact
+        if artifact is None or artifact.artifact_id != artifact_id:
+            return JSONResponse({"detail": "artifact not found"}, status_code=404)
+        try:
+            manifest = result_artifact_store.load_manifest(
+                artifact_id=artifact_id,
+                user_id=user.id,
+                workspace_id=conversation.metadata.get("workspace_id", OLIST_WORKSPACE.workspace_id),
+            )
+        except (FileNotFoundError, PermissionError, ValueError):
+            return JSONResponse({"detail": "artifact not found"}, status_code=404)
+        return JSONResponse(manifest)
         try:
             conversation = await conversation_store.get_conversation(
                 conversation_id, user
