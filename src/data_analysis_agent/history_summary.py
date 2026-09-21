@@ -1,8 +1,8 @@
-"""Deterministic, non-semantic summaries for omitted conversation history.
+"""Bounded semantic/provenance summaries for omitted conversation history.
 
-The summary deliberately does not paraphrase user or assistant content.  It
-only gives the model a provenance boundary: some earlier complete turns were
-omitted, and server-owned structured state remains authoritative for SQL.
+The semantic text is optional and generated through an isolated summarizer;
+the source range, digest and server-owned structured state remain authoritative
+for SQL and business facts.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def message_chars(message: Message) -> int:
 
 @dataclass(frozen=True)
 class HistorySummary:
-    """A bounded provenance record for a contiguous range of omitted turns."""
+    """A bounded record for a contiguous range of omitted turns."""
 
     source_turn_start: int
     source_turn_end: int
