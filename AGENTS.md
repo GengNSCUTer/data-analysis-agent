@@ -22,6 +22,7 @@
 
 - 先看模块地图、输入输出契约和失败保护，再深入涉及 SQL、权限、数据隔离、模型训练和即将修改函数的关键代码；不要求逐行通读整个仓库。
 - 讲解和审阅按一个小单元推进：用户先看真实代码与测试并复述，我再纠正；未完成当前单元时不启动新的长训练或完整评测。
+- 每进入一个产品能力基线阶段，先做组件回顾：说明本阶段测量目标、实际运行链路、关键类/函数、输入输出和失败边界；再运行测试，最后把“组件已验证行为、测试空白、下一阶段不应提前推出的结论”分开解释。
 - 对已被明确契约和回归测试覆盖的重复转换，采用抽样检查和聚合证据即可；发现新风险再升级为逐条审查。
 - 每次审阅区分“已验证行为”“测试空白”“待确认设计”，不要因为目录或文档视觉整齐进行无关重构。
 
@@ -33,6 +34,7 @@
 - 所有用户/模型 SQL 必须经过 AST 策略、对象白名单、单语句、LIMIT/超时和只读数据库角色。不得用字符串黑名单替代 AST 安全策略。
 - 受保护 holdout 不得作为训练、验证、in-domain test、few-shot 或合成种子。切分时按 `family_id`/程序族隔离，日期、措辞、别名等表面变体不得跨 split。
 - Gold SQL 的业务公式来自冻结 Catalog/指标合同和 deterministic renderer；模型候选仍必须经过 SqlPolicy、reader role、ResultContract/ResultValidator，不能以训练数据绕过运行时治理。
+- 后训练的 `adapter_best` 只能由训练期 validation 的预先冻结指标选择；protected final test 只评测这个预选 adapter 一次。`adapter_final` 仅保留作训练末步诊断，不能作为默认评测目标或在看到 final test 后替换 headline 模型。若历史实验没有可回读的 validation-best checkpoint，则只能标为历史诊断，不补选、不重跑 final test。
 
 ## 5. 项目架构边界
 
@@ -40,6 +42,7 @@
 - Olist 领域 SFT 的训练输入必须复用真实 `olist-candidate-sql-v1` Prompt（Catalog + QueryPlan + ResultContract），目标仅为 canonical PostgreSQL SQL 加 EOS；不能退化为 SQLite Schema-only 模板。
 - `QuerySpec` 是离线、版本锁定的结构化施工图，不是自然语言解析结果，也不是 SQL 字符串；renderer 只编译已验证结构，不解析问题、不执行 SQL、不调用 LLM。
 - 训练数据、模型实验和生产运行时分开；后训练 Adapter 未通过匹配 Base/Adapter 业务质量门前，不接入生产默认路径。
+- 长历史上下文只能通过有界、可追溯的 `HistorySummary`/`ContextBudget` 机制处理。语义摘要可以帮助理解对话脉络，但不能成为指标、时间、筛选、权限、SQL 或业务结果事实；这些只能来自验证过的 WorkingMemory、QueryPlan、ResultContract 和 ResultArtifact。长期记忆、向量检索和跨会话自动事实召回必须另立合同，不能在上下文压缩任务中顺手引入。
 
 ## 6. 文档职责
 
@@ -69,6 +72,7 @@
 - 每条训练行必须能追溯到 QuerySpec、Gold SQL、Prompt 版本、workspace 快照、split 和长度统计。
 - 不静默截断 Prompt 或 SQL；超长样本进入脱敏 exclusion manifest，除非合同明确允许并记录原因。
 - 中等规模数据必须同时报告行数、QuerySpec 数、family 数、程序族覆盖和每个 split 的哈希；行数不能替代独立语义能力。
+- 对后续新生成或新准入的数据，数据库执行上限固定为 1,000 行，UI 预览预算固定为 200 行：201--999 行是完整执行且只标记 `display_truncated=true`，实际返回达到 1,000 行才是潜在执行截断。受保护历史评测若已冻结不同的完整-denotation 行数合同，保持其原合同，不迁移或重写。
 - 自动生成的大批量样本使用确定性 renderer 和全量确定性契约检查；对高风险指标/粒度做分层人工或模型辅助抽样，不为低风险重复样本逐条制造昂贵人工流程。
 - Olist SQL-only 扩展必须按闸门推进：先冻结新增指标合同，再冻结 family/program 配额，再冻结受控中文 surface contract；只有小批 QuerySpec/Gold 准入、语义身份和 split 审计通过后，才允许物化完整 train/validation/test。中文改写不增加 family 计数，日期窗口不替代独立程序覆盖。
 
