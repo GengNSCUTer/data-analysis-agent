@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from vanna.core.filter import ConversationFilter
@@ -95,6 +96,12 @@ class ContextBudgetFilter(ConversationFilter):
                     turns, max_chars=self.max_chars, max_messages=self.max_messages
                 ),
             )
+            summary = replace(
+                summary,
+                source_tokens=self.token_counter.count_messages(
+                    message for turn in omitted for message in turn
+                ),
+            )
             cached = self._summary_cache.get(summary.source_sha256)
             if cached is not None:
                 summary = cached
@@ -115,6 +122,7 @@ class ContextBudgetFilter(ConversationFilter):
                         semantic_text=semantic[:6_000],
                         summary_status="semantic_generated",
                         summary_tokens=self.token_counter.count_text(semantic),
+                        source_tokens=summary.source_tokens,
                     )
                     self._summary_cache[summary.source_sha256] = summary
             candidate = [summary.as_message(), *_flatten(retained)]

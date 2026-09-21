@@ -292,7 +292,7 @@ class BudgetUsage:
             digest = summary.get("source_sha256")
             if isinstance(digest, str) and len(digest) == 64:
                 result["summary"] = {
-                    "version": "history-summary-v1",
+                    "version": _summary_version(summary.get("version")),
                     "source_turn_start": _non_negative_int(
                         summary.get("source_turn_start")
                     ),
@@ -303,6 +303,10 @@ class BudgetUsage:
                     "source_chars": _non_negative_int(summary.get("source_chars")),
                     "source_sha256": digest,
                     "reason": _context_reason(summary.get("reason")),
+                    "summary_status": _summary_status(summary.get("summary_status")),
+                    "summary_model": _bounded_evidence_text(summary.get("summary_model")),
+                    "summary_tokens": _non_negative_int(summary.get("summary_tokens")),
+                    "source_tokens": _non_negative_int(summary.get("source_tokens")),
                 }
         self.context_budget = result
 
@@ -458,6 +462,18 @@ def _non_negative_int(value: Any) -> int:
 
 def _context_reason(value: Any) -> str:
     return value if value in {"char_budget", "message_budget", "both"} else "unknown"
+
+
+def _summary_version(value: Any) -> str:
+    return value if value in {"history-summary-v1", "history-summary-v2"} else "history-summary-v1"
+
+
+def _summary_status(value: Any) -> str:
+    return value if value in {"provenance_only", "semantic_generated"} else "provenance_only"
+
+
+def _bounded_evidence_text(value: Any) -> str | None:
+    return value[:128] if isinstance(value, str) and value else None
 
 
 CURRENT_BUDGET: ContextVar[BudgetUsage | None] = ContextVar(

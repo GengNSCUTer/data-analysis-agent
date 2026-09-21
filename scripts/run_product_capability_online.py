@@ -288,6 +288,7 @@ def _safe_context_budget(value: Any) -> dict[str, Any] | None:
                 "summary_status",
                 "summary_model",
                 "summary_tokens",
+                "source_tokens",
             )
             if isinstance(summary.get(key), (str, int))
         }

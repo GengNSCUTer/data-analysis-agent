@@ -41,6 +41,7 @@ class HistorySummary:
     summary_model: str | None = None
     summary_status: str = "provenance_only"
     summary_tokens: int = 0
+    source_tokens: int = 0
 
     @classmethod
     def from_turns(
@@ -89,6 +90,7 @@ class HistorySummary:
             "summary_status": self.summary_status,
             "summary_model": self.summary_model,
             "summary_tokens": self.summary_tokens,
+            "source_tokens": self.source_tokens,
         }
 
     def as_message(self) -> Message:
