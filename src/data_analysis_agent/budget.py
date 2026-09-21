@@ -40,9 +40,13 @@ class RequestBudget:
     max_sql_calls: int = 2
     max_visualization_calls: int = 1
     max_input_chars: int = 4_000
-    max_context_chars: int = 12_000
-    max_context_messages: int = 40
-    max_output_tokens: int = 1_200
+    # 128K-class providers are intentionally operated below their maximum.
+    # History receives 48K; system/catalog/tools and output use the remainder.
+    max_prompt_tokens: int = 64_000
+    max_history_tokens: int = 48_000
+    max_context_chars: int = 192_000  # legacy observability ceiling
+    max_context_messages: int = 160
+    max_output_tokens: int = 4_000
     llm_timeout_seconds: float = 120.0
     deterministic_result_finalization: bool = True
 
@@ -56,6 +60,8 @@ class RequestBudget:
             raise ValueError("max_sql_calls cannot exceed max_tool_calls")
         if self.max_visualization_calls > self.max_tool_calls:
             raise ValueError("max_visualization_calls cannot exceed max_tool_calls")
+        if self.max_history_tokens > self.max_prompt_tokens:
+            raise ValueError("max_history_tokens cannot exceed max_prompt_tokens")
 
     @classmethod
     def from_environment(cls) -> "RequestBudget":
@@ -86,6 +92,12 @@ class RequestBudget:
             max_input_chars=read("DATA_ANALYSIS_MAX_INPUT_CHARS", cls.max_input_chars),
             max_context_chars=read(
                 "DATA_ANALYSIS_MAX_CONTEXT_CHARS", cls.max_context_chars
+            ),
+            max_prompt_tokens=read(
+                "DATA_ANALYSIS_MAX_PROMPT_TOKENS", cls.max_prompt_tokens
+            ),
+            max_history_tokens=read(
+                "DATA_ANALYSIS_MAX_HISTORY_TOKENS", cls.max_history_tokens
             ),
             max_context_messages=read(
                 "DATA_ANALYSIS_MAX_CONTEXT_MESSAGES", cls.max_context_messages
@@ -121,6 +133,7 @@ class BudgetUsage:
     output_tokens: int | None = None
     total_tokens: int | None = None
     context_truncated: bool = False
+    context_budget: dict[str, Any] | None = None
     termination_reason: str = "running"
     error_type: str | None = None
     catalog_trace: dict[str, Any] | None = None
@@ -134,11 +147,13 @@ class BudgetUsage:
     extra_sql_suppressed: int = 0
     deterministic_result_finalized: bool = False
     deterministic_result_finalization_disabled: bool = False
+    deterministic_chart_rendered: bool = False
     llm_observations: list[dict[str, Any]] = field(default_factory=list)
     phase_timings_ms: dict[str, list[int]] = field(default_factory=dict)
     last_response_had_tool_calls: bool = False
     _tool_counts: dict[str, int] = field(default_factory=dict)
     _llm_started_at: float | None = field(default=None, init=False, repr=False)
+    _validated_chart_frame: Any | None = field(default=None, init=False, repr=False)
 
     def set_input(self, message: str) -> None:
         self.input_chars = len(message)
@@ -233,6 +248,73 @@ class BudgetUsage:
         if truncated:
             self.context_truncated = True
 
+    def record_context_budget(self, evidence: dict[str, Any]) -> None:
+        """Record bounded, content-free history-budget provenance.
+
+        The conversation filter is the only expected writer. Validate here so
+        arbitrary prompt/history text cannot enter `agent_runs.catalog_trace`.
+        The evidence measures characters, not provider tokenizer tokens.
+        """
+        if not isinstance(evidence, dict):
+            raise TypeError("context budget evidence must be a mapping")
+        numeric_keys = {
+            "max_context_chars",
+            "max_context_messages",
+            "input_chars",
+            "input_messages",
+            "input_turns",
+            "output_chars",
+            "output_messages",
+            "retained_turns",
+            "omitted_turns",
+            "max_context_tokens",
+            "input_context_tokens",
+            "output_context_tokens",
+        }
+        result: dict[str, Any] = {"version": "context-budget-v1"}
+        for key in numeric_keys:
+            value = evidence.get(key)
+            if isinstance(value, int) and value >= 0:
+                result[key] = value
+        for key in (
+            "summary_inserted",
+            "current_turn_compacted",
+            "current_user_exceeds_budget",
+        ):
+            result[key] = bool(evidence.get(key))
+        for key in ("tokenizer_mode", "tokenizer_id"):
+            value = evidence.get(key)
+            if isinstance(value, str):
+                result[key] = value[:256]
+        summary = evidence.get("summary")
+        if isinstance(summary, dict):
+            digest = summary.get("source_sha256")
+            if isinstance(digest, str) and len(digest) == 64:
+                result["summary"] = {
+                    "version": "history-summary-v1",
+                    "source_turn_start": _non_negative_int(
+                        summary.get("source_turn_start")
+                    ),
+                    "source_turn_end": _non_negative_int(summary.get("source_turn_end")),
+                    "source_message_count": _non_negative_int(
+                        summary.get("source_message_count")
+                    ),
+                    "source_chars": _non_negative_int(summary.get("source_chars")),
+                    "source_sha256": digest,
+                    "reason": _context_reason(summary.get("reason")),
+                }
+        self.context_budget = result
+
+    def context_budget_evidence(self) -> dict[str, Any] | None:
+        """Return a JSON-safe copy without exposing mutable internal state."""
+        if self.context_budget is None:
+            return None
+        summary = self.context_budget.get("summary")
+        return {
+            **self.context_budget,
+            "summary": dict(summary) if isinstance(summary, dict) else None,
+        }
+
     def record_catalog(self, trace: dict[str, Any]) -> None:
         """Record only the server-generated, non-content retrieval evidence."""
         if not isinstance(trace, dict):
@@ -266,6 +348,21 @@ class BudgetUsage:
     def mark_result_contract_satisfied(self) -> None:
         """Mark that a server-validated result is available for this request."""
         self.result_contract_satisfied = True
+
+    def set_validated_chart_frame(self, frame: Any) -> None:
+        """Keep an ephemeral validated frame for deterministic server charts.
+
+        This value is deliberately excluded from ``as_dict()`` and persistence.
+        It exists only for the lifetime of the current request.
+        """
+        self._validated_chart_frame = frame
+
+    def take_validated_chart_frame(self) -> Any | None:
+        """Read the request-local chart input without exporting it to evidence."""
+        return self._validated_chart_frame
+
+    def mark_deterministic_chart_rendered(self) -> None:
+        self.deterministic_chart_rendered = True
 
     def can_finalize_trusted_result(self) -> bool:
         """Whether the next Agent turn may avoid an ungrounded model summary."""
@@ -326,6 +423,7 @@ class BudgetUsage:
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
             "context_truncated": self.context_truncated,
+            "context_budget": self.context_budget_evidence(),
             "termination_reason": self.termination_reason,
             "error_type": self.error_type,
             "catalog_trace": self.catalog_trace,
@@ -336,6 +434,7 @@ class BudgetUsage:
             "extra_sql_suppressed": self.extra_sql_suppressed,
             "deterministic_result_finalized": self.deterministic_result_finalized,
             "deterministic_result_finalization_disabled": self.deterministic_result_finalization_disabled,
+            "deterministic_chart_rendered": self.deterministic_chart_rendered,
             "llm_observations": list(self.llm_observations),
             "performance": self.performance_evidence(),
         }
@@ -350,6 +449,14 @@ class BudgetUsage:
                 except (TypeError, ValueError):
                     return None
         return None
+
+
+def _non_negative_int(value: Any) -> int:
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
+def _context_reason(value: Any) -> str:
+    return value if value in {"char_budget", "message_budget", "both"} else "unknown"
 
 
 CURRENT_BUDGET: ContextVar[BudgetUsage | None] = ContextVar(

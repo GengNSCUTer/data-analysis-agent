@@ -27,6 +27,7 @@ from data_analysis_agent.budget import (
 )
 from data_analysis_agent.chat_runtime import BudgetedChatHandler
 from data_analysis_agent.context_builder import ContextBudgetFilter
+from data_analysis_agent.history_summary import build_llm_summary_provider
 from data_analysis_agent.conversation_store import (
     InvalidConversationId,
     PostgresConversationStore,
@@ -53,8 +54,8 @@ from data_analysis_agent.semantic_catalog import (
     CatalogRetriever,
 )
 from data_analysis_agent.question_router import QuestionRouter
+from data_analysis_agent.working_memory import WorkingMemory
 from data_analysis_agent.trusted_workflow import TrustedOlistWorkflowHandler
-from data_analysis_agent.visualization import TrustedVisualizeDataTool
 from vanna import Agent
 from vanna.core.agent.config import AgentConfig
 from vanna.core.enhancer import DefaultLlmContextEnhancer
@@ -76,6 +77,7 @@ WEB_COMPONENT_DIST = REPOSITORY_ROOT / "frontends" / "webcomponent" / "dist"
 QUERY_RESULTS_DIRECTORY = Path(
     os.getenv("VANNA_QUERY_RESULTS_DIR", "/tmp/data-analysis-agent-vanna-query-results")
 )
+DEMO_PORT = int(os.getenv("DATA_ANALYSIS_DEMO_PORT", "32010"))
 
 
 class DemoSessionRequest(BaseModel):
@@ -129,7 +131,10 @@ def create_app() -> FastAPI:
         catalog_retriever,
         base_enhancer=DefaultLlmContextEnhancer(agent_memory),
     )
-    question_router = QuestionRouter(catalog_retriever)
+    question_router = QuestionRouter(
+        catalog_retriever,
+        max_result_rows=settings.max_rows,
+    )
     # A process-local fallback keeps this public demo usable without adding a
     # secret to source control. Restarts invalidate old cookies by design.
     signer = DemoSessionSigner(
@@ -159,9 +164,6 @@ def create_app() -> FastAPI:
         ),
         access_groups=["analyst", "admin"],
     )
-    registry.register_local_tool(
-        TrustedVisualizeDataTool(query_file_system), access_groups=["analyst", "admin"]
-    )
     agent = Agent(
         llm_service=llm_service,
         tool_registry=registry,
@@ -173,6 +175,10 @@ def create_app() -> FastAPI:
             ContextBudgetFilter(
                 max_chars=budget.max_context_chars,
                 max_messages=budget.max_context_messages,
+                max_tokens=budget.max_history_tokens,
+                summary_provider=build_llm_summary_provider(
+                    provider_llm_service, model_name=model_name
+                ),
             )
         ],
         llm_middlewares=[BudgetSafetyMiddleware()],
@@ -205,6 +211,31 @@ def create_app() -> FastAPI:
     @app.get("/api/project/evidence")
     async def evidence() -> dict:
         return METRIC_EVIDENCE
+
+    @app.get("/api/project/runtime-contract")
+    async def runtime_contract() -> dict:
+        """Expose only versioned, server-owned capability facts for diagnostics."""
+        return {
+            "workspace_id": OLIST_WORKSPACE.workspace_id,
+            "dataset_version": DATASET_VERSION,
+            "metric_version": METRIC_VERSION,
+            "catalog_version": catalog_retriever.catalog.catalog_version,
+            "policy_version": catalog_retriever.catalog.policy_version,
+            "metric_ids": [metric.metric_id for metric in catalog_retriever.catalog.metrics],
+            "chart_contract": {
+                "supported_types": [
+                    "bar",
+                    "horizontal_bar",
+                    "line",
+                    "area",
+                    "donut",
+                ],
+                "maximum_result_rows": 200,
+                "maximum_x_values": 120,
+                "maximum_series": 8,
+                "donut_maximum_categories": 8,
+            },
+        }
 
     @app.get("/api/project/audits")
     async def audits(request: Request) -> list[dict]:
@@ -256,6 +287,8 @@ def create_app() -> FastAPI:
             return JSONResponse({"detail": str(exc)}, status_code=400)
         if conversation is None:
             return JSONResponse({"detail": "conversation not found"}, status_code=404)
+        memory = WorkingMemory.from_mapping(conversation.metadata.get("working_memory"))
+        artifact = memory.previous_result_artifact
         return JSONResponse(
             {
                 "conversation_id": conversation.id,
@@ -277,6 +310,10 @@ def create_app() -> FastAPI:
                     for message in conversation.messages
                     if message.role != "system"
                 ],
+                # This is a bounded replay card, not a SQL/result-table
+                # export.  The client may render it after a reload without
+                # triggering the model or database.
+                "trusted_result_artifact": artifact.as_dict() if artifact else None,
             }
         )
 
@@ -346,4 +383,4 @@ def create_app() -> FastAPI:
 
 
 if __name__ == "__main__":
-    uvicorn.run(create_app(), host="127.0.0.1", port=32010)
+    uvicorn.run(create_app(), host="127.0.0.1", port=DEMO_PORT)

@@ -34,9 +34,9 @@ Replace HistorySummary v1's provenance-only boundary with a bounded semantic sum
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-001 | Add `token_budget.py` with exact-local-tokenizer and explicitly estimated fallback counters; add `max_prompt_tokens=64000`, prompt reservations, history token budget and semantic-summary token limits to `RequestBudget`. |  |  |
-| TASK-002 | Extend `history_summary.py` with a versioned semantic summary record, source-digest reuse and a strict LLM summary prompt that treats conversation text as data, not instructions. |  |  |
-| TASK-003 | Refactor `ContextBudgetFilter` to select complete turns by token/message budget, inject semantic summary when available, and fall back to provenance boundary on summarizer failure. |  |  |
+| TASK-001 | Add `token_budget.py` with exact-local-tokenizer and explicitly estimated fallback counters; add `max_prompt_tokens=64000`, prompt reservations, history token budget and semantic-summary token limits to `RequestBudget`. | ✅ | 2026-09-21 |
+| TASK-002 | Extend `history_summary.py` with a versioned semantic summary record, source-digest reuse and a strict LLM summary prompt that treats conversation text as data, not instructions. | ✅ | 2026-09-21 |
+| TASK-003 | Refactor `ContextBudgetFilter` to select complete turns by token/message budget, inject semantic summary when available, and fall back to provenance boundary on summarizer failure. | ✅ | 2026-09-21 |
 
 ### Implementation Phase 2
 
@@ -68,6 +68,7 @@ Replace HistorySummary v1's provenance-only boundary with a bounded semantic sum
 
 - **DEP-001**: `ContextBudgetFilter`, `BudgetedChatHandler`, `WorkingMemory`, `ResultArtifact`, `TrustedRunSqlTool`, `PostgresConversationStore` and the trusted demo remain the integration points.
 - **DEP-002**: Exact accounting requires a local official tokenizer directory supplied through `DATA_ANALYSIS_TOKENIZER_PATH`; the current provider does not expose it in this workspace.
+- **DEP-003**: SiliconFlow currently exposes `deepseek-ai/DeepSeek-V4-Flash` in its model catalog but not a tokenizer endpoint or public tokenizer revision. Public DeepSeek-V3 assets use `LlamaTokenizerFast` and a 131072-token configuration; that is a documented fallback estimate for V4, not proof of identity.
 
 ## 5. Files
 
