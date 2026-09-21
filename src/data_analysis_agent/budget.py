@@ -268,6 +268,7 @@ class BudgetUsage:
             "retained_turns",
             "omitted_turns",
             "max_context_tokens",
+            "max_prompt_tokens",
             "input_context_tokens",
             "output_context_tokens",
         }

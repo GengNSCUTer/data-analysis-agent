@@ -38,6 +38,7 @@ class ContextBudgetFilter(ConversationFilter):
         usage: BudgetUsage | None = None,
         *,
         max_tokens: int | None = None,
+        max_prompt_tokens: int | None = None,
         token_counter: TokenCounter | None = None,
         summary_provider: SummaryProvider | None = None,
     ):
@@ -47,6 +48,7 @@ class ContextBudgetFilter(ConversationFilter):
         self.max_messages = max_messages
         self.usage = usage
         self.max_tokens = max_tokens
+        self.max_prompt_tokens = max_prompt_tokens
         self.token_counter = token_counter or DEFAULT_TOKEN_COUNTER
         self.summary_provider = summary_provider
         self._summary_cache: dict[str, HistorySummary] = {}
@@ -220,6 +222,7 @@ class ContextBudgetFilter(ConversationFilter):
                     "current_turn_compacted": current_turn_compacted,
                     "current_user_exceeds_budget": current_user_exceeds_budget,
                     "max_context_tokens": self.max_tokens,
+                    "max_prompt_tokens": self.max_prompt_tokens,
                     "input_context_tokens": input_tokens,
                     "output_context_tokens": self.token_counter.count_messages(result),
                     "tokenizer_mode": self.token_counter.mode,

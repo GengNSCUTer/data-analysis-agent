@@ -176,6 +176,7 @@ def create_app() -> FastAPI:
                 max_chars=budget.max_context_chars,
                 max_messages=budget.max_context_messages,
                 max_tokens=budget.max_history_tokens,
+                max_prompt_tokens=budget.max_prompt_tokens,
                 summary_provider=build_llm_summary_provider(
                     provider_llm_service, model_name=model_name
                 ),

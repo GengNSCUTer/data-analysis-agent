@@ -254,6 +254,7 @@ def _safe_context_budget(value: Any) -> dict[str, Any] | None:
         "max_context_chars",
         "max_context_messages",
         "max_context_tokens",
+        "max_prompt_tokens",
         "input_chars",
         "input_messages",
         "input_turns",
