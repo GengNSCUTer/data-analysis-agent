@@ -15,7 +15,7 @@ from .history_summary import (
     SummaryProvider,
     message_chars,
 )
-from .token_budget import DEFAULT_TOKEN_COUNTER, TokenCounter
+from .token_budget import TokenCounter
 
 if TYPE_CHECKING:
     from vanna.core.storage import Message as MessageType
@@ -50,7 +50,9 @@ class ContextBudgetFilter(ConversationFilter):
         self.usage = usage
         self.max_tokens = max_tokens
         self.max_prompt_tokens = max_prompt_tokens
-        self.token_counter = token_counter or DEFAULT_TOKEN_COUNTER
+        # Construct after application dotenv loading so a local tokenizer path
+        # configured by the service is actually observed.
+        self.token_counter = token_counter or TokenCounter()
         self.summary_provider = summary_provider
         self._summary_cache: dict[str, HistorySummary] = {}
 
