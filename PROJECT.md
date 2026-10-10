@@ -906,3 +906,9 @@ TheLook 在线接入仍未实现，后训练资产未改。
 README 已更新为当前本地登录、来源绑定嵌入令牌、完整 CSV 下载、五种服务端图表与会话链路。产品解析器只接受本地账号会话或有效 embed token，不接受演示角色 cookie；偏好仍仅保存、尚未应用展示。
 
 重读既有主实验原始终测汇总后，纠正两项对外口径：最新多 Schema 1.5B 主模型的训练集已包含 TheLook，因此其 TheLook final test 是已见 Schema 的留出评测；Olist Base 的 3 条 Gold 匹配由 ordered 2 条和仅 bag 1 条构成，不能写成 ordered 3 条。历史 Olist-only 迁移实验不受此结论替换。本轮没有启动新训练或重跑 protected final test。
+
+### 2026-10-10：后端与 Agent 实习方向的四周完善与学习路线
+
+当前代码基线 `8bdb1de` 已推送到 origin/main。结合用户简历的两个项目和第二轮学习计划，新增 [`plan/process-agent-internship-improvement-v1.md`](plan/process-agent-internship-improvement-v1.md)，默认四周、每次一个具体单元。第一周掌握真实链路并完成产品质量基线；第二周围绕前三类真实错误改善业务回答；第三周补隔离环境部署、可配置 workspace、权限与并发证据；第四周审阅既有 SFT 并形成开源交付与面试口径。企业规模交付不作为四周承诺。
+
+本项目突出结构化数据、指标 grain/口径、SQL 信任边界和结果证据；另一知识 Agent 项目继续承担 RAG、通用工具与 Durable 主题。计算机基础不重复安排。后训练保留为小比例、可解释的已有实验专题；本地候选接入必须先验证离线 QuerySpec 与在线 QueryPlan 输入关系，默认 provider 不自动切换。新一轮大规模数据扩展、完整训练、DPO/RL 与 protected test 重跑均未启动。路线当前为 Planned，下一单元是第一周 Day 1 的请求链追踪与用户复述。当前事实、核验范围、口径修正及四周路线已同步飞书项目文档 revision 253。

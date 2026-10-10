@@ -7,6 +7,7 @@
 | 目的 | 入口 | 文档性质 |
 | --- | --- | --- |
 | 了解项目目标、当前阶段和技术决策 | [`../PROJECT.md`](../PROJECT.md) | 当前项目基线 |
+| 查看新的四周产品完善、代码学习与实习面试路线 | [`../plan/process-agent-internship-improvement-v1.md`](../plan/process-agent-internship-improvement-v1.md) | 2026-10-10 计划；不重复计算机基础，不自动启动训练 |
 | 了解本周已核实的用户请求/可信执行链 | [`architecture/project-v1-baseline-review.md`](architecture/project-v1-baseline-review.md) | Week 1 当前审查基线 |
 | 查看有证据支持的产品优化候选与暂不处理项 | [`architecture/project-v1-gap-map.md`](architecture/project-v1-gap-map.md) | Week 1 缺口地图，不是实时任务台账 |
 | 查看嵌入式 Copilot 与长对话状态的目标架构 | [`architecture/embedded-copilot-and-memory-design-v1.md`](architecture/embedded-copilot-and-memory-design-v1.md) | M1 宿主合同入口；按 M1–M7 状态阅读 |
