@@ -4,7 +4,7 @@
 
 ## Day 1：沿一条问题认识请求链
 
-场景：“按客户州统计有效订单数前五名，并生成柱状图”。完整调用关系和本次请求证据见 [`产品请求架构`](../architecture/product-request-architecture-v1.md)。目标是用户能画出请求链，区分代码/模型职责，以及离线 QuerySpec 与在线 QueryPlan；入口复述已完成，当前进入 Catalog 与 Router 小段，Day 1 尚未完成。
+场景：“按客户州统计有效订单数前五名，并生成柱状图”。完整调用关系和本次请求证据见 [`产品请求架构`](../architecture/product-request-architecture-v1.md)。目标是用户能画出请求链，区分代码/模型职责，以及离线 QuerySpec 与在线 QueryPlan；入口和 Router 复述已完成，当前进入 QueryPlan 与模型上下文小段，Day 1 尚未完成。
 
 ### 第一小段：启动装配与请求入口
 
@@ -61,14 +61,62 @@
 
 第三例是在没有已确认时间范围的初始会话中运行的。当前实现不会自行把“本月”解析成明确日期窗口；这是当前产品行为，不能泛化成所有 Agent 都应这样处理。三个例子只验证这些问法，不证明规则覆盖所有中文表达。
 
-本段待用户回答：
+2026-10-10 问答：
 
 1. 两个问题都提到“有效订单数”，为什么问统计口径不用查数据库，而问订单有多少需要查？
 2. “本月有效订单数是多少”已经被 classify 识别成数据查询，为什么 admit_sql_request 仍可以阻止生成 SQL？
 
+用户回答：
+
+1. “因为统计口径相当于是指标的定义，直接返回就可以了，订单数量则需要具体看数据库有多少。”
+2. “admit是判断当前query是否足够明确的，检查分组维度，归属，时间等，本月并不是具体的日期，所以会被打回，让用户补充进一步信息。”
+
+反馈：定义与实际数值、分类与准入的区别均理解正确。“本月”是相对时间，若有确定的时间锚点和时区，可以转换成明确日期窗口；当前初始会话的实现没有自动完成这一步，才要求补充，不是相对时间天然不可查询。
+
+### 第三小段：在线 QueryPlan、模型上下文与离线 QuerySpec
+
+本段目标是区分“服务端提出的查询要求”和“模型生成的 SQL”，并识别线上/离线输入差别。只核对当前例子的计划构造与上下文，不新增功能或调用在线模型。
+
+先看 `src/data_analysis_agent/query_plan.py:QueryPlan.from_selection()`。输入是 CatalogSelection、当前问题、已准入的 QuestionRoute 和受控会话状态，输出 QueryPlan 对象。它通过代码整理指标、维度、时间、必要结果列和聚合策略；不返回 SQL，也不执行数据库查询。
+
+本地按同一问题构造出的字段节选为：
+
+```json
+{
+  "plan_type": "single_metric",
+  "metric_ids": ["paid_order_count"],
+  "dimensions": ["customer_state"],
+  "time_range": null,
+  "required_result_columns": ["customer_state", "paid_order_count"],
+  "execution_strategy": "single_metric_aggregation",
+  "top_n": {}
+}
+```
+
+`required_result_columns` 意味着最终结果需要州和有效订单数，不能只给一个订单总数，也不能顺手返回客户标识。`execution_strategy` 描述聚合方式，并不是 SQL 文本。本例没有用户指定的时间窗口；`top_n` 为空是当前结构化排行覆盖缺口，不能擅自把例子写成 top_n=5。之前真实请求的 LIMIT 5 和 Gold 排序确实正确，但来自候选 SQL 对问题的遵循。
+
+再看 `QueryPlan.prompt_context()`：它把对象转换成模型可读的查询要求，例如结果列白名单、维度、时间和聚合策略。`as_dict()` 则用于结构化状态与证据，两者用途不同。
+
+上下文传递可在 `chat_runtime.py` 的 `usage.set_query_plan(query_plan.as_dict(), query_plan.prompt_context())` 和 `semantic_catalog.py:CatalogContextEnhancer.enhance_system_prompt()` 对照：后者将本轮 Catalog、受控 WorkingMemory 和 QueryPlan 文本附到系统提示词。模型随后依据系统提示词、用户问题和工具定义生成候选 SQL；计划文本不能取代后续的 SQL 检查。
+
+与离线数据构建的区别：
+
+| 对象 | 来源与用途 | SQL 如何产生 |
+| --- | --- | --- |
+| 在线 QueryPlan | 当前自然语言问题、Catalog 选择、路由和受控状态，经服务端代码整理 | 作为模型上下文的一部分；模型生成候选 SQL |
+| 离线 QuerySpec | 预先设计并验证、锁定版本的结构化样本规格，规定指标、shape、时间和 join program 等 | deterministic Gold renderer 将已验证规格编译为 Gold SQL |
+
+离线 `olist_queryspec.py:render_gold_sql()` 不解析自然语言；需要已经构建好的 QuerySpec。当前多 Schema SQL-only 训练模板 `multi_schema_sql_only_sft.py:render_prompt()` 明确包含 Catalog、QuerySpec、Result Contract 和中文问题。在线使用 QueryPlan 文本与 Agent 工具调用，二者不是同一个对象，也不是完全相同的输入模板；已有离线成绩不能直接证明 Adapter 能替换当前线上模型。
+
+本次直接运行计划构造和 prompt 断言通过，核对指标、维度、结果列、聚合策略和实际 top_n；没有请求数据库或在线 LLM。这只证明该例子的代码输出，不是模型质量评测。
+
+本段待用户回答：
+
+1. 当前 QueryPlan 是谁生成的？它已经是一条 SQL 吗，候选 SQL 又由谁生成？
+2. 既然离线有 renderer 能生成 Gold SQL，为什么不能说当前用户提交自然语言后，就由这个 renderer 直接生成线上 SQL？
+
 ### 后续小段（尚未讲解）
 
-- 在线 QueryPlan 与模型上下文：怎样约束候选 SQL，与离线 QuerySpec 有什么区别。
 - 工具执行到结果证据：为什么 SQL 可运行、合同通过、业务正确是不同层次。
 
-本次真实请求已核验，但运行成功不能代替用户读代码。Router 本段、后续两段和闭卷链路复述完成后，才将 Day 1 标记完成。
+本次真实请求已核验，但运行成功不能代替用户读代码。QueryPlan 本段、结果证据小段和闭卷链路复述完成后，才将 Day 1 标记完成。
