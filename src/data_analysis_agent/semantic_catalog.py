@@ -36,6 +36,14 @@ CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "catalog" / "olist
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]+$")
 _WORD = re.compile(r"[a-z0-9_]+|[\u4e00-\u9fff]+")
 _ROLES = frozenset({"analyst", "admin"})
+# Unique spoken forms that still name one Catalog metric. Ambiguous words
+# such as “金额” stay out: they are not a safe alias for GMV or freight.
+_COLLOQUIAL_METRIC_HINTS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"卖得最[好火]|最火|热销|火爆"), "item_count"),
+    (re.compile(r"取消订单最多"), "canceled_order_count"),
+    (re.compile(r"订单最多"), "paid_order_count"),
+)
+_ORDER_COUNT_CONFLICT = re.compile(r"取消订单|已送达订单|不可用订单")
 
 
 class CatalogValidationError(ValueError):
@@ -264,9 +272,10 @@ class ResultContract:
         )
         # A scalar result has no time column to validate.  Require a time column
         # only when the request explicitly asks for a temporal breakdown.
-        temporal_request = bool(
-            re.search(r"按?年|按?季度|按?月|按?周|按?日|每天|各月|趋势|时间序列|日期", question)
-        )
+        # "2018年" is a filter year; it must not demand a `time` result column.
+        from .query_plan import QueryPlan
+
+        temporal_request = QueryPlan._time_grain(question) is not None
         result_time_column = time_fields[0] if temporal_request and len(time_fields) == 1 else None
         time_aliases = (
             tuple(dict.fromkeys(("time", "analysis_time", "date", "day", "week", "month", "quarter", "year", *time_fields)))
@@ -285,6 +294,16 @@ class ResultContract:
                 # presentation metadata and never changes the SQL contract.
                 if column.aliases:
                     result_column_labels.setdefault(column.name, column.aliases[0])
+        # The Olist online result contract canonicalizes category-grouped
+        # output through the translation dimension.  The physical SQL alias is
+        # still product_category_name, so the display label must not imply the
+        # returned values are the original Portuguese category strings.
+        selected_join_ids = tuple(join.join_id for join in selection.joins)
+        if (
+            "product_category_name" in requested_dimensions
+            and "products_translation" in selected_join_ids
+        ):
+            result_column_labels["product_category_name"] = "商品品类（英文展示名）"
         if result_time_column:
             result_column_labels.setdefault("time", "时间")
         attribution_requirements = cls._attribution_requirements(
@@ -302,7 +321,7 @@ class ResultContract:
             result_time_column_aliases=time_aliases,
             requested_start=(time_range or {}).get("start"),
             requested_end=(time_range or {}).get("end"),
-            selected_join_ids=tuple(join.join_id for join in selection.joins),
+            selected_join_ids=selected_join_ids,
             result_column_labels=MappingProxyType(result_column_labels),
             metric_fact_grains=MappingProxyType(
                 {metric.metric_id: metric.grain for metric in selection.metrics}
@@ -708,6 +727,8 @@ class CatalogLoader:
             mode = raw_policy["mode"]
             if mode not in {
                 "safe_direct",
+                "multi_membership",
+                "payment_share",
                 "requires_attribution",
                 "server_owned_rule",
             }:
@@ -908,24 +929,29 @@ class CatalogRetriever:
         # A requested dimension may be separated from the metric fact by one or
         # more bridge tables.  Close the selected set over the shortest legal
         # Catalog graph paths before considering optional ranked tables.
-        requested_dimensions = self.dimension_table_candidates(
-            normalized, selected_metrics, visible_tables
+        requested_dimensions = self._required_dimension_candidates(
+            question, selected_metrics, visible_tables
         )
-        for dimension, candidates in requested_dimensions:
-            if any(table_id in selected_table_ids for table_id, _ in candidates):
+        visible_ids = {table.table_id for table in visible_tables}
+        for _dimension, candidates in requested_dimensions:
+            if any(table_id in selected_table_ids for table_id, _score in candidates):
                 continue
             for target_table, _score in candidates:
                 path = self._shortest_path(
                     selected_table_ids,
                     target_table,
-                    allowed_table_ids={table.table_id for table in visible_tables},
+                    allowed_table_ids=visible_ids,
                 )
                 if path is None:
                     continue
-                candidate_ids = selected_table_ids | set(path[0])
-                if len(candidate_ids) > self.max_tables or len(self._joins_for(candidate_ids)) > self.max_joins:
+                fitted = self._fit_required_tables(
+                    selected_table_ids,
+                    set(path[0]),
+                    protected_ids=required_table_ids,
+                )
+                if fitted is None:
                     continue
-                selected_table_ids = candidate_ids
+                selected_table_ids = fitted
                 break
         # A requested dimension may need a lower-scoring bridge table (for
         # example, translation -> products -> order items). Iterate to a fixed
@@ -1076,6 +1102,53 @@ class CatalogRetriever:
                 queue.append((neighbor, next_tables, next_joins))
         return None
 
+    def _required_dimension_candidates(
+        self,
+        question: str,
+        metrics: Sequence[MetricDefinition],
+        visible_tables: list[CatalogTable],
+    ) -> tuple[tuple[str, tuple[tuple[str, float], ...]], ...]:
+        """Tables for grouping and filters outrank optional catalog slices."""
+
+        requested = list(self.dimension_table_candidates(question, metrics, visible_tables))
+        known = {dimension for dimension, _candidates in requested}
+        from .query_plan import QueryPlan
+
+        for dimension in QueryPlan._dimensions(question, tuple(metrics)):
+            if dimension in known:
+                continue
+            tables = tuple(
+                dict.fromkeys(
+                    table.table_id
+                    for table in visible_tables
+                    if any(column.name == dimension for column in table.columns)
+                )
+            )
+            if tables:
+                requested.append((dimension, tuple((table_id, 3.0) for table_id in tables)))
+        return tuple(requested)
+
+    def _fit_required_tables(
+        self,
+        selected_ids: set[str],
+        path_tables: set[str],
+        *,
+        protected_ids: set[str],
+    ) -> set[str] | None:
+        """Keep metric tables and drop optional ones to fit a required path."""
+
+        candidate = set(selected_ids) | set(path_tables)
+        optional = [
+            table_id
+            for table_id in sorted(candidate)
+            if table_id not in protected_ids and table_id not in path_tables
+        ]
+        while len(candidate) > self.max_tables and optional:
+            candidate.remove(optional.pop())
+        if len(candidate) > self.max_tables or len(self._joins_for(candidate)) > self.max_joins:
+            return None
+        return candidate
+
     def requested_dimensions(
         self,
         question: str,
@@ -1128,6 +1201,27 @@ class CatalogRetriever:
                     for score, table_id in sorted(candidates, key=lambda item: (-item[0], item[1]))
                 )
                 found.append((dimension, ranked))
+        # A state code such as “只看 SP 客户” is a filter, not the word “州”.
+        # The customer dimension table still has to be in the prompt or the
+        # model cannot see customer_state.
+        from .query_plan import customer_state_filter
+
+        if (
+            customer_state_filter(question)
+            and "customer_state" in allowed
+            and not any(dimension == "customer_state" for dimension, _ in found)
+        ):
+            state_tables = tuple(
+                dict.fromkeys(
+                    table.table_id
+                    for table in tables
+                    if any(column.name == "customer_state" for column in table.columns)
+                )
+            )
+            if state_tables:
+                found.append(
+                    ("customer_state", tuple((table_id, 3.0) for table_id in state_tables))
+                )
         return tuple(found)
 
     def _rank_metrics(
@@ -1137,6 +1231,9 @@ class CatalogRetriever:
         ranked = []
         for metric in metrics:
             score, terms = self._score(question, (*metric.aliases, metric.metric_id, metric.name))
+            score, terms = self._apply_colloquial_metric_hint(
+                question_norm, metric, score, terms
+            )
             ranked.append((metric, score, terms))
         ranked.sort(key=lambda item: (-item[1], item[0].metric_id))
         # Chinese metric names frequently contain one another: for example,
@@ -1152,6 +1249,57 @@ class CatalogRetriever:
             for item in ranked
             if not self._metric_is_fully_shadowed(item, ranked, question_norm)
         ]
+
+    def _apply_colloquial_metric_hint(
+        self,
+        question_norm: str,
+        metric: MetricDefinition,
+        score: float,
+        terms: tuple[str, ...],
+    ) -> tuple[float, tuple[str, ...]]:
+        """Raise a unique spoken form to the alias threshold.
+
+        This does not invent a metric. The hint must name a metric that is
+        already in the Catalog, and conflicting order-count phrases stay out.
+        """
+
+        if score >= self.min_score:
+            return score, terms
+        for pattern, metric_id in _COLLOQUIAL_METRIC_HINTS:
+            if metric.metric_id != metric_id:
+                continue
+            match = pattern.search(question_norm)
+            if match is None:
+                continue
+            if metric_id == "paid_order_count" and _ORDER_COUNT_CONFLICT.search(
+                question_norm
+            ):
+                continue
+            return 2.25, (match.group(0), *terms)
+        return score, terms
+
+    def hinted_dimensions(
+        self, question: str, user: User | None = None
+    ) -> tuple[str, ...]:
+        """Dimensions named in the question, even when no metric was selected.
+
+        Used only to write a more precise missing-metric clarification. It
+        does not authorize SQL or invent a metric.
+        """
+
+        role = _role_for_user(user)
+        visible_metrics = [
+            metric for metric in self.catalog.metrics if role in metric.role_visibility
+        ]
+        visible_tables = [
+            table for table in self.catalog.tables if role in table.role_visibility
+        ]
+        return tuple(
+            dimension
+            for dimension, _candidates in self.dimension_table_candidates(
+                question, visible_metrics, visible_tables
+            )
+        )
 
     @staticmethod
     def _metric_aliases(metric: MetricDefinition) -> tuple[str, ...]:
@@ -1344,6 +1492,10 @@ class CatalogRetriever:
                 for dimension, policy in metric.dimension_policies.items():
                     if policy.mode == "safe_direct":
                         action = "可按安全直连维度执行"
+                    elif policy.mode == "multi_membership":
+                        action = "可直接执行：每个分组各自去重计数，各组合计可以大于总体"
+                    elif policy.mode == "payment_share":
+                        action = "可直接执行：按订单内 payment_value 占比分摊金额"
                     elif policy.mode == "requires_attribution":
                         action = "必须先向用户澄清"
                     elif self.catalog.has_available_attribution_rule(
@@ -1420,18 +1572,21 @@ class CatalogContextEnhancer(LlmContextEnhancer):
                 system_prompt, user_message, user
             )
         usage = CURRENT_BUDGET.get()
-        retrieval_question = (
-            getattr(usage, "catalog_question", None) or user_message
-            if usage is not None
-            else user_message
-        )
-        selection = self.retriever.retrieve(retrieval_question, user)
-        if usage is not None and hasattr(usage, "record_catalog"):
-            from .metric_context import PROMPT_VERSION
-
-            usage.record_catalog(
-                {**selection.trace.as_dict(), "prompt_version": PROMPT_VERSION}
+        catalog_prompt = getattr(usage, "catalog_prompt", None) if usage is not None else None
+        if not catalog_prompt:
+            retrieval_question = (
+                getattr(usage, "catalog_question", None) or user_message
+                if usage is not None
+                else user_message
             )
+            selection = self.retriever.retrieve(retrieval_question, user)
+            catalog_prompt = selection.prompt
+            if usage is not None and hasattr(usage, "record_catalog"):
+                from .metric_context import PROMPT_VERSION
+
+                usage.record_catalog(
+                    {**selection.trace.as_dict(), "prompt_version": PROMPT_VERSION}
+                )
         working_memory = getattr(usage, "working_memory", None) if usage else None
         state_prompt = ""
         if isinstance(working_memory, dict):
@@ -1441,4 +1596,4 @@ class CatalogContextEnhancer(LlmContextEnhancer):
         query_plan_prompt = ""
         if usage is not None:
             query_plan_prompt = str(getattr(usage, "query_plan_prompt", "") or "")
-        return f"{system_prompt}\n\n{selection.prompt}{state_prompt}{query_plan_prompt}"
+        return f"{system_prompt}\n\n{catalog_prompt}{state_prompt}{query_plan_prompt}"

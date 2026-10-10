@@ -49,8 +49,12 @@ class SequenceRunner(SqlRunner):
             metric_columns=context.metadata.get("metric_result_columns", ()),
         )
         context.metadata["result_validation"] = validation.as_dict()
-        if not validation.safe_to_answer:
+        if not validation.safe_to_display:
             raise ResultValidationError(validation)
+        if validation.dropped_columns:
+            frame = frame.drop(columns=list(validation.dropped_columns), errors="ignore")
+        if not validation.safe_to_answer:
+            context.metadata["result_display_notice"] = validation.reason
         return frame
 
 
@@ -101,6 +105,35 @@ async def test_normal_query_passes_result_contract(tmp_path) -> None:
     assert runner.calls == [
         "SELECT COUNT(order_id) AS paid_order_count FROM fact_orders"
     ]
+    presentation = result.metadata["result_presentation"]
+    assert presentation["total_row_count"] == 1
+    assert presentation["preview_row_count"] == 1
+    assert presentation["display_truncated"] is False
+    assert presentation["preview_export_allowed"] is False
+    assert presentation["full_export_allowed"] is False
+    assert result.ui_component.rich_component.total_row_count == 1
+    assert result.ui_component.rich_component.preview_row_count == 1
+    assert result.ui_component.rich_component.exportable is False
+
+
+@pytest.mark.asyncio
+async def test_presenter_carries_persisted_artifact_reference(tmp_path) -> None:
+    runner = SequenceRunner([pd.DataFrame({"paid_order_count": [7]})])
+    context = _context()
+    result = await _tool(
+        runner,
+        None,
+        tmp_path,
+        result_artifact_store=ResultArtifactStore(tmp_path / "artifacts"),
+    ).execute(
+        context,
+        RunSqlToolArgs(sql="SELECT COUNT(order_id) AS paid_order_count FROM fact_orders"),
+    )
+
+    assert result.success is True
+    artifact_id = context.metadata["result_artifact"]["artifact_id"]
+    assert result.metadata["result_presentation"]["artifact_id"] == artifact_id
+    assert result.ui_component.rich_component.audit_ref == "trusted-tool-request"
 
 
 @pytest.mark.asyncio
@@ -150,6 +183,7 @@ async def test_execution_error_is_repaired_once_and_reexecuted(tmp_path) -> None
     assert evidence["repair_error_category"] == "unknown_column"
     assert evidence["repair_execution_status"] == "succeeded"
     assert evidence["terminal_reason"] is None
+    assert "result_presentation" in result.metadata
 
 
 @pytest.mark.asyncio
@@ -170,6 +204,23 @@ async def test_unsafe_repair_candidate_is_rejected_without_second_execution(tmp_
         "repaired_sql_rejected_by_policy"
     )
     assert result.metadata["terminal_reason"] == "repaired_sql_rejected_by_policy"
+
+
+@pytest.mark.asyncio
+async def test_missing_dimension_displays_the_metric_without_a_trusted_stamp(tmp_path) -> None:
+    runner = SequenceRunner([pd.DataFrame({"paid_order_count": [7]})])
+    context = _context()
+    context.metadata["required_result_columns"] = ["customer_state", "paid_order_count"]
+    result = await _tool(runner, None, tmp_path).execute(
+        context,
+        RunSqlToolArgs(sql="SELECT COUNT(order_id) AS paid_order_count FROM fact_orders"),
+    )
+
+    assert result.success is True
+    assert result.metadata.get("terminal_reason") is None
+    assert context.metadata.get("result_contract_satisfied") is None
+    assert "customer_state" in context.metadata["result_display_notice"]
+    assert "customer_state" in result.ui_component.rich_component.description
 
 
 @pytest.mark.asyncio

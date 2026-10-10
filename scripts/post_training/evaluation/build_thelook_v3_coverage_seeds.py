@@ -2,8 +2,9 @@
 
 This command intentionally stops before Gold rendering, database access,
 question generation, or model invocation.  It creates only QuerySpec-backed
-coverage seeds, then verifies their frozen quota contract and their QuerySpec
-identity does not reuse historical protected TheLook v2 cases.
+coverage seeds and verifies their frozen quota contract.  The v3 contract
+explicitly permits four reviewed v2 snapshot plans, and reports that reuse
+rather than forcing artificial date variants or hiding the metric.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -33,7 +34,7 @@ from data_analysis_agent.thelook_v3_coverage import (  # noqa: E402
 )
 
 
-DEFAULT_OUTPUT = ROOT / "data" / "fixtures" / "thelook_v3_coverage_seeds_v1.jsonl"
+DEFAULT_OUTPUT = ROOT / "data" / "fixtures" / "thelook_v3_coverage_seeds_v2.jsonl"
 DEFAULT_V2_CASES = Path(
     "/disk2/gengnan/data-analysis-agent-data/evals/"
     "thelook-cross-schema-final-test-v2-20260910/cases.jsonl"
@@ -82,9 +83,41 @@ def _fixed_offset_windows(*, span_months: int, count: int = 48) -> tuple[tuple[s
     return tuple(windows)
 
 
+def _fixed_day_windows(
+    *, span_days: int, count: int = 48, step_days: int = 14
+) -> tuple[tuple[str, str], ...]:
+    """Build a deterministic short-window pool for high-cardinality slices.
+
+    The starts are spread across the first two years of the snapshot while the
+    requested interval stays short enough for the 200-row display contract.
+    This is a predeclared coverage rule, not a runtime retry strategy.
+    """
+
+    first_start = date(2019, 2, 1)
+    return tuple(
+        (
+            (first_start + timedelta(days=step_days * index)).isoformat(),
+            (first_start + timedelta(days=step_days * index + span_days)).isoformat(),
+        )
+        for index in range(count)
+    )
+
+
 # Deliberately offset from v2's January-aligned annual windows.  They are
 # static candidates only; actual database admission occurs in the next stage.
 _RANGE_WINDOWS = _fixed_offset_windows(span_months=3)
+# High-cardinality dimensions are deliberately covered groupings. Three-month
+# windows can legitimately exceed the 200-row presentation contract, whereas
+# one-month windows keep the requested business slice displayable. This is a
+# fixed dimension rule, not an admission-time retry or generated date search;
+# the runtime gate remains authoritative for the actual row count.
+# One-week windows keep high-cardinality dimensions displayable while still
+# covering multiple points in the frozen snapshot.  The interval and spacing
+# are part of the v3 coverage contract and are never selected from failures.
+_HIGH_CARDINALITY_RANGE_WINDOWS = _fixed_day_windows(span_days=7)
+_HIGH_CARDINALITY_DIMENSIONS = frozenset(
+    {"customer_city", "product_brand", "user_state"}
+)
 _SERIES_WINDOWS: Mapping[str, tuple[tuple[str, str], ...]] = {
     "day": _fixed_offset_windows(span_months=2),
     "week": _fixed_offset_windows(span_months=6),
@@ -186,7 +219,7 @@ _FAMILY_PLANS: tuple[FamilyPlan, ...] = (
     ),
     FamilyPlan(
         "event_session_scalar_series",
-        {"scalar": 26, "time_series": 14},
+        {"scalar": 25, "time_series": 15},
         {1: 30, 2: 10},
         {},
     ),
@@ -216,9 +249,19 @@ _FAMILY_PLANS: tuple[FamilyPlan, ...] = (
     ),
     FamilyPlan(
         "registration_time_series",
-        {"dimension_grouped": 17, "time_series": 8},
-        {1: 25},
-        {"user_country": 6, "user_traffic_source": 6, "user_state": 5},
+        {"dimension_grouped": 14, "time_series": 7},
+        {1: 21},
+        {"user_country": 5, "user_traffic_source": 5, "user_state": 4},
+    ),
+    FamilyPlan(
+        "inventory_unsold_snapshot",
+        {"scalar": 1, "dimension_grouped": 3},
+        {1: 4},
+        {
+            "distribution_center": 1,
+            "product_category": 1,
+            "product_department": 1,
+        },
     ),
 )
 
@@ -348,6 +391,7 @@ _METRIC_OPTIONS: Mapping[str, Mapping[int, tuple[tuple[str, ...], ...]]] = {
     "registration_foundation_range": {1: (("registered_user_count",),)},
     "registration_geo_acquisition_group": {1: (("registered_user_count",),)},
     "registration_time_series": {1: (("registered_user_count",),)},
+    "inventory_unsold_snapshot": {1: (("current_unsold_inventory_unit_count",),)},
 }
 
 
@@ -387,6 +431,7 @@ def build_seeds() -> list[dict[str, Any]]:
     series_grains = _weighted_sequence(contract["case_quotas"]["time_series_grains"])
     series_cursors: Counter[str] = Counter()
     range_cursor = 0
+    high_cardinality_range_cursor = 0
     metric_exposure: Counter[str] = Counter()
     fixed_metric_cursors: Counter[tuple[str, int]] = Counter()
     seen_query_specs: set[str] = set()
@@ -409,6 +454,17 @@ def build_seeds() -> list[dict[str, Any]]:
                 grain = series_grains.pop(0)
                 query_time, window_candidate = _series_time(grain, series_cursors[grain])
                 series_cursors[grain] += 1
+            elif plan.family_id == "inventory_unsold_snapshot":
+                # The frozen v2 validator only permits this snapshot metric
+                # as an all-time plan.  Do not invent date variants merely to
+                # avoid the explicitly approved v2 reuse.
+                query_time = TheLookQueryTime("all_time")
+                window_candidate = "all_time"
+            elif dimension in _HIGH_CARDINALITY_DIMENSIONS:
+                query_time, window_candidate = _high_cardinality_range_time(
+                    high_cardinality_range_cursor
+                )
+                high_cardinality_range_cursor += 1
             else:
                 query_time, window_candidate = _range_time(range_cursor)
                 range_cursor += 1
@@ -425,6 +481,7 @@ def build_seeds() -> list[dict[str, Any]]:
                 query_time=query_time,
                 window_candidate=window_candidate,
                 seen_query_specs=seen_query_specs,
+                high_cardinality=dimension in _HIGH_CARDINALITY_DIMENSIONS,
             )
             risk_tags = list(derive_thelook_v3_risk_tags(spec, contract))
             record = {
@@ -527,11 +584,30 @@ def audit_seed_records(
             )
 
     v2_overlap = 0
+    reused_family_counts: Counter[str] = Counter()
     if v2_cases is not None:
         v2_ids = _read_v2_query_spec_ids(v2_cases)
-        v2_overlap = len(set(query_spec_ids) & v2_ids)
-        if v2_overlap:
-            raise TheLookV3CoverageError(f"v3 seeds overlap {v2_overlap} protected v2 QuerySpecs")
+        overlapping_ids = set(query_spec_ids) & v2_ids
+        v2_overlap = len(overlapping_ids)
+        identity = contract["identity_and_reuse"]
+        expected_overlap = int(identity["expected_v2_query_spec_id_overlap"])
+        if v2_overlap != expected_overlap:
+            raise TheLookV3CoverageError(
+                f"v3 seeds overlap {v2_overlap} v2 QuerySpecs; expected {expected_overlap}"
+            )
+        allowed_families = set(identity["allowed_v2_reuse_scenario_families"])
+        for seed in seeds:
+            if seed.query_spec.query_spec_id in overlapping_ids:
+                reused_family_counts[seed.scenario_family_id] += 1
+                if seed.scenario_family_id not in allowed_families:
+                    raise TheLookV3CoverageError(
+                        "v2 QuerySpec reuse is outside the approved scenario family: "
+                        f"{seed.scenario_family_id}"
+                    )
+        if set(reused_family_counts) != allowed_families or sum(reused_family_counts.values()) != expected_overlap:
+            raise TheLookV3CoverageError(
+                "v2 QuerySpec reuse does not match the approved family/count contract"
+            )
     return {
         "seed_count": len(seeds),
         "fact_domains": dict(sorted(fact_counts.items())),
@@ -543,6 +619,7 @@ def audit_seed_records(
         "scenario_families": dict(sorted(family_counts.items())),
         "risk_tags": dict(sorted(risk_counts.items())),
         "v2_query_spec_overlap": v2_overlap,
+        "v2_reused_family_counts": dict(sorted(reused_family_counts.items())),
         "sql_rendered": False,
         "database_accessed": False,
         "model_called": False,
@@ -610,6 +687,13 @@ def _series_time(grain: str, cursor: int) -> tuple[TheLookQueryTime, str]:
     return TheLookQueryTime("series", start, end, grain), f"series:{grain}:{start}:{end}"
 
 
+def _high_cardinality_range_time(cursor: int) -> tuple[TheLookQueryTime, str]:
+    start, end = _HIGH_CARDINALITY_RANGE_WINDOWS[
+        cursor % len(_HIGH_CARDINALITY_RANGE_WINDOWS)
+    ]
+    return TheLookQueryTime("absolute_range", start, end), f"high-cardinality-range:{start}:{end}"
+
+
 def _unique_candidate_spec(
     *,
     metric_ids: tuple[str, ...],
@@ -618,6 +702,7 @@ def _unique_candidate_spec(
     query_time: TheLookQueryTime,
     window_candidate: str,
     seen_query_specs: set[str],
+    high_cardinality: bool = False,
 ) -> tuple[TheLookV2QuerySpec, TheLookQueryTime, str]:
     """Construct a unique candidate; the caller immediately validates its record.
 
@@ -635,8 +720,17 @@ def _unique_candidate_spec(
             _series_time(query_time.grain, index)
             for index in range(len(_SERIES_WINDOWS[query_time.grain]))
         )
+    elif query_time.mode == "absolute_range":
+        if high_cardinality:
+            candidates.extend(
+                _high_cardinality_range_time(index)
+                for index in range(len(_HIGH_CARDINALITY_RANGE_WINDOWS))
+            )
+        else:
+            candidates.extend(_range_time(index) for index in range(len(_RANGE_WINDOWS)))
     else:
-        candidates.extend(_range_time(index) for index in range(len(_RANGE_WINDOWS)))
+        # all_time is a semantic contract, not a candidate date window.
+        candidates.append((TheLookQueryTime("all_time"), "all_time"))
     for candidate_time, candidate_window in candidates:
         spec = TheLookV2QuerySpec.create(
             metric_ids=metric_ids,

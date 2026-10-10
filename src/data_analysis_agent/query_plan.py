@@ -30,31 +30,61 @@ PlanType = Literal[
 
 
 _TIME_GRAINS: tuple[tuple[str, str], ...] = (
-    (r"按?月|每月|月度", "month"),
-    (r"按?周|每周|周度", "week"),
-    (r"按?日|每天|每日|日度", "day"),
-    (r"按?季度|季度", "quarter"),
-    (r"按?年|年度|每年", "year"),
+    # A calendar mention such as "2018年" is a filter, not a series. Require
+    # an explicit grouping word so the result contract does not demand a
+    # `time` column the user never asked to see.
+    (r"按月|每月|月度|各月|分月", "month"),
+    (r"按周|每周|周度|各周|分周", "week"),
+    (r"按日|每天|每日|日度|各日|分日", "day"),
+    (r"按季度|每季度|各季度|分季度", "quarter"),
+    (r"按年|每年|年度|各年|分年", "year"),
     (r"趋势|时间序列", "day"),
 )
 _DIMENSION_ALIASES: tuple[tuple[str, str], ...] = (
-    ("州", "customer_state"),
+    ("各州", "customer_state"),
+    ("按州", "customer_state"),
+    ("每个州", "customer_state"),
+    ("哪个州", "customer_state"),
+    ("分州", "customer_state"),
+    ("客户州", "customer_state"),
     ("地区", "customer_state"),
     ("省份", "customer_state"),
     ("城市", "customer_city"),
     ("品类", "product_category_name"),
     ("类目", "product_category_name"),
-    ("卖家", "seller_id"),
-    ("商家", "seller_id"),
+    ("卖家州", "seller_state"),
+    ("按卖家州", "seller_state"),
+    ("商家州", "seller_state"),
     ("支付方式", "payment_type"),
 )
+_GROUP_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"哪[一种个类]?商品|什么商品|哪种货|哪类商品|哪个品类|哪种品类|"
+            r"最火的货|热销商品|卖得最[好火]|火爆商品"
+        ),
+        "product_category_name",
+    ),
+    (
+        re.compile(r"哪个卖家|哪些卖家|按卖家(?!州)|各卖家|卖家排名|哪个商家|按商家"),
+        "seller_city",
+    ),
+)
+_TOP_N_DIMENSIONS: dict[str, int] = {
+    "customer_city": 20,
+    "seller_city": 20,
+}
+_RANKING_CATEGORY_LIMIT = 20
+_NON_DISPLAYABLE_DIMENSIONS = frozenset({"seller_id"})
 
 # These are server-owned display-cardinality bounds, not database statistics
 # inferred at request time.  A new workspace must explicitly declare/replace
 # them before enabling the corresponding grouped output.
 _DISPLAY_DIMENSION_CARDINALITY: dict[str, int] = {
     "customer_state": 27,
+    "seller_state": 27,
     "product_category_name": 73,
+    "payment_type": 8,
 }
 _TIME_GRAIN_CARDINALITY: dict[str, int] = {
     "year": 3,
@@ -63,12 +93,51 @@ _TIME_GRAIN_CARDINALITY: dict[str, int] = {
     "week": 160,
     "day": 1_100,
 }
-_NON_DISPLAYABLE_DIMENSIONS = frozenset({"seller_id", "customer_city", "payment_type"})
 _EXPLICIT_DATE_RANGE = re.compile(
     r"(?P<start>20\d{2}-\d{2}-\d{2})\s*(?:至|到|到|-|~|～)\s*"
     r"(?P<end>20\d{2}-\d{2}-\d{2})"
 )
 _EXPLICIT_YEAR = re.compile(r"(?<!\d)20\d{2}(?!\d)")
+_BR_STATE_CODE = (
+    "AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO"
+)
+_CUSTOMER_STATE_FILTER = re.compile(
+    rf"(?:只看|仅看|限定|筛选)?\s*(?P<code>{_BR_STATE_CODE})\s*(?:州)?\s*(?:的)?\s*客户"
+    rf"|客户(?:州|地区)?(?:是|为|在|属于|=)?\s*(?P<code2>{_BR_STATE_CODE})"
+    rf"|圣保罗",
+    re.IGNORECASE,
+)
+
+
+def customer_state_filter(question: str) -> str | None:
+    """Return a Brazilian state code used as a customer filter, not a grouping."""
+
+    match = _CUSTOMER_STATE_FILTER.search(question or "")
+    if match is None:
+        return None
+    if match.group(0) == "圣保罗" or "圣保罗" in match.group(0):
+        return "SP"
+    code = match.group("code") or match.group("code2")
+    return code.upper() if code else None
+
+
+def ranking_category_output_bound(
+    question: str, dimensions: tuple[str, ...]
+) -> int | None:
+    """Bound product_category_name when the question is a ranking, not a census.
+
+    A spoken ranking such as “卖得最好的货” must not be estimated as all 73
+    categories. Combined with another grouping it means the best category in
+    each remaining group (1), not 27×73.
+    """
+
+    if "product_category_name" not in dimensions:
+        return None
+    if not _GROUP_PATTERNS[0][0].search(question or ""):
+        return None
+    if any(dimension != "product_category_name" for dimension in dimensions):
+        return 1
+    return _RANKING_CATEGORY_LIMIT
 
 
 @dataclass(frozen=True)
@@ -130,6 +199,7 @@ class QueryPlan:
     attribution_requirements: tuple[AttributionRequirement, ...]
     execution_strategy: str
     warnings: tuple[str, ...] = ()
+    top_n: tuple[tuple[str, int], ...] = ()
 
     @classmethod
     def preflight(
@@ -140,29 +210,25 @@ class QueryPlan:
         *,
         max_result_rows: int = DEFAULT_ANALYST_RESULT_LIMIT,
     ) -> QueryPlanPreflight:
-        """Reject query shapes the current result contract cannot display.
+        """Reject query shapes the configured execution contract cannot bound.
 
-        This is intentionally prior to LLM/SQL generation.  It validates only
-        deterministic output capability, not business metric attribution;
+        This is intentionally prior to LLM/SQL generation.  The bound is the
+        database execution cap, not the smaller UI preview budget. It validates
+        only deterministic output capability, not business metric attribution;
         attribution remains owned by the Catalog policy checked by the Router.
         """
         if max_result_rows <= 0:
             raise ValueError("max_result_rows must be positive")
-        dimensions = cls._dimensions(question, metrics)
+        dimensions = cls._dimensions(question, metrics, conversation_state)
         non_displayable = next(
             (dimension for dimension in dimensions if dimension in _NON_DISPLAYABLE_DIMENSIONS),
             None,
         )
         if non_displayable:
-            display_name = {
-                "seller_id": "卖家",
-                "customer_city": "客户城市",
-                "payment_type": "支付方式",
-            }[non_displayable]
             return QueryPlanPreflight(
                 False,
                 "dimension_not_displayable",
-                f"当前结果合同尚未支持按{display_name}稳定展示。请改按客户州、商品品类，或缩小为已支持的汇总范围。",
+                "卖家原始编号不能出现在结果中。请改为按卖家城市或卖家州查看排名最高的分组。",
             )
         time_grain = cls._time_grain(question)
         state = conversation_state or {}
@@ -178,15 +244,27 @@ class QueryPlan:
                 "按日统计必须先给出明确的绝对日期范围，避免结果超出当前行数预算。",
             )
         estimated_rows = 1
+        ranking_bound = ranking_category_output_bound(question, dimensions)
         for dimension in dimensions:
-            estimated_rows *= _DISPLAY_DIMENSION_CARDINALITY.get(dimension, max_result_rows + 1)
+            if ranking_bound is not None and dimension == "product_category_name":
+                continue
+            if dimension in _TOP_N_DIMENSIONS:
+                estimated_rows *= _TOP_N_DIMENSIONS[dimension]
+            else:
+                estimated_rows *= _DISPLAY_DIMENSION_CARDINALITY.get(
+                    dimension, max_result_rows + 1
+                )
+        if ranking_bound is not None:
+            estimated_rows *= ranking_bound
         if time_grain:
             estimated_rows *= cls._series_bucket_bound(time_grain, question, state)
         if estimated_rows > max_result_rows:
+            labels = "、".join(dimensions) if dimensions else "当前分组"
             return QueryPlanPreflight(
                 False,
                 "result_row_budget_exceeded",
-                "当前分组形状可能超过可验证的结果行数预算。请缩小时间范围、降低时间粒度或减少分组维度。",
+                f"当前分组（{labels}）可能超过可验证的结果行数预算。"
+                "请去掉其中一个分组、缩小时间范围或降低时间粒度。",
                 estimated_rows,
             )
         return QueryPlanPreflight(True, estimated_max_rows=estimated_rows)
@@ -200,9 +278,15 @@ class QueryPlan:
         conversation_state: Mapping[str, Any] | None = None,
     ) -> "QueryPlan":
         state = conversation_state or {}
-        metrics = tuple(selection.metrics)
-        metric_ids = tuple(metric.metric_id for metric in metrics)
-        dimensions = cls._dimensions(question, metrics)
+        selection_metrics = tuple(selection.metrics)
+        route_ids = tuple(route.metric_ids or ())
+        selection_ids = tuple(metric.metric_id for metric in selection_metrics)
+        metric_ids = route_ids or selection_ids
+        by_id = {metric.metric_id: metric for metric in selection_metrics}
+        metrics = tuple(by_id[metric_id] for metric_id in metric_ids if metric_id in by_id)
+        if not metrics:
+            metrics = selection_metrics
+        dimensions = cls._dimensions(question, metrics, state)
         time_grain = cls._time_grain(question)
         time_range = cls._time_range(state)
         comparison = cls._comparison(state)
@@ -239,6 +323,19 @@ class QueryPlan:
         )
         if unsupported_dimensions:
             warnings.append("dimension_not_supported_by_all_metrics")
+        state_code = customer_state_filter(question)
+        if state_code:
+            warnings.append(f"filter_customer_state:{state_code}")
+        ranking_bound = ranking_category_output_bound(question, dimensions)
+        if ranking_bound == 1:
+            warnings.append("ranking_category_best_per_group")
+        top_n = tuple(
+            (dimension, limit)
+            for dimension, limit in _TOP_N_DIMENSIONS.items()
+            if dimension in dimensions
+        )
+        if ranking_bound == _RANKING_CATEGORY_LIMIT:
+            top_n = (*top_n, ("product_category_name", _RANKING_CATEGORY_LIMIT))
         attribution_requirements = tuple(
             AttributionRequirement(
                 metric_id=metric.metric_id,
@@ -265,6 +362,7 @@ class QueryPlan:
             attribution_requirements=attribution_requirements,
             execution_strategy=execution_strategy,
             warnings=tuple(warnings),
+            top_n=top_n,
         )
 
     @staticmethod
@@ -276,14 +374,39 @@ class QueryPlan:
 
     @staticmethod
     def _dimensions(
-        question: str, metrics: tuple[MetricDefinition, ...]
+        question: str,
+        metrics: tuple[MetricDefinition, ...],
+        state: Mapping[str, Any] | None = None,
     ) -> tuple[str, ...]:
-        if not metrics:
-            return ()
+        """Detect grouping dimensions from query shape, not incidental words.
+
+        ``SP州`` names a filter. It does not ask for one row per state.
+        ``哪种商品`` asks for a category ranking even when the word ``品类``
+        is absent. Extra dimensions may come from a Catalog-constrained
+        grounding step, and only allowed dimensions are kept.
+        """
+
+        allowed = {
+            dimension
+            for metric in metrics
+            for dimension in metric.allowed_dimensions
+        }
         selected: list[str] = []
         for alias, dimension in _DIMENSION_ALIASES:
             if alias in question and dimension not in selected:
                 selected.append(dimension)
+        for pattern, dimension in _GROUP_PATTERNS:
+            if pattern.search(question) and dimension not in selected:
+                selected.append(dimension)
+        raw_resolved = (state or {}).get("resolved_dimensions")
+        if isinstance(raw_resolved, (list, tuple)):
+            for dimension in raw_resolved:
+                if (
+                    isinstance(dimension, str)
+                    and dimension in allowed
+                    and dimension not in selected
+                ):
+                    selected.append(dimension)
         return tuple(selected)
 
     @staticmethod
@@ -365,6 +488,7 @@ class QueryPlan:
             ],
             "execution_strategy": self.execution_strategy,
             "warnings": list(self.warnings),
+            "top_n": {dimension: limit for dimension, limit in self.top_n},
         }
 
     def prompt_context(self) -> str:
@@ -395,6 +519,34 @@ class QueryPlan:
             )
         if self.comparison_baseline:
             lines.append(f"- 已确认比较基线：{self.comparison_baseline}。")
+        for warning in self.warnings:
+            if warning.startswith("filter_customer_state:"):
+                code = warning.split(":", 1)[1]
+                lines.append(
+                    f"- 筛选：`dim_customers.customer_state = '{code}'`。"
+                    "这是过滤条件，不要按客户州分组，最终结果列不要包含 customer_state。"
+                )
+        if any(item.policy_mode == "multi_membership" for item in self.attribution_requirements):
+            lines.append(
+                "- 多归属：同一订单或评价进入它实际碰到的每一个品类或支付方式。"
+                "各组合计可以大于总体，不要为了让合计相等而只保留第一条。"
+            )
+        if any(item.policy_mode == "payment_share" for item in self.attribution_requirements):
+            lines.append(
+                "- 支付占比：在每个订单内用 payment_value / SUM(payment_value) 乘以商品金额或运费，"
+                "再按 payment_type 汇总。禁止只用 payment_sequential = 1 代表整单。"
+            )
+        for dimension, limit in self.top_n:
+            if dimension in self.dimensions:
+                lines.append(
+                    f"- `{dimension}` 只返回该指标最高的 {limit} 个分组，SQL 必须带这个 LIMIT。"
+                    "不要返回全部城市或卖家。"
+                )
+        if "ranking_category_best_per_group" in self.warnings:
+            lines.append(
+                "- `product_category_name` 是排名维：每个其余分组只返回该指标最高的 1 个品类，"
+                "不要展开全部品类。"
+            )
         if self.warnings:
             lines.append(f"- 需要注意：{'；'.join(self.warnings)}。")
         for requirement in self.attribution_requirements:

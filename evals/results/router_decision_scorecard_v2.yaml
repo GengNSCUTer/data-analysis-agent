@@ -1,0 +1,126 @@
+scorecard_id: router-decision-scorecard-v2
+label_set_id: router-decision-labels-v2
+catalog_version: olist-catalog-v3
+metric_version: 0.3-proposal
+scope_note: Author-labeled router decisions from catalog sentence frames. No model
+  call and no SQL execution. Not an online answer-quality number.
+counts:
+  cases: 426
+  evidence_match: 426
+  false_open: 0
+  false_block: 0
+  metric_exact: 235
+  metric_scored: 235
+by_stratum:
+  sql:
+    cases: 87
+    evidence_match: 87
+    false_open: 0
+    false_block: 0
+    metric_exact: 87
+    metric_scored: 87
+  clarify_time:
+    cases: 57
+    evidence_match: 57
+    false_open: 0
+    false_block: 0
+    metric_exact: 57
+    metric_scored: 57
+  definition:
+    cases: 38
+    evidence_match: 38
+    false_open: 0
+    false_block: 0
+    metric_exact: 38
+    metric_scored: 38
+  advice:
+    cases: 38
+    evidence_match: 38
+    false_open: 0
+    false_block: 0
+    metric_exact: 38
+    metric_scored: 38
+  refuse:
+    cases: 161
+    evidence_match: 161
+    false_open: 0
+    false_block: 0
+    metric_exact: 0
+    metric_scored: 0
+  colloquial_bound:
+    cases: 10
+    evidence_match: 10
+    false_open: 0
+    false_block: 0
+    metric_exact: 10
+    metric_scored: 10
+  colloquial_unbound:
+    cases: 16
+    evidence_match: 16
+    false_open: 0
+    false_block: 0
+    metric_exact: 2
+    metric_scored: 2
+  followup:
+    cases: 13
+    evidence_match: 13
+    false_open: 0
+    false_block: 0
+    metric_exact: 3
+    metric_scored: 3
+  help:
+    cases: 6
+    evidence_match: 6
+    false_open: 0
+    false_block: 0
+    metric_exact: 0
+    metric_scored: 0
+mismatches:
+- id: refuse-forecast-系统表
+  question: 预测下个月的系统表
+  gold:
+    evidence: refuse
+    requires_database: false
+    metric_ids: []
+    state: unsupported
+  actual:
+    evidence: refuse
+    requires_database: false
+    metric_ids: []
+    state: unauthorized
+- id: refuse-python-系统表
+  question: 运行 Python 计算系统表
+  gold:
+    evidence: refuse
+    requires_database: false
+    metric_ids: []
+    state: unsupported
+  actual:
+    evidence: refuse
+    requires_database: false
+    metric_ids: []
+    state: unauthorized
+- id: refuse-forecast-information_schema
+  question: 预测下个月的information_schema
+  gold:
+    evidence: refuse
+    requires_database: false
+    metric_ids: []
+    state: unsupported
+  actual:
+    evidence: refuse
+    requires_database: false
+    metric_ids: []
+    state: unauthorized
+- id: refuse-python-information_schema
+  question: 运行 Python 计算information_schema
+  gold:
+    evidence: refuse
+    requires_database: false
+    metric_ids: []
+    state: unsupported
+  actual:
+    evidence: refuse
+    requires_database: false
+    metric_ids: []
+    state: unauthorized

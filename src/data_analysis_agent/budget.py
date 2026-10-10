@@ -27,6 +27,7 @@ TERMINATION_REASONS: Final[frozenset[str]] = frozenset(
         "unsupported_request",
         "catalog_answered",
         "input_too_long",
+        "state_conflict",
     }
 )
 
@@ -47,7 +48,11 @@ class RequestBudget:
     max_context_chars: int = 192_000  # legacy observability ceiling
     max_context_messages: int = 160
     max_output_tokens: int = 4_000
-    llm_timeout_seconds: float = 120.0
+    # Connection is TCP/TLS/HTTP setup. First byte is the wait until the model
+    # emits anything. Stream idle is the gap allowed between later tokens.
+    llm_connect_timeout_seconds: float = 10.0
+    llm_first_byte_timeout_seconds: float = 120.0
+    llm_stream_idle_timeout_seconds: float = 30.0
     deterministic_result_finalization: bool = True
 
     def __post_init__(self) -> None:
@@ -105,10 +110,25 @@ class RequestBudget:
             max_output_tokens=read(
                 "DATA_ANALYSIS_MAX_OUTPUT_TOKENS", cls.max_output_tokens
             ),
-            llm_timeout_seconds=float(
+            llm_connect_timeout_seconds=float(
                 os.getenv(
-                    "DATA_ANALYSIS_LLM_TIMEOUT_SECONDS",
-                    str(cls.llm_timeout_seconds),
+                    "DATA_ANALYSIS_LLM_CONNECT_TIMEOUT_SECONDS",
+                    str(cls.llm_connect_timeout_seconds),
+                )
+            ),
+            llm_first_byte_timeout_seconds=float(
+                os.getenv(
+                    "DATA_ANALYSIS_LLM_FIRST_BYTE_TIMEOUT_SECONDS",
+                    os.getenv(
+                        "DATA_ANALYSIS_LLM_TIMEOUT_SECONDS",
+                        str(cls.llm_first_byte_timeout_seconds),
+                    ),
+                )
+            ),
+            llm_stream_idle_timeout_seconds=float(
+                os.getenv(
+                    "DATA_ANALYSIS_LLM_STREAM_IDLE_TIMEOUT_SECONDS",
+                    str(cls.llm_stream_idle_timeout_seconds),
                 )
             ),
             deterministic_result_finalization=read_bool(
@@ -136,10 +156,12 @@ class BudgetUsage:
     context_budget: dict[str, Any] | None = None
     history_summary: dict[str, Any] | None = None
     history_summary_text: str | None = None
+    suppress_semantic_history_summary: bool = False
     termination_reason: str = "running"
     error_type: str | None = None
     catalog_trace: dict[str, Any] | None = None
     catalog_question: str | None = None
+    catalog_prompt: str | None = None
     working_memory: dict[str, Any] | None = None
     query_plan: dict[str, Any] | None = None
     query_plan_prompt: str | None = None
@@ -206,6 +228,7 @@ class BudgetUsage:
         usage_status: str,
         finish_reason: str | None = None,
         error_type: str | None = None,
+        timeout_phase: str | None = None,
     ) -> None:
         """Record bounded provider status without storing prompts or responses."""
         if len(self.llm_observations) >= 16:
@@ -219,6 +242,8 @@ class BudgetUsage:
             observation["finish_reason"] = str(finish_reason)[:64]
         if error_type:
             observation["error_type"] = str(error_type)[:64]
+        if timeout_phase:
+            observation["timeout_phase"] = str(timeout_phase)[:32]
         self.llm_observations.append(observation)
 
     def consume_tool(self, tool_name: str) -> bool:
@@ -343,11 +368,22 @@ class BudgetUsage:
         self.catalog_trace = {**(self.catalog_trace or {}), **dict(trace)}
 
     def set_catalog_context(
-        self, retrieval_question: str, working_memory: dict[str, Any] | None = None
+        self,
+        retrieval_question: str,
+        working_memory: dict[str, Any] | None = None,
+        catalog_prompt: str | None = None,
     ) -> None:
-        """Set per-request retrieval context without adding it to run evidence."""
+        """Set per-request retrieval context without adding it to run evidence.
+
+        ``catalog_prompt`` is the Catalog slice that routing, QueryPlan and
+        ResultContract were built from. When it is set, the prompt enhancer
+        must reuse it; a second retrieval over different text can drop the
+        fact tables those contracts require.
+        """
         self.catalog_question = retrieval_question[: self.budget.max_input_chars]
         self.working_memory = dict(working_memory) if working_memory else None
+        if catalog_prompt is not None:
+            self.catalog_prompt = catalog_prompt
 
     def set_query_plan(
         self, query_plan: dict[str, Any], prompt_context: str | None = None

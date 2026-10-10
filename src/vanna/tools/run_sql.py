@@ -15,6 +15,26 @@ from vanna.capabilities.file_system import FileSystem
 from vanna.integrations.local import LocalFileSystem
 
 
+_ROW_CUT_NOTICE = (
+    "\n(Results truncated to complete rows. FOR LARGE RESULTS YOU DO NOT NEED TO "
+    "SUMMARIZE THESE RESULTS OR PROVIDE OBSERVATIONS. THE NEXT STEP SHOULD BE A "
+    "VISUALIZE_DATA CALL)"
+)
+
+
+def result_preview_for_llm(csv_content: str, validated_summary: object) -> str:
+    """Hand the model a complete summary, never a CSV slice that ends mid-row."""
+
+    if isinstance(validated_summary, str) and validated_summary.strip():
+        return validated_summary.strip()
+    if len(csv_content) <= 1000:
+        return csv_content
+    cut = csv_content.rfind("\n", 0, 1000)
+    if cut <= 0:
+        cut = 1000
+    return csv_content[:cut] + _ROW_CUT_NOTICE
+
+
 class RunSqlTool(Tool[RunSqlToolArgs]):
     """Tool that executes SQL queries using an injected SqlRunner implementation."""
 
@@ -72,6 +92,9 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                             columns=[],
                             title="Query Results",
                             description="No rows returned",
+                            exportable=False,
+                            preview_export_allowed=False,
+                            full_export_allowed=False,
                         ),
                         simple_component=SimpleTextComponent(text=result),
                     )
@@ -95,21 +118,47 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         filename, csv_content, context, overwrite=True
                     )
 
-                    # Create result text for LLM with truncated results
-                    results_preview = csv_content
-                    if len(results_preview) > 1000:
-                        results_preview = (
-                            results_preview[:1000]
-                            + "\n(Results truncated to 1000 characters. FOR LARGE RESULTS YOU DO NOT NEED TO SUMMARIZE THESE RESULTS OR PROVIDE OBSERVATIONS. THE NEXT STEP SHOULD BE A VISUALIZE_DATA CALL)"
-                        )
+                    results_preview = result_preview_for_llm(
+                        csv_content, context.metadata.get("validated_result_summary")
+                    )
 
-                    result = f"{results_preview}\n\nResults saved to file: {filename}\n\n**IMPORTANT: FOR VISUALIZE_DATA USE FILENAME: {filename}**"
+                    display_budget = int(context.metadata.get("display_result_row_budget", 200))
+                    if display_budget <= 0:
+                        display_budget = 200
+                    display_truncated = row_count > display_budget
+                    result = (
+                        f"{results_preview}\n\nResults saved to file: {filename}\n"
+                        f"\n完整查询返回 {row_count} 行；"
+                        + (
+                            f"界面仅预览前 {display_budget} 行。\n"
+                            if display_truncated
+                            else "界面已展示全部返回行。\n"
+                        )
+                        + f"\n**IMPORTANT: FOR VISUALIZE_DATA USE FILENAME: {filename}**"
+                    )
 
                     # Create DataFrame component for UI
+                    display_results_data = results_data[:display_budget]
                     dataframe_component = DataFrameComponent.from_records(
-                        records=cast(List[Dict[str, Any]], results_data),
+                        records=cast(List[Dict[str, Any]], display_results_data),
                         title="Query Results",
-                        description=f"SQL query returned {row_count} rows with {len(columns)} columns",
+                        max_rows_displayed=display_budget,
+                        description=(
+                            f"SQL query returned {row_count} rows with {len(columns)} columns"
+                            + (
+                                f"; previewing first {display_budget} rows"
+                                if display_truncated
+                                else ""
+                            )
+                        ),
+                        total_row_count=row_count,
+                        preview_row_count=len(display_results_data),
+                        display_truncated=display_truncated,
+                        # The generic tool has no authenticated full-export
+                        # route; never imply that its preview is complete.
+                        exportable=False,
+                        preview_export_allowed=False,
+                        full_export_allowed=False,
                     )
 
                     ui_component = UiComponent(
@@ -122,6 +171,9 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "columns": columns,
                         "query_type": query_type,
                         "results": results_data,
+                        "display_results": display_results_data,
+                        "display_row_budget": display_budget,
+                        "display_truncated": display_truncated,
                         "output_file": filename,
                     }
             else:

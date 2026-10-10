@@ -29,8 +29,8 @@ from data_analysis_agent.external_artifacts import ensure_path_outside_repositor
 from data_analysis_agent.candidate_sql_generator import unwrap_sql_completion
 from data_analysis_agent.result_validator import ResultValidator
 from data_analysis_agent.sql_policy import PolicyViolation, SqlPolicy
-from data_analysis_agent.thelook_context import THELOOK_WORKSPACE
-from data_analysis_agent.thelook_queryspec import TheLookQuerySpec
+from data_analysis_agent.thelook_v2_context import THELOOK_V2_WORKSPACE
+from data_analysis_agent.thelook_v2_queryspec import TheLookV2QuerySpec
 
 
 class TheLookOutputError(ValueError):
@@ -57,10 +57,11 @@ def parse_args() -> argparse.Namespace:
 
 def _load_cases(path: Path, manifest: Path) -> dict[str, dict[str, Any]]:
     frozen = json.loads(manifest.read_text(encoding="utf-8"))
-    if frozen.get("evaluation_version") != "thelook-cross-schema-final-test-v1":
+    if frozen.get("evaluation_version") not in {"thelook-cross-schema-final-test-v1", "thelook-cross-schema-final-test-v3"}:
         raise TheLookOutputError("unexpected evaluation manifest")
     expected = frozen.get("output", {}).get("cases_jsonl", {})
-    if expected.get("sha256") != sha256_file(path) or expected.get("rows") != 206:
+    expected_rows = expected.get("rows")
+    if not isinstance(expected_rows, int) or expected_rows <= 0 or expected.get("sha256") != sha256_file(path):
         raise TheLookOutputError("cases do not match frozen manifest")
     cases: dict[str, dict[str, Any]] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -74,8 +75,8 @@ def _load_cases(path: Path, manifest: Path) -> dict[str, dict[str, Any]]:
             if key not in item:
                 raise TheLookOutputError(f"case lacks {key}")
         cases[item["case_id"]] = item
-    if len(cases) != 206:
-        raise TheLookOutputError("expected 206 cases")
+    if len(cases) != expected_rows:
+        raise TheLookOutputError(f"expected {expected_rows} cases")
     return cases
 
 
@@ -113,8 +114,8 @@ def _frame(sql: str, policy: SqlPolicy) -> tuple[str, pd.DataFrame | None, str |
 
 
 def _validate(frame: pd.DataFrame, case: Mapping[str, Any]) -> bool:
-    spec = TheLookQuerySpec.from_mapping(case["query_spec"])
-    catalog = __import__("data_analysis_agent.semantic_catalog", fromlist=["CatalogLoader"]).CatalogLoader(THELOOK_WORKSPACE).load()
+    spec = TheLookV2QuerySpec.from_mapping(case["query_spec"])
+    catalog = __import__("data_analysis_agent.semantic_catalog", fromlist=["CatalogLoader"]).CatalogLoader(THELOOK_V2_WORKSPACE).load()
     constraints = {metric: dict(catalog.metrics_by_id[metric].result_value_constraints) for metric in spec.metric_ids}
     result = ResultValidator(max_rows=200).validate(
         frame,
@@ -187,13 +188,14 @@ def _one(case: Mapping[str, Any], candidate_sql: str, policy: SqlPolicy) -> dict
 def main() -> int:
     args = parse_args()
     cases = _load_cases(args.cases_jsonl, args.manifest)
+    frozen_manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     base_raw = _load_raw(args.base_dir / "raw-candidates.jsonl", set(cases))
     adapter_raw = _load_raw(args.adapter_dir / "raw-candidates.jsonl", set(cases))
     base_report = json.loads((args.base_dir / "safe-report.json").read_text(encoding="utf-8"))
     adapter_report = json.loads((args.adapter_dir / "safe-report.json").read_text(encoding="utf-8"))
     if base_report.get("comparison_contract") != adapter_report.get("comparison_contract"):
         raise TheLookOutputError("Base and Adapter contracts differ")
-    policy = SqlPolicy(workspace=THELOOK_WORKSPACE)
+    policy = SqlPolicy(workspace=THELOOK_V2_WORKSPACE)
     output_dir = ensure_path_outside_repository(args.output_dir, ROOT)
     if output_dir.exists():
         raise TheLookOutputError("output directory must be new")
@@ -216,7 +218,7 @@ def main() -> int:
     )
     report = {
         "report_schema_version": "thelook-matching-evaluation-v1",
-        "dataset": "thelook-cross-schema-final-test-v1",
+        "dataset": frozen_manifest.get("evaluation_version"),
         "cases_sha256": sha256_file(args.cases_jsonl),
         "base_raw_sha256": sha256_file(args.base_dir / "raw-candidates.jsonl"),
         "adapter_raw_sha256": sha256_file(args.adapter_dir / "raw-candidates.jsonl"),

@@ -1,0 +1,79 @@
+{
+  "contract_version": "thelook-sql-only-sft-coverage-contract-v1",
+  "purpose": "TheLook domain SQL-only SFT train/validation seed coverage; not a protected evaluation release",
+  "workspace": {
+    "workspace_id": "thelook-cross-schema-eval-v2",
+    "catalog_version": "thelook-catalog-v2",
+    "dataset_version": "thelook-kaggle-mirror-v1-20260908",
+    "metric_version": "0.2-frozen",
+    "query_spec_schema_version": "thelook-query-spec-v2",
+    "renderer_version": "thelook-postgres-gold-renderer-v2",
+    "split_policy": "program_disjoint_stratified_80_20"
+  },
+  "targets": {
+    "programs": 750,
+    "samples_per_program": 5,
+    "train_programs": 600,
+    "validation_programs": 150,
+    "train_samples": 3000,
+    "validation_samples": 750,
+    "snapshot_programs": 0
+  },
+  "semantic_rules": {
+    "allowed_metric_count": [1, 2, 3, 4],
+    "same_fact_domain_for_multi_metric": true,
+    "allowed_result_shapes": ["scalar", "dimension_grouped", "time_series"],
+    "allowed_time_series_grains": ["day", "week", "month", "quarter", "year"],
+    "allow_free_filters": false,
+    "allow_top_n_or_ranking": false,
+    "allow_cross_fact_metric_combinations": false,
+    "protected_test_overlap": "zero_query_spec_window_question_or_gold_hash_overlap",
+    "snapshot_policy": "excluded_until_snapshot_queryspec_is_expanded",
+    "high_cardinality_window_days": 7
+  },
+  "execution_contract": {
+    "analyst_execution_row_cap": 1000,
+    "display_preview_row_budget": 200,
+    "statement_timeout_ms": 5000,
+    "semantics": "201_to_999_rows_are_complete_execution_with_display_truncated_true;_1000_rows_is_potential_execution_truncation"
+  },
+  "scenario_families": [
+    {"id": "sales_item_scalar_customer_range", "fact_domain": "order_items", "programs": 45},
+    {"id": "sales_item_dimension_group", "fact_domain": "order_items", "programs": 50},
+    {"id": "sales_item_series_pair", "fact_domain": "order_items", "programs": 40},
+    {"id": "completed_order_customer", "fact_domain": "orders", "programs": 45},
+    {"id": "order_level_two_stage_average", "fact_domain": "orders", "programs": 45},
+    {"id": "status_filtered_orders", "fact_domain": "orders", "programs": 45},
+    {"id": "fulfillment_stage_duration", "fact_domain": "orders", "programs": 60},
+    {"id": "return_rate_and_delay", "fact_domain": "orders", "programs": 35},
+    {"id": "orders_series_multi_metric", "fact_domain": "orders", "programs": 20},
+    {"id": "inventory_received_scalar_series", "fact_domain": "inventory_received", "programs": 25},
+    {"id": "inventory_received_group_multi", "fact_domain": "inventory_received", "programs": 35},
+    {"id": "inventory_sold_scalar_series", "fact_domain": "inventory_sold", "programs": 45},
+    {"id": "inventory_sold_group", "fact_domain": "inventory_sold", "programs": 35},
+    {"id": "inventory_sold_multi_metric", "fact_domain": "inventory_sold", "programs": 20},
+    {"id": "event_session_scalar_series", "fact_domain": "events", "programs": 40},
+    {"id": "event_low_cardinality_group", "fact_domain": "events", "programs": 45},
+    {"id": "event_series_multi_metric", "fact_domain": "events", "programs": 50},
+    {"id": "registration_foundation_range", "fact_domain": "users", "programs": 20},
+    {"id": "registration_geo_acquisition_group", "fact_domain": "users", "programs": 25},
+    {"id": "registration_time_series", "fact_domain": "users", "programs": 25}
+  ],
+  "surface": {
+    "samples_per_program": 5,
+    "variant_policy": "five_fixed_non_overlapping_date_windows",
+    "natural_language_generated_after_gold_admission": true
+  },
+  "release_gates": [
+    "all_seeds_validate_against_frozen_catalog",
+    "program_ids_unique",
+    "query_spec_ids_unique",
+    "train_validation_programs_disjoint",
+    "protected_query_spec_and_window_overlap_zero_at_seed_stage",
+    "protected_gold_sql_hash_and_normalized_question_overlap_zero_at_final_materialization",
+    "exact_family_and_split_quotas",
+    "no_snapshot_programs",
+    "no_sql_rendered_or_database_accessed_during_seed_build",
+    "all_gold_sql_pass_1000_row_execution_admission_before_question_materialization"
+  ]
+}

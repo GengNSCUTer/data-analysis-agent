@@ -66,7 +66,7 @@ nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total,utilization.gpu 
 
 "${QLORA_PYTHON}" "${ROOT}/scripts/validate_post_training_adapter.py" \
   --model-dir "${MODEL_DIR}" \
-  --adapter-dir "${RUN_DIRECTORY}/adapter_final" \
+  --adapter-dir "${RUN_DIRECTORY}/adapter_best" \
   --validation-jsonl "${SPLIT_DIRECTORY}/validation.jsonl" \
   --output-dir "${RUN_DIRECTORY}" \
   --max-seq-length 1536 \

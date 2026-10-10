@@ -70,7 +70,7 @@ Policy 为没有显式 `LIMIT` 的候选添加的 200 行安全上限，不单�
 | --- | --- | --- |
 | 纯合同、Prompt、pair 校验 | `src/data_analysis_agent/thelook_v2_matching.py` | 无 |
 | 单侧生成 | `scripts/post_training/evaluation/run_thelook_v2_matching_generation.py` | `.../base-generation/` 或 `.../adapter-generation/` |
-| screen 启动器 | `scripts/post_training/launchers/start_thelook_v2_base_adapter_matching_screen.sh` | `.../logs/` |
+| 历史启动器 | 已移除；该 v2 合同只保留外部实验产物作为历史证据 | 不适用于新评测 |
 | 两侧配对 marker | `scripts/post_training/evaluation/verify_thelook_v2_matching_generation.py` | `.../matching-generation-marker.json` |
 | 执行与 Gold 对照 | `scripts/post_training/evaluation/evaluate_thelook_v2_matching_outputs.py` | `.../evaluation/` |
 

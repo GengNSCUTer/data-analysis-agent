@@ -34,6 +34,24 @@ class ResultArtifact:
     plotly_sha256: str | None = None
     plotly_bytes: int | None = None
 
+    def chart_replay_ref(self) -> "ChartReplayRef | None":
+        """Return the external chart pointer when this artifact actually saved one."""
+        if (
+            self.chart_state != "rendered"
+            or self.plotly_ref != "chart.plotly.json"
+            or not isinstance(self.plotly_sha256, str)
+            or len(self.plotly_sha256) != 64
+            or not isinstance(self.plotly_bytes, int)
+            or self.plotly_bytes < 0
+        ):
+            return None
+        return ChartReplayRef(
+            artifact_id=self.artifact_id,
+            workspace_id=self.workspace_id,
+            plotly_sha256=self.plotly_sha256,
+            plotly_bytes=self.plotly_bytes,
+        )
+
     @classmethod
     def from_trusted_usage(
         cls,
@@ -125,13 +143,64 @@ class ResultArtifact:
     def replay_text(self) -> str:
         """Render an explicit replay notice; this never triggers a new query."""
         metrics = "、".join(self.metric_ids) or "受控指标"
-        chart_note = "；历史图表未缓存" if self.chart_state == "rendered" else ""
+        chart_note = "；图表已保存在会话中" if self.chart_replay_ref() is not None else ""
         return (
             "已恢复上一轮已验证的数据结果摘要（不会重新执行 SQL）。\n"
             f"指标：{metrics}；数据版本：{self.dataset_version}；"
             f"指标版本：{self.metric_version}{chart_note}\n\n"
             f"{self.summary}"
         )
+
+
+@dataclass(frozen=True)
+class ChartReplayRef:
+    """Pointer to a verified Plotly file. The figure itself stays on disk."""
+
+    artifact_id: str
+    workspace_id: str
+    plotly_sha256: str
+    plotly_bytes: int
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any] | None) -> "ChartReplayRef | None":
+        if not isinstance(value, Mapping):
+            return None
+        artifact_id = _bounded_text(value.get("artifact_id"), 64)
+        workspace_id = _bounded_text(value.get("workspace_id"), 128) or "unknown"
+        digest = _bounded_text(value.get("plotly_sha256"), 64)
+        size = _non_negative_int(value.get("plotly_bytes"))
+        if not artifact_id or not isinstance(digest, str) or len(digest) != 64 or size is None:
+            return None
+        return cls(
+            artifact_id=artifact_id,
+            workspace_id=workspace_id,
+            plotly_sha256=digest,
+            plotly_bytes=size,
+        )
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "artifact_id": self.artifact_id,
+            "workspace_id": self.workspace_id,
+            "plotly_sha256": self.plotly_sha256,
+            "plotly_bytes": self.plotly_bytes,
+        }
+
+
+def chart_replay_from_trace(
+    trace: Mapping[str, Any] | None, question: str | None = None
+) -> tuple[ChartReplayRef, str | None] | None:
+    """Read one saved-chart pointer from an Agent Run catalog trace."""
+    if not isinstance(trace, Mapping):
+        return None
+    external = trace.get("result_artifact")
+    if not isinstance(external, Mapping) or external.get("plotly_ref") != "chart.plotly.json":
+        return None
+    ref = ChartReplayRef.from_mapping(external)
+    if ref is None:
+        return None
+    text = question.strip()[:500] if isinstance(question, str) and question.strip() else None
+    return ref, text
 
 
 def _strings(value: Any, limit: int = 16) -> tuple[str, ...]:

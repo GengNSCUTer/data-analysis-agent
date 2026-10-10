@@ -27,14 +27,13 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from data_analysis_agent.external_artifacts import ensure_path_outside_repository
-from data_analysis_agent.thelook_context import THELOOK_WORKSPACE
-from data_analysis_agent.thelook_queryspec import validate_thelook_query_spec, TheLookQuerySpec
+from data_analysis_agent.thelook_v2_context import THELOOK_V2_WORKSPACE
+from data_analysis_agent.thelook_v2_queryspec import validate_thelook_v2_query_spec, TheLookV2QuerySpec
 from data_analysis_agent.semantic_catalog import CatalogLoader
 
 
 MODEL_ID = "Qwen/Qwen2.5-Coder-1.5B"
 PROMPT_VERSION = "thelook-candidate-sql-v1"
-EXPECTED_CASES = 206
 EXPECTED_MAX_INPUT = 3072
 EXPECTED_MAX_NEW = 768
 
@@ -69,10 +68,12 @@ def parse_args() -> argparse.Namespace:
 
 def _read_cases(path: Path, manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("evaluation_version") != "thelook-cross-schema-final-test-v1":
+    evaluation_version = manifest.get("evaluation_version")
+    if evaluation_version not in {"thelook-cross-schema-final-test-v1", "thelook-cross-schema-final-test-v3"}:
         raise TheLookMatchingError("unexpected TheLook evaluation version")
     output = manifest.get("output", {}).get("cases_jsonl", {})
-    if output.get("rows") != EXPECTED_CASES or output.get("sha256") != sha256_file(path):
+    expected_cases = output.get("rows")
+    if not isinstance(expected_cases, int) or expected_cases <= 0 or output.get("sha256") != sha256_file(path):
         raise TheLookMatchingError("cases hash or row count differs from frozen manifest")
     rows: list[dict[str, Any]] = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -84,21 +85,21 @@ def _read_cases(path: Path, manifest_path: Path) -> tuple[list[dict[str, Any]], 
             raise TheLookMatchingError(f"case {line_number} lacks matching fields")
         # Deliberately project fields instead of retaining gold_sql.
         rows.append({key: row[key] for key in required})
-    if len(rows) != EXPECTED_CASES or [r["case_id"] for r in rows] != sorted(r["case_id"] for r in rows):
+    if len(rows) != expected_cases or [r["case_id"] for r in rows] != sorted(r["case_id"] for r in rows):
         raise TheLookMatchingError("case order or count is not frozen")
     if len({r["case_id"] for r in rows}) != len(rows):
         raise TheLookMatchingError("duplicate case IDs")
-    catalog = CatalogLoader(THELOOK_WORKSPACE).load()
+    catalog = CatalogLoader(THELOOK_V2_WORKSPACE).load()
     for row in rows:
-        spec = TheLookQuerySpec.from_mapping(row["query_spec"])
-        validate_thelook_query_spec(spec, catalog)
+        spec = TheLookV2QuerySpec.from_mapping(row["query_spec"])
+        validate_thelook_v2_query_spec(spec, catalog)
         if tuple(row["required_result_columns"]) != spec.required_result_columns:
             raise TheLookMatchingError(f"result contract mismatch for {row['case_id']}")
     return rows, manifest
 
 
 def _catalog_prompt() -> str:
-    catalog = CatalogLoader(THELOOK_WORKSPACE).load()
+    catalog = CatalogLoader(THELOOK_V2_WORKSPACE).load()
     lines = [
         f"Catalog version: {catalog.catalog_version}; dataset: {catalog.dataset_version}; dialect: PostgreSQL",
         "Use only analytics views and the listed columns. IDs are join keys, not output columns.",
@@ -229,7 +230,9 @@ def main() -> int:
     rows, manifest = _read_cases(args.cases_jsonl, args.manifest)
     catalog_prompt = _catalog_prompt()
     prompts = [_render_prompt(row, catalog_prompt) for row in rows]
-    random.seed(args.seed); np.random.seed(args.seed); set_seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    set_seed(args.seed)
     tokenizer, model, adapter_meta, model_manifest = _load_model(args.model_dir, args.run_label, adapter_dir)
     token_lengths = [len(tokenizer(prompt, add_special_tokens=False)["input_ids"]) for prompt in prompts]
     if max(token_lengths) > args.max_input_tokens:
@@ -266,7 +269,7 @@ def main() -> int:
             "failure_category": failure,
         })
     contract = {
-        "dataset": "thelook-cross-schema-final-test-v1",
+        "dataset": manifest.get("evaluation_version"),
         "cases_sha256": sha256_file(args.cases_jsonl),
         "manifest_sha256": sha256_file(args.manifest),
         "case_count": len(rows),
@@ -276,7 +279,7 @@ def main() -> int:
         "gold_sql_read_for_generation": False,
         "database": "thelook_analytics",
         "reader_role": "daa_thelook_reader",
-        "policy_version": THELOOK_WORKSPACE.policy_version,
+        "policy_version": THELOOK_V2_WORKSPACE.policy_version,
     }
     report = {
         "report_schema_version": "thelook-matching-v1",

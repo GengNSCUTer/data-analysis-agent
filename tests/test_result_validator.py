@@ -6,6 +6,34 @@ import pytest
 from data_analysis_agent.result_validator import ResultValidator, build_result_summary
 
 
+def test_regional_gmv_without_time_column_is_a_trusted_table() -> None:
+    result = ResultValidator().validate(
+        pd.DataFrame({"customer_state": ["SP", "RJ"], "gmv": [10.0, 4.0]}),
+        required_columns=("customer_state", "gmv"),
+        metric_columns=("gmv",),
+        exact_columns=True,
+        metric_value_constraints={"gmv": {"minimum": 0}},
+    )
+
+    assert result.state == "valid"
+    assert result.safe_to_answer is True
+    assert result.safe_to_display is True
+
+
+def test_missing_dimension_still_displays_the_metric() -> None:
+    result = ResultValidator().validate(
+        pd.DataFrame({"gmv": [10.0]}),
+        required_columns=("customer_state", "gmv"),
+        metric_columns=("gmv",),
+        exact_columns=True,
+    )
+
+    assert result.state == "degraded"
+    assert result.safe_to_display is True
+    assert result.safe_to_answer is False
+    assert result.missing_columns == ("customer_state",)
+
+
 def test_validator_accepts_finite_non_empty_metric_result() -> None:
     result = ResultValidator().validate(
         pd.DataFrame({"month": ["2017-01-01"], "gmv": [123.4]}),
@@ -28,7 +56,9 @@ def test_validator_refuses_missing_metric_and_non_finite_values() -> None:
     )
 
     assert missing.state == "refuse"
+    assert missing.safe_to_display is False
     assert invalid.state == "refuse"
+    assert invalid.safe_to_display is False
 
 
 def test_validator_rejects_extra_columns_and_metric_range_violations() -> None:
@@ -53,9 +83,14 @@ def test_validator_rejects_extra_columns_and_metric_range_violations() -> None:
         metric_value_constraints={"gmv": {"minimum": 0}},
     )
 
-    assert extra.state == "refuse"
+    assert extra.state == "degraded"
+    assert extra.safe_to_display is True
+    assert extra.safe_to_answer is False
+    assert extra.dropped_columns == ("order_status",)
     assert invalid_rate.state == "refuse"
+    assert invalid_rate.safe_to_display is False
     assert negative_amount.state == "refuse"
+    assert negative_amount.safe_to_display is False
 
 
 def test_validator_does_not_turn_empty_or_truncated_result_into_numbers() -> None:
@@ -66,9 +101,59 @@ def test_validator_does_not_turn_empty_or_truncated_result_into_numbers() -> Non
         pd.DataFrame({"gmv": [1, 2]}), metric_columns=("gmv",)
     )
 
-    assert empty.state == "needs_clarification"
-    assert truncated.state == "needs_clarification"
+    assert empty.state == "degraded"
+    assert empty.safe_to_display is True
+    assert empty.safe_to_answer is False
+    assert truncated.state == "degraded"
+    assert truncated.safe_to_display is True
     assert truncated.truncated is True
+
+
+def test_validator_distinguishes_complete_execution_from_display_preview_budget() -> None:
+    frame = pd.DataFrame({"gmv": list(range(250))})
+
+    validation = ResultValidator(max_rows=1_000).validate(
+        frame,
+        required_columns=("gmv",),
+        metric_columns=("gmv",),
+    )
+
+    assert validation.state == "valid"
+    assert validation.truncated is False
+    assert validation.display_truncated is True
+    assert validation.as_dict()["execution_truncated"] is False
+    assert validation.as_dict()["display_truncated"] is True
+
+
+def test_exact_cap_is_complete_only_when_the_sentinel_saw_no_extra_row() -> None:
+    frame = pd.DataFrame({"gmv": list(range(1_000))})
+
+    complete = ResultValidator(max_rows=1_000).validate(
+        frame, metric_columns=("gmv",), execution_truncated=False
+    )
+    truncated = ResultValidator(max_rows=1_000).validate(
+        frame, metric_columns=("gmv",), execution_truncated=True
+    )
+
+    assert complete.state == "valid"
+    assert complete.truncated is False
+    assert truncated.state == "degraded"
+    assert truncated.truncated is True
+    assert "未展示" in truncated.reason
+
+
+def test_validator_still_rejects_results_reaching_execution_cap() -> None:
+    validation = ResultValidator(max_rows=1_000).validate(
+        pd.DataFrame({"gmv": list(range(1_000))}), metric_columns=("gmv",)
+    )
+
+    assert validation.state == "degraded"
+    assert validation.safe_to_display is True
+    assert validation.safe_to_answer is False
+    assert validation.truncated is True
+    assert validation.display_truncated is True
+    assert "可能不完整" in validation.reason
+    assert "多读" not in validation.reason
 
 
 def test_validator_checks_time_coverage_and_join_amplification() -> None:
@@ -85,8 +170,12 @@ def test_validator_checks_time_coverage_and_join_amplification() -> None:
         join_multiplicity={"order_id": 2},
     )
 
-    assert outside.state == "refuse"
+    assert outside.state == "degraded"
+    assert outside.safe_to_display is True
+    assert outside.safe_to_answer is False
+    assert outside.time_start is not None
     assert amplified.state == "refuse"
+    assert amplified.safe_to_display is False
 
 
 def test_validator_accepts_server_owned_bucket_label_before_partial_range_start() -> None:

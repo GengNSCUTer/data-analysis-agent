@@ -11,7 +11,7 @@ from typing import Any, Literal, Mapping, Sequence
 import pandas as pd
 
 
-ValidationState = Literal["valid", "needs_clarification", "refuse"]
+ValidationState = Literal["valid", "degraded", "needs_clarification", "refuse"]
 
 
 @dataclass(frozen=True)
@@ -22,13 +22,21 @@ class ResultValidation:
     columns: tuple[str, ...]
     missing_columns: tuple[str, ...] = ()
     null_metric_columns: tuple[str, ...] = ()
+    dropped_columns: tuple[str, ...] = ()
     truncated: bool = False
+    display_truncated: bool = False
     time_start: str | None = None
     time_end: str | None = None
 
     @property
     def safe_to_answer(self) -> bool:
+        """Whether this result may be stamped as a trusted contract result."""
         return self.state == "valid"
+
+    @property
+    def safe_to_display(self) -> bool:
+        """Whether the table may be shown, including imperfect but readable results."""
+        return self.state in {"valid", "degraded"}
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -39,7 +47,10 @@ class ResultValidation:
             "columns": list(self.columns),
             "missing_columns": list(self.missing_columns),
             "null_metric_columns": list(self.null_metric_columns),
+            "dropped_columns": list(self.dropped_columns),
             "truncated": self.truncated,
+            "execution_truncated": self.truncated,
+            "display_truncated": self.display_truncated,
             "time_start": self.time_start,
             "time_end": self.time_end,
         }
@@ -161,10 +172,19 @@ def _display_label(column: str, labels: Mapping[str, str]) -> str:
 class ResultValidator:
     """Reject only conditions that can be determined without an LLM."""
 
-    def __init__(self, max_rows: int = 1_000):
+    def __init__(self, max_rows: int = 1_000, display_row_budget: int | None = None):
         if max_rows <= 0:
             raise ValueError("max_rows must be positive")
+        if display_row_budget is None:
+            # Small test/evaluation caps should not make construction fail;
+            # the preview cannot exceed the configured execution cap.
+            display_row_budget = min(200, max_rows)
+        if display_row_budget <= 0:
+            raise ValueError("display_row_budget must be positive")
+        if display_row_budget > max_rows:
+            raise ValueError("display_row_budget cannot exceed max_rows")
         self.max_rows = max_rows
+        self.display_row_budget = display_row_budget
 
     def validate(
         self,
@@ -179,6 +199,7 @@ class ResultValidator:
         requested_start: str | date | datetime | None = None,
         requested_end: str | date | datetime | None = None,
         limit_applied: bool = False,
+        execution_truncated: bool | None = None,
         join_multiplicity: Mapping[str, int] | None = None,
         exact_columns: bool = False,
         metric_value_constraints: Mapping[str, Mapping[str, float | bool]] | None = None,
@@ -195,14 +216,18 @@ class ResultValidator:
                 for candidate in dict.fromkeys((column, *aliases.get(column, ())))
             )
         )
-        if missing:
+        metric_names = {str(column) for column in metric_columns}
+        missing_metrics = tuple(column for column in missing if column in metric_names)
+        missing_shape = tuple(column for column in missing if column not in metric_names)
+        if missing_metrics:
             return ResultValidation(
                 "refuse",
-                "结果缺少请求所需的指标或维度列。",
+                "结果缺少请求所需的指标列，未输出确定性数字。",
                 len(frame),
                 columns,
                 missing_columns=missing,
             )
+        unexpected: tuple[str, ...] = ()
         if exact_columns:
             allowed_actual_columns: set[str] = set()
             for column in required_columns:
@@ -211,14 +236,9 @@ class ResultValidator:
                     for candidate in dict.fromkeys((column, *aliases.get(column, ())))
                     if candidate in frame.columns
                 )
-            unexpected = tuple(column for column in columns if column not in allowed_actual_columns)
-            if unexpected:
-                return ResultValidation(
-                    "refuse",
-                    "结果包含未在服务器合同中声明的列。",
-                    len(frame),
-                    columns,
-                )
+            unexpected = tuple(
+                column for column in columns if column not in allowed_actual_columns
+            )
         if join_multiplicity and any(value > 1 for value in join_multiplicity.values()):
             return ResultValidation(
                 "refuse",
@@ -226,12 +246,26 @@ class ResultValidator:
                 len(frame),
                 columns,
             )
+        shape_notes: list[str] = []
+        if unexpected:
+            shape_notes.append(
+                "结果包含未在合同中声明的列，展示时已去掉："
+                + "、".join(unexpected)
+                + "。"
+            )
+        if missing_shape:
+            shape_notes.append(
+                "结果缺少计划中的列，已显示现有列：" + "、".join(missing_shape) + "。"
+            )
         if frame.empty:
             return ResultValidation(
-                "needs_clarification",
-                "查询没有返回数据，请确认时间范围、筛选条件或指标口径。",
+                "degraded",
+                "查询没有返回数据。请核对时间范围、筛选条件或指标口径。"
+                + ("".join(shape_notes)),
                 0,
                 columns,
+                missing_columns=missing_shape,
+                dropped_columns=unexpected,
             )
         null_metrics = tuple(
             column
@@ -277,14 +311,25 @@ class ResultValidator:
                         len(frame),
                         columns,
                     )
-        if len(frame) >= self.max_rows or limit_applied:
-            return ResultValidation(
-                "needs_clarification",
-                "结果可能受到行数上限截断，请缩小范围或分批查询。",
-                len(frame),
-                columns,
-                truncated=True,
-            )
+        reached_cap = (
+            (len(frame) >= self.max_rows or limit_applied)
+            if execution_truncated is None
+            else execution_truncated
+        )
+        if reached_cap:
+            if execution_truncated is True:
+                shape_notes.append(
+                    f"结果超过执行上限 {self.max_rows} 行，已只返回前 {self.max_rows} 行。"
+                    "多读的一行只用于判断是否截断，未展示给用户或模型。"
+                )
+            else:
+                # Callers that did not run the +1 sentinel keep the conservative
+                # wording; they must not claim a probe row was read and discarded.
+                shape_notes.append(
+                    f"结果达到执行上限 {self.max_rows} 行，可能不完整；请缩小查询范围后重试。"
+                )
+        time_start = None
+        time_end = None
         if time_column and (requested_start is not None or requested_end is not None):
             candidate_time_columns = tuple(
                 dict.fromkeys((time_column, *time_column_aliases))
@@ -294,51 +339,62 @@ class ResultValidator:
                 None,
             )
             if resolved_time_column is None:
-                return ResultValidation(
-                    "needs_clarification",
-                    "结果没有可核对的时间列，请补充明确的时间范围。",
-                    len(frame),
-                    columns,
-                )
-            parsed = pd.to_datetime(frame[resolved_time_column], errors="coerce").dropna()
-            if parsed.empty:
-                return ResultValidation(
-                    "needs_clarification",
-                    "结果没有可核对的时间覆盖，暂不输出确定性数字。",
-                    len(frame),
-                    columns,
-                )
-            start = pd.Timestamp(requested_start) if requested_start is not None else None
-            end = pd.Timestamp(requested_end) if requested_end is not None else None
-            # PostgreSQL timestamptz buckets are timezone-aware while QuerySpec
-            # dates are intentionally timezone-neutral. Compare both on the
-            # same naive timeline rather than raising on mixed timestamp types.
-            if parsed.dt.tz is not None:
-                parsed = parsed.dt.tz_localize(None)
-            if start is not None and start.tzinfo is not None:
-                start = start.tz_localize(None)
-            if end is not None and end.tzinfo is not None:
-                end = end.tz_localize(None)
-            if start is not None and time_bucket_grain is not None:
-                start = _bucket_start(start, time_bucket_grain)
-            if start is not None and parsed.min() < start or end is not None and parsed.max() > end:
-                return ResultValidation(
-                    "refuse",
-                    "结果时间范围超出请求范围，未输出确定性数字。",
-                    len(frame),
-                    columns,
-                    time_start=parsed.min().isoformat(),
-                    time_end=parsed.max().isoformat(),
-                )
+                shape_notes.append("结果没有可核对的时间列，表中的数字仍会显示。")
+            else:
+                parsed = pd.to_datetime(frame[resolved_time_column], errors="coerce").dropna()
+                if parsed.empty:
+                    shape_notes.append("结果没有可核对的时间覆盖，表中的数字仍会显示。")
+                else:
+                    start = pd.Timestamp(requested_start) if requested_start is not None else None
+                    end = pd.Timestamp(requested_end) if requested_end is not None else None
+                    # PostgreSQL timestamptz buckets are timezone-aware while QuerySpec
+                    # dates are intentionally timezone-neutral. Compare both on the
+                    # same naive timeline rather than raising on mixed timestamp types.
+                    if parsed.dt.tz is not None:
+                        parsed = parsed.dt.tz_localize(None)
+                    if start is not None and start.tzinfo is not None:
+                        start = start.tz_localize(None)
+                    if end is not None and end.tzinfo is not None:
+                        end = end.tz_localize(None)
+                    if start is not None and time_bucket_grain is not None:
+                        start = _bucket_start(start, time_bucket_grain)
+                    if (
+                        start is not None and parsed.min() < start
+                        or end is not None and parsed.max() > end
+                    ):
+                        shape_notes.append(
+                            "结果时间覆盖与请求范围不完全一致："
+                            f"{parsed.min().isoformat()} 至 {parsed.max().isoformat()}。"
+                        )
+                    time_start = parsed.min().isoformat()
+                    time_end = parsed.max().isoformat()
+        if shape_notes:
             return ResultValidation(
-                "valid",
-                "结果通过指标、时间和粒度检查。",
+                "degraded",
+                "".join(shape_notes),
                 len(frame),
                 columns,
-                time_start=parsed.min().isoformat(),
-                time_end=parsed.max().isoformat(),
+                missing_columns=missing_shape,
+                dropped_columns=unexpected,
+                truncated=reached_cap,
+                display_truncated=len(frame) > self.display_row_budget,
+                time_start=time_start,
+                time_end=time_end,
             )
-        return ResultValidation("valid", "结果通过确定性检查。", len(frame), columns)
+        return ResultValidation(
+            "valid",
+            "结果通过确定性检查。"
+            + (
+                f" 查询完整执行，共返回 {len(frame)} 行；界面仅预览前 {self.display_row_budget} 行。"
+                if len(frame) > self.display_row_budget
+                else ""
+            ),
+            len(frame),
+            columns,
+            display_truncated=len(frame) > self.display_row_budget,
+            time_start=time_start,
+            time_end=time_end,
+        )
 
 
 def _bucket_start(value: pd.Timestamp, grain: str) -> pd.Timestamp:

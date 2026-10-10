@@ -100,37 +100,39 @@ async def test_runner_rejects_columns_outside_the_server_result_contract() -> No
         }
     )
 
-    with pytest.raises(ResultValidationError, match="未在服务器合同中声明的列"):
-        await runner.run_sql(
-            RunSqlToolArgs(
-                sql=(
-                    "SELECT COUNT(DISTINCT order_id) AS paid_order_count, "
-                    "'extra' AS extra FROM fact_orders"
-                )
-            ),
-            context,
-        )
+    frame = await runner.run_sql(
+        RunSqlToolArgs(
+            sql=(
+                "SELECT COUNT(DISTINCT order_id) AS paid_order_count, "
+                "'extra' AS extra FROM fact_orders"
+            )
+        ),
+        context,
+    )
 
     validation = context.metadata["result_validation"]
-    assert validation["state"] == "refuse"
+    assert validation["state"] == "degraded"
+    assert list(frame.columns) == ["paid_order_count"]
     assert context.metadata.get("result_contract_satisfied") is None
+    assert "extra" in context.metadata["result_display_notice"]
 
 
 @pytest.mark.asyncio
-async def test_runner_treats_the_policy_row_limit_as_possible_truncation() -> None:
-    """The effective SQL Policy limit, not fetchmany's defensive cap, is authoritative."""
+async def test_runner_treats_the_online_execution_cap_as_possible_truncation() -> None:
+    """The online 1,000-row Policy cap remains authoritative for completeness."""
     runner = SecurePostgresRunner()
     context = make_context(f"policy-limit-{uuid.uuid4().hex[:12]}")
 
-    with pytest.raises(ResultValidationError, match="行数上限截断"):
-        await runner.run_sql(
-            RunSqlToolArgs(sql="SELECT customer_state FROM dim_customers"), context
-        )
+    frame = await runner.run_sql(
+        RunSqlToolArgs(sql="SELECT customer_state FROM dim_customers"), context
+    )
 
     validation = context.metadata["result_validation"]
-    assert validation["state"] == "needs_clarification"
+    assert validation["state"] == "degraded"
     assert validation["truncated"] is True
-    assert validation["row_count"] == 200
+    assert validation["row_count"] == 1_000
+    assert len(frame) == 1_000
+    assert context.metadata.get("result_contract_satisfied") is None
 
 
 @pytest.mark.asyncio

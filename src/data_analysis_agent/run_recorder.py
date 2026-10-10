@@ -15,6 +15,7 @@ from vanna.core.user import User
 
 from .budget import BudgetUsage, RequestBudget
 from .postgres_runner import PostgresConnectionSettings
+from .result_artifact import ChartReplayRef, chart_replay_from_trace
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,14 @@ class PostgresRunRecorder:
 
     async def finish(self, run: AgentRun, usage: BudgetUsage) -> None:
         await asyncio.to_thread(self._finish_sync, run, usage)
+
+    async def list_rendered_charts(
+        self, *, conversation_id: str, user_id: str
+    ) -> list[tuple[ChartReplayRef, str | None]]:
+        """Return saved chart pointers for this user, oldest question first."""
+        return await asyncio.to_thread(
+            self._list_rendered_charts_sync, conversation_id, user_id
+        )
 
     def _connect(self):
         return psycopg2.connect(
@@ -112,6 +121,38 @@ class PostgresRunRecorder:
         finally:
             connection.close()
 
+    def _list_rendered_charts_sync(
+        self, conversation_id: str, user_id: str
+    ) -> list[tuple[ChartReplayRef, str | None]]:
+        connection = self._connect()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT question, catalog_trace
+                        FROM app.agent_runs
+                        WHERE conversation_id = %s AND user_id = %s
+                          AND catalog_trace #>> '{result_artifact,plotly_ref}'
+                              = 'chart.plotly.json'
+                        ORDER BY started_at ASC
+                        LIMIT 8
+                        """,
+                        (conversation_id, user_id),
+                    )
+                    rows = cursor.fetchall()
+        finally:
+            connection.close()
+        charts: list[tuple[ChartReplayRef, str | None]] = []
+        for question, trace in rows:
+            parsed = chart_replay_from_trace(
+                trace if isinstance(trace, dict) else None,
+                question if isinstance(question, str) else None,
+            )
+            if parsed is not None:
+                charts.append(parsed)
+        return charts
+
     def _finish_sync(self, run: AgentRun, usage: BudgetUsage) -> None:
         values = usage.as_dict()
         catalog_trace = dict(values["catalog_trace"] or {})
@@ -120,6 +161,8 @@ class PostgresRunRecorder:
             # Keep the existing schema stable while making latency breakdowns
             # queryable with the run's redacted Catalog evidence.
             catalog_trace["performance"] = performance
+        if values.get("context_budget"):
+            catalog_trace["context_budget"] = values["context_budget"]
         if values.get("result_summary"):
             catalog_trace["result_summary"] = values["result_summary"]
         if values.get("result_contract_satisfied"):
@@ -130,6 +173,8 @@ class PostgresRunRecorder:
             catalog_trace["deterministic_result_finalized"] = True
         if values.get("deterministic_result_finalization_disabled"):
             catalog_trace["deterministic_result_finalization_disabled"] = True
+        if values.get("deterministic_chart_rendered"):
+            catalog_trace["deterministic_chart_rendered"] = True
         if values.get("llm_observations"):
             catalog_trace["llm_observations"] = values["llm_observations"]
         connection = self._connect()

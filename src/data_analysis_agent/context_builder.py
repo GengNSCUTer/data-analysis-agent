@@ -104,10 +104,14 @@ class ContextBudgetFilter(ConversationFilter):
                     message for turn in omitted for message in turn
                 ),
             )
+            usage = self.usage or CURRENT_BUDGET.get()
+            allow_semantic = not (
+                usage is not None and usage.suppress_semantic_history_summary
+            )
             cached = self._summary_cache.get(summary.source_sha256)
-            if cached is not None:
+            if allow_semantic and cached is not None:
                 summary = cached
-            elif self.summary_provider is not None:
+            elif allow_semantic and self.summary_provider is not None:
                 try:
                     semantic = await self.summary_provider(omitted, summary)
                 except Exception:
@@ -127,7 +131,6 @@ class ContextBudgetFilter(ConversationFilter):
                         source_tokens=summary.source_tokens,
                     )
                     self._summary_cache[summary.source_sha256] = summary
-            usage = self.usage or CURRENT_BUDGET.get()
             if usage is not None and summary.semantic_text:
                 usage.record_history_summary(summary.as_evidence(), summary.semantic_text)
             candidate = [summary.as_message(), *_flatten(retained)]

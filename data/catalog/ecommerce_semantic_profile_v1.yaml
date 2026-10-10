@@ -1,0 +1,27 @@
+profile_version: ecommerce-semantic-profile-v1
+description: >
+  Shared ecommerce roles. A new dataset reuses a role by binding it to its own
+  metric_id or dimension id. Unbound roles stay out of that dataset. Physical
+  tables, status values, and attribution rules are not shared.
+
+metric_roles:
+  - {role: merchandise_amount, meaning: 商品成交金额，不含运费, bindings: {olist-catalog-v3: gmv, thelook-catalog-v2: completed_sale_amount}}
+  - {role: item_rows, meaning: 商品行数，不是 SKU 去重, bindings: {olist-catalog-v3: item_count, thelook-catalog-v2: completed_item_count}}
+  - {role: order_count, meaning: 符合默认状态过滤的订单数, bindings: {olist-catalog-v3: paid_order_count, thelook-catalog-v2: completed_order_count}}
+  - {role: average_order_value, meaning: 先按订单汇总金额再平均, bindings: {olist-catalog-v3: average_order_value, thelook-catalog-v2: average_order_value}}
+  - {role: average_items_per_order, meaning: 先按订单数商品行再平均, bindings: {olist-catalog-v3: average_items_per_order, thelook-catalog-v2: average_items_per_completed_order}}
+  - {role: customer_count, meaning: 去重客户数, bindings: {olist-catalog-v3: unique_customer_count, thelook-catalog-v2: completed_customer_count}}
+  - {role: canceled_orders, meaning: 取消订单数, bindings: {olist-catalog-v3: canceled_order_count, thelook-catalog-v2: cancelled_order_count}}
+  - {role: fulfillment_days, meaning: 下单到送达的平均天数, bindings: {olist-catalog-v3: average_delivery_days, thelook-catalog-v2: average_fulfillment_days}}
+  - {role: freight_amount, meaning: 运费金额, bindings: {olist-catalog-v3: freight_amount}}
+  - {role: review_score, meaning: 评价分或好评率, bindings: {olist-catalog-v3: average_review_score}}
+  - {role: return_rate, meaning: 退货率, bindings: {thelook-catalog-v2: return_rate}}
+  - {role: inventory_units, meaning: 库存单元, bindings: {thelook-catalog-v2: sold_inventory_unit_count}}
+
+dimension_roles:
+  - {role: order_time, meaning: 下单时间, bindings: {olist-catalog-v3: date, thelook-catalog-v2: date}}
+  - {role: customer_region, meaning: 客户地区，低基数, bindings: {olist-catalog-v3: customer_state, thelook-catalog-v2: customer_state}}
+  - {role: seller_region, meaning: 卖家地区，低基数, bindings: {olist-catalog-v3: seller_state}}
+  - {role: product_category, meaning: 商品品类, bindings: {olist-catalog-v3: product_category_name, thelook-catalog-v2: product_category}}
+  - {role: product_brand, meaning: 品牌, bindings: {thelook-catalog-v2: product_brand}}
+  - {role: traffic_source, meaning: 流量来源, bindings: {thelook-catalog-v2: customer_traffic_source}}

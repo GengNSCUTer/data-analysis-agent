@@ -31,7 +31,9 @@
 | precision | bf16 + gradient checkpointing | 用重算换显存，不改变标签合同 |
 
 训练期间按 global step 记录 train loss 和 validation loss，并保存有限 checkpoint；
-validation 只参与稳定性观察和事先约定的模型选择，不能据此宣称 SQL 业务正确。完整训练
+当前 SQL-only Trainer 要求 `evaluation_steps == save_steps`，以 `eval_loss` 最小值启用
+`load_best_model_at_end`，并同时保留最后一步 `adapter_final` 与恢复后的
+`adapter_best`。validation 只参与稳定性观察和事先约定的模型选择，不能据此宣称 SQL 业务正确。完整训练
 前必须用相同参数完成 1-step GPU smoke，确认 batch、反传、optimizer step、显存峰值和
 adapter 写出。
 
@@ -50,4 +52,3 @@ case 数量、失败类别和固定抽样的人工口径复核。不得把生成
 
 发现 split/hash/Prompt/长度合同漂移、测试数据被读取、显存 OOM、adapter reload 失败或
 成对生成变量不一致时立即停止；保留外部日志和 evidence，不修改数据集来适应训练脚本。
-

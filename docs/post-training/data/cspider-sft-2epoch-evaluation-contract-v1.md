@@ -49,7 +49,7 @@ evidence 与 prediction JSONL，只检查证据、哈希、完整 source-order c
 必须只声明 adapter disabled，Adapter 必须声明已加载并提供 adapter 哈希。验证报告不写问题、SQL、
 库标识或结果行。随后才允许只读 SQLite diagnostics、paired 状态分析和 bounded denotation audit。
 
-`start_post_training_cspider_base_adapter_evaluation_screen.sh` 将 Base 和 Adapter 在同一受 UUID
+历史的 `start_post_training_cspider_base_adapter_evaluation_screen.sh` 曾将 Base 和 Adapter 在同一受 UUID
 守卫的 GPU 上顺序生成，先运行上述 verifier，再执行 CSpider SQLite、paired analysis 与生成后
 denotation。它不引用 Spider Test Suite，也不引用或读取 CSpider final test。本轮对入口的回归为 15
 项，覆盖 source hash/role 漂移、gold SQL 非读取、case namespace、报告脱敏、证据/配置漂移和 case

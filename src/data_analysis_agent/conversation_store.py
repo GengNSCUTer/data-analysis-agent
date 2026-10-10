@@ -21,6 +21,10 @@ class ConversationOwnershipError(PermissionError):
     """Raised when an existing conversation belongs to another user."""
 
 
+class ConversationStateConflict(RuntimeError):
+    """Raised when a stale conversation attempts to overwrite newer state."""
+
+
 class InvalidConversationId(ValueError):
     """Raised when a client supplies an invalid conversation identifier."""
 
@@ -30,8 +34,16 @@ class PostgresConversationStore(ConversationStore):
 
     _conversation_id_pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
-    def __init__(self, settings: PostgresConnectionSettings | None = None):
+    def __init__(
+        self,
+        settings: PostgresConnectionSettings | None = None,
+        *,
+        default_workspace_id: str = "olist-demo",
+    ):
         self.settings = settings or PostgresConnectionSettings.from_environment()
+        if not isinstance(default_workspace_id, str) or not default_workspace_id.strip():
+            raise ValueError("default_workspace_id must be a non-empty string")
+        self.default_workspace_id = default_workspace_id.strip()
 
     async def create_conversation(
         self, conversation_id: str, user: User, initial_message: str
@@ -46,18 +58,40 @@ class PostgresConversationStore(ConversationStore):
         return conversation
 
     async def get_conversation(
-        self, conversation_id: str, user: User
+        self, conversation_id: str, user: User, workspace_id: str | None = None
     ) -> Conversation | None:
         self._validate_conversation_id(conversation_id)
-        return await asyncio.to_thread(self._get_sync, conversation_id, user)
+        return await asyncio.to_thread(
+            self._get_sync, conversation_id, user, workspace_id or self.default_workspace_id
+        )
 
     async def update_conversation(self, conversation: Conversation) -> None:
         self._validate_conversation_id(conversation.id)
         await asyncio.to_thread(self._update_sync, conversation)
 
+    async def truncate_from_last_user_message(
+        self, conversation_id: str, user: User
+    ) -> int | None:
+        """Delete the latest user message and every message after it.
+
+        Returns the removed user-message index, or ``None`` when that
+        conversation has no user message. Working memory is cleared so the
+        replacement question does not reuse the deleted turn.
+        """
+
+        self._validate_conversation_id(conversation_id)
+        return await asyncio.to_thread(
+            self._truncate_from_last_user_sync,
+            conversation_id,
+            user,
+            self.default_workspace_id,
+        )
+
     async def delete_conversation(self, conversation_id: str, user: User) -> bool:
         self._validate_conversation_id(conversation_id)
-        return await asyncio.to_thread(self._delete_sync, conversation_id, user)
+        return await asyncio.to_thread(
+            self._delete_sync, conversation_id, user, self.default_workspace_id
+        )
 
     async def list_conversations(
         self, user: User, limit: int = 50, offset: int = 0
@@ -84,18 +118,24 @@ class PostgresConversationStore(ConversationStore):
                 "it must start with a letter or digit"
             )
 
-    def _get_sync(self, conversation_id: str, user: User) -> Conversation | None:
+    def _get_sync(
+        self, conversation_id: str, user: User, workspace_id: str
+    ) -> Conversation | None:
         connection = self._connect()
         try:
             with connection.cursor(
                 cursor_factory=psycopg2.extras.RealDictCursor
             ) as cursor:
                 cursor.execute(
-                    "SELECT * FROM app.conversations WHERE conversation_id = %s AND status = 'active'",
-                    (conversation_id,),
+                    """
+                    SELECT * FROM app.conversations
+                    WHERE conversation_id = %s AND user_id = %s
+                      AND workspace_id = %s AND status = 'active'
+                    """,
+                    (conversation_id, user.id, workspace_id),
                 )
                 conversation_row = cursor.fetchone()
-                if not conversation_row or conversation_row["user_id"] != user.id:
+                if not conversation_row:
                     return None
                 cursor.execute(
                     """
@@ -118,6 +158,8 @@ class PostgresConversationStore(ConversationStore):
                     "message_count": conversation_row["message_count"],
                     "dataset_version_id": conversation_row["dataset_version_id"],
                     "metric_version": conversation_row["metric_version"],
+                    "workspace_id": conversation_row["workspace_id"],
+                    "state_version": conversation_row["state_version"],
                     "working_memory": conversation_row.get("working_memory") or {},
                     "history_summary": (conversation_row.get("working_memory") or {}).get("__history_summary"),
                 },
@@ -131,6 +173,13 @@ class PostgresConversationStore(ConversationStore):
             "dataset_version_id", "olist-kaggle-v2-2026-08-03"
         )
         metric_version = conversation.metadata.get("metric_version", "0.1-draft")
+        workspace_id = conversation.metadata.get("workspace_id", self.default_workspace_id)
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise ValueError("conversation workspace_id must be a non-empty string")
+        workspace_id = workspace_id.strip()
+        expected_state_version = conversation.metadata.get("state_version", 0)
+        if not isinstance(expected_state_version, int) or expected_state_version < 0:
+            raise ValueError("conversation state_version must be a non-negative integer")
         title = self._title_for(conversation)
         connection = self._connect()
         try:
@@ -142,16 +191,17 @@ class PostgresConversationStore(ConversationStore):
                     cursor.execute(
                         """
                         INSERT INTO app.conversations (
-                            conversation_id, user_id, user_role, title,
+                            conversation_id, user_id, user_role, workspace_id, title,
                             dataset_version_id, metric_version, working_memory,
-                            message_count, created_at, updated_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            message_count, state_version, created_at, updated_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (conversation_id) DO NOTHING
                         """,
                         (
                             conversation.id,
                             conversation.user.id,
                             role,
+                            workspace_id,
                             title,
                             dataset_version,
                             metric_version,
@@ -159,18 +209,28 @@ class PostgresConversationStore(ConversationStore):
                                 stored_memory
                             ),
                             0,
+                            0,
                             self._utc(conversation.created_at),
                             self._utc(conversation.updated_at),
                         ),
                     )
                     cursor.execute(
-                        "SELECT user_id FROM app.conversations WHERE conversation_id = %s FOR UPDATE",
+                        """
+                        SELECT user_id, workspace_id, state_version
+                        FROM app.conversations WHERE conversation_id = %s FOR UPDATE
+                        """,
                         (conversation.id,),
                     )
                     owner = cursor.fetchone()
                     if not owner or owner[0] != conversation.user.id:
                         raise ConversationOwnershipError(
                             "conversation belongs to another user"
+                        )
+                    if owner[1] != workspace_id:
+                        raise ConversationStateConflict("conversation workspace does not match")
+                    if owner[2] != expected_state_version:
+                        raise ConversationStateConflict(
+                            "conversation state_version is stale"
                         )
                     for index, message in enumerate(conversation.messages):
                         cursor.execute(
@@ -206,8 +266,9 @@ class PostgresConversationStore(ConversationStore):
                         UPDATE app.conversations
                         SET title = %s, message_count = %s, updated_at = %s,
                             dataset_version_id = %s, metric_version = %s,
-                            working_memory = %s
-                        WHERE conversation_id = %s
+                            working_memory = %s, state_version = state_version + 1
+                        WHERE conversation_id = %s AND workspace_id = %s
+                          AND state_version = %s
                         """,
                         (
                             title,
@@ -219,19 +280,92 @@ class PostgresConversationStore(ConversationStore):
                                 stored_memory
                             ),
                             conversation.id,
+                            workspace_id,
+                            expected_state_version,
                         ),
                     )
+                    if cursor.rowcount != 1:
+                        raise ConversationStateConflict("conversation state_version is stale")
+                    conversation.metadata["workspace_id"] = workspace_id
+                    conversation.metadata["state_version"] = expected_state_version + 1
         finally:
             connection.close()
 
-    def _delete_sync(self, conversation_id: str, user: User) -> bool:
+    def _truncate_from_last_user_sync(
+        self, conversation_id: str, user: User, workspace_id: str
+    ) -> int | None:
         connection = self._connect()
         try:
             with connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        "DELETE FROM app.conversations WHERE conversation_id = %s AND user_id = %s RETURNING conversation_id",
+                        """
+                        SELECT workspace_id, state_version, working_memory
+                        FROM app.conversations
+                        WHERE conversation_id = %s AND user_id = %s AND status = 'active'
+                        FOR UPDATE
+                        """,
                         (conversation_id, user.id),
+                    )
+                    row = cursor.fetchone()
+                    if row is None or row[0] != workspace_id:
+                        return None
+                    cursor.execute(
+                        """
+                        SELECT MAX(message_index) FROM app.messages
+                        WHERE conversation_id = %s AND role = 'user'
+                        """,
+                        (conversation_id,),
+                    )
+                    user_index = cursor.fetchone()[0]
+                    if user_index is None:
+                        return None
+                    cursor.execute(
+                        """
+                        DELETE FROM app.messages
+                        WHERE conversation_id = %s AND message_index >= %s
+                        """,
+                        (conversation_id, user_index),
+                    )
+                    cursor.execute(
+                        """
+                        SELECT COUNT(*) FROM app.messages WHERE conversation_id = %s
+                        """,
+                        (conversation_id,),
+                    )
+                    remaining = cursor.fetchone()[0]
+                    cursor.execute(
+                        """
+                        UPDATE app.conversations
+                        SET message_count = %s, working_memory = %s,
+                            state_version = state_version + 1, updated_at = CURRENT_TIMESTAMP
+                        WHERE conversation_id = %s AND state_version = %s
+                        """,
+                        (
+                            remaining,
+                            psycopg2.extras.Json({}),
+                            conversation_id,
+                            row[1],
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        raise ConversationStateConflict("conversation state_version is stale")
+                    return int(user_index)
+        finally:
+            connection.close()
+
+    def _delete_sync(self, conversation_id: str, user: User, workspace_id: str) -> bool:
+        connection = self._connect()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        DELETE FROM app.conversations
+                        WHERE conversation_id = %s AND user_id = %s AND workspace_id = %s
+                        RETURNING conversation_id
+                        """,
+                        (conversation_id, user.id, workspace_id),
                     )
                     return cursor.fetchone() is not None
         finally:
@@ -246,11 +380,12 @@ class PostgresConversationStore(ConversationStore):
                 cursor.execute(
                     """
                     SELECT * FROM app.conversations
-                    WHERE user_id = %s AND status = 'active' AND message_count > 0
+                    WHERE user_id = %s AND workspace_id = %s
+                      AND status = 'active' AND message_count > 0
                     ORDER BY updated_at DESC
                     LIMIT %s OFFSET %s
                     """,
-                    (user.id, limit, offset),
+                    (user.id, self.default_workspace_id, limit, offset),
                 )
                 return [
                     Conversation(
@@ -263,6 +398,8 @@ class PostgresConversationStore(ConversationStore):
                             "title": row["title"],
                             "dataset_version_id": row["dataset_version_id"],
                             "metric_version": row["metric_version"],
+                            "workspace_id": row["workspace_id"],
+                            "state_version": row["state_version"],
                             "working_memory": row.get("working_memory") or {},
                             "message_count": row["message_count"],
                         },

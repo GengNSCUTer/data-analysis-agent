@@ -786,8 +786,12 @@ export const richComponentStyles = css`
 
   .dataframe-description {
     margin: 0 0 var(--vanna-space-3) 0;
+    padding: 8px 10px;
     font-size: 0.875rem;
-    color: var(--vanna-foreground-dimmer);
+    color: #6a4b16;
+    background: #fff7e8;
+    border: 1px solid #f0e2c4;
+    border-radius: 6px;
   }
 
   .dataframe-meta {

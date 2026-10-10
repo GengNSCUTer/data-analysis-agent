@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 import uuid
+import inspect
+import re
 from time import perf_counter
 
 from vanna.components import RichTextComponent, SimpleTextComponent, StatusCardComponent, UiComponent
-from vanna.core.llm import LlmMessage, LlmRequest
+from vanna.core.llm import LlmMessage, LlmRequest, LlmResponse
 from vanna.core.storage import Conversation, Message
 from vanna.servers.base import ChatHandler
 from vanna.servers.base.models import ChatRequest, ChatStreamChunk
 
+from .analysis_lifecycle import prepare_turn_memory
+from .catalog_grounding import ConstrainedCatalogGrounder, grounded_retrieval_question
+from .question_router import (
+    _is_clarification_continuation,
+    expand_retrieval_question,
+    is_result_refinement,
+)
 from .budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
 from .chart_contract import ChartContract, ChartContractError
+from .conversation_store import ConversationStateConflict
 from .metric_context import OLIST_WORKSPACE, PROMPT_VERSION
 from .question_router import QuestionRouter
 from .query_plan import QueryPlan
@@ -34,6 +44,22 @@ def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
     return {key: manifest[key] for key in allowed if key in manifest}
 
 
+_FOLLOWUP_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+
+
+def followup_adds_numbers(answer: str, summary: str) -> bool:
+    """True when a result explanation contains a number absent from the summary."""
+
+    allowed = set(_FOLLOWUP_NUMBER.findall(summary))
+    return any(number not in allowed for number in _FOLLOWUP_NUMBER.findall(answer))
+
+
+def constrain_followup_answer(answer: str, summary: str) -> str:
+    if not followup_adds_numbers(answer, summary):
+        return answer
+    return "这次只复述已验证摘要，不补充摘要以外的数字。\n" + summary.strip()
+
+
 TOOL_FREE_SYSTEM_PROMPT = """
 你是一个通用业务解释助手，当前请求没有数据库工具。
 
@@ -41,6 +67,12 @@ TOOL_FREE_SYSTEM_PROMPT = """
 工作区数据，也不得编造当前数据中的数字、排名、趋势或结论。如果用户明确要求当前数据事实，
 请说明需要进入受控数据查询流程，并请用户提供指标、时间范围或维度。回答应简洁、中文、可执行；
 如果问题属于当前工作区的指标定义，应优先依赖服务器提供的 Semantic Catalog，而不是猜测口径。
+""".strip()
+
+RESULT_FOLLOWUP_SYSTEM_PROMPT = """
+你只能解释上一轮已验证结果摘要。只能使用摘要里已经出现的数字和事实。
+不要计算、估计或补充任何新数字，也不要把摘要没有写明的原因说成确定事实。
+若摘要不足以回答，直接说明依据不足。回答应简洁、中文。
 """.strip()
 
 class BudgetedChatHandler(ChatHandler):
@@ -54,6 +86,7 @@ class BudgetedChatHandler(ChatHandler):
         question_router: QuestionRouter | None = None,
         workspace: WorkspaceProfile | None = None,
         result_artifact_store: ResultArtifactStore | None = None,
+        catalog_grounder: ConstrainedCatalogGrounder | None = None,
     ):
         super().__init__(agent)
         self.budget = budget
@@ -61,6 +94,18 @@ class BudgetedChatHandler(ChatHandler):
         self.question_router = question_router
         self.workspace = workspace or OLIST_WORKSPACE
         self.result_artifact_store = result_artifact_store
+        self.catalog_grounder = catalog_grounder
+
+    async def _get_conversation(self, conversation_id: str, user):
+        """Load a conversation with workspace scope while preserving test-store compatibility."""
+        getter = self.agent.conversation_store.get_conversation
+        parameters = inspect.signature(getter).parameters
+        if "workspace_id" in parameters or len(parameters) >= 3:
+            return await getter(conversation_id, user, self.workspace.workspace_id)
+        # Small in-memory stores used by focused runtime tests implement the
+        # pre-M2 two-argument protocol. They have no cross-workspace data and
+        # remain valid fixtures without weakening the Postgres contract.
+        return await getter(conversation_id, user)
 
     async def handle_stream(self, request: ChatRequest):
         conversation_id = request.conversation_id or f"conv_{uuid.uuid4().hex[:8]}"
@@ -91,15 +136,14 @@ class BudgetedChatHandler(ChatHandler):
             # Agent Run has a foreign key to the conversation. Create an empty
             # owner-scoped row before recording the run; Agent appends messages
             # through ConversationStore after this boundary is established.
-            conversation = await self.agent.conversation_store.get_conversation(
-                conversation_id, user
-            )
+            conversation = await self._get_conversation(conversation_id, user)
             if not conversation:
                 conversation = Conversation(
                     id=conversation_id,
                     user=user,
                     metadata={
                         "workspace_id": self.workspace.workspace_id,
+                        "state_version": 0,
                         "dataset_version_id": self.workspace.dataset_version_id,
                         "metric_version": self.workspace.metric_version,
                         "working_memory": {},
@@ -128,6 +172,19 @@ class BudgetedChatHandler(ChatHandler):
                 )
                 return
 
+            memory, invalidation_notice = prepare_turn_memory(
+                conversation, self.workspace
+            )
+            if invalidation_notice:
+                usage.suppress_semantic_history_summary = True
+                await self.agent.conversation_store.update_conversation(conversation)
+                yield self._budget_chunk(
+                    conversation_id,
+                    request_id,
+                    "分析上下文已失效",
+                    invalidation_notice,
+                )
+
             # Route only user-authored analysis turns. Workflow commands such as
             # /help must remain owned by Vanna's workflow handler.
             if self.question_router and request.message.strip().lower() not in {
@@ -136,29 +193,104 @@ class BudgetedChatHandler(ChatHandler):
                 "/h",
             }:
                 route_started_at = perf_counter()
-                memory = WorkingMemory.from_mapping(
-                    conversation.metadata.get("working_memory")
-                )
-                retrieval_question = memory.retrieval_context(request.message)
-                usage.set_catalog_context(retrieval_question, memory.as_dict())
+                route_state = memory.as_dict()
+                # A new question that already names a metric must not be
+                # searched together with the previous clarification text.
+                # Otherwise "本月 GMV" stays attached to a later order-count
+                # question and the result contract demands both columns.
+                retrieval_question = request.message.strip()
                 selection = self.question_router.retriever.retrieve(
                     retrieval_question, user
                 )
+                if (
+                    not selection.trace.selected_metrics
+                    and memory.pending_question
+                ):
+                    retrieval_question = memory.retrieval_context(request.message)
+                    if retrieval_question != request.message.strip():
+                        selection = self.question_router.retriever.retrieve(
+                            retrieval_question, user
+                        )
+                has_metric_match = bool(selection.trace.selected_metrics)
+                expanded_question = expand_retrieval_question(
+                    retrieval_question,
+                    route_state,
+                    has_metric_match=has_metric_match,
+                )
+                if expanded_question != retrieval_question:
+                    retrieval_question = expanded_question
+                    selection = self.question_router.retriever.retrieve(
+                        retrieval_question, user
+                    )
+                if (
+                    is_result_refinement(
+                        request.message,
+                        route_state,
+                        has_metric_match=has_metric_match,
+                    )
+                    and memory.dimensions
+                    and not QueryPlan._dimensions(request.message, selection.metrics)
+                ):
+                    route_state = {
+                        **route_state,
+                        "resolved_dimensions": list(memory.dimensions),
+                    }
+                usage.set_catalog_context(retrieval_question, memory.as_dict())
                 usage.record_catalog(selection.trace.as_dict())
                 route = self.question_router.classify(
                     request.message,
                     user=user,
                     selection=selection,
-                    conversation_state=memory.as_dict(),
+                    conversation_state=route_state,
                 )
+                resolved_dimensions: tuple[str, ...] = ()
+                if route.should_generate_sql:
+                    if (
+                        not selection.trace.selected_metrics
+                        and self.catalog_grounder is not None
+                        and not _is_clarification_continuation(route_state)
+                    ):
+                        grounded = await self._ground_unmatched_question(
+                            request.message, user
+                        )
+                        if grounded is not None:
+                            selection = self.question_router.retriever.retrieve(
+                                grounded_retrieval_question(
+                                    request.message,
+                                    grounded,
+                                    self.question_router.retriever.catalog,
+                                ),
+                                user,
+                            )
+                            if any(
+                                metric_id in selection.trace.selected_metrics
+                                for metric_id in grounded.metric_ids
+                            ):
+                                resolved_dimensions = grounded.dimensions
+                                route_state = {
+                                    **route_state,
+                                    "resolved_dimensions": list(resolved_dimensions),
+                                }
+                                usage.record_catalog(
+                                    {"catalog_grounding": grounded.as_dict()}
+                                )
+                    route = self.question_router.admit_sql_request(
+                        request.message,
+                        user=user,
+                        selection=selection,
+                        conversation_state=route_state,
+                    )
                 updated_memory = memory.apply(request.message, route)
                 query_plan = None
                 if route.should_generate_sql:
+                    plan_state = updated_memory.as_dict()
+                    if resolved_dimensions:
+                        plan_state["resolved_dimensions"] = list(resolved_dimensions)
                     query_plan = QueryPlan.from_selection(
                         selection,
                         request.message,
                         route,
-                        updated_memory.as_dict(),
+                        plan_state,
                     )
                     # QueryPlan, not assistant prose or client metadata, owns
                     # the resolved grouping for this turn.  Persist it only as
@@ -233,7 +365,9 @@ class BudgetedChatHandler(ChatHandler):
                     catalog_evidence["chart_contract"] = chart_contract.as_evidence()
                 usage.record_catalog(catalog_evidence)
                 usage.set_catalog_context(
-                    retrieval_question, updated_memory.as_dict()
+                    retrieval_question,
+                    updated_memory.as_dict(),
+                    catalog_prompt=selection.prompt,
                 )
                 request.request_context.metadata["route_intent"] = route.intent
                 request.request_context.metadata["route_evidence_mode"] = route.evidence_mode
@@ -270,13 +404,22 @@ class BudgetedChatHandler(ChatHandler):
 
                 if not route.should_generate_sql:
                     detail = route.direct_answer or route.clarification or "当前请求无法在受控数据范围内回答。"
+                    streamed_tool_free = False
                     if route.should_use_tool_free_llm:
-                        detail = await self._tool_free_answer(
+                        detail = ""
+                        async for piece in self._tool_free_answer(
                             request,
                             route,
                             updated_memory,
                             user,
-                        )
+                        ):
+                            if isinstance(piece, str):
+                                detail = piece
+                            else:
+                                streamed_tool_free = True
+                                yield piece
+                        if not detail:
+                            detail = "当前无法生成通用解释；如果你要查询实际数据，请补充指标和时间范围。"
                     conversation.add_message(Message(role="user", content=request.message))
                     conversation.add_message(
                         Message(
@@ -294,9 +437,10 @@ class BudgetedChatHandler(ChatHandler):
                         return
                     if route.state == "help" or route.should_use_tool_free_llm:
                         usage.terminate("completed")
-                        yield self._text_chunk(
-                            conversation_id, request_id, detail
-                        )
+                        if not streamed_tool_free:
+                            yield self._text_chunk(
+                                conversation_id, request_id, detail
+                            )
                         return
                     if route.needs_clarification:
                         usage.terminate("clarification_required")
@@ -386,6 +530,14 @@ class BudgetedChatHandler(ChatHandler):
             ):
                 usage.terminate("tool_budget_exhausted")
             usage.finish()
+        except ConversationStateConflict:
+            usage.terminate("state_conflict")
+            yield self._budget_chunk(
+                conversation_id,
+                request_id,
+                "会话状态已更新",
+                "当前会话已有新消息，请刷新后重试；本次请求未覆盖已有分析状态。",
+            )
         except Exception as exc:
             usage.terminate("execution_error", type(exc).__name__)
             raise
@@ -449,6 +601,15 @@ class BudgetedChatHandler(ChatHandler):
             f"指标：{metric_text}；结果字段：{column_text}；"
             f"数据版本：{dataset_version}；指标版本：{metric_version}。"
         )
+        plan = trace.get("query_plan") if isinstance(trace.get("query_plan"), dict) else {}
+        requirements = plan.get("attribution_requirements") or []
+        if any(
+            isinstance(item, dict) and item.get("policy_mode") == "multi_membership"
+            for item in requirements
+        ):
+            content += "按品类或支付方式拆开时，同一订单可以进入多个分组，各组合计可以大于总体。"
+        if any(str(item).startswith("filter_customer_state:") for item in plan.get("warnings") or []):
+            content += "客户州条件是筛选，不是按州分组。"
         component = UiComponent(
             rich_component=StatusCardComponent(
                 title="本次回答的数据依据",
@@ -466,29 +627,34 @@ class BudgetedChatHandler(ChatHandler):
         route,
         memory: WorkingMemory,
         user,
-    ) -> str:
+    ):
         """Answer a non-data request without exposing the SQL tool registry.
 
-        The same configured model service may be reused, but the request is
-        sent directly with ``tools=None`` and a system prompt that forbids
-        claims about current database facts.  This keeps the data Agent as the
-        only component allowed to call ``run_sql``.
+        Text deltas are yielded as chat chunks. The last item is the final
+        string stored on the conversation. The request uses ``tools=None`` and
+        a system prompt that forbids claims about current database facts.
         """
         prompt = request.message.strip()
-        if route.intent == "result_followup" and memory.previous_result_summary:
+        summary = memory.previous_result_summary or ""
+        hold_followup = route.intent == "result_followup" and bool(summary.strip())
+        system_prompt = (
+            RESULT_FOLLOWUP_SYSTEM_PROMPT if hold_followup else TOOL_FREE_SYSTEM_PROMPT
+        )
+        if hold_followup:
             prompt = (
-                "可信的上一轮结果摘要如下（只能解释其中已有信息，不得补造新数字）：\n"
-                f"{memory.previous_result_summary[:1000]}\n\n"
+                "可信的上一轮结果摘要如下。只能使用摘要里已经出现的数字；"
+                "不要计算、估计或补充任何新数字：\n"
+                f"{summary[:1000]}\n\n"
                 f"当前追问：{prompt}"
             )
         llm_request = LlmRequest(
             messages=[LlmMessage(role="user", content=prompt)],
             user=user,
             tools=None,
-            stream=False,
+            stream=True,
             temperature=0.0,
             max_tokens=min(self.budget.max_output_tokens, 800),
-            system_prompt=TOOL_FREE_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             metadata={
                 "purpose": "tool_free_response",
                 "intent": route.intent,
@@ -496,22 +662,45 @@ class BudgetedChatHandler(ChatHandler):
                 "request_id": request.request_id,
             },
         )
+        streamer = getattr(self.agent, "_handle_streaming_response", None)
+        streaming = bool(getattr(getattr(self.agent, "config", None), "stream_responses", False))
+        if streaming and callable(streamer):
+            content = ""
+            async for piece in streamer(llm_request):
+                if isinstance(piece, LlmResponse):
+                    content = (piece.content or "").strip()
+                elif not hold_followup:
+                    yield ChatStreamChunk.from_component(
+                        piece, request.conversation_id or "", request.request_id or ""
+                    )
+            if hold_followup:
+                content = constrain_followup_answer(content, summary)
+            yield content
+            return
         sender = getattr(self.agent, "_send_llm_request", None)
         if not callable(sender):
             raise RuntimeError("agent does not expose the project LLM request boundary")
         response = await sender(llm_request)
         content = (response.content or "").strip()
-        if not content:
-            return "当前无法生成通用解释；如果你要查询实际数据，请补充指标和时间范围。"
-        return content
+        if hold_followup:
+            content = constrain_followup_answer(content, summary)
+        yield content
+
+    async def _ground_unmatched_question(self, question: str, user):
+        """Align an unmatched data question to Catalog ids, or keep clarifying."""
+
+        if self.catalog_grounder is None:
+            return None
+        try:
+            return await self.catalog_grounder.ground(question, user)
+        except Exception:
+            return None
 
     async def _persist_result_artifact(
         self, conversation_id: str, user, request_id: str, usage: BudgetUsage
     ) -> None:
         """Persist a small trusted-result replay artifact into working memory."""
-        conversation = await self.agent.conversation_store.get_conversation(
-            conversation_id, user
-        )
+        conversation = await self._get_conversation(conversation_id, user)
         if conversation is None:
             return
         memory = WorkingMemory.from_mapping(conversation.metadata.get("working_memory"))
@@ -556,9 +745,7 @@ class BudgetedChatHandler(ChatHandler):
         """Persist only the bounded semantic summary in the owner-scoped session."""
         if not usage.history_summary or not usage.history_summary_text:
             return
-        conversation = await self.agent.conversation_store.get_conversation(
-            conversation_id, user
-        )
+        conversation = await self._get_conversation(conversation_id, user)
         if conversation is None:
             return
         conversation.metadata["history_summary"] = {

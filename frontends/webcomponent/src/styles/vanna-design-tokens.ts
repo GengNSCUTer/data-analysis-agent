@@ -12,7 +12,7 @@ export const vannaDesignTokens = css`
 
     /* Color Palette - Light mode (default) */
     --vanna-background-root: rgb(255, 255, 255);
-    --vanna-background-default: rgb(231, 225, 207);
+    --vanna-background-default: rgb(247, 248, 247);
     --vanna-background-higher: rgb(244, 246, 248);
     --vanna-background-highest: rgb(229, 231, 235);
     --vanna-background-subtle: rgb(248, 250, 252);
@@ -47,7 +47,7 @@ export const vannaDesignTokens = css`
     --vanna-outline-hover: rgb(21, 168, 168);
 
     /* Typography */
-    --vanna-font-family-default: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    --vanna-font-family-default: Inter, "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
     --vanna-font-family-serif: "Roboto Slab", ui-serif, Georgia, serif;
     --vanna-font-family-mono: "Space Mono", ui-monospace, SFMono-Regular, "SF Mono", Monaco, Inconsolata, "Roboto Mono", "Ubuntu Mono", monospace;
 

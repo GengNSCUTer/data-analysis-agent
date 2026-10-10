@@ -1,4 +1,7 @@
-# 分析数据模型（Phase 2 草案）
+# 分析数据模型与运行时持久化边界
+
+> 本文描述当前 Olist 演示工作区的分析层及实际已落地的 `app` 元数据表。
+> 数据指标、PostgreSQL Gold SQL 与后训练数据合同以 `docs/metric-contracts/`、`docs/post-training/data/` 为准；当前请求/执行链的已验证事实见 [project-v1-baseline-review.md](project-v1-baseline-review.md)。
 
 ## 目标
 
@@ -33,11 +36,23 @@ dim_products * ─── 1 dim_category_translation
 - `fact_payments(order_id, payment_sequential, payment_type, payment_installments, payment_value)`
 - `fact_reviews(review_id, order_id, review_score, review_creation_date)`，复合主键为 `(review_id, order_id)`
 
-### `app`（后续 Phase 3）
+### `app`（当前已落地的运行时元数据）
 
-`users`、`conversations`、`messages`、`metric_definitions`、`dataset_versions`、
-`query_audits`、`policy_decisions`、`evaluation_cases` 和 `evaluation_runs` 暂不创建，
-这里只预留职责边界。
+`app` 与 `analytics` 使用不同数据库角色：前者由应用 writer role 写入，后者由
+analytics reader role 只读查询。当前实现已实际创建并使用以下表：
+
+- `conversations`：用户所有的会话记录，含标题、workspace、数据/指标版本、状态、消息数、乐观并发 `state_version` 与受控的 `working_memory` JSONB；
+- `messages`：会话按 `message_index` 追加的 user / assistant / tool message、受控 tool call metadata；
+- `agent_runs`：一次用户请求的模型、预算、token、Catalog trace、结果合同、repair evidence 与终止状态；
+- `query_audits`：每次 SQL 尝试的原始/最终 SQL、Policy 状态、行数、耗时、脱敏错误与 repair evidence。
+
+这些不是业务事实表，不能通过 analytics reader role 查询。会话加载和删除均按 `user_id`
+做所有权范围约束；前端历史详情会把 tool message 显示为“工具结果已记录”，不直接回传原始工具内容。
+
+当前 `app.conversations` 保存 `workspace_id`、`dataset_version_id`、`metric_version`、`state_version`
+与 `working_memory`。历史单工作区行由迁移回填为 `olist-demo`；旧数据不会猜测迁移到 TheLook。Store
+在 get/list/delete/update 中按 workspace 过滤，并在 update 时要求客户端对象携带当前 `state_version`，
+成功后递增版本；过期对象抛出 `ConversationStateConflict`，不会静默覆盖新状态。M5 已提供可见的「清空分析上下文」。隐形 TTL 仍未实现。
 
 ## 权限和展示边界
 
@@ -52,4 +67,5 @@ dim_products * ─── 1 dim_category_translation
 - `metric_version`：指标目录版本。
 - `policy_version`：SQL 安全规则版本。
 
-数据真正加载前，以上版本只记录设计草案，不能在项目介绍中描述为已完成能力。
+当前 Olist 演示已使用数据、指标与 Policy 版本写入会话和运行审计；不同历史报告中的版本数字只对各自
+冻结资产负责，不能混为“当前默认版本”。

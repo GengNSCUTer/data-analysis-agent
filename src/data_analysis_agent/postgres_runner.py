@@ -11,11 +11,12 @@ from typing import Any
 import pandas as pd
 import psycopg2
 import psycopg2.extras
+from sqlglot import exp, parse_one
 
 from vanna.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
 from vanna.core.tool import ToolContext
 
-from .sql_policy import PolicyViolation, SqlPolicy
+from .sql_policy import DEFAULT_ANALYST_EXECUTION_LIMIT, PolicyViolation, SqlPolicy
 from .result_validator import (
     ResultValidationError,
     ResultValidator,
@@ -26,6 +27,31 @@ from .metric_context import DATASET_VERSION, METRIC_VERSION, OLIST_WORKSPACE
 from .workspace import WorkspaceProfile
 
 
+def execution_probe(final_sql: str, row_limit: int, *, policy_limit_applied: bool) -> tuple[str, int]:
+    """Read one extra row only when policy itself capped the statement.
+
+    The extra row is not part of the SQL stored in the audit. Callers must
+    drop it before validation, summaries, charts, or the model prompt.
+    """
+
+    if not policy_limit_applied:
+        return final_sql, row_limit
+    statement = parse_one(final_sql, read="postgres")
+    statement.set("limit", exp.Limit(expression=exp.Literal.number(row_limit + 1)))
+    return statement.sql(dialect="postgres"), row_limit + 1
+
+
+def cap_probed_rows(
+    rows: list[dict[str, Any]],
+    row_limit: int,
+    *,
+    policy_limit_applied: bool,
+) -> tuple[list[dict[str, Any]], bool]:
+    if policy_limit_applied and len(rows) > row_limit:
+        return rows[:row_limit], True
+    return rows, False
+
+
 @dataclass(frozen=True)
 class PostgresConnectionSettings:
     database: str = "data_analysis_agent"
@@ -34,7 +60,7 @@ class PostgresConnectionSettings:
     reader_user: str = "daa_analytics_reader"
     writer_user: str = "daa_app_writer"
     statement_timeout_ms: int = 5_000
-    max_rows: int = 1_000
+    max_rows: int = DEFAULT_ANALYST_EXECUTION_LIMIT
 
     @classmethod
     def from_environment(cls) -> "PostgresConnectionSettings":
@@ -158,7 +184,14 @@ class SecurePostgresRunner(SqlRunner):
                 writer_user=workspace.writer_role,
             )
         self.settings = configured_settings
-        self.policy = policy or SqlPolicy(workspace=self.workspace)
+        # A directly constructed online runner follows the database execution
+        # cap (normally 1,000 rows). Protected/offline contracts inject their
+        # own explicit 200-row policy and are therefore unaffected.
+        self.policy = policy or SqlPolicy(
+            analyst_limit=self.settings.max_rows,
+            admin_limit=self.settings.max_rows,
+            workspace=self.workspace,
+        )
         self.audit = PostgresQueryAudit(self.settings, model_name)
         # Result validation is part of the trusted execution boundary. A
         # direct runner construction must not accidentally bypass it just
@@ -197,8 +230,18 @@ class SecurePostgresRunner(SqlRunner):
                 connection.set_session(readonly=True, autocommit=False)
                 with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
                     cursor.execute("SET LOCAL statement_timeout = %s", (self.settings.statement_timeout_ms,))
-                    cursor.execute(decision.final_sql)
-                    rows: list[dict[str, Any]] = [dict(row) for row in cursor.fetchmany(self.settings.max_rows)]
+                    probe_sql, probe_count = execution_probe(
+                        decision.final_sql,
+                        decision.row_limit,
+                        policy_limit_applied=decision.policy_limit_applied,
+                    )
+                    cursor.execute(probe_sql)
+                    fetched = [dict(row) for row in cursor.fetchmany(probe_count)]
+                    rows, execution_truncated = cap_probed_rows(
+                        fetched,
+                        decision.row_limit,
+                        policy_limit_applied=decision.policy_limit_applied,
+                    )
             finally:
                 connection.close()
         except Exception as exc:
@@ -231,15 +274,11 @@ class SecurePostgresRunner(SqlRunner):
                 time_bucket_grain=time_bucket_grain,
                 requested_start=context.metadata.get("requested_start"),
                 requested_end=context.metadata.get("requested_end"),
-                # A clarification is required only if Policy itself inserted
-                # or tightened the cap and the response reaches it. An
-                # explicit smaller SQL LIMIT is a separate semantic concern
-                # for QueryPlan/Gold-SQL review, not evidence of a Policy
-                # truncation.
-                limit_applied=(
-                    decision.policy_limit_applied
-                    and len(rows) >= decision.row_limit
-                ),
+                # Truncation is true only when the policy cap probe saw one
+                # extra row. That row is already discarded. An explicit
+                # smaller LIMIT is not evidence of a policy truncation.
+                limit_applied=False,
+                execution_truncated=execution_truncated,
                 join_multiplicity=context.metadata.get("join_multiplicity"),
                 exact_columns=bool(context.metadata.get("exact_result_columns", False)),
                 metric_value_constraints=context.metadata.get(
@@ -247,7 +286,9 @@ class SecurePostgresRunner(SqlRunner):
                 ),
             )
             context.metadata["result_validation"] = validation.as_dict()
-            if not validation.safe_to_answer:
+            context.metadata["display_result_row_budget"] = self.result_validator.display_row_budget
+            context.metadata["execution_row_limit"] = self.result_validator.max_rows
+            if not validation.safe_to_display:
                 self._record_timing(context, "postgres_sql", started_at)
                 self.audit.record(
                     context,
@@ -261,8 +302,28 @@ class SecurePostgresRunner(SqlRunner):
                     repair_evidence=context.metadata.get("repair_evidence"),
                 )
                 raise ResultValidationError(validation)
+            validated_frame = pd.DataFrame(rows)
+            if validation.dropped_columns:
+                validated_frame = validated_frame.drop(
+                    columns=list(validation.dropped_columns), errors="ignore"
+                )
+            if not validation.safe_to_answer:
+                context.metadata["result_display_notice"] = validation.reason
+                self.audit.record(
+                    context,
+                    role,
+                    args.sql,
+                    status="allowed",
+                    final_sql=decision.final_sql,
+                    reason=f"displayed:{validation.reason}",
+                    elapsed_ms=int((perf_counter() - started_at) * 1000),
+                    row_count=len(validated_frame),
+                    repair_evidence=context.metadata.get("repair_evidence"),
+                )
+                self._record_timing(context, "postgres_sql", started_at)
+                return validated_frame
             result_summary = build_result_summary(
-                pd.DataFrame(rows),
+                validated_frame,
                 validation,
                 metric_ids=context.metadata.get("metric_result_columns", ()),
                 required_columns=context.metadata.get("required_result_columns", ()),
@@ -279,6 +340,14 @@ class SecurePostgresRunner(SqlRunner):
                 usage.set_result_summary(result_summary)
             if usage is not None and hasattr(usage, "mark_result_contract_satisfied"):
                 usage.mark_result_contract_satisfied()
+            chart_metadata = context.metadata.get("chart_contract")
+            if (
+                usage is not None
+                and isinstance(chart_metadata, dict)
+                and chart_metadata.get("status") == "valid"
+                and hasattr(usage, "set_validated_chart_frame")
+            ):
+                usage.set_validated_chart_frame(validated_frame)
             context.metadata["result_contract_satisfied"] = True
 
         self.audit.record(

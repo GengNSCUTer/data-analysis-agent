@@ -120,7 +120,26 @@ async def test_context_filter_uses_semantic_summary_and_reuses_by_source_digest(
 
 
 @pytest.mark.asyncio
-async def test_token_budget_can_trigger_compression_even_when_char_budget_fits() -> None:
+async def test_version_invalidation_skips_semantic_history_summary() -> None:
+    messages = [
+        Message(role="user", content="历史问题：分析销售额" * 8),
+        Message(role="assistant", content="历史回答：已准备查询" * 8),
+        Message(role="user", content="当前问题"),
+        Message(role="assistant", content="当前回答"),
+    ]
+    usage = BudgetUsage(RequestBudget())
+    usage.suppress_semantic_history_summary = True
+    provider = _SummaryCounter()
+
+    filtered = await ContextBudgetFilter(
+        180, 5, usage, summary_provider=provider
+    ).filter_messages(messages)
+
+    assert provider.calls == 0
+    assert filtered[0].role == "system"
+    assert "服务器历史边界" in filtered[0].content
+    assert "用户先讨论业务指标" not in filtered[0].content
+    assert usage.history_summary_text is None
     messages = [
         Message(role="user", content="第一轮"),
         Message(role="assistant", content="第一轮回答"),

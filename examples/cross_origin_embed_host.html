@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>跨域嵌入宿主</title>
+    <style>
+      body { margin: 0; font-family: Inter, "PingFang SC", sans-serif; color: #17212b; background: #f5f7f8; }
+      header { padding: 16px 20px; background: #fff; border-bottom: 1px solid #dbe2e6; }
+      label { display: block; margin-top: 8px; font-size: 13px; }
+      input, button { font: inherit; }
+      input { width: min(720px, 100%); min-height: 34px; margin-top: 4px; }
+      iframe { width: 100%; height: calc(100vh - 180px); border: 0; background: #fff; }
+      #status { min-height: 20px; color: #0f766e; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>宿主页面</strong>
+      <p>把在 Copilot 里签发的 5 分钟令牌贴在这里。页面只通过 postMessage 交给 iframe，不提交 user_id。</p>
+      <label>Copilot 地址<input id="copilot-url" value="http://127.0.0.1:32013/embedded-copilot" /></label>
+      <label>嵌入令牌<input id="token" autocomplete="off" /></label>
+      <button id="open" type="button">打开 iframe</button>
+      <p id="status"></p>
+    </header>
+    <iframe id="copilot" title="数据分析 Copilot"></iframe>
+    <script>
+      const iframe = document.querySelector("#copilot");
+      const status = document.querySelector("#status");
+      let nonce = "";
+      document.querySelector("#open").addEventListener("click", () => {
+        nonce = Math.random().toString(36).slice(2);
+        const url = new URL(document.querySelector("#copilot-url").value);
+        iframe.src = url.toString();
+        status.textContent = "等待 Copilot 确认令牌…";
+      });
+      iframe.addEventListener("load", () => {
+        const token = document.querySelector("#token").value.trim();
+        if (!token || !nonce) return;
+        const target = new URL(iframe.src).origin;
+        iframe.contentWindow.postMessage({ type: "daa.embed.v1", token, nonce }, target);
+      });
+      window.addEventListener("message", (event) => {
+        if (!iframe.src) return;
+        if (event.origin !== new URL(iframe.src).origin) return;
+        if (!event.data || event.data.type !== "daa.embed.ack.v1" || event.data.nonce !== nonce) return;
+        status.textContent = "Copilot 已接受这个来源的令牌。";
+      });
+    </script>
+  </body>
+</html>

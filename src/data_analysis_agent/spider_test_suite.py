@@ -19,7 +19,10 @@ import sys
 from typing import Any, Iterable, Mapping, Sequence
 
 from data_analysis_agent.sqlite_benchmark import BenchmarkInputError, SqlPrediction
-from data_analysis_agent.text_to_sql_output import normalize_text_to_sql_candidate
+from data_analysis_agent.candidate_sql_generator import (
+    CandidateSqlGenerationError,
+    unwrap_sql_completion,
+)
 
 
 class OfficialSpiderTestSuiteError(ValueError):
@@ -91,7 +94,12 @@ def prepare_complete_spider_test_suite_inputs(
     gold_lines: list[str] = []
     prediction_lines: list[str] = []
     for case_id, database_id, gold_sql in normalized_cases:
-        candidate_sql = normalize_text_to_sql_candidate(prediction_by_case[case_id])
+        try:
+            candidate_sql = unwrap_sql_completion(prediction_by_case[case_id])
+        except CandidateSqlGenerationError as exc:
+            raise OfficialSpiderTestSuiteError(
+                f"candidate SQL for {case_id} has no SQL content after presentation unwrapping"
+            ) from exc
         candidate_sql = _serialize_single_line_sql(candidate_sql, "candidate SQL")
         gold_sql = _serialize_single_line_sql(gold_sql, "gold SQL")
         if "\t" in database_id or "\n" in database_id or "\r" in database_id:

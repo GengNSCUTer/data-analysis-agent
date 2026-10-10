@@ -7,7 +7,7 @@ import re
 from typing import Any, Mapping
 
 from .question_router import QuestionRoute
-from .result_artifact import ResultArtifact
+from .result_artifact import ChartReplayRef, ResultArtifact
 
 
 _DATE_RANGE = re.compile(
@@ -29,6 +29,7 @@ class WorkingMemory:
     comparison_baseline: str | None = None
     previous_result_summary: str | None = None
     previous_result_artifact: ResultArtifact | None = None
+    chart_history: tuple[ChartReplayRef, ...] = ()
     pending_question: str | None = None
     pending_missing: tuple[str, ...] = ()
     _MAX_TEXT: int = field(default=4000, init=False, repr=False)
@@ -66,6 +67,7 @@ class WorkingMemory:
             previous_result_artifact=ResultArtifact.from_mapping(
                 value.get("previous_result_artifact")
             ),
+            chart_history=_chart_history(value.get("chart_history")),
             pending_question=text("pending_question"),
             pending_missing=strings("pending_missing"),
         )
@@ -83,6 +85,7 @@ class WorkingMemory:
                 if self.previous_result_artifact
                 else None
             ),
+            "chart_history": [item.as_dict() for item in self.chart_history],
             "pending_question": self.pending_question,
             "pending_missing": list(self.pending_missing),
         }
@@ -121,6 +124,7 @@ class WorkingMemory:
             comparison_baseline=comparison,
             previous_result_summary=self.previous_result_summary,
             previous_result_artifact=self.previous_result_artifact,
+            chart_history=self.chart_history,
             pending_question=pending_question,
             pending_missing=tuple(pending_missing),
         )
@@ -141,6 +145,7 @@ class WorkingMemory:
             comparison_baseline=self.comparison_baseline,
             previous_result_summary=value,
             previous_result_artifact=self.previous_result_artifact,
+            chart_history=self.chart_history,
             pending_question=self.pending_question,
             pending_missing=self.pending_missing,
         )
@@ -157,6 +162,7 @@ class WorkingMemory:
             comparison_baseline=self.comparison_baseline,
             previous_result_summary=artifact.summary,
             previous_result_artifact=artifact,
+            chart_history=_remember_chart(self.chart_history, artifact),
             pending_question=self.pending_question,
             pending_missing=self.pending_missing,
         )
@@ -196,6 +202,7 @@ class WorkingMemory:
             comparison_baseline=self.comparison_baseline,
             previous_result_summary=self.previous_result_summary,
             previous_result_artifact=self.previous_result_artifact,
+            chart_history=self.chart_history,
             pending_question=self.pending_question,
             pending_missing=self.pending_missing,
         )
@@ -232,6 +239,42 @@ class WorkingMemory:
         if not lines:
             return ""
         return "\n### 本轮已确认的结构化分析状态\n" + "\n".join(lines)
+
+
+def replayable_chart_refs(
+    memory: WorkingMemory, current: ResultArtifact | None
+) -> tuple[ChartReplayRef, ...]:
+    """Charts already saved for this conversation, including the latest artifact.
+
+    Older sessions stored only the current artifact. A later non-chart answer
+    used to replace that pointer, so history replay also keeps ``chart_history``.
+    """
+    refs = list(memory.chart_history)
+    extra = current.chart_replay_ref() if current is not None else None
+    if extra is not None and all(item.artifact_id != extra.artifact_id for item in refs):
+        refs.append(extra)
+    return tuple(refs[-8:])
+
+
+def _chart_history(value: Any) -> tuple[ChartReplayRef, ...]:
+    if not isinstance(value, list):
+        return ()
+    refs: list[ChartReplayRef] = []
+    for item in value[:8]:
+        ref = ChartReplayRef.from_mapping(item if isinstance(item, Mapping) else None)
+        if ref is not None:
+            refs.append(ref)
+    return tuple(refs)
+
+
+def _remember_chart(
+    history: tuple[ChartReplayRef, ...], artifact: ResultArtifact
+) -> tuple[ChartReplayRef, ...]:
+    ref = artifact.chart_replay_ref()
+    if ref is None:
+        return history
+    kept = tuple(item for item in history if item.artifact_id != ref.artifact_id)
+    return (kept + (ref,))[-8:]
 
 
 def _extract_time_range(question: str) -> dict[str, str] | None:

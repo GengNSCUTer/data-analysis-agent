@@ -1,0 +1,14 @@
+scorecard_id: router-decision-scorecard-v1
+label_set_id: router-decision-labels-v1
+catalog_version: olist-catalog-v3
+metric_version: 0.3-proposal
+scope_note: Author-labeled router decisions from the catalog contract. No model call
+  and no SQL execution. Not an online answer-quality number.
+counts:
+  cases: 48
+  evidence_match: 48
+  false_open: 0
+  false_block: 0
+  metric_exact: 29
+  metric_scored: 29
+mismatches: []

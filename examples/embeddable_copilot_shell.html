@@ -1,0 +1,795 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>数据分析 Copilot</title>
+    <script type="module" src="/static/vanna-components.js?v=20260924-chart-history"></script>
+    <style>
+      :root {
+        color: #1c2430;
+        background: #f4f6f8;
+        font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body { margin: 0; min-width: 320px; overflow: hidden; }
+      .shell { height: 100vh; min-height: 0; display: grid; grid-template-rows: 56px minmax(0, 1fr); overflow: hidden; }
+      h2.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+      .topbar {
+        display: flex; align-items: center; gap: 16px;
+        padding: 0 20px; color: #1c2430; background: #f7f8f7; border-bottom: 1px solid #e4e7eb;
+      }
+      .topbar .action { color: #1c2430; background: #fff; border-color: #d5dbe2; }
+      .topbar .action[aria-pressed="true"] { background: #e7f4f3; border-color: #0f766e; color: #0f766e; }
+      .brand { min-width: 0; font-size: 15px; font-weight: 650; letter-spacing: 0; }
+      .workspace, .topbar-account { overflow: hidden; color: #5c6b78; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+      .topbar-spacer { flex: 1; }
+      .more-menu { position: relative; }
+      .more-menu summary { list-style: none; cursor: pointer; }
+      .more-menu summary::-webkit-details-marker { display: none; }
+      .more-menu[open] summary { background: #eef3f6; }
+      .more-panel {
+        position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; display: grid; gap: 6px;
+        min-width: 180px; padding: 8px; background: #fff; border: 1px solid #e4e7eb; border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(23, 32, 42, .08);
+      }
+      .more-panel .action { width: 100%; justify-content: flex-start; }
+      main { display: grid; min-height: 0; padding: 12px; overflow: hidden; }
+      .copilot-surface {
+        display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; overflow: hidden;
+        background: #fff; border: 1px solid #e4e7eb; border-radius: 8px;
+      }
+      .admin-panel { display: none; flex: 0 1 auto; max-height: 34%; padding: 12px 20px; overflow: auto; background: #f7fafb; border-bottom: 1px solid #e7ecef; }
+      body[data-admin="true"] .admin-panel { display: block; }
+      .admin-grid { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; }
+      .demo-session-title { margin: 0; font-size: 14px; font-weight: 700; }
+      .demo-session-detail, .session-error { margin: 6px 0 0; color: #64727d; font-size: 12px; }
+      .session-error { min-height: 16px; color: #b45309; }
+      .audit-list { display: grid; gap: 8px; max-height: 180px; overflow: auto; }
+      .audit-item { padding: 8px; border: 1px solid #e1e7ea; border-radius: 5px; background: #fff; }
+      .audit-question { margin-top: 4px; font-size: 13px; font-weight: 600; }
+      .audit-meta, .audit-sql { margin-top: 4px; color: #64727d; font-size: 12px; }
+      .audit-sql { max-height: 64px; overflow: auto; white-space: pre-wrap; }
+      .surface-header { display: none; }
+      .surface-heading { min-width: 0; }
+      h1 { margin: 0; font-size: 20px; }
+      .surface-detail { margin: 5px 0 0; color: #64727d; font-size: 13px; }
+      .analysis-notice {
+        display: none; margin: 0; padding: 10px 20px; color: #6a4b16; background: #fff7e8;
+        border-bottom: 1px solid #f0e2c4; font-size: 13px; line-height: 1.5;
+      }
+      .analysis-notice[data-open="true"] { display: block; }
+      .workspace-layout { height: 100%; min-height: 0; }
+      .copilot-surface {
+        position: fixed; right: 20px; bottom: 20px; z-index: 20;
+        width: 420px; height: 640px; min-width: 320px; min-height: 420px;
+        max-width: calc(100vw - 24px); max-height: calc(100vh - 80px);
+        box-shadow: 0 16px 40px rgba(23, 32, 42, .16);
+      }
+      .copilot-surface.is-minimized, .copilot-surface.is-maximized {
+        width: 0; height: 0; min-width: 0; min-height: 0; border: 0; background: transparent; box-shadow: none; overflow: visible;
+      }
+      .resize-handle {
+        position: absolute; top: 0; left: 0; z-index: 3; width: 18px; height: 18px; cursor: nwse-resize;
+      }
+      .resize-handle::after {
+        content: ""; position: absolute; left: 4px; top: 4px; width: 8px; height: 8px;
+        border-top: 2px solid #8aa0ad; border-left: 2px solid #8aa0ad;
+      }
+      .conversation-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 16px; overflow: auto; background: #fff; border: 1px solid #dbe2e6; border-radius: 8px; }
+      .conversation-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .conversation-toolbar h2 { margin: 0; font-size: 16px; }
+      .conversation-list { display: grid; gap: 8px; margin-top: 12px; min-height: 0; overflow: auto; }
+      .conversation-item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px; border: 1px solid #e1e7ea; border-radius: 5px; }
+      .conversation-item[data-active="true"] { border-color: #5caeb1; background: #f1fbfb; }
+      .conversation-select { min-width: 0; flex: 1; padding: 0; border: 0; background: transparent; color: #263943; cursor: pointer; text-align: left; }
+      .conversation-title { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+      .conversation-meta { margin-top: 3px; color: #64727d; font-size: 11px; }
+      .conversation-delete { width: 28px; height: 28px; border: 0; border-radius: 4px; background: transparent; color: #7a8a93; cursor: pointer; }
+      .memory-panel { margin-top: 12px; padding-top: 8px; border-top: 1px solid #e7ecef; }
+      .memory-panel summary { cursor: pointer; font-size: 13px; font-weight: 650; color: #33414c; }
+      .memory-panel h2 { margin: 8px 0; font-size: 14px; }
+      .conversation-pane { width: min(420px, 100%); height: 100%; }
+      .preference-form { display: grid; gap: 8px; }
+      .preference-form label { display: grid; gap: 4px; color: #52636f; font-size: 12px; }
+      .preference-form select, .preference-form input { min-height: 32px; border: 1px solid #b8c8cf; border-radius: 5px; background: #fff; color: #17212b; }
+      .saved-list, .diagnostics { display: grid; gap: 6px; max-height: 140px; overflow: auto; margin-top: 8px; }
+      .diagnostics { white-space: pre-wrap; color: #263943; font-size: 12px; }
+      .saved-item { padding: 8px; border: 1px solid #e1e7ea; border-radius: 5px; background: #fff; font-size: 12px; }
+      .conversation-empty, .conversation-error { margin: 12px 0 0; color: #64727d; font-size: 13px; }
+      .conversation-error { min-height: 18px; color: #b45309; }
+      .surface-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+      button { font: inherit; }
+      .action {
+        min-height: 34px; padding: 0 12px; border: 1px solid #b8c8cf; border-radius: 5px;
+        background: #fff; color: #145c63; cursor: pointer; font-size: 13px; font-weight: 600;
+      }
+      .action:hover { background: #edf7f7; }
+      .action:focus-visible { outline: 2px solid #0f9ba6; outline-offset: 2px; }
+      .action.primary { color: #fff; background: #0f766e; border-color: #0f766e; }
+      .action.primary:hover { background: #0d655f; }
+      .evidence {
+        display: none; padding: 12px 20px; color: #52636f; background: #f7fafb; border-bottom: 1px solid #e7ecef; font-size: 12px; line-height: 1.6;
+      }
+      .evidence[data-open="true"] { display: block; }
+      .evidence-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
+      .evidence-item { min-width: 0; }
+      .evidence-label { display: block; color: #7a8a93; }
+      .evidence-value { display: block; overflow: hidden; color: #263943; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+      vanna-chat { display: block; flex: 1 1 auto; min-width: 0; min-height: 0; width: 100%; height: 100%; }
+      .login-gate { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(23, 32, 42, .55); }
+      .login-gate[hidden] { display: none; }
+      .login-card { width: min(380px, calc(100% - 32px)); padding: 24px; background: #ffffff; color: #17212b; border-radius: 8px; box-shadow: 0 16px 40px rgba(23, 48, 66, .2); }
+      .login-card h2 { margin: 0; font-size: 20px; }
+      .login-card p { margin: 8px 0 0; color: #52636f; font-size: 13px; }
+      .login-card label { display: block; margin-top: 14px; font-size: 13px; font-weight: 600; }
+      .login-card input { width: 100%; min-height: 36px; margin-top: 6px; padding: 0 10px; border: 1px solid #b8c8cf; border-radius: 5px; background: #ffffff; color: #17212b; }
+      .login-card button { margin-top: 16px; }
+      .embed-token { margin-top: 8px; max-height: 72px; overflow: auto; color: #263943; font-size: 12px; word-break: break-all; }
+      @media (max-width: 900px) {
+        main { padding: 0; }
+        .conversation-pane { width: 100%; height: calc(100vh - 56px); }
+      }
+      @media (max-width: 640px) {
+        .topbar { padding: 0 16px; }
+        .workspace { max-width: 45vw; }
+        main { padding: 0; }
+        .conversation-pane { width: 100%; height: calc(100vh - 56px); border: 0; border-radius: 0; }
+        .copilot-surface { right: 8px; bottom: 8px; width: min(420px, calc(100vw - 16px)); height: min(640px, calc(100vh - 88px)); }
+        .admin-grid { grid-template-columns: 1fr; }
+        .surface-header { align-items: center; padding: 8px 12px; }
+        .surface-detail { display: none; }
+        .surface-actions { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; }
+        h1 { font-size: 16px; }
+        .action { white-space: nowrap; }
+        .evidence { padding: 10px 16px; }
+        .evidence-grid { grid-template-columns: 1fr; gap: 4px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">数据分析</div>
+        <div class="workspace" id="workspace-label">当前工作区：加载中</div>
+        <div class="topbar-spacer"></div>
+        <div class="topbar-account" id="topbar-account">未登录</div>
+        <button class="action primary" id="new-analysis" type="button">新分析</button>
+        <details class="more-menu">
+          <summary class="action">更多</summary>
+          <div class="more-panel">
+            <button class="action" id="evidence-toggle" type="button" aria-expanded="false">查看依据</button>
+            <button class="action" id="download-result" type="button">下载完整结果</button>
+            <button class="action" id="save-analysis" type="button">保存本次分析</button>
+            <button class="action" id="clear-analysis" type="button">清空分析上下文</button>
+            <button class="action" id="admin-toggle" type="button" aria-pressed="false">管理</button>
+            <button class="action" id="logout" type="button">退出</button>
+          </div>
+        </details>
+      </header>
+      <main>
+        <div class="workspace-layout">
+        <aside class="conversation-pane" aria-label="分析会话">
+          <div class="conversation-toolbar">
+            <h2>分析会话</h2>
+          </div>
+          <div id="conversation-list" class="conversation-list"><p class="conversation-empty">正在读取会话历史…</p></div>
+          <p id="conversation-error" class="conversation-error" aria-live="polite"></p>
+          <details class="memory-panel">
+            <summary>展示偏好</summary>
+            <h2 class="sr-only">展示偏好</h2>
+            <p class="conversation-empty">这些偏好会保存，但还不会改变本轮回答的语言、时区、图表或数字格式。</p>
+            <form id="preference-form" class="preference-form">
+              <label>语言
+                <select name="language"><option value="zh">中文</option><option value="en">English</option></select>
+              </label>
+              <label>时区
+                <select name="timezone"><option value="Asia/Shanghai">Asia/Shanghai</option><option value="UTC">UTC</option></select>
+              </label>
+              <label>默认图表
+                <select name="default_chart"><option value="bar">柱状图</option><option value="line">折线图</option><option value="none">不指定</option></select>
+              </label>
+              <label>数字格式
+                <select name="display_format"><option value="plain">原值</option><option value="currency">货币</option></select>
+              </label>
+              <button class="action" type="submit">保存偏好</button>
+            </form>
+            <p id="preference-status" class="conversation-error"></p>
+            <div id="saved-list" class="saved-list"></div>
+          </details>
+        </aside>
+        <section class="copilot-surface" aria-label="分析对话">
+          <div class="resize-handle" id="resize-handle" title="拖动调整大小"></div>
+          <p class="analysis-notice" id="analysis-notice" data-open="false" role="status"></p>
+          <div id="evidence-panel" class="evidence" data-open="false" aria-live="polite">
+            <div class="evidence-grid">
+              <div class="evidence-item"><span class="evidence-label">数据版本</span><span class="evidence-value" data-evidence="dataset">加载中</span></div>
+              <div class="evidence-item"><span class="evidence-label">指标版本</span><span class="evidence-value" data-evidence="metric">加载中</span></div>
+              <div class="evidence-item"><span class="evidence-label">查询权限</span><span class="evidence-value">服务器只读校验</span></div>
+            </div>
+          </div>
+          <section class="admin-panel" id="admin-panel" aria-label="管理功能">
+            <div class="admin-grid">
+              <div>
+                <p class="demo-session-title">当前账号</p>
+                <p id="account-identity" class="demo-session-detail">登录后由服务器显示用户名和角色。</p>
+              </div>
+              <div>
+                <p class="demo-session-title">运行计数</p>
+                <p class="demo-session-detail">只显示次数。分析员只看自己的会话，管理员看工作区合计，都不显示问题或 SQL。</p>
+                <div id="diagnostics" class="diagnostics"><p class="conversation-empty">打开管理后读取。</p></div>
+              </div>
+              <div>
+                <p class="demo-session-title">跨域嵌入</p>
+                <p class="demo-session-detail">签发 5 分钟令牌。宿主页面只能用 postMessage 把它交给 iframe，不能自报用户。</p>
+                <form id="embed-form" class="preference-form">
+                  <label>宿主 origin
+                    <input id="embed-origin" name="origin" placeholder="http://127.0.0.1:32014" />
+                  </label>
+                  <button class="action" type="submit">签发嵌入令牌</button>
+                </form>
+                <p id="embed-token" class="embed-token"></p>
+              </div>
+              <div>
+                <p class="demo-session-title">最近查询</p>
+                <div id="audit-list" class="audit-list"><p class="conversation-empty">打开管理后读取。</p></div>
+              </div>
+            </div>
+          </section>
+          <vanna-chat
+            title="可信业务分析"
+            subtitle="当前工作区内的受控数据分析"
+            placeholder="例如：按州统计有效订单数前五名"
+            empty-state-title="分析 Copilot 已就绪"
+            empty-state-subtitle="可以直接输入业务问题"
+            minimize-title="最小化"
+            maximize-title="最大化"
+            restore-title="恢复"
+            send-button-label="发送问题"
+            sse-endpoint="/api/vanna/v2/chat_sse"
+            theme="light"
+            data-hosted-window="true"
+          ></vanna-chat>
+        </section>
+        </div>
+      </main>
+    </div>
+    <div id="login-gate" class="login-gate">
+      <form id="login-form" class="login-card">
+        <h2>登录</h2>
+        <p>使用本地账号。角色保存在服务器账号上，页面不能切换。</p>
+        <label>用户名<input id="login-username" name="username" autocomplete="username" required /></label>
+        <label>密码<input id="login-password" name="password" type="password" autocomplete="current-password" required /></label>
+        <p id="login-error" class="conversation-error"></p>
+        <button class="action primary" id="login-submit" type="submit">登录</button>
+      </form>
+    </div>
+    <script>
+      const chat = document.querySelector("vanna-chat");
+      const conversationStorageKey = "data-analysis-agent-embeddable-conversation-v1";
+      const savedConversationId = localStorage.getItem(conversationStorageKey);
+      if (savedConversationId) chat.setAttribute("conversation-id", savedConversationId);
+      chat.setAttribute("data-defer-starter", "true");
+      const newAnalysis = document.querySelector("#new-analysis");
+      const clearAnalysis = document.querySelector("#clear-analysis");
+      const saveAnalysis = document.querySelector("#save-analysis");
+      const downloadResult = document.querySelector("#download-result");
+      const logout = document.querySelector("#logout");
+      const loginGate = document.querySelector("#login-gate");
+      const loginForm = document.querySelector("#login-form");
+      const loginError = document.querySelector("#login-error");
+      let embedToken = "";
+      let embedParentOrigin = "";
+      function withAuth(options = {}) {
+        const headers = new Headers(options.headers || {});
+        if (embedToken) headers.set("Authorization", "Bearer " + embedToken);
+        if (embedParentOrigin) headers.set("X-Embed-Parent-Origin", embedParentOrigin);
+        return Object.assign({ credentials: "same-origin" }, options, { headers });
+      }
+      function applyEmbedHeaders() {
+        if (typeof chat.getApiClient === "function") chat.getApiClient();
+        if (!embedToken || typeof chat.setCustomHeaders !== "function") return;
+        chat.setCustomHeaders({
+          Authorization: "Bearer " + embedToken,
+          "X-Embed-Parent-Origin": embedParentOrigin
+        });
+      }
+      const preferenceForm = document.querySelector("#preference-form");
+      const preferenceStatus = document.querySelector("#preference-status");
+      const savedList = document.querySelector("#saved-list");
+      const diagnostics = document.querySelector("#diagnostics");
+      const analysisNotice = document.querySelector("#analysis-notice");
+      const evidenceToggle = document.querySelector("#evidence-toggle");
+      const evidencePanel = document.querySelector("#evidence-panel");
+      const adminToggle = document.querySelector("#admin-toggle");
+      const conversationList = document.querySelector("#conversation-list");
+      const conversationError = document.querySelector("#conversation-error");
+      const adminStorageKey = "data-analysis-agent-admin-panel-v1";
+      let bootstrapScope = null;
+      let conversationItems = [];
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+        }[character]));
+      }
+      function setAdminOpen(open) {
+        document.body.dataset.admin = String(open);
+        adminToggle.setAttribute("aria-pressed", String(open));
+        if (open) {
+          sessionStorage.setItem(adminStorageKey, "1");
+          loadDiagnostics();
+        } else sessionStorage.removeItem(adminStorageKey);
+      }
+
+      function showAnalysisNotice(text) {
+        analysisNotice.textContent = text;
+        analysisNotice.dataset.open = "true";
+      }
+      function currentConversationId() {
+        return chat.conversationId || localStorage.getItem(conversationStorageKey) || "";
+      }
+
+      customElements.whenDefined("vanna-chat").then(() => {
+        const conversationId = localStorage.getItem(conversationStorageKey);
+        if (conversationId && typeof chat.setConversationId === "function") {
+          chat.setConversationId(conversationId);
+        }
+      });
+      chat.addEventListener("conversation-id-changed", (event) => {
+        const conversationId = event.detail?.conversationId || event.detail?.id;
+        if (conversationId) localStorage.setItem(conversationStorageKey, conversationId);
+      });
+      newAnalysis.addEventListener("click", () => {
+        if (typeof chat.startNewConversation !== "function") return;
+        const conversationId = chat.startNewConversation();
+        if (conversationId) localStorage.setItem(conversationStorageKey, conversationId);
+        analysisNotice.dataset.open = "false";
+        chat.windowState = "normal";
+        renderConversations();
+      });
+      const surface = document.querySelector(".copilot-surface");
+      const savedSize = JSON.parse(localStorage.getItem("daa-chat-size") || "null");
+      if (savedSize && savedSize.width && savedSize.height) {
+        surface.style.width = Math.max(320, savedSize.width) + "px";
+        surface.style.height = Math.max(420, savedSize.height) + "px";
+      }
+      document.querySelector("#resize-handle").addEventListener("pointerdown", (event) => {
+        if (surface.classList.contains("is-minimized") || surface.classList.contains("is-maximized")) return;
+        event.preventDefault();
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const startWidth = surface.offsetWidth;
+        const startHeight = surface.offsetHeight;
+        const move = (moveEvent) => {
+          const width = Math.min(window.innerWidth - 24, Math.max(320, startWidth + (startX - moveEvent.clientX)));
+          const height = Math.min(window.innerHeight - 80, Math.max(420, startHeight + (startY - moveEvent.clientY)));
+          surface.style.width = width + "px";
+          surface.style.height = height + "px";
+        };
+        const stop = () => {
+          localStorage.setItem("daa-chat-size", JSON.stringify({
+            width: surface.offsetWidth,
+            height: surface.offsetHeight
+          }));
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", stop);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", stop);
+      });
+      chat.addEventListener("window-state-changed", (event) => {
+        const state = event.detail?.state;
+        surface.classList.toggle("is-minimized", state === "minimized");
+        surface.classList.toggle("is-maximized", state === "maximized");
+      });
+      saveAnalysis.addEventListener("click", async () => {
+        const conversationId = currentConversationId();
+        if (!conversationId) {
+          showAnalysisNotice("当前没有可保存的分析结果。");
+          return;
+        }
+        saveAnalysis.disabled = true;
+        try {
+          const response = await fetch("/api/project/saved-analyses", withAuth({
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversation_id: conversationId })
+          }));
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            showAnalysisNotice(body.detail || "当前没有已校验的结果可保存。");
+            return;
+          }
+          showAnalysisNotice(body.note || "已保存本次分析。它只用于回看，不会进入下一问。");
+          await loadSavedAnalyses();
+        } catch (_) {
+          showAnalysisNotice("保存本次分析失败。");
+        } finally {
+          saveAnalysis.disabled = false;
+        }
+      });
+      preferenceForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        preferenceStatus.textContent = "";
+        const fields = ["language", "timezone", "default_chart", "display_format"];
+        try {
+          for (const memoryKind of fields) {
+            const value = preferenceForm.elements[memoryKind].value;
+            const response = await fetch("/api/project/preferences", withAuth({
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ memory_kind: memoryKind, value })
+            }));
+            if (!response.ok) throw new Error("preference rejected");
+          }
+          preferenceStatus.textContent = "偏好已保存。它们还不会改变本轮的图表、语言或数字格式，也不会成为查询事实。";
+        } catch (_) {
+          preferenceStatus.textContent = "偏好保存失败。";
+        }
+      });
+      async function loadPreferences() {
+        try {
+          const response = await fetch("/api/project/preferences", withAuth());
+          if (!response.ok) return;
+          for (const item of await response.json()) {
+            const field = preferenceForm.elements[item.memory_kind];
+            if (field) field.value = item.value;
+          }
+        } catch (_) {
+          preferenceStatus.textContent = "偏好暂时读不到。";
+        }
+      }
+      async function loadSavedAnalyses() {
+        try {
+          const response = await fetch("/api/project/saved-analyses", withAuth());
+          if (!response.ok) return;
+          const items = await response.json();
+          savedList.replaceChildren();
+          if (!items.length) return;
+          for (const item of items) {
+            const row = document.createElement("div");
+            row.className = "saved-item";
+            row.textContent = `${item.summary} · ${item.metric_version}`;
+            savedList.append(row);
+          }
+        } catch (_) {
+          savedList.textContent = "已保存分析暂时读不到。";
+        }
+      }
+      async function loadDiagnostics() {
+        try {
+          const response = await fetch("/api/project/diagnostics", withAuth());
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            diagnostics.textContent = "运行计数暂时读不到。";
+            return;
+          }
+          const counts = body.termination_counts || {};
+          const lines = Object.keys(counts).map((key) => `${key}：${counts[key]}`);
+          diagnostics.textContent = [
+            body.scope === "workspace" ? "工作区合计" : "仅自己的会话",
+            ...lines,
+            `修复成功：${body.repair_succeeded ?? 0}`
+          ].join("\n");
+        } catch (_) {
+          diagnostics.textContent = "运行计数暂时读不到。";
+        }
+      }
+      downloadResult.addEventListener("click", async () => {
+        const conversationId = currentConversationId();
+        if (!conversationId) {
+          showAnalysisNotice("当前没有可下载的分析结果。");
+          return;
+        }
+        downloadResult.disabled = true;
+        try {
+          const response = await fetch(
+            `/api/project/conversations/${encodeURIComponent(conversationId)}/result.csv`,
+            withAuth()
+          );
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            showAnalysisNotice(body.detail || "当前没有已校验的完整结果可下载。界面预览仍最多 200 行。");
+            return;
+          }
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = "validated-result.csv";
+          link.click();
+          URL.revokeObjectURL(url);
+          const rows = response.headers.get("X-Row-Count");
+          showAnalysisNotice(rows ? `已下载本次已校验结果，共 ${rows} 行。` : "已下载本次已校验结果。");
+        } catch (_) {
+          showAnalysisNotice("完整结果下载失败。");
+        } finally {
+          downloadResult.disabled = false;
+        }
+      });
+      logout.addEventListener("click", async () => {
+        await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+        embedToken = "";
+        embedParentOrigin = "";
+        window.location.reload();
+      });
+      loginForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        loginError.textContent = "";
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: loginForm.username.value,
+            password: loginForm.password.value
+          })
+        });
+        if (!response.ok) {
+          loginError.textContent = "用户名或密码不正确。";
+          return;
+        }
+        loginForm.password.value = "";
+        loginGate.hidden = true;
+        startProduct();
+      });
+      document.querySelector("#embed-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const tokenNode = document.querySelector("#embed-token");
+        tokenNode.textContent = "";
+        const response = await fetch("/api/copilot/embed-tokens", withAuth({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ origin: document.querySelector("#embed-origin").value.trim() })
+        }));
+        const body = await response.json().catch(() => ({}));
+        tokenNode.textContent = response.ok
+          ? body.token
+          : (body.detail || "当前 origin 不在允许列表里。");
+      });
+      window.addEventListener("message", async (event) => {
+        const data = event.data;
+        if (!data || data.type !== "daa.embed.v1" || typeof data.token !== "string" || typeof data.nonce !== "string") return;
+        embedToken = data.token;
+        embedParentOrigin = event.origin;
+        applyEmbedHeaders();
+        const response = await fetch("/api/auth/session", withAuth());
+        const body = await response.json().catch(() => ({}));
+        if (!body.authenticated || body.embed_origin !== event.origin) {
+          embedToken = "";
+          embedParentOrigin = "";
+          return;
+        }
+        loginGate.hidden = true;
+        if (event.source && typeof event.source.postMessage === "function") {
+          event.source.postMessage({ type: "daa.embed.ack.v1", nonce: data.nonce }, event.origin);
+        }
+        startProduct();
+      });
+      function startProduct() {
+        applyEmbedHeaders();
+        loadPreferences();
+        loadSavedAnalyses();
+        fetch("/api/project/session", withAuth()).then((response) => response.json()).then((session) => {
+          const roleLabel = session.role === "admin" ? "管理员" : "分析员";
+          document.querySelector("#topbar-account").textContent = `${session.username || session.user_id} · ${roleLabel}`;
+        }).catch(() => {});
+        if (sessionStorage.getItem(adminStorageKey) === "1") {
+          setAdminOpen(true);
+          refreshAdmin().catch(() => {
+            document.querySelector("#audit-list").innerHTML = '<p class="conversation-empty">查询历史暂时不可用。</p>';
+          });
+        }
+        restoreVisibleConversation().catch(() => {
+          conversationList.innerHTML = '<p class="conversation-empty">会话历史暂时不可用。</p>';
+          if (typeof chat.showStarterIfEmpty === "function") chat.showStarterIfEmpty();
+        });
+        loadBootstrap()
+          .then((scope) => {
+            document.querySelector("#workspace-label").textContent = `当前工作区：${scope.workspace_id || "受控分析"}`;
+            return refreshAnalysisScope();
+          })
+          .catch(() => {
+            document.querySelector("#workspace-label").textContent = "当前工作区：受控分析";
+          });
+      }
+      fetch("/api/auth/session", { credentials: "same-origin" })
+        .then((response) => response.json())
+        .then((body) => {
+          if (body.authenticated && body.auth_mode === "local_session") {
+            loginGate.hidden = true;
+            startProduct();
+          } else {
+            loginGate.hidden = false;
+          }
+        })
+        .catch(() => {
+          loginGate.hidden = false;
+        });
+      clearAnalysis.addEventListener("click", async () => {
+        const conversationId = currentConversationId();
+        if (!conversationId) {
+          showAnalysisNotice("当前没有可清空的分析会话。");
+          return;
+        }
+        clearAnalysis.disabled = true;
+        try {
+          const response = await fetch(
+            `/api/project/conversations/${encodeURIComponent(conversationId)}/analysis-context`,
+            withAuth({ method: "POST" })
+          );
+          const body = await response.json().catch(() => ({}));
+          if (response.status === 409) {
+            showAnalysisNotice(body.detail || "当前会话已有新消息，请刷新后重试。");
+            return;
+          }
+          if (response.status === 404) {
+            showAnalysisNotice("当前会话还没有可清空的分析上下文。");
+            return;
+          }
+          if (!response.ok) {
+            showAnalysisNotice("清空分析上下文失败，聊天记录未删除。");
+            return;
+          }
+          showAnalysisNotice(body.notice || "已清空分析上下文，聊天记录仍保留。");
+        } catch (_) {
+          showAnalysisNotice("清空分析上下文失败，聊天记录未删除。");
+        } finally {
+          clearAnalysis.disabled = false;
+        }
+      });
+      evidenceToggle.addEventListener("click", async () => {
+        const open = evidencePanel.dataset.open === "true";
+        evidencePanel.dataset.open = String(!open);
+        evidenceToggle.setAttribute("aria-expanded", String(!open));
+        if (open || evidencePanel.dataset.loaded === "true") return;
+        try {
+          const contract = bootstrapScope || await loadBootstrap();
+          document.querySelector('[data-evidence="dataset"]').textContent = contract.dataset_version || "未知";
+          document.querySelector('[data-evidence="metric"]').textContent = contract.metric_version || "未知";
+          evidencePanel.dataset.loaded = "true";
+        } catch (_) {
+          document.querySelector('[data-evidence="dataset"]').textContent = "暂不可用";
+          document.querySelector('[data-evidence="metric"]').textContent = "暂不可用";
+        }
+      });
+      async function loadBootstrap() {
+        const response = await fetch("/api/copilot/bootstrap", withAuth({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            surface_id: "embedded-copilot",
+            requested_workspace_id: "olist-demo",
+            selected_entity_refs: []
+          })
+        }));
+        if (!response.ok) throw new Error("copilot bootstrap unavailable");
+        const bootstrap = await response.json();
+        bootstrapScope = bootstrap.conversation_scope;
+        return bootstrapScope;
+      }
+      async function refreshAnalysisScope() {
+        const conversationId = localStorage.getItem(conversationStorageKey) || "";
+        if (!conversationId) return;
+        try {
+          const response = await fetch(`/api/project/conversations/${encodeURIComponent(conversationId)}`, withAuth());
+          if (!response.ok) return;
+          const body = await response.json();
+          if (body.analysis_scope_current === false && body.analysis_scope_notice) {
+            showAnalysisNotice(body.analysis_scope_notice);
+          }
+        } catch (_) {
+          return;
+        }
+      }
+      function renderConversations() {
+        const activeId = currentConversationId();
+        if (!conversationItems.length) {
+          conversationList.innerHTML = '<p class="conversation-empty">还没有已保存的分析会话。</p>';
+          return;
+        }
+        conversationList.innerHTML = conversationItems.map((item) => {
+          const id = escapeHtml(item.conversation_id);
+          const title = escapeHtml(item.title || "未命名分析会话");
+          const count = Number(item.message_count || 0);
+          return `<article class="conversation-item" data-active="${String(item.conversation_id === activeId)}">
+            <button class="conversation-select" type="button" data-load-conversation="${id}">
+              <div class="conversation-title">${title}</div>
+              <div class="conversation-meta">${count} 条消息</div>
+            </button>
+            <button class="conversation-delete" type="button" data-delete-conversation="${id}" aria-label="删除会话">×</button>
+          </article>`;
+        }).join("");
+      }
+      async function refreshConversations() {
+        const response = await fetch("/api/project/conversations?limit=20", withAuth());
+        if (!response.ok) throw new Error("conversation list unavailable");
+        conversationItems = await response.json();
+        renderConversations();
+      }
+      async function restoreVisibleConversation() {
+        await refreshConversations();
+        const savedId = localStorage.getItem(conversationStorageKey) || "";
+        const ordered = [
+          ...conversationItems.filter((item) => item.conversation_id === savedId),
+          ...conversationItems.filter((item) => item.conversation_id !== savedId)
+        ];
+        for (const item of ordered) {
+          try {
+            await loadConversation(item.conversation_id);
+            return;
+          } catch (_) {
+            continue;
+          }
+        }
+        localStorage.removeItem(conversationStorageKey);
+        if (typeof chat.showStarterIfEmpty === "function") chat.showStarterIfEmpty();
+      }
+      async function loadConversation(conversationId) {
+        const response = await fetch(`/api/project/conversations/${encodeURIComponent(conversationId)}`, withAuth());
+        if (!response.ok) throw new Error("conversation unavailable");
+        const detail = await response.json();
+        const messages = Array.isArray(detail.messages) ? detail.messages : [];
+        if (detail.trusted_result_artifact?.summary) {
+          messages.push({ role: "assistant", content: detail.trusted_result_artifact.summary });
+        }
+        const charts = Array.isArray(detail.charts) ? detail.charts : [];
+        chat.loadConversation(detail.conversation_id, messages, charts);
+        localStorage.setItem(conversationStorageKey, detail.conversation_id);
+        renderConversations();
+        if (detail.analysis_scope_current === false && detail.analysis_scope_notice) {
+          showAnalysisNotice(detail.analysis_scope_notice);
+        }
+      }
+      async function refreshAdmin() {
+        const [session, audits] = await Promise.all([
+          fetch("/api/project/session", withAuth()).then((response) => response.json()),
+          fetch("/api/project/audits", withAuth()).then((response) => response.json())
+        ]);
+        const identity = document.querySelector("#account-identity");
+        const roleLabel = session.role === "admin" ? "管理员" : "分析员";
+        identity.textContent = `${session.username || session.user_id} · ${roleLabel}`;
+        document.querySelector("#topbar-account").textContent = identity.textContent;
+        const auditList = document.querySelector("#audit-list");
+        auditList.innerHTML = audits.length ? audits.slice(0, 5).map((audit) => `<article class="audit-item">
+          <div class="audit-question">${escapeHtml(audit.question)}</div>
+          <div class="audit-meta">${escapeHtml(audit.status)} · ${escapeHtml(audit.row_count ?? 0)} 行</div>
+          ${audit.final_sql ? `<pre class="audit-sql">${escapeHtml(audit.final_sql)}</pre>` : `<div class="audit-meta">${escapeHtml(audit.reason || "")}</div>`}
+        </article>`).join("") : '<p class="conversation-empty">当前身份还没有查询历史。</p>';
+      }
+      adminToggle.addEventListener("click", async () => {
+        const open = document.body.dataset.admin !== "true";
+        setAdminOpen(open);
+        if (!open) return;
+        try {
+          await refreshAdmin();
+        } catch (_) {
+          document.querySelector("#audit-list").innerHTML = '<p class="conversation-empty">查询历史暂时不可用。</p>';
+        }
+      });
+      conversationList.addEventListener("click", async (event) => {
+        const loadId = event.target.closest("[data-load-conversation]")?.dataset.loadConversation;
+        const deleteId = event.target.closest("[data-delete-conversation]")?.dataset.deleteConversation;
+        conversationError.textContent = "";
+        try {
+          if (loadId) {
+            await loadConversation(loadId);
+            return;
+          }
+          if (!deleteId || !window.confirm("删除这个分析会话及其历史记录？")) return;
+          const response = await fetch(`/api/project/conversations/${encodeURIComponent(deleteId)}`, withAuth({ method: "DELETE" }));
+          if (!response.ok) throw new Error("delete failed");
+          if (currentConversationId() === deleteId && typeof chat.startNewConversation === "function") {
+            const conversationId = chat.startNewConversation();
+            if (conversationId) localStorage.setItem(conversationStorageKey, conversationId);
+          }
+          await refreshConversations();
+        } catch (_) {
+          conversationError.textContent = "会话操作失败，请稍后重试。";
+        }
+      });
+    </script>
+  </body>
+</html>

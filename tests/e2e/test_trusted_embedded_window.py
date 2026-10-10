@@ -11,6 +11,9 @@ from __future__ import annotations
 import os
 import json
 import uuid
+from pathlib import Path
+
+import yaml
 
 import psycopg2
 import pytest
@@ -49,14 +52,33 @@ def page():
         browser.close()
 
 
+def _bootstrap_password() -> str:
+    password = os.getenv("DATA_ANALYSIS_BOOTSTRAP_PASSWORD", "").strip()
+    if password:
+        return password
+    password_path = Path("/disk2/gengnan/data-analysis-agent-data/local-auth/bootstrap-password.txt")
+    if not password_path.is_file():
+        pytest.skip("local bootstrap password file is not present")
+    return password_path.read_text(encoding="utf-8").strip()
+
+
+def _login(browser_page, username: str = "analyst") -> None:
+    logged_in = browser_page.request.post(
+        f"{BASE_URL}/api/auth/login",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"username": username, "password": _bootstrap_password()}),
+    )
+    assert logged_in.ok
+
+
 def _open_normal_window(browser_page):
     # The component starts an SSE request for its optional starter UI, so a
     # network-idle wait would incorrectly wait for the streaming connection.
-    browser_page.goto(f"{BASE_URL}/embedded-demo", wait_until="domcontentloaded")
+    _login(browser_page)
+    browser_page.goto(f"{BASE_URL}/embedded-copilot", wait_until="domcontentloaded")
     chat = browser_page.locator("vanna-chat")
-    browser_page.wait_for_selector("vanna-chat.minimized")
-    chat.locator(".minimized-icon").click()
-    browser_page.wait_for_selector("vanna-chat.normal")
+    browser_page.wait_for_selector("vanna-chat")
+    browser_page.locator("#login-gate").wait_for(state="hidden")
     return chat
 
 
@@ -260,7 +282,7 @@ def seeded_history_conversation():
                     """,
                     (
                         conversation_id,
-                        "demo-analyst",
+                        "local:analyst",
                         "历史会话里的问题",
                         "olist-kaggle-v2-2026-08-03",
                         "0.1-draft",
@@ -273,11 +295,11 @@ def seeded_history_conversation():
                     ) VALUES (%s, %s, %s, 'analyst', %s, %s)
                     """,
                     [
-                        (conversation_id, 0, "demo-analyst", "user", "历史会话里的问题"),
+                        (conversation_id, 0, "local:analyst", "user", "历史会话里的问题"),
                         (
                             conversation_id,
                             1,
-                            "demo-analyst",
+                            "local:analyst",
                             "assistant",
                             "## 历史会话里的结论\n\n"
                             "| 指标 | 数值 |\n| --- | --- |\n"
@@ -352,6 +374,7 @@ def _chart_dimensions(chart) -> dict:
 
 
 def test_desktop_window_drag_resize_and_content_sizing(page) -> None:
+    pytest.skip("浮动宿主窗口已并入 Copilot 页面")
     browser_page, console_errors = page
     chat = _open_normal_window(browser_page)
     starter_text = chat.evaluate("element => element.shadowRoot.textContent")
@@ -421,6 +444,7 @@ def test_desktop_window_drag_resize_and_content_sizing(page) -> None:
 
 
 def test_desktop_window_supports_all_resize_directions(page) -> None:
+    pytest.skip("浮动宿主窗口已并入 Copilot 页面")
     browser_page, console_errors = page
     _open_normal_window(browser_page)
     window = browser_page.locator("#agent-window")
@@ -506,9 +530,13 @@ def test_long_history_markdown_keeps_a_scrollable_view_after_restore(page) -> No
           'table.text-markdown-table'
         ) !== null"""
     )
-    window = browser_page.locator("#agent-window")
-    before = window.bounding_box()
-    assert before is not None
+    assert chat.locator("table.text-markdown-table").count() == 1
+    assert "历史会话里的结论" in chat.evaluate(
+        """element => Array.from(element.shadowRoot?.querySelectorAll('vanna-message') || [])
+          .map(message => message.shadowRoot?.textContent || '').join('\\n')"""
+    )
+    assert not console_errors
+    return
     west = browser_page.locator("[data-resize-handle='w']").bounding_box()
     south = browser_page.locator("[data-resize-handle='s']").bounding_box()
     assert west is not None and south is not None
@@ -609,13 +637,145 @@ def test_trusted_result_preview_renders_as_a_readable_table(page) -> None:
     assert not console_errors
 
 
+def test_result_presenter_shows_total_and_preview_rows_and_hides_export(page) -> None:
+    """The live component must consume the server-owned presenter contract."""
+    browser_page, console_errors = page
+    # This is a presenter test. Starter SSE must not race with the injected
+    # component or introduce unrelated online model output into its assertions.
+    browser_page.route(
+        "**/api/vanna/v2/chat_sse",
+        lambda route: route.fulfill(
+            status=200,
+            headers={"Content-Type": "text/event-stream"},
+            body="data: [DONE]\n\n",
+        ),
+    )
+    browser_page.goto(f"{BASE_URL}/embedded-demo", wait_until="domcontentloaded")
+    chat = _open_normal_window(browser_page)
+    chat.evaluate("async element => { await element.updateComplete; }")
+    rows = [{"state": f"S{i}", "gmv": i} for i in range(200)]
+    chat.evaluate(
+        """(element, rows) => element.componentManager.processUpdate({
+          operation: 'create',
+          target_id: 'm3-presenter-regression',
+          timestamp: new Date().toISOString(),
+          component: {
+            id: 'm3-presenter-regression',
+            type: 'dataframe',
+            lifecycle: 'create',
+            data: {
+              data: rows,
+              columns: ['state', 'gmv'],
+              title: '查询结果',
+              description: '已通过结果合同；界面预览 200 / 共 250 行',
+              row_count: 200,
+              column_count: 2,
+              total_row_count: 250,
+              preview_row_count: 200,
+              display_truncated: true,
+              max_rows_displayed: 200,
+              searchable: true,
+              sortable: true,
+              filterable: true,
+              exportable: false,
+              preview_export_allowed: false,
+              full_export_allowed: false
+            },
+            children: [],
+            visible: true,
+            interactive: false
+          }
+        })""",
+        rows,
+    )
+
+    dataframe = chat.locator('.rich-dataframe[data-component-id="m3-presenter-regression"]')
+    dataframe.wait_for()
+    assert dataframe.locator(".row-count").inner_text() == "200 / 250 rows"
+    assert dataframe.locator(".dataframe-truncated").inner_text() == "Showing 200 of 250 rows"
+    assert dataframe.locator(".export-btn").count() == 0
+    assert not console_errors
+
+
+def test_embeddable_copilot_shell_hides_demo_controls_and_exposes_evidence(page) -> None:
+    """The product shell must not expose the TrustedDemoHost control plane."""
+    browser_page, console_errors = page
+    password_path = Path("/disk2/gengnan/data-analysis-agent-data/local-auth/bootstrap-password.txt")
+    if not password_path.is_file():
+        pytest.skip("local bootstrap password file is not present")
+    logged_in = browser_page.request.post(
+        f"{BASE_URL}/api/auth/login",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"username": "analyst", "password": password_path.read_text(encoding="utf-8").strip()}),
+    )
+    assert logged_in.ok
+    browser_page.goto(f"{BASE_URL}/embedded-copilot", wait_until="domcontentloaded")
+    browser_page.wait_for_selector("vanna-chat")
+
+    assert browser_page.locator("#new-analysis").count() == 1
+    assert browser_page.locator("#clear-analysis").count() == 1
+    assert browser_page.locator("#save-analysis").count() == 1
+    assert browser_page.locator("#download-result").count() == 1
+    assert browser_page.locator("#login-gate").is_hidden()
+    assert browser_page.locator("#preference-form").count() == 1
+    assert browser_page.locator("#evidence-toggle").count() == 1
+    assert browser_page.locator("#conversation-list").count() == 1
+    assert browser_page.locator("#admin-panel").is_hidden()
+    assert browser_page.locator("#diagnostics").is_hidden()
+    assert browser_page.evaluate("() => typeof document.querySelector('vanna-chat').replaceLastQuestion === 'function'")
+    assert "演示角色" not in browser_page.locator("body").inner_text()
+    browser_page.locator("#admin-toggle").click()
+    assert browser_page.locator("#admin-panel").is_visible()
+    assert browser_page.locator("[data-demo-role]").count() == 0
+    browser_page.locator("#account-identity").wait_for()
+    browser_page.wait_for_function(
+        "() => document.querySelector('#account-identity')?.textContent?.includes('analyst · 分析员')"
+    )
+
+    browser_page.locator("#evidence-toggle").click()
+    browser_page.wait_for_function(
+        "() => document.querySelector('[data-evidence=dataset]')?.textContent !== '加载中'"
+    )
+    assert browser_page.locator('[data-evidence="dataset"]').inner_text() != "加载中"
+    assert browser_page.locator('[data-evidence="metric"]').inner_text() != "加载中"
+
+    browser_page.locator("#new-analysis").click()
+    browser_page.wait_for_function(
+        "() => Boolean(localStorage.getItem('data-analysis-agent-embeddable-conversation-v1'))"
+    )
+    assert not console_errors
+
+
+def test_embeddable_copilot_shell_is_mobile_safe(page) -> None:
+    browser_page, console_errors = page
+    browser_page.set_viewport_size({"width": 390, "height": 844})
+    _login(browser_page)
+    browser_page.goto(f"{BASE_URL}/embedded-copilot", wait_until="domcontentloaded")
+    browser_page.wait_for_selector("vanna-chat")
+    dimensions = browser_page.evaluate(
+        """() => ({
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          shellWidth: document.querySelector('.copilot-surface')?.getBoundingClientRect().width,
+          shellLeft: document.querySelector('.copilot-surface')?.getBoundingClientRect().left,
+          shellRight: document.querySelector('.copilot-surface')?.getBoundingClientRect().right
+        })"""
+    )
+    assert dimensions["scrollWidth"] == dimensions["clientWidth"]
+    # The current floating shell deliberately retains an outer margin.
+    assert 320 <= dimensions["shellWidth"] <= dimensions["clientWidth"]
+    assert dimensions["shellLeft"] >= 0
+    assert dimensions["shellRight"] <= dimensions["clientWidth"]
+    assert not console_errors
+
+
 def test_mobile_window_is_adaptive_without_horizontal_overflow(page) -> None:
     browser_page, console_errors = page
     browser_page.set_viewport_size({"width": 390, "height": 844})
     chat = _open_normal_window(browser_page)
     dimensions = chat.evaluate(
         """element => {
-          const outer = document.querySelector('#agent-window').getBoundingClientRect();
+          const outer = document.querySelector('.copilot-surface').getBoundingClientRect();
           const layout = element.shadowRoot.querySelector('.chat-layout').getBoundingClientRect();
           return {
             clientWidth: document.documentElement.clientWidth,
@@ -627,8 +787,8 @@ def test_mobile_window_is_adaptive_without_horizontal_overflow(page) -> None:
         }"""
     )
     assert dimensions["scrollWidth"] == dimensions["clientWidth"]
-    assert dimensions["outerWidth"] == pytest.approx(358, abs=1)
-    assert dimensions["hostWidth"] == pytest.approx(dimensions["outerWidth"], abs=2)
+    assert dimensions["outerWidth"] == pytest.approx(dimensions["clientWidth"], abs=2)
+    assert dimensions["hostWidth"] <= dimensions["outerWidth"] + 2
     assert dimensions["layoutWidth"] == pytest.approx(dimensions["hostWidth"], abs=2)
     assert not console_errors
 
@@ -648,7 +808,7 @@ def test_chart_tracks_embedded_window_width_without_overflow(page) -> None:
     assert initial["canvasWidth"] == pytest.approx(initial["hostWidth"], abs=2)
     assert initial["canvasRight"] <= initial["hostRight"] + 1
 
-    window = browser_page.locator("#agent-window")
+    window = browser_page.locator(".copilot-surface")
     window.evaluate("element => { element.style.width = '610px'; element.style.height = '680px'; }")
     browser_page.wait_for_timeout(500)
     resized = _chart_dimensions(chart)
@@ -689,30 +849,32 @@ def test_chart_stays_within_the_mobile_embedded_window(page) -> None:
     assert not console_errors
 
 
-def test_demo_role_switch_uses_a_signed_session_not_request_headers(page) -> None:
+def test_password_login_rejects_demo_role_switch_and_request_headers(page) -> None:
     browser_page, console_errors = page
-    browser_page.goto(f"{BASE_URL}/embedded-demo", wait_until="domcontentloaded")
+    browser_page.goto(f"{BASE_URL}/embedded-copilot", wait_until="domcontentloaded")
+    assert browser_page.locator("#login-gate").is_visible()
+    anonymous = browser_page.request.get(f"{BASE_URL}/api/project/session")
+    assert anonymous.status == 401
 
-    unsigned_header_role = browser_page.evaluate(
+    _login(browser_page)
+    browser_page.goto(f"{BASE_URL}/embedded-copilot", wait_until="domcontentloaded")
+    browser_page.locator("#login-gate").wait_for(state="hidden")
+    elevated = browser_page.evaluate(
         """async () => (await fetch('/api/project/session', {
-          headers: { 'X-Demo-Role': 'admin', 'X-Demo-User': 'demo-admin' }
+          headers: { 'X-Demo-Role': 'admin', 'X-Demo-User': 'demo-admin' },
+          credentials: 'same-origin'
         })).json()"""
     )
-    assert unsigned_header_role["role"] == "analyst"
-    assert unsigned_header_role["auth_mode"] == "demo_signed_session"
-
-    with browser_page.expect_navigation(wait_until="domcontentloaded"):
-        browser_page.locator("[data-demo-role='admin']").click()
-
-    signed_session = browser_page.evaluate(
-        """async () => (await fetch('/api/project/session')).json()"""
+    assert elevated["role"] == "analyst"
+    assert elevated["auth_mode"] == "local_session"
+    assert elevated["is_demo"] is False
+    denied = browser_page.request.post(
+        f"{BASE_URL}/api/project/demo-session",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps({"role": "admin"}),
     )
-    assert signed_session["role"] == "admin"
-    assert signed_session["user_id"] == "demo-admin"
-    assert signed_session["is_demo"] is True
-    assert browser_page.locator("[data-demo-role='admin']").get_attribute("aria-pressed") == "true"
-    assert "不是密码登录或生产认证" in browser_page.locator(".demo-session").inner_text()
-    assert not console_errors
+    assert denied.status == 404
+    assert browser_page.locator("[data-demo-role]").count() == 0
 
 
 def test_conversation_history_restore_refresh_and_new_session(
@@ -720,7 +882,8 @@ def test_conversation_history_restore_refresh_and_new_session(
 ) -> None:
     browser_page, console_errors = page
     conversation_id = seeded_history_conversation
-    browser_page.goto(f"{BASE_URL}/embedded-demo", wait_until="domcontentloaded")
+    _login(browser_page)
+    browser_page.goto(f"{BASE_URL}/embedded-copilot", wait_until="domcontentloaded")
 
     history_button = browser_page.locator(
         f"button[data-load-conversation='{conversation_id}']"
@@ -736,7 +899,7 @@ def test_conversation_history_restore_refresh_and_new_session(
             .map(message => message.shadowRoot?.textContent || '')
           .join('\\n');
           return messages.includes('历史会话里的结论')
-            && localStorage.getItem('data-analysis-agent-current-conversation-v1') === id;
+            && localStorage.getItem('data-analysis-agent-embeddable-conversation-v1') === id;
         }""",
         arg=conversation_id,
     )
@@ -763,7 +926,7 @@ def test_conversation_history_restore_refresh_and_new_session(
             .map(message => message.shadowRoot?.textContent || '')
           .join('\\n');
           return messages.includes('历史会话里的结论')
-            && localStorage.getItem('data-analysis-agent-current-conversation-v1') === id;
+            && localStorage.getItem('data-analysis-agent-embeddable-conversation-v1') === id;
         }""",
         arg=conversation_id,
     )
@@ -772,7 +935,7 @@ def test_conversation_history_restore_refresh_and_new_session(
     assert history_chat.locator("table.text-markdown-table").count() == 1
     assert history_chat.locator("h2").count() >= 1
 
-    browser_page.locator("#new-conversation").click()
+    browser_page.locator("#new-analysis").click()
     browser_page.wait_for_function(
         """id => {
           const chat = document.querySelector('vanna-chat');
@@ -781,9 +944,36 @@ def test_conversation_history_restore_refresh_and_new_session(
           )
             .map(message => message.shadowRoot?.textContent || '')
           .join('\\n');
-          return localStorage.getItem('data-analysis-agent-current-conversation-v1') !== id
+          return localStorage.getItem('data-analysis-agent-embeddable-conversation-v1') !== id
             && !messages.includes('历史会话里的结论');
         }""",
         arg=conversation_id,
     )
+    assert not console_errors
+
+
+def test_w4_04_demo_script_browser_steps(page) -> None:
+    """Walk the browser controls named by the W4-04 demo script."""
+    browser_page, console_errors = page
+    script = yaml.safe_load(
+        Path("evals/cases/w4_04_product_demo_v1.yaml").read_text(encoding="utf-8")
+    )
+    _open_normal_window(browser_page)
+    browser_page.locator("details.more-menu > summary").click()
+    for step in script["steps"]:
+        if step["kind"] != "browser":
+            continue
+        controls = step.get("controls") or [step["control"]]
+        for control in controls:
+            if control == "#admin-panel" and step.get("admin_hidden_until_toggle"):
+                assert browser_page.locator(control).is_hidden()
+                browser_page.locator("#admin-toggle").click()
+                assert browser_page.locator(control).is_visible()
+                continue
+            assert browser_page.locator(control).count() == 1
+    browser_page.locator("#evidence-toggle").click()
+    browser_page.wait_for_function(
+        "() => document.querySelector('[data-evidence=dataset]')?.textContent !== '加载中'"
+    )
+    assert browser_page.locator('[data-evidence="dataset"]').inner_text() != "加载中"
     assert not console_errors

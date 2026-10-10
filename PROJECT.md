@@ -135,8 +135,10 @@ SQL 先通过 `sqlglot` AST 策略，再由 `daa_analytics_reader` 只读角色�
 SQLite fixture 只用于可重复的上游冒烟验证，不代表最终业务数据；可信原型使用已加载的
 Olist 分析表。图表由服务器拥有的 `ChartContract` 从用户意图、`QueryPlan` 与 `ResultContract`
 派生，固定允许的图表类型、横轴、指标列、可选系列、标题、当前 SQL 结果工件与行数边界。
-当前仅支持柱状图和折线图；不支持或缺少必要横轴的请求会在 SQL 前澄清/拒绝，不能由模型或
-前端静默改图。图表层仅渲染已经通过 `ResultValidator` 的当前结果，不补值、去重、聚合或重算。
+当前只支持服务端直接渲染的柱状图、横向条形图、折线图、面积图和环形图；不支持或缺少必要横轴的
+请求会在 SQL 前澄清/拒绝，不能由模型或前端静默改图。面积图仅用于单指标无业务分组的时间序列；
+环形图仅用于用户显式请求的单个可加指标、单维度、至多 8 个非负类别。图表层仅渲染已经通过
+`ResultValidator` 的当前结果，不补值、去重、聚合或重算。
 前端在普通、缩放、最大化和 390px 窄屏嵌入窗口中均有确定性浏览器回归。真实认证、行级范围
 与真实模型调用下的完整图表链路验收仍属于后续阶段，不能把演示请求头当作生产认证。
 
@@ -346,7 +348,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 创建 FastAPI 应用、认证/角色占位、PostgreSQL 双角色配置；
 - 已接入 Vanna Agent 与受控工具，真实查询只能通过策略和 `daa_analytics_reader`；
 - 已实现 `sqlglot` SQL Policy、超时/行数限制、持久审计、指标与数据版本证据；
-- 已实现服务端 `ChartContract`：由用户意图、`QueryPlan` 和 `ResultContract` 固定 bar/line、横轴、指标列、系列、标题与当前 SQL 结果工件；不支持的图形和缺少横轴的请求在 SQL 前终止，图表层不做二次聚合。
+- 已实现服务端 `ChartContract v2`：由用户意图、`QueryPlan` 和 `ResultContract` 固定 `bar`、`horizontal_bar`、`line`、`area`、`donut`、横轴、指标列、系列、标题与当前 SQL 结果工件；不支持的图形和缺少横轴的请求在 SQL 前终止，图表层不做二次聚合。
 - 已提供演示级签名会话：固定 `analyst` / `admin` 身份映射同时约束 SSE、SQL 策略与审计 API，
   页面可切换并展示其用途和非生产边界；旧请求头不能提升权限。
 - 已增加 PostgreSQL 会话/消息存储、Agent Run 台账、请求级预算和上下文裁剪基础；后端历史 API 已提供列表、详情和删除。
@@ -404,7 +406,7 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 - 已完成第一轮 QLoRA SFT 工程 smoke：128 条 Spider train-only 候选按 `db_id` 进行 schema-disjoint 切分，102 条训练/26 条验证来自 66/19 个不重叠 Schema，SQL shape 交集和 v2 holdout 碰撞均为 0。以 Qwen 1.5B 4-bit NF4、`r=16` LoRA、`batch=1`、accumulation=4、8 个 step 在逻辑 CUDA 1/物理 GPU 3 上训练，得到 train/eval loss `0.556203/0.466989`，峰值 allocated 显存约 3.31 GiB；仅保存 74 MB adapter 与外部可恢复 checkpoint，并完成 fresh PEFT adapter reload 的 validation 前向。该次 smoke 证明训练工程可用，不构成 SQL 准确率或业务语义提升结论。详见 [`evals/manifests/post_training_sft_smoke_v1.yaml`](evals/manifests/post_training_sft_smoke_v1.yaml)。
 - 已完成 Qwen 1.5B base vs adapter 评测协议与双条 smoke：训练构造和推理共用 `spider-sft-schema-question-sql-v1` schema/question 序列化，生成侧只读 Spider dev 的 `db_id/question` 而不读其 gold SQL；base 与 adapter 固定为同一 revision、4-bit NF4、贪心解码、输入顺序、SQLite Adapter 和 Test Suite bridge。两条 smoke 验证 base/adapter 都能生成外部候选并进入相同诊断，且 adapter 仅为加载 74 MB LoRA 的变量；全量任务由单个 `screen` 顺序驱动，base 成功后才运行 adapter。它们不是质量结论，完整协议见 [`docs/post-training-base-adapter-evaluation.md`](docs/post-training-base-adapter-evaluation.md)。
 - 2026-08-25 Base vs Adapter 全量评测容错与恢复：Base 已完成 1,034/1,034 外部候选生成（128,957 token、4,631,685 ms，预测 SHA-256 `8978b8...29cc0e`），SQLite 诊断因一条未闭合单引号 SQL 触发 `sqlglot.TokenError` 而中断；没有丢失预测，也未启动 adapter。离线 `SqliteBenchmarkPolicy` 现统一把 `SqlglotError`（含 parser 与 tokenizer 异常）映射为 `policy_rejected`，批处理继续执行后续 case。新增 two-case 回归验证坏 SQL 被报告、合法后续 SQL 正常执行；顺序 driver 增加显式 `BASE_REUSE_GENERATION=1`，只在已有 `generation_evidence.json` 与完整预测时复用 base 生成，且已有官方评测证据时拒绝恢复。SQLite/bridge 相关 **26 passed**，ruff、compileall、shell 语法和 diff 检查通过。该修复不改变生产 Vanna/PostgreSQL，不构成 base/adapter 质量结论；下一步是复用 base 预测完成诊断/Test Suite，再在空闲的映射 4090 上运行 adapter。
-- 2026-08-25 Base 原始完成文本规范化：恢复官方 bridge 时发现 Base 的原始 completion 常在正确或错误 SQL 后继续生成 `### Answer`/Markdown 表格；旧 bridge 将表格分隔线中的 `--` 保守视为 SQL 行注释并拒绝整批。新增共享 `text_to_sql_output` 规范化器，原始 JSONL 不改写，只在 SQLite 诊断与官方 bridge 前一致移除代码围栏、`SQLQuery:`/`SQL:` 前缀及答案/解释 Markdown heading 后的展示尾部；不修 SQL、Schema、Join、聚合或读取 gold。真实 SQL `--` 注释在单行 bridge 中转为等价块注释再折叠。Base 预检为 1,034 条中 806 条发生仅展示包装移除；专项 **32 passed, 1 skipped**，下一步将以相同规范化重跑 Base 诊断/bridge，保证与未来 Adapter 的比较公平。
+- 2026-08-25 Base 原始完成文本规范化：恢复官方 bridge 时发现 Base 的原始 completion 常在正确或错误 SQL 后继续生成 `### Answer`/Markdown 表格；旧 bridge 将表格分隔线中的 `--` 保守视为 SQL 行注释并拒绝整批。当时新增共享展示包装清洗器，原始 JSONL 不改写，只在 SQLite 诊断与官方 bridge 前一致移除代码围栏、`SQLQuery:`/`SQL:` 前缀及答案/解释 Markdown heading 后的展示尾部；不修 SQL、Schema、Join、聚合或读取 gold。该历史模块后来已合并并删除，唯一入口为 `candidate_sql_generator.unwrap_sql_completion()`；真实 SQL `--` 注释在单行 bridge 中转为等价块注释再折叠。Base 预检为 1,034 条中 806 条发生仅展示包装移除；专项 **32 passed, 1 skipped**，下一步将以相同规范化重跑 Base 诊断/bridge，保证与未来 Adapter 的比较公平。
 - 2026-08-25 Qwen 1.5B Base 完整评测证据：在固定共享规范化合同下，Base 原始 1,034 条预测不改写，SQLite diagnostic 为 **831 executed、4 policy rejected、199 execution error、0 timeout**（报告 SHA-256 `433cf3...15d071b`）；此前未规范化报告留在仓库外审计，不参与 Base/Adapter 比较。未修改 Test Suite evaluator 完整运行 1,034 条，原始内部输出为 easy/medium/hard/extra/all = `0.748/0.448/0.241/0.094/0.427`，输入/输出 hash 已进入 manifest。`831/1034` 是单库受控可执行性，`0.427` 是固定资产组合上的 Test Suite 行为对照，二者不能互换；后者不是当前官方 Spider leaderboard。Adapter 已在同一逻辑 CUDA 1/物理 GPU 3 的 4090 上按同一 prompt、decode、normalizer 和 evaluator 顺序生成，未完成前不宣称 QLoRA 提升。
 - 已完成后训练依赖环境 bootstrap 与首个基座冻结：独立 Conda 前缀 `data-analysis-agent-qlora` 使用 Python 3.11，冻结 CUDA 12.1 的 `torch==2.5.1+cu121`、accelerate、bitsandbytes、transformers、PEFT、TRL、datasets 以及训练专属 pytest/pytest-asyncio 的直接/传递依赖。宿主 535.54.03 驱动只支持 CUDA 12.2，故选择 CUDA 12.1 wheel 而非需更高驱动的 CUDA 12.4；`pip check` 通过。`CUDA_VISIBLE_DEVICES=1` 的最小探针只见进程内 `cuda:0`，其 UUID 确认为物理 GPU 3/RTX 4090。Qwen 1.5B 已下载并完成 forward-only smoke 与一次 8-step QLoRA SFT 工程 smoke；DPO/GRPO 尚未启动，v2 60 条 holdout 继续永久隔离。详见 [`docs/qlora-environment.md`](docs/qlora-environment.md) 和 [`evals/manifests/qlora_environment_v1.yaml`](evals/manifests/qlora_environment_v1.yaml)。
 - 已完成后训练研究的 SQLite benchmark Adapter 基础设施：离线 `ReadOnlySqliteExecutor` 使用 SQLite 方言 AST、只读 URI、SQLite authorizer、超时和行数上限执行外部候选 SQL；`scripts/run_sqlite_benchmark.py` 仅消费 BIRD/Spider 原生 `dev.json` 和外部预测 JSONL，输出版本化模型/Prompt/候选/执行证据报告。它不接入 Vanna/前端/生产 PostgreSQL，也不自行计算官方 EX；BIRD/Spider 原始数据、模型预测和报告都继续留在仓库外或忽略目录，许可与 checksum 在下载前再冻结。详情见 [`docs/sqlite-benchmark-adapter.md`](docs/sqlite-benchmark-adapter.md)。
@@ -435,26 +437,139 @@ GitHub Actions 的 `Project Quality Checks` 使用 Python 3.12，与项目运行
 开发模型、SQLite 合成冒烟 fixture、Olist 主展示案例草案、后续再引入 PostgreSQL 和
 v1 不引入 Redis。
 
-已确认数据加载方式、PostgreSQL 双角色和首批核心指标 golden 结果。Olist 只是当前展示数据集，
-通用链路通过 `WorkspaceProfile` 组织，尚未用第二个真实数据集验证。待确认真实认证方式、组织/行级
-权限的演示粒度、评测题标准答案与图表受控生成方案。独立 Next.js/TailAdmin 外壳不再作为候选默认方案。
+已确认数据加载方式、PostgreSQL 双角色和首批核心指标 golden 结果。Olist 仍是当前产品展示数据集，
+通用链路通过 `WorkspaceProfile` 组织；TheLook 已作为独立、只读、跨 Schema 的后置评测 workspace
+完成 v3 受保护 release。待确认真实认证方式、组织/行级权限的演示粒度、评测题标准答案与图表受控
+生成方案。独立 Next.js/TailAdmin 外壳不再作为候选默认方案。
 
 ## 11. 变更记录
 
-### 2026-09-15：TheLook v3 跨 Schema 评测静态覆盖合同与 seed 冻结
+### 2026-09-21：M1 宿主上下文合同与文档入口治理完成
+
+新增 `CopilotBootstrap`、`AnalysisSurfaceContext`、`ConversationScope` 及服务器拥有的
+`WorkspaceAccessRegistry`。同源 `POST /api/copilot/bootstrap` 只接受受限 `surface_id`、请求的
+workspace 和 opaque entity refs；用户、角色、workspace membership、dataset/metric/catalog/policy
+版本均从签名 demo session 与 registry 推导。请求体中的 `user_id`、role、SQL、DOM 等额外字段被
+Pydantic 拒绝，未授权 TheLook workspace 返回 403；TheLook 未接入默认在线产品。该任务没有改变
+Router、QueryPlan、SQL Policy、reader role、ResultValidator、聊天流程或模型 provider。运行时 Conda
+环境回归为 **20 passed**，其中包含真实 FastAPI route 测试。M2 才会将 workspace 与 `state_version`
+持久化到会话，并单独处理迁移和并发语义。
+
+本轮同时新增文档生命周期地图：`PROJECT.md` 与飞书项目文档承担当前事实，`docs/architecture/`
+承担设计/合同，`docs/post-training/` 分离数据、实验和学习。没有批量删除历史 Markdown；它们仍可能
+承载唯一的实验溯源或外部链接，必须在完整迁移、无引用和链接检查后才允许物理删除。
+
+### 2026-09-21：M2 Workspace 与会话状态版本完成
+
+`app.conversations` 新增非空 `workspace_id` 与非负 `state_version`；幂等迁移将已有 206 条单工作区
+历史回填为 `olist-demo`，并新增 `(user_id, workspace_id, updated_at)` 索引。`PostgresConversationStore`
+的读取、列表、删除和更新均加入 workspace 范围；更新先锁行校验对象携带的 `state_version`，成功后
+递增，旧对象写入抛出 `ConversationStateConflict`，`BudgetedChatHandler` 返回可恢复状态卡，不做
+silent last-write-wins。历史详情/列表 DTO 现在返回 workspace 与 state version；TheLook 仍未接入默认在线
+页面。真实 PostgreSQL store/route 回归 **6 passed**，身份/运行时回归 **70 passed**，迁移、compileall、
+Ruff 和 diff 检查通过。该任务未改 SQL 生成、Policy、reader role、ResultValidator、模型或训练评测链。
+
+### 2026-09-21：Phase 3 长对话摘要与结果工件真实验收完成
+
+完成 Phase 3 的代码收紧与隔离线上回归。`ResultArtifactStore.verify_manifest()` 会在恢复前重算
+CSV/Plotly 的 SHA-256 与字节数；`TrustedRunSqlTool` 只有在显式
+`ResultValidator.state == valid` 时才允许写完整 CSV；会话详情与 artifact manifest 路由已恢复为两个
+可达的 owner/workspace-scoped endpoint。真实 SSE 使用隔离端口 `32012` 和临时 `1,200` history-token
+预算运行：受控州 GMV 图表查询生成 10 行 CSV 与 Plotly JSON，manifest 恢复校验通过；连续 6 个 user-led
+turn 触发并持久化 `history-summary-v2`，摘要后的“2017 年按月统计有效订单数”通过 reader role、ResultContract
+和 ResultValidator；切换到另一个 demo role 访问同一 artifact 返回 404。摘要正文未进入 `WorkingMemory` typed SQL
+state，tokenizer evidence 明确为 `local_tokenizer_estimate`，不是 DeepSeek-V4-Flash exact tokenizer。
+一次真实回归还发现旧指标被无条件追加到新问题检索上下文的状态串扰，已改为只有未完成 clarification 才保留
+`pending_question`，并补回归。确定性/定向测试 **82 passed**，Ruff、compileall、diff check 和隔离页面
+Playwright（HTTP 200、无 console error）通过。安全报告和原始 SSE 均在仓库外：
+`/disk2/gengnan/data-analysis-agent-data/evals/product-capability-baseline-v1/phase3-context-artifacts/`。
+摘要 provider 失败回退与工件篡改检测为确定性故障注入覆盖，未伪造为线上故障发生。
+
+### 2026-09-20：可信图表 ChartContract v2 完成
+
+图表不再只有 `bar` / `line`：新增 `horizontal_bar`、`area` 与 `donut`，但保持
+`SqlPolicy -> reader role -> ResultContract/ResultValidator -> 当前请求内 DataFrame -> 服务端 Plotly`
+这一条受控链路。品类图默认横向条形图；面积图只接受单指标、无业务分组的时间序列；环形图必须显式
+请求、只接受可加金额/数量指标、一个维度、实际至多 8 个非负类别。散点、热力、地图、直方、漏斗、
+瀑布、堆叠图仍因缺少相应的结果语义合同而明确拒绝，绝不静默替换。图表不增加模型调用：两条真实
+SSE 验收（品类 GMV 横向条形图、州 GMV 环形图）均为 1 次 SQL、0 次模型图表工具调用、1 轮 LLM，
+并发出服务器 `chart` 组件；原始 SSE 留在仓库外。专项回归 **67 passed**、Ruff、compileall 与 diff
+检查通过。完整 `pytest` 在服务运行 Conda 环境的收集阶段被既有后训练测试所需的 `torch` 缺失阻断，
+这不等价于图表测试失败。嵌入页面历史会话当前只恢复安全文本/表格而不回放图表组件，这是既有会话
+体验边界，留给后续 Phase C 处理，不据此否定实时 SSE 图表能力。
+
+### 2026-09-20：产品能力基线 Phase C 结构性运行完成
+
+新增 10 个多轮会话脚本与 `scripts/run_product_capability_conversations.py`，通过当前 trusted demo
+SSE 运行 26 个 turn；原始事件位于仓库外，正式安全报告为
+`/disk2/gengnan/data-analysis-agent-data/evals/product-capability-baseline-v1/phase-c/rerun-v2/conversation-safe-report.json`。
+报告只保留会话/request hash、route、WorkingMemory 投影、可信结果摘要存在性、工具调用和上下文预算字段，
+并已通过 safe-evidence schema。修正 runner 将未完成 SQL 标为失败后，10 个脚本中 4 个严格通过，暴露四类
+事实：`WorkingMemory.apply()` 没有记录当前轮新维度；一条“刚才排名第一的州是否合理”被下钻规则误路由为新
+数据库分析；8 个 answerable turn 的真实终态不是 `completed`；长历史本批未触发 context truncation。
+相对时间澄清后补绝对年份、无可信结果先澄清、有可信摘要的 tool-free 追问和新会话隔离均有通过证据。
+Phase C 只完成测量，未直接实现长期记忆、workspace/state version 或 clear action。随后已补齐失败诊断、结果追问
+分类、QueryPlan 维度写回和最小可信 ResultArtifact 回放；相关结构性回归通过。当前进一步将 `ContextBudgetFilter`
+升级为无模型的 `HistorySummary v1`：超预算时保留最近完整 turn，以范围/数量/字符/哈希边界替代被省略旧 turn，
+并把 `context_budget` 脱敏证据写入 `agent_runs.catalog_trace`；极端当前 turn 仅用固定 marker 压缩工具交互。
+这不等于长期记忆，也不是 provider 精确 token 统计；长历史真实小批回归待服务重载后执行。
+
+### 2026-09-18：产品能力基线测试 v1 Phase 0 完成
+
+冻结 [`plan/feature-product-capability-baseline-test-v1.md`](plan/feature-product-capability-baseline-test-v1.md) 与 [`docs/architecture/product-capability-baseline-v1.md`](docs/architecture/product-capability-baseline-v1.md)：A 路由/澄清 12 条、B 单轮业务问答 16 条、C 多轮会话 10 组、D 浏览器 8 条、E 汇总的分阶段测试合同已定义。Phase 0 只完成 `product_capability_v1.yaml` 的 runtime-only 隔离骨架、safe evidence schema、SQL/Gold/结果行/protected-case fail-closed 校验及 8 条合同测试；A--D 尚未物化 case、未调用在线模型、未连接业务数据库、未启动浏览器真实流和未改运行时。后续按用户审阅后一次推进一个阶段。
+
+### 2026-09-19：产品能力基线测试 v1 Phase A 完成
+
+完成 12 条确定性 Router 基线：3 条数据库可答、2 条帮助/Catalog、3 条澄清、3 条安全拒绝、1 条无可信结果追问。新增 [`scripts/run_product_capability_routing.py`](scripts/run_product_capability_routing.py) 与 [`tests/test_product_capability_routing.py`](tests/test_product_capability_routing.py)，实际结果为 **12/12 passed**；runner 明确记录 `database_calls=0`、`llm_calls=0`，不生成/执行 SQL，不启动浏览器。安全聚合报告位于仓库外 `/disk2/gengnan/data-analysis-agent-data/evals/product-capability-baseline-v1/phase-a/routing-safe-report.json`。该结果只证明路由边界，不代表 SQL、业务语义、图表或多轮能力；B/C/D 仍未运行。
+
+### 2026-09-19：产品能力基线测试 v1 Phase B 运行完成（待人工语义审核）
+
+冻结 16 条单轮 case，并新增 [`scripts/run_product_capability_online.py`](scripts/run_product_capability_online.py)、[`src/data_analysis_agent/product_capability_review.py`](src/data_analysis_agent/product_capability_review.py) 及合同测试。通过当前 trusted demo SSE 正式运行 16 条：16/16 AgentRun 可回读，14 条完成 SQL 闭环，3/3 图表请求产生图表组件；2 条二层聚合请求在 Router/Catalog 阶段澄清、未生成 SQL。结构化报告位于仓库外 `/disk2/gengnan/data-analysis-agent-data/evals/product-capability-baseline-v1/phase-b/single-turn-safe-report.json`，人工审核模板位于同目录 `manual-review-template.json`。本次服务审计仍报告 `metric_version=0.1-draft`，与仓库当前离线指标目录存在版本一致性待确认问题；在完成 `metric_semantics`、`time_scope`、`answer_grounded`、`chart_semantics` 人工审核及服务版本确认前，不发布 B 语义准确率，也不进入 C。
+
+### 2026-09-18：Project v1 Week 1 复盘完成
+
+本周未启动新训练、DPO、protected final test 或大规模产品重构；重点是从真实代码、定向测试和仓库外脱敏证据恢复可演示项目基线。已完成请求路由、Semantic Catalog/QuerySpec、SQL Policy/reader role/ResultValidator、图表/表格、WorkingMemory、会话所有权、local Adapter 运行时边界以及 repair/fallback 的代码级审查；详细记录见 [`docs/architecture/project-v1-baseline-review.md`](docs/architecture/project-v1-baseline-review.md)，已确认缺口见 [`docs/architecture/project-v1-gap-map.md`](docs/architecture/project-v1-gap-map.md)。
+
+同时冻结了“嵌入式 Copilot + artifact-backed memory”的 M1--M6 依赖路线：先宿主身份/workspace 合同，再会话隔离与版本、可信 ResultArtifact、产品壳、状态生命周期，最后才在真实超预算时增加可溯源历史摘要；该路线不采用“把全部聊天向量化后直接拼 Prompt”的模式。公开 Codex CLI、Aider、LangGraph、Mem0 的 revision-pinned 代码调研见 [`docs/architecture/open-source-agent-context-research-v1.md`](docs/architecture/open-source-agent-context-research-v1.md)。
+
+后训练主事实统一收束为 Qwen2.5-Coder-1.5B Base 的 multi-schema SQL-only `adapter_best`：以 Olist/TheLook `6,000/1,500` 训练/validation、validation-best step 2700 为唯一候选，在两个各 750 条 protected final test 上完成统一治理与 Gold denotation 对照。Olist ordered Gold match 为 Base/Adapter `3/403`，TheLook 为 `41/396`；这证明冻结电商合同下的候选质量提升，不等于生产接入、开放域泛化或业务准确率。完整边界见 [`docs/post-training/experiments/project-v1-model-baseline.md`](docs/post-training/experiments/project-v1-model-baseline.md)。
+
+DPO 当前不启动：train-only 与 validation-only 的两批各 48 次分层采样均为 Gold match，未出现可复核 A--C rejected SQL；不得手写坏 SQL、不得使用 holdout 错误凑 pair。证据与重新准入门见 [`docs/post-training/experiments/project-v1-dpo-decision.md`](docs/post-training/experiments/project-v1-dpo-decision.md)。Week 2--4 只作为待确认的单任务依赖路线，见 [`plan/process-project-v1-week2-4.md`](plan/process-project-v1-week2-4.md)。
+
+### 2026-09-16：多 Schema 电商 SQL-only SFT v1 冻结
+
+Olist v3.1 与 TheLook v3 r3 的 1.5B Base/Adapter matching 和 Gold denotation 对照已完成。Olist Adapter 在 750 条域内测试上达到 `750/750` ResultContract valid 与 `750/750` Gold ordered denotation；TheLook Adapter 在未见 Schema 的 750 条测试上达到 `368/750` ResultContract valid、`289/750` Gold bag denotation，说明 Olist-only SFT 的跨 Schema 能力仍有明显缺口。基于该证据，冻结 [`docs/post-training/data/multi-schema-ecommerce-sql-only-sft-v1.md`](docs/post-training/data/multi-schema-ecommerce-sql-only-sft-v1.md)：保留 Olist `3,000/750` train/validation，并已构建与 TheLook v3 r3 protected test 隔离的 TheLook `3,000/750` seed/Gold/admission release（`thelook-sql-only-sft-v1-r4`，`3750/3750` reader-role 准入）。新 SFT release 使用 1,000 行执行上限和独立 200 行预览预算，14 条 `201--829` 行训练结果仅标记展示截断、没有执行截断；TheLook v3 r3 750 条 test、Gold、错误结果不得回流训练。统一中文主问法、Prompt、token audit 与 Olist/TheLook 合并 `6,000/1,500` release 尚未开始，未启动下一轮训练。
+
+### 2026-09-15：在线 SQL 执行上限与界面展示预算分离
+
+修复在线查询因“200 行预算”提前失败的问题。`SecurePostgresRunner` 和在线
+`QuestionRouter` 默认使用 1,000 行数据库执行上限；结果在 201--999 行时仍视为完整执行，
+前端表格仅预览前 200 行并明确标记展示截断；真正取满 1,000 行才要求缩小查询范围。默认
+`SqlPolicy()` 仍保持 200 行，以兼容受保护离线评测和历史合同；TheLook v3 继续显式使用
+200 行完整 denotation 合同。图表展示预算不变，超过 200 行时要求先缩小范围。相关运行时
+合同见 [`docs/architecture/runtime-contract-preflight-v1.md`](docs/architecture/runtime-contract-preflight-v1.md)，
+回归测试覆盖 100 条，PostgreSQL 集成测试覆盖 7 条。
+
+### 2026-09-15：TheLook v3 跨 Schema 评测覆盖合同 v2 与 seed 冻结
 
 为避免把历史 TheLook v2 的 `family_id == query_spec_id` 误当成场景覆盖，新增机器可读
-`thelook-v3-coverage-contract-v1`、独立 `scenario_family_id`、由 QuerySpec 派生的
+`thelook-v3-coverage-contract-v2`、独立 `scenario_family_id`、由 QuerySpec 派生的
 `program_signature` 和 `risk_tags`。v3 目标为 750 个静态、可复现 seed；冻结事实域
-`135/250/60/100/0/135/70`、shape `210/285/255`、日/周/月/季/年序列 `35/45/65/60/50`、
-13 个安全分组维度、20 个 scenario family、1--4 指标配额、风险下限和八类纯中文主问法配额。
-语义底座继续固定在 TheLook v2 的 20 项指标和 QuerySpec/renderer 版本；`current_unsold_inventory_unit_count`
-因当前仅 4 个合法 all-time QuerySpec 均已在 protected v2 出现，v3 暂显式配额为 0，不能为凑数量
-伪造新时间/过滤语义。静态构造器生成 750 条 QuerySpec-backed seed，精确满足上述分布，受保护 v2
-QuerySpec ID overlap 为 0；它未渲染 SQL、访问 PostgreSQL、生成问题或调用模型。静态合同/seed/测试见
-[`docs/post-training/data/thelook-v3-coverage-contract-v1.md`](docs/post-training/data/thelook-v3-coverage-contract-v1.md)。
-下一独立任务才是逐条 `QuerySpec -> renderer -> SqlPolicy -> reader role -> ResultContract` 准入；在那以前
-TheLook v3 不可用于模型评测、训练、Prompt、模型选择或错误回流。
+`135/250/60/100/4/135/66`、shape `210/285/255`、日/周/月/季/年序列 `35/45/65/60/50`、
+13 个安全分组维度、21 个 scenario family、1--4 指标配额、风险下限和八类纯中文主问法配额。
+语义底座继续固定在 TheLook v2 的 20 项指标和 QuerySpec/renderer 版本。v3 明确允许
+`inventory_unsold_snapshot` family 复用 v2 中 4 个合法 all-time snapshot QuerySpec/Gold，其他
+QuerySpec、Gold hash 和规范化主问题仍由 release audit 检查，不再把合理复用误判为失败。
+静态构造器生成 750 条 QuerySpec-backed seed，精确满足上述分布；seed 本身未渲染 SQL、访问
+PostgreSQL、生成问题或调用模型。随后已完成 44/44、21/21 family 的小批准入，并物化
+`thelook-cross-schema-final-test-v3-20260915-r3`：750/750 通过 Gold renderer、SqlPolicy、
+`daa_thelook_reader`、ResultContract/ResultValidator 和 200 行展示预算。最终 release 的
+`cases.jsonl` SHA-256 为 `bd1195c00dd68a884fc55eb8301184ef1492dd070f01fa26f96293ac13acef7c`，
+release audit 状态为 `pass`。静态合同/seed/代码/测试见
+[`docs/post-training/data/thelook-v3-coverage-contract-v2.md`](docs/post-training/data/thelook-v3-coverage-contract-v2.md)。
+该 release 仅用于 Base/Adapter 的 final evaluation；TheLook v3 不进入 Olist 训练、Prompt 调优、
+错误回流或模型选择。v2/v3 允许的 4 个 `inventory_unsold_snapshot` QuerySpec/Gold 复用已在
+release audit 中显式记录，其他身份和规范化主问题不允许未经批准地重合。
 
 ### 2026-09-14：Olist v3 指标合同、平衡 SQL-only release 与全量准入
 
@@ -695,3 +810,99 @@ checkpoint 与三阶段 matching Base/Adapter 协议已冻结于
 | 2026-09-01 | Olist 英文候选 prompt 语言敏感性对照 | 以当前代码、当前 PostgreSQL 工作区和同一 RTX 4090 刷新中文 Base/Adapter，再冻结 Catalog/Router/QueryPlan/ResultContract/审计的中文 grounding，仅将候选生成器问题替换为仓库外、哈希固定的英文 overlay。英文直接进入当前中文语义层时仅 8/12 可查库、4/12 保持相同指标；隔离生成对照中 Base 从 `12/12 generated, 6 policy accepted, 4 executed, 2 contract-valid` 变为 `12/12, 6, 2, 1`，Adapter 从 `12/12, 6, 2, 0` 变为 `12/12, 4, 2, 0`。该实验分离了产品多语言缺口与模型候选语言敏感性，不构成业务准确率；Adapter 在任一语言下均未通过业务迁移门，生产默认 Vanna/SiliconFlow 路径不变。详见 `docs/post-training/experiments/olist-english-prompt-transfer-v1.md`。 |
 | 2026-09-04 | Olist Medium v1 训练前配置与 bf16 LoRA smoke | 训练入口兼容新的 `olist_family_isolated_v1` split audit；冻结 Medium v1 的 bf16 未量化基座、LoRA `r=16/alpha=32/dropout=0.05`、`adamw_torch`、学习率 `1e-4`、weight decay `0.01`、真实 batch `2`、梯度累计 `2`（有效 batch `4`）、两 epoch和 `max_seq_length=3072`。1-step smoke 在逻辑 GPU `1`/物理 GPU `3` RTX 4090 完成，global step=1、train loss `0.2078`、validation loss `0.2198`，峰值显存约 14.65 GiB allocated / 22.99 GiB reserved，adapter 成功写出；这些仅证明训练工程链路可运行，不代表 SQL 质量。配置与成对评测合同见 [`docs/post-training/data/olist-medium-v1-training-evaluation-contract.md`](docs/post-training/data/olist-medium-v1-training-evaluation-contract.md)，外部证据见 `/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-olist-medium-bf16-lora-smoke-v1-20260904/`。下一步才是用户确认后启动完整两 epoch，并在冻结 test 上做 matching Base/Adapter 生成评测。 |
 | 2026-09-04 | Olist Medium v1 正式两 epoch 训练已启动 | 通过独立覆盖审查后，在 screen `daa-olist-medium-full2epoch-v1-20260904` 使用逻辑 CUDA `1`（物理 GPU `3`，RTX 4090）启动冻结配置：720 train、240 validation、有效 batch `4`、预计 360 global steps、bf16 未量化 LoRA、`adamw_torch`、weight decay `0.01`、3072 长度。训练过程稳定，初始 15/360 steps 未 OOM。审查确认各 split 内及跨 split 的 family、QuerySpec、问题、Prompt 和 canonical SQL 均无重复；已知限制是 category_grouped 仅 train/validation 的 3/2 条，in-domain test 没有该形态，因此不对品类分组做本轮测试结论。外部日志与最终 adapter 位于 `/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-olist-medium-bf16-lora-full2epoch-v1-20260904/`。训练完成后才运行 matching Base/Adapter 生成和 240 条冻结 test 的质量评测。 |
+
+### 2026-09-21：M3 ResultArtifact presenter 合同与预览边界完成
+
+冻结 [`docs/architecture/result-artifact-presenter-v1.md`](docs/architecture/result-artifact-presenter-v1.md)：
+结果呈现现在明确区分 `total_row_count`（已验证结果总行数）与
+`preview_row_count`（实际发送给表格的预览行数），并以
+`display_truncated`、列标签/单位、workspace、dataset/metric version 和不含 SQL 的
+`audit_ref` 作为服务器拥有的 presenter metadata。250 行结果会展示“预览 200 / 共 250 行”，
+隐藏行不会进入 UI 或模型上下文。未建立认证、workspace 隔离和审计下载路由前，
+`preview_export_allowed`、`full_export_allowed` 和通用表格 `exportable` 均为 false，
+避免把预览误认为完整 CSV；现有 `ResultArtifactStore` 仍只作为内部完整 artifact 存储。
+新增 presenter、trusted SQL tool、通用 SQL table 和 250 行预览回归，focused 测试 13 passed，
+结果验证/artifact/runner/router 回归 61 passed、7 skipped，compileall、ruff 和 diff check 通过。
+前端 DataFrame renderer 已消费这份合同：真实 `embedded-demo` 浏览器回归中，250 行结果实际显示
+`200 / 250 rows` 与 `Showing 200 of 250 rows`，且没有通用 Export 按钮、没有 console error；npm build
+通过。本阶段没有修改 SQL 生成、Policy、reader role、ResultValidator 或 1,000 行执行上限。
+
+### 2026-09-21：M4 EmbeddableCopilotShell 产品壳完成
+
+新增独立 [`/embedded-copilot`](examples/embeddable_copilot_shell.html) 产品入口和
+[`embeddable-copilot-shell-v1.md`](docs/architecture/embeddable-copilot-shell-v1.md)。它只显示服务端
+bootstrap 得到的当前 workspace、可信聊天面板、`新分析` 和按需 `查看依据`；不显示演示角色切换、全局
+审计列表或原始 SQL 面板。原 `/embedded-demo` 保留完整开发/面试/安全回归控制面，未被替换或删除。
+
+产品壳通过 M1 `/api/copilot/bootstrap` 获取 workspace、dataset/metric version，浏览器不自报用户、角色、
+权限或 SQL；查看依据只展示版本和“服务器只读校验”。`新分析`通过新的 conversation ID 清空 active analysis
+state，不删除旧历史。移动端采用全宽、无横向滚动布局，桌面端保留紧凑的嵌入式 surface；TheLook 仍未接入默认在线页面，
+跨域 iframe/postMessage 和真实 SSO 仍不在本任务范围。
+
+真实服务端口 32013 的 Playwright 回归结果：产品壳隔离/依据/新分析 **2 passed**，M3 结果预览、旧 Demo 表格和移动端回归
+**3 passed**；前端 `npm run build`、定向 Ruff、compileall 和 diff check 通过。M4 没有修改 SQL 生成、Policy、reader role、
+ResultValidator 或模型 provider。
+
+### 2026-09-21：M1–M4 联合验收完成
+
+后端定向回归 **83 passed, 12 skipped, 0 failed**；skip 仅对应未启用的外部 PostgreSQL/集成环境。M1–M4 浏览器回归在
+`http://127.0.0.1:32013/embedded-copilot` 通过 **13 passed, 1 skipped**，覆盖嵌入式产品壳、依据面板、新分析、ResultArtifact
+预览（250 行结果显示为 200/250 且不提供导出）、旧 Demo 表格、移动端无横向溢出以及多轮澄清。该验收确认四阶段的接口边界
+可以联通；M5 的会话生命周期（清空上下文、版本失效、并发产品合同）、真实 SSO/跨域宿主和 full export 仍未实现。
+
+### 2026-09-22：M5 会话分析上下文生命周期完成
+
+同一会话现在可以清空分析上下文而保留聊天记录。`POST /api/project/conversations/{id}/analysis-context`
+只清除 WorkingMemory 中的指标、时间、维度和 active ResultArtifact 引用，保留消息与 history summary，
+不删除审计 artifact 文件。数据版本或指标版本与当前 Olist workspace 不一致时，下一轮请求丢弃旧分析状态
+和语义历史摘要，并返回“分析上下文已失效”；版本匹配时仍复用已确认状态。同会话 stale `state_version`
+返回“会话状态已更新”，并正式记录 `termination_reason=state_conflict`，不再在冲突处理中因未知终止原因抛错。
+产品壳 `/embedded-copilot` 增加“清空分析上下文”，发送中的聊天输入由组件锁定为单次 in-flight。
+定向测试 `tests/test_analysis_lifecycle.py` 与上下文过滤器回归通过。真实 SSO、跨域宿主、完整导出和
+TheLook 在线接入仍未实现，后训练资产未改。
+
+### 2026-09-22：Router 排名、指标别名与会话指标继承修正
+
+「最好 / 最高 / 最低」不再被当成缺少同比或环比基线。上一轮指标只在未完成澄清（`pending_question` 或 `pending_missing`）时继续使用；新问题若未命中 Catalog 指标，会重新询问，不再静默沿用 GMV。运行时 Olist Catalog 为「商品件数」增加「销量」别名。定向测试 `tests/test_question_router.py`、Catalog 与生命周期回归 86 passed。这不改变品类归属未冻结时的澄清，也不把口语筛选值自动写成 SQL 条件。
+
+### 2026-09-22：问法对齐从别名补丁改为查询形状加受约束对齐
+
+排名词不再进入对比规则。「各州 / 按州」才是按州汇总，「SP州」只作为筛选，不拆成每个州一行。「哪种商品」按品类排名。别名没有命中时，才额外调用一次模型，并且只能返回当前 Catalog 里的指标和维度 id；未知 id 丢弃，失败则仍澄清。归因、行数预算、SqlPolicy 和 ResultValidator 仍在这条对齐之后。相关测试 57 passed。
+
+### 2026-09-22：产品页合并为单一 Copilot 界面
+
+`/embedded-copilot` 现在包含会话列表、恢复和删除。演示角色与最近查询放在「管理」开关后面，默认用户界面不显示。`/embedded-demo` 重定向到该页面。旧的 `examples/embedded_analyst_host.html` 已删除。浮动窗口拖拽回归不再对应当前界面。
+
+### 2026-09-22：Router 只决定是否生成 SQL
+
+`QuestionRouter.classify` 现在只拒绝不安全或当前做不到的请求，并区分帮助、指标定义、经营建议、结果解释和需要查库。指标是否命中、分组归属、相对时间、比较基线和结果行数形状改由 `admit_sql_request` 在生成 SQL 前检查。别名未命中时，仍先做一次受约束的 Catalog 对齐，再进入这道验收。定向测试 63 passed。
+
+### 2026-09-22：在线 Catalog 扩到 v3，并冻结可复用电商角色
+
+在线演示改为读取 `olist_catalog_v3`，工作区 id 仍是 `olist-demo`，指标版本为 `0.3-proposal`。商品成交额、商品件数和运费金额增加 `seller_state`。新增 [`data/catalog/ecommerce_semantic_profile_v1.yaml`](data/catalog/ecommerce_semantic_profile_v1.yaml)，把 Olist 与 TheLook 中可共用的指标和维度收成角色绑定。客户城市和卖家城市改为只返回该指标最高的 20 个分组。订单按品类或支付方式统计使用多归属，金额按支付占比分摊。卖家原始编号仍不能出现在结果里。
+
+### 2026-09-22：本轮产品优化停在偏好、诊断、路由探针和结果摘要
+
+当前轮交给模型的结果优先使用已验证摘要；没有摘要时，CSV 在完整行边界截断，并仍带上图表文件名。产品页可以保存语言、时区、默认图表和数字格式，也可以把当前已校验结果按数据版本和指标版本保存下来。这两类记录不进入下一问的 SQL。管理开关后面增加按终止原因和修复成功次数的计数，分析员只看自己的会话。运行时路由探针冻结在 `evals/cases/runtime_router_probe_v1.yaml`，其中两条口语问法记为已知缺口。Phase B 安全模板仍是 `pending_manual`，没有回答正文，所以没有填写语义通过或失败。5–8 分钟演示脚本、架构图和模型实验卡留到后面。后训练资产未改。
+
+### 2026-09-22：本地登录、跨域嵌入令牌和完整结果下载
+
+产品页在没有本地会话或显式演示 cookie 时要求登录。账号密码只存在服务端；浏览器提交的 `user_id` 或角色会被拒绝。跨域宿主使用允许列表里的 origin 换取 5 分钟嵌入令牌，再由 `postMessage` 交给 iframe。完整 CSV 下载的是当前用户已校验的结果文件，下载前重算校验和，并写入 `app.export_audits`。界面里的通用预览导出按钮仍然关闭。这不是外部身份提供商，也没有放开 1,000 行执行上限。
+
+### 2026-10-08：周计划补记本地登录三项，演示脚本成为全量功能测试
+
+`plan/process-project-v1-week2-4.md` 补上 2026-09-22 的本地登录、跨域令牌和完整结果下载。当前入口文档里仍把已删除宿主页或「SSO/导出未做」写成现状的句子已改掉。历史变更记录和实验报告保留。W4-04 的演示脚本在 [`docs/demo-script.md`](docs/demo-script.md)，自动步骤在 [`evals/cases/w4_04_product_demo_v1.yaml`](evals/cases/w4_04_product_demo_v1.yaml)。同一天补了架构图、模型实验卡和面试问答，数字仍指向既有实验记录，没有重跑评测。
+
+### 2026-10-08：行数上限、结果追问和偏好说明
+
+策略把查询收到 1,000 行时，会多读一行判断是否还有数据，然后丢掉这一行。正好 1,000 行且没有多出来的行，不再说成可能截断。结果追问若写出摘要里没有的数字，回答会改成只复述已验证摘要。展示偏好仍会保存，页面写明它们还不会改变本轮的语言、时区、图表或数字格式。
+
+### 2026-10-10：当前实现提交前核验与对外口径修正
+
+核验从 2026-09-21 基线之后积累的产品与离线后训练改动。对已修改及新增的定向 Python 用例运行无在线模型回归：`369 passed, 30 skipped, 1 deselected`；跳过项有数据库/集成前置条件，主动排除了会创建本地账号的登录路由用例。另补 CI 基础组回归 `87 passed, 1 skipped`。Web Component 的 TypeScript/Vite build 通过。静态检查发现的字典推导和多语句写法已做等价修正，定向 Ruff 通过；相关复验 `15 passed, 4 skipped`。这不是全仓测试或在线语义准确率结论。
+
+当前产品页的四条 Playwright 用例最终 `4 passed, 11 deselected`，覆盖登录不能被演示角色/请求头提权、演示脚本控件、移动端不溢出和 200/250 行数提示且关闭预览导出。首次检查暴露 presenter 注入与 starter SSE 并行的用例不稳定、移动端旧“宽度必须等于视口”断言不适用；已将 presenter 用例与 starter 输出隔离，并按现有浮动窗边距验证视口边界，复验通过。没有据此宣称完整在线语义验收。
+
+README 已更新为当前本地登录、来源绑定嵌入令牌、完整 CSV 下载、五种服务端图表与会话链路。产品解析器只接受本地账号会话或有效 embed token，不接受演示角色 cookie；偏好仍仅保存、尚未应用展示。
+
+重读既有主实验原始终测汇总后，纠正两项对外口径：最新多 Schema 1.5B 主模型的训练集已包含 TheLook，因此其 TheLook final test 是已见 Schema 的留出评测；Olist Base 的 3 条 Gold 匹配由 ordered 2 条和仅 bag 1 条构成，不能写成 ordered 3 条。历史 Olist-only 迁移实验不受此结论替换。本轮没有启动新训练或重跑 protected final test。

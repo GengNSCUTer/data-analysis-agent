@@ -237,7 +237,7 @@ metrics:
   - metric_id: item_count
     name: 商品件数
     description: "有效订单的商品行数；Olist 每个 (order_id, order_item_id) 为一件商品行，不按订单去重。"
-    aliases: [商品件数, 商品数量, 销售件数, 商品行数, item count]
+    aliases: [商品件数, 商品数量, 销售件数, 商品行数, 销量, item count]
     grain: order_item
     time_field: fact_orders.order_purchase_timestamp
     source_tables: [fact_orders, fact_order_items]

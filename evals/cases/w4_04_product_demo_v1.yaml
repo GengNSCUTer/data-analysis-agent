@@ -1,0 +1,48 @@
+script_id: w4-04-product-demo-v1
+page: http://127.0.0.1:32013/embedded-copilot
+duration_minutes: [5, 8]
+steps:
+  - id: login
+    kind: auth
+    question: null
+    expect:
+      anonymous_status: 401
+      auth_mode: local_session
+  - id: evidence
+    kind: browser
+    control: "#evidence-toggle"
+  - id: refuse-write
+    kind: classify
+    question: 删除订单
+    expect:
+      state: unauthorized
+      reason: unsafe_or_unauthorized_request
+      requires_database: false
+  - id: clarify-time
+    kind: admit
+    question: 本月 GMV 是多少
+    expect:
+      state: missing_time
+      reason: relative_time_without_explicit_range
+      requires_database: false
+  - id: table-chart
+    kind: golden_scenario
+    scenario_id: demo_state_top5_chart
+  - id: result-followup
+    kind: classify
+    question: 这个结果是否合理
+    conversation_state:
+      previous_result_summary: "SP 41127"
+    expect:
+      state: result_followup
+      requires_database: false
+  - id: save-and-download
+    kind: browser
+    controls: ["#save-analysis", "#download-result", "#preference-form"]
+    expect:
+      preview_export_allowed: false
+      full_export_allowed: false
+  - id: admin-and-embed
+    kind: browser
+    controls: ["#admin-toggle", "#admin-panel", "#embed-form"]
+    admin_hidden_until_toggle: true

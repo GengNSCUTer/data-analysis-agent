@@ -18,13 +18,14 @@ from vanna.tools import RunSqlTool
 from vanna.components import DataFrameComponent, SimpleTextComponent, UiComponent
 
 from .budget import CURRENT_BUDGET
+from .plan_sql_guard import sql_plan_mismatch
 from .sql_policy import SqlPolicy
 from .sql_repair import (
     OneShotSqlRepair,
     SanitizedSqlError,
     SqlRepairOutcome,
 )
-from .result_presentation import display_records
+from .result_presentation import build_result_presentation, display_records
 from .result_artifact_store import ResultArtifactStore
 
 
@@ -78,6 +79,11 @@ class LlmRepairCandidateProvider:
         return extract_sql_candidate(response.content)
 
 
+def _validation_is_displayable(validation: dict) -> bool:
+    """Shape problems may still show a table. Illegal numbers may not."""
+    return validation.get("state") in {"valid", "degraded"}
+
+
 class TrustedRunSqlTool(RunSqlTool):
     """Run Vanna SQL rendering with one request-scoped repair attempt."""
 
@@ -103,10 +109,20 @@ class TrustedRunSqlTool(RunSqlTool):
         self.result_artifact_store = result_artifact_store
 
     async def execute(self, context: ToolContext, args: RunSqlToolArgs) -> ToolResult:
-        result = await super().execute(context, args)
+        mismatch = sql_plan_mismatch(args.sql, context.metadata.get("query_plan"))
+        if mismatch:
+            context.metadata["safe_sql_error"] = SanitizedSqlError("unknown", mismatch, True)
+            result = ToolResult(
+                success=False,
+                result_for_llm=mismatch,
+                error=mismatch,
+                metadata={"plan_sql_mismatch": mismatch},
+            )
+        else:
+            result = await super().execute(context, args)
         if result.success:
-            self._replace_with_server_presentation(context, result)
             self._remember_result_artifact(context, result)
+            self._replace_with_server_presentation(context, result)
             return result
 
         safe_error = context.metadata.get("safe_sql_error")
@@ -114,7 +130,7 @@ class TrustedRunSqlTool(RunSqlTool):
             # Result validation failures are terminal for this tool call.  A
             # second SQL candidate cannot prove a missing semantic column.
             validation = context.metadata.get("result_validation")
-            if validation and validation.get("state") != "valid":
+            if validation and not _validation_is_displayable(validation):
                 return self._terminal_result(
                     result,
                     context,
@@ -190,6 +206,18 @@ class TrustedRunSqlTool(RunSqlTool):
         # tool call and inherits the same server-owned result contract.
         context.metadata.pop("safe_sql_error", None)
         context.metadata.pop("sql_error", None)
+        repaired_mismatch = sql_plan_mismatch(
+            outcome.repaired_sql, context.metadata.get("query_plan")
+        )
+        if repaired_mismatch:
+            evidence["repair_execution_status"] = "failed"
+            evidence["terminal_reason"] = "plan_sql_mismatch"
+            return self._terminal_result(
+                result,
+                context,
+                evidence=evidence,
+                detail=repaired_mismatch,
+            )
         retry_result = await super().execute(
             context, RunSqlToolArgs(sql=outcome.repaired_sql)
         )
@@ -198,6 +226,7 @@ class TrustedRunSqlTool(RunSqlTool):
             evidence["result_validation"] = context.metadata.get("result_validation")
             retry_result.metadata["sql_repair"] = evidence
             self._remember_result_artifact(context, retry_result)
+            self._replace_with_server_presentation(context, retry_result)
             return retry_result
 
         evidence["repair_execution_status"] = "failed"
@@ -335,17 +364,68 @@ class TrustedRunSqlTool(RunSqlTool):
             labels = {}
         display_rows, _ = display_records(records, columns=columns, labels=labels)
         row_count = int(result.metadata.get("row_count") or len(display_rows))
-        display_truncated = bool(result.metadata.get("display_truncated"))
         budget = int(result.metadata.get("display_row_budget") or len(display_rows))
+        contract = context.metadata.get("result_contract")
+        contract = contract if isinstance(contract, dict) else {}
+        workspace_id = str(context.metadata.get("workspace_id") or "unknown")
+        dataset_version = str(
+            contract.get("dataset_version")
+            or context.metadata.get("dataset_version_id")
+            or "unknown"
+        )
+        metric_version = str(
+            contract.get("metric_version")
+            or context.metadata.get("metric_version")
+            or "unknown"
+        )
+        artifact = context.metadata.get("result_artifact")
+        artifact_id = artifact.get("artifact_id") if isinstance(artifact, dict) else None
+        notice = context.metadata.get("result_display_notice")
+        imperfect = isinstance(notice, str) and bool(notice.strip())
+        if imperfect and notice not in (result.result_for_llm or ""):
+            result.result_for_llm = f"{result.result_for_llm}\n\n{notice}"
+        presentation = build_result_presentation(
+            total_row_count=row_count,
+            preview_row_count=len(display_rows),
+            columns=columns,
+            labels=labels,
+            units=context.metadata.get("result_column_units"),
+            workspace_id=workspace_id,
+            dataset_version=dataset_version,
+            metric_version=metric_version,
+            audit_ref=context.request_id,
+            artifact_id=artifact_id,
+        )
+        result.metadata["result_presentation"] = presentation.as_dict()
         result.ui_component = UiComponent(
             rich_component=DataFrameComponent.from_records(
                 records=display_rows,
                 title="查询结果",
                 max_rows_displayed=budget,
                 description=(
-                    f"已通过结果合同：共 {row_count} 行、{len(columns)} 列"
-                    + (f"；界面仅预览前 {budget} 行" if display_truncated else "")
+                    notice
+                    if imperfect
+                    else (
+                        f"已通过结果合同：共 {row_count} 行、{len(columns)} 列"
+                        + (
+                            f"；界面预览 {len(display_rows)} / 共 {row_count} 行"
+                            if presentation.display_truncated
+                            else ""
+                        )
+                    )
                 ),
+                total_row_count=presentation.total_row_count,
+                preview_row_count=presentation.preview_row_count,
+                display_truncated=presentation.display_truncated,
+                column_labels=dict(presentation.column_labels),
+                column_units=dict(presentation.column_units),
+                workspace_id=presentation.workspace_id,
+                dataset_version=presentation.dataset_version,
+                metric_version=presentation.metric_version,
+                audit_ref=presentation.audit_ref,
+                preview_export_allowed=presentation.preview_export_allowed,
+                full_export_allowed=presentation.full_export_allowed,
+                exportable=False,
             ),
             # Keep the model-facing summary and result filename unchanged. It
             # remains a tool artifact, not a user-facing formatting source.

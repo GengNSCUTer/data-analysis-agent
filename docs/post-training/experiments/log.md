@@ -2,6 +2,53 @@
 
 本台账只记录已完成实验和待评测的受控实验，不在这里讲通用概念。原始训练样本、SQL、预测、数据库、模型权重、checkpoint 和完整日志都留在仓库外；这里仅记录可复核的配置、哈希和聚合结果。当前学习顺序在上级目录的 `README.md` 中维护。
 
+## 2026-09-17：validation-best 评测边界与 DPO 分层来源选择
+
+后续正式 final test 统一只加载训练期 validation 预先选定的 `adapter_best`；`adapter_final` 只保留训练末步诊断，不能在看过 protected test 后作为替代模型。为落实这一点，Qwen3.5 Trainer 已改为强制 `evaluation_steps == save_steps`、以最小 `eval_loss` 启用 `load_best_model_at_end`、在最终步快照 `adapter_final` 后保存恢复的 `adapter_best`，并在 evidence 记录二者和 best checkpoint。旧的 Qwen3.5-2B 自动“训练完成即用 `adapter_final` 评测”入口已移除。
+
+现有 Qwen3.5-2B multi-schema run 是历史诊断：其 `trainer_state.json` 的 `best_model_checkpoint` / `best_metric` 均为 null，且只保留 checkpoint 2700 / 3000；log history 中最小 validation `eval_loss=0.0000632845` 位于已被清理的 step 1500。因此不能从现有产物补建可追溯的 `adapter_best`，此前 Olist / TheLook 终测不再作为后续 headline 选择依据，也不重新运行 final test。
+
+DPO collector 的 source selection 已从 sample-ID hash slice 改为 train-only 分层选择：workspace 等额配额、result shape 均衡、scenario family 去重优先和 risk-tag novelty。真实 release dry-run 发现 49 条 Olist train 行历史上 `risk_tags=[]`；其上游规则把“单指标普通 scalar 聚合”表示为空集合。冻结 release 不被改写，collector 仅以 `olist-dpo-risk-tag-backfill-v1` metadata overlay 为这些经 QuerySpec 证明的行补 `simple_scalar_aggregation`，并把 derivation 与 source ID 写入 selection manifest / pair source。本轮默认 Olist / TheLook 各 6 条 source 的 dry-run 分别得到 6 个独立 family，shape 为 `2/1/2/1`（category/scalar/state/time）和 `2/2/2`（dimension/scalar/time），风险标签覆盖 9 / 8 个。`safe-audit.json` 额外执行每 workspace 至少 3 个 A--C pair、3 个 family、2 个 shape、2 个 risk tag 的停止门。未满足时产出 `stop_no_dpo` 且 DPO training 仍明确未授权。此阶段没有启动 GPU 生成、DPO 训练或新的 final test。
+
+## 2026-09-17：Qwen3.5-2B multi-schema LoRA 的 Olist / TheLook v3 最终评测
+
+Qwen3.5-2B multi-schema SQL-only LoRA 的 Olist v3.1 与 TheLook v3 生成均在相同冻结模型 revision、non-thinking chat template、greedy decode、3072 input / 768 output token cap 和 750-case protected test 下完成。生成阶段没有读取 Gold SQL 或数据库行；Olist / TheLook 的 Gold 都只在 raw completion 完整冻结后进入后置评测。Base 与 Adapter 均为 `750/750` completion，原始 completion、SQL、Gold 与结果行均留在仓库外。
+
+Olist v3.1：Base -> Adapter 的 Policy / PostgreSQL executed / ResultContract valid 为 `271/114/76 -> 710/707/659`，Gold ordered denotation 为 `16/750 -> 376/750`。Adapter 的其余状态为列不匹配 269、数值不匹配 10、行数不匹配 4、未通过合同 91；因此 659 条合同有效不等于 659 条 Gold 正确，376/750 也只代表当前冻结 Olist snapshot 的有序 denotation 对照。
+
+TheLook v3：初次后置评测遇到一条 pathological nested model SQL 时，sqlglot 抛出 `RecursionError`，而 `SqlPolicy` 只捕获 ParseError/TokenError，导致 evaluator 中断。修复将 `RecursionError` 收敛为同类 `PolicyViolation`，不放宽 SQL、权限、Catalog 或结果合同；新增回归覆盖该异常。随后只重放既有的 Base/Adapter raw completion，未重新调用模型。完整后置结果为 Base -> Adapter：Policy accepted `228 -> 696`，PostgreSQL executed `90 -> 695`，ResultContract valid `63 -> 676`，ordered Gold `31 -> 519`，ordered-or-bag Gold `31 -> 537`。Adapter 有 18 条 bag-only match；31 条 Base ordered match 全部保持 ordered match，另有 488 条从非 ordered 变为 ordered，但仍有 231 条非 ordered。两侧的 750 条 Gold SQL 全部在该重放中正常执行。
+
+最终安全汇总在仓库外 `experiments/qwen35-2b-multischema-v3_1-olist-thelook-base-adapter-v1-20260916/terminal-evaluation-summary-recursion-safe-v1.json`，SHA-256 为 `39abc6583623b9271b2dbc6bc41245689d501ef32548538fbe7cc9b0b0f95859`。这是固定两个 protected ecommerce workspace 上的 Base/Adapter 对照，不是开放式 Text-to-SQL、通用业务准确率或生产接入资格；生产默认路径未改变。
+
+## 2026-09-17：Multi-schema DPO candidate collector 最小真实 smoke
+
+本轮只实现并验证 DPO pair 的 rejected-side collector，未启动 DPO Trainer、未更新任何 Adapter、未改生产候选生成路径。collector 的生成阶段只从冻结的 multi-schema SFT train release 投影 `sample_id`、workspace、完整 runtime SQL-only Prompt 和 Prompt hash；它不读取 Gold SQL 或 `training_text`。所有 raw completion 先写入仓库外目录并写入完成 marker，随后重新核验 release train SHA-256，才读取对应 Gold 来完成后置治理与 denotation 判定。最终 test、validation、few-shot、错误回流均未读取。
+
+在 physical GPU 0（RTX 3090）以冻结 Qwen2.5-Coder-1.5B multi-schema SFT parent adapter
+`76c77a75...ca8f6b5`，对 Olist / TheLook 各选 1 条 train source、每条随机采样 2 次；4/4 生成完成。先行的真实 Gold governance smoke 表明两个 workspace 的 `SqlPolicy -> reader role -> ResultContract/ResultValidator` 都可用。实际采样后 4/4 都与 Gold denotation 匹配，同一 source 的两次 raw-completion hash 均一致，因此没有真实 A/B/C rejected，最终 `pairs.jsonl` 为零行。这是正确的空结果处理，不是质量失败或数据丢失；不得为凑 DPO 行数把正确候选、手写坏 SQL 或 final test 错误加入训练。
+
+外部证据目录为 `/disk2/gengnan/data-analysis-agent-data/evals/multi-schema-dpo-candidate-pilot-v1-20260917/`：`safe-audit.json` 记录 `protected_tests_read=false`、`dpo_training_started=false`、冻结输入/parent hash、GPU UUID、聚合 tier 和 artifact hash；`raw-completions.jsonl` 与空的 `pairs.jsonl` 保留在仓库外。相关单元回归为 `24 passed`，双 workspace 治理 smoke 已通过。该结果只说明 collector 的隔离和空-pair fail-closed 语义正确，尚未证明能获得覆盖均衡的 DPO 数据，更不授权 DPO 训练。
+
+## 2026-09-14：SQL-only SFT 优化研究与下一阶段方案冻结
+
+本轮只完成论文/官方代码调研与历史结果对齐，没有启动训练、消融、生产运行时修改或读取 TheLook protected 数据构造新样本。研究报告见 [`../research/sql-only-sft-optimization-v1.md`](../research/sql-only-sft-optimization-v1.md)。
+
+当前主线冻结为“运行时 Prompt -> 单次 SQL 候选 -> 服务器确定性治理”：模型只负责提升 SQL 结构、schema 绑定、指标公式、粒度和输出边界；`sqlglot Policy`、PostgreSQL 只读角色、`ResultContract/ResultValidator`、审计和预算仍是最终裁决。1.5B SQL-only Adapter 在 TheLook v2 为 `467/335/313/225`（Policy/执行/合同/Gold ordered-or-bag），优于同基座 Schema-aware Program Adapter 的 `457/296/284/205`；Qwen3.5-2B Adapter 为 `388/206/196/118`，4B Adapter 为 `518/389/389/340`。这些数字支持 SQL-only 路线与更大模型的正向信号，但不能写成开放式 Text-to-SQL 或生产准确率。
+
+调研得到的优先顺序是：先补 validation-best、Prompt/target/EOS 一致性、family 级去重和按程序族重采样；再优化 Catalog/QuerySpec 的确定性 schema 裁剪与必要 join 召回；随后做 1–4 候选的执行/合同 reranking；最后才评估 PostgreSQL reader 隔离的 pairwise preference 或小规模 execution-aware GRPO。IRNet/NatSQL 只有在中间表示被 decoder/compiler 消费时才形成真正的 plan-to-SQL；当前独立 Task B JSON 没有线上消费路径，不作为默认训练目标。TheLook 继续只作方案冻结后的跨 schema 后置 holdout。
+
+## 2026-09-14：SQL-only Trainer validation-best 工程改造完成
+
+`scripts/post_training/training/run_post_training_sft_smoke.py` 现在固定以 `eval_loss` 最小值选择 validation-best：开启 `load_best_model_at_end=True`、`metric_for_best_model=eval_loss`、`greater_is_better=False`，并要求 `evaluation_steps == save_steps`，避免最佳评估点没有对应 checkpoint。训练结束时，`FinalAdapterSnapshotCallback` 在最后一个 optimizer step 保存实际 final adapter；Trainer 恢复 best 权重后再保存独立的 `adapter_best`。外部 evidence 同时记录 best metric/step/checkpoint、final step 以及两个 adapter 路径，后续可以明确比较 final 与 best，而不是把最后一步误称为最优。
+
+为满足这一合同，仍调用该 SQL-only Trainer 的 Olist full、Olist domain release launcher 已将保存步频分别从 `90 -> 45`、`300 -> 150`，与原评估步频对齐；Spider launcher 的验证步骤也改为读取新产出的 `adapter_best`。历史实验产物不重写。新增回归覆盖不匹配步频 fail-closed、最终一步 adapter snapshot 和不同 Transformers 版本缺少 `best_global_step` 时从 checkpoint 路径解析 best step；后训练环境相关测试为 `18 passed`。另用极小 CPU GPT-2 + LoRA Trainer 做了真实 2-step 生命周期验证，确认 `load_best_model_at_end` 恢复 `best`、callback 留下 `final`、两个 adapter 均可加载。该改造阶段没有启动正式 GPU 训练。
+
+## 2026-09-14：SQL-only Trainer Qwen2.5-Coder-1.5B 真实 GPU smoke
+
+使用 Olist Medium v1 的完整训练/验证文件做 1 个 optimizer step（`eval_steps=save_steps=1`），在物理 GPU 3（RTX 4090，逻辑 `CUDA_VISIBLE_DEVICES=1`）完成真实 bf16 LoRA 生命周期。数据和模型均为既有冻结资产，未读取 final test、TheLook 或 Gold 结果，也未修改生产运行时。训练 loss=`0.207819`，validation loss=`0.220014`，峰值 allocated/reserved 显存约 `14.65/19.70 GiB`；GPU UUID guard、split/hash/长度审计、LoRA 写出均通过。
+
+外部证据目录为 `/disk2/gengnan/data-analysis-agent-data/experiments/qwen25coder15b-olist-medium-bf16-lora-smoke-v2-20260914/`。`sft_smoke.json` 明确记录 `best_global_step=1`、`best_model_checkpoint=.../checkpoint-1`，并同时写出 `adapter_best/adapter_model.safetensors` 与 `adapter_final/adapter_model.safetensors`（各约 70.5 MiB）。该结果只证明真实 Trainer 工程链路可运行，不是质量结论；下一步才进入 SQL-only 数据程序族扩展或正式训练。
+
 ## 2026-09-14：Schema-aware Program Adapter 的 TheLook v2 输出协议重评
 
 新 Schema-aware Program Adapter 已复用冻结的 Base / Adapter `600/600` raw completion、既有 generation-safe matching marker 和 protected TheLook v2；本轮没有调用模型、训练、改动 Olist 数据、Prompt 或默认运行时。只修改阶段 C 的共享 `unwrap_sql_completion()`：除了既有代码栏、`SQL:` 与精确标题外，它只会删除最前面一条满足严格条件的展示标题（最多两词/64 字符、无 SQL 标记，且紧随的非空行明确以 `SELECT`/`WITH` 开始）。不会搜索/修复 SQL，所有清洗后文本仍经原 `SqlPolicy -> daa_thelook_reader -> ResultContract/ResultValidator`。

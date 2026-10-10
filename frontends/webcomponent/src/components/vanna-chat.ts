@@ -16,6 +16,14 @@ export interface ConversationHistoryMessage {
   timestamp?: string;
 }
 
+export interface ConversationChartReplay {
+  artifact_id?: string;
+  title?: string;
+  question?: string;
+  data: unknown[];
+  layout: Record<string, unknown>;
+}
+
 type ChatStatus = 'idle' | 'working' | 'error' | 'success' | 'warning';
 
 @customElement('vanna-chat')
@@ -59,7 +67,8 @@ export class VannaChat extends LitElement {
        * Keep this opt-in so the standalone component retains its default sizing. */
       :host([data-hosted-window="true"]:not(.minimized):not(.maximized)) {
         width: 100%;
-        height: var(--vanna-chat-height, 600px);
+        height: 100%;
+        min-height: 0;
         max-width: none;
         margin: 0;
         border: 0;
@@ -71,6 +80,15 @@ export class VannaChat extends LitElement {
         box-shadow: none;
         transform: none;
       }
+
+      :host([data-hosted-window="true"]) .sidebar {
+        display: none;
+      }
+
+      :host([data-hosted-window="true"]) .chat-layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
 
       :host([theme="dark"]) {
         --chat-primary: var(--vanna-accent-primary-default);
@@ -165,7 +183,9 @@ export class VannaChat extends LitElement {
 
       :host([data-hosted-window="true"]:not(.minimized):not(.maximized)) .chat-layout {
         height: 100%;
-        max-height: none;
+        max-height: 100%;
+        min-height: 0;
+        grid-template-rows: minmax(0, 1fr);
       }
 
       :host(.maximized) .chat-layout {
@@ -185,6 +205,7 @@ export class VannaChat extends LitElement {
         min-width: 0;
         min-height: 0;
         overflow: hidden;
+        container-type: size;
       }
 
       .chat-layout.compact .chat-main {
@@ -193,12 +214,12 @@ export class VannaChat extends LitElement {
 
       .chat-header {
         padding: var(--vanna-space-6) var(--vanna-space-7);
-        background: linear-gradient(135deg, var(--chat-primary) 0%, var(--chat-primary-stronger) 100%);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        background: #f7f8f7;
+        border-bottom: 1px solid #e4e7eb;
         display: flex;
         flex-direction: column;
-        gap: var(--vanna-space-4);
-        color: var(--chat-primary-foreground);
+        gap: var(--vanna-space-2);
+        color: #1c2430;
         position: relative;
         overflow: hidden;
       }
@@ -244,18 +265,17 @@ export class VannaChat extends LitElement {
       }
 
       .chat-avatar {
-        width: 44px;
-        height: 44px;
-        border-radius: var(--vanna-border-radius-lg);
-        background: rgba(255, 255, 255, 0.2);
-        backdrop-filter: blur(10px);
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        background: #e7f4f3;
         display: grid;
         place-items: center;
         font-weight: 600;
-        font-size: 16px;
-        letter-spacing: 0.02em;
-        color: var(--chat-primary-foreground);
-        border: 1px solid rgba(255, 255, 255, 0.3);
+        font-size: 12px;
+        letter-spacing: 0;
+        color: #0f766e;
+        border: 1px solid #d5ebe8;
       }
 
       .header-text {
@@ -267,10 +287,10 @@ export class VannaChat extends LitElement {
 
       .chat-title {
         margin: 0;
-        font-size: 18px;
-        font-weight: 600;
-        letter-spacing: -0.01em;
-        color: var(--chat-primary-foreground);
+        font-size: 15px;
+        font-weight: 650;
+        letter-spacing: 0;
+        color: #1c2430;
       }
 
       .chat-subtitle {
@@ -293,9 +313,9 @@ export class VannaChat extends LitElement {
         width: 32px;
         height: 32px;
         border-radius: var(--vanna-border-radius-lg);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        background: rgba(255, 255, 255, 0.1);
-        color: var(--chat-primary-foreground);
+        border: 1px solid #d5dbe2;
+        background: #fff;
+        color: #1c2430;
         cursor: pointer;
         display: inline-flex;
         align-items: center;
@@ -370,15 +390,14 @@ export class VannaChat extends LitElement {
       }
 
       .chat-messages {
-        flex: 1;
+        flex: 1 1 0%;
         overflow-y: auto;
         overflow-x: hidden;
         padding: var(--vanna-space-6) var(--vanna-space-6) var(--vanna-space-5);
         background: linear-gradient(180deg, var(--chat-muted) 0%, var(--chat-surface) 70%);
-        scroll-behavior: smooth;
-        display: flex;
-        flex-direction: column;
-        gap: var(--vanna-space-4);
+        scroll-behavior: auto;
+        overflow-anchor: none;
+        display: block;
         min-height: 0;
         min-width: 0;
         max-height: 100%;
@@ -477,8 +496,35 @@ export class VannaChat extends LitElement {
         display: flex;
         flex-direction: column;
         gap: var(--vanna-space-4);
-        flex-shrink: 0; /* Prevent input area from shrinking */
+        flex: 0 1 auto;
+        min-height: 0;
         min-width: 0;
+      }
+
+      /* A short embedded panel used to leave the message list only a few
+       * pixels tall, so the wheel had nothing to scroll until the window was
+       * maximized. Compact the composer whenever the panel itself is short. */
+      @container (max-height: 560px) {
+        .chat-header {
+          padding: var(--vanna-space-3) var(--vanna-space-4);
+        }
+
+        .chat-messages {
+          padding: var(--vanna-space-3) var(--vanna-space-4);
+        }
+
+        .chat-input-area {
+          gap: var(--vanna-space-2);
+          padding: var(--vanna-space-2) var(--vanna-space-3);
+          max-height: 42%;
+          overflow: auto;
+        }
+
+        .message-input {
+          min-height: 36px;
+          max-height: 72px;
+          padding: 8px 0;
+        }
       }
 
       /* The embedded host can be resized below the standalone component's
@@ -510,8 +556,8 @@ export class VannaChat extends LitElement {
         display: flex;
         align-items: center;
         gap: var(--vanna-space-2);
-        padding: 6px 8px 6px 18px;
-        border-radius: 999px;
+        padding: 4px 8px 4px 12px;
+        border-radius: 8px;
         background: var(--chat-muted);
         border: 1px solid var(--chat-muted-stronger);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
@@ -724,6 +770,11 @@ export class VannaChat extends LitElement {
           max-height: 85vh;
         }
 
+        :host([data-hosted-window="true"]:not(.minimized):not(.maximized)) .chat-layout {
+          height: 100%;
+          max-height: 100%;
+        }
+
         .sidebar {
           display: none;
         }
@@ -741,6 +792,11 @@ export class VannaChat extends LitElement {
         .chat-layout {
           height: min(500px, 80vh);
           max-height: 80vh;
+        }
+
+        :host([data-hosted-window="true"]:not(.minimized):not(.maximized)) .chat-layout {
+          height: 100%;
+          max-height: 100%;
         }
 
         .chat-header {
@@ -778,6 +834,7 @@ export class VannaChat extends LitElement {
   @property() title = 'Vanna AI Chat';
   @property() placeholder = 'Ask me anything...';
   @property({ type: Boolean }) disabled = false;
+  private sendInFlight = false;
   @property({ type: Boolean }) showProgress = true;
   @property({ type: Boolean }) allowMinimize = true;
   @property({ reflect: true }) theme = 'light';
@@ -867,8 +924,23 @@ export class VannaChat extends LitElement {
     // Set initial CSS class
     this.classList.add(this._windowState);
 
-    // Request starter UI from backend
-    this.requestStarterUI();
+    const hostedConversationId = this.getAttribute('conversation-id')?.trim();
+    if (hostedConversationId) {
+      this.conversationId = hostedConversationId;
+    }
+
+    // The host page replays a saved transcript itself. A starter request here
+    // would mint a fresh id and paint the welcome prompts over that history.
+    if (!this.hasAttribute('data-defer-starter')) {
+      this.requestStarterUI();
+    }
+  }
+
+  /** Show example prompts only when the host has no transcript to replay. */
+  showStarterIfEmpty(): void {
+    const rich = this.shadowRoot?.querySelector('.rich-components-container');
+    if (rich && rich.childElementCount > 0) return;
+    void this.requestStarterUI();
   }
 
   /**
@@ -909,17 +981,33 @@ export class VannaChat extends LitElement {
   loadConversation(
     conversationId: string,
     messages: ConversationHistoryMessage[],
+    charts?: ConversationChartReplay[],
   ): void {
     this.setConversationId(conversationId);
     this.clearMessages();
+    const pending = (charts || []).slice();
+    let armed: ConversationChartReplay | null = null;
+    let replayed = 0;
+    const finishArmed = () => {
+      if (armed && this.appendReplayChart(armed)) replayed += 1;
+      armed = null;
+    };
     for (const message of messages) {
       if (message.role !== 'user' && message.role !== 'assistant') continue;
       if (!String(message.content || '').trim()) continue;
+      if (message.role === 'user') finishArmed();
       this.addMessage(message.content, message.role, message.timestamp);
+      if (message.role !== 'user') continue;
+      const asked = this.normalizeChartQuestion(message.content);
+      const index = pending.findIndex((chart) => this.normalizeChartQuestion(chart.question) === asked);
+      if (index >= 0) armed = pending.splice(index, 1)[0];
     }
-    this.setStatus('idle', '历史会话已恢复', '');
+    finishArmed();
+    replayed += pending.filter((chart) => this.appendReplayChart(chart)).length;
+    this.setStatus('idle', '历史会话已恢复', replayed ? '已恢复保存的图表' : '');
     this.requestUpdate();
-    this.scheduleLatestMessageScroll();
+    if (replayed) this.scheduleChartIntoView();
+    else this.scheduleLatestMessageScroll();
   }
 
   /** Start a fresh server-side conversation and request the starter UI. */
@@ -937,7 +1025,13 @@ export class VannaChat extends LitElement {
     return conversationId;
   }
 
+  connectedCallback() {
+    super.connectedCallback();
+    this.addEventListener('replace-question', this.onReplaceQuestion as EventListener);
+  }
+
   disconnectedCallback() {
+    this.removeEventListener('replace-question', this.onReplaceQuestion as EventListener);
     super.disconnectedCallback();
     
     // Clean up mutation observer
@@ -954,6 +1048,57 @@ export class VannaChat extends LitElement {
     if (changedProperties.has('windowState')) {
       this.classList.remove('normal', 'maximized', 'minimized');
       this.classList.add(this._windowState);
+    }
+    this.markLastUserMessageEditable();
+  }
+
+  private markLastUserMessageEditable() {
+    const nodes = Array.from(this.shadowRoot?.querySelectorAll('vanna-message') || []) as unknown as Array<{
+      type?: string;
+      canEdit: boolean;
+    }>;
+    let lastUser: { canEdit: boolean } | null = null;
+    for (const node of nodes) {
+      if (node.type === 'user') lastUser = node;
+    }
+    for (const node of nodes) {
+      node.canEdit = node === lastUser && !this.sendInFlight;
+    }
+  }
+
+  private onReplaceQuestion = (event: Event) => {
+    const content = (event as CustomEvent<{ content?: string }>).detail?.content || '';
+    void this.replaceLastQuestion(content);
+  };
+
+  private async replaceLastQuestion(content: string) {
+    const text = content.trim();
+    if (!text || this.sendInFlight || !this.conversationId) return;
+    const response = await fetch(
+      `/api/project/conversations/${encodeURIComponent(this.conversationId)}/replace-last-question`,
+      { method: 'POST', headers: this.getApiClient().getCustomHeaders() },
+    );
+    if (!response.ok) {
+      this.setStatus('error', '无法替换上一轮提问', '请刷新后重试');
+      return;
+    }
+    this.removeFromLastUserMessage();
+    await this.sendMessage(text);
+  }
+
+  private removeFromLastUserMessage() {
+    const components = this.componentManager?.getAllComponents() || [];
+    let start = -1;
+    components.forEach((component, index) => {
+      if (component.type === 'user-message') start = index;
+    });
+    if (start < 0 || !this.componentManager) return;
+    for (let index = components.length - 1; index >= start; index -= 1) {
+      this.componentManager.processUpdate({
+        operation: 'remove',
+        target_id: components[index].id,
+        timestamp: new Date().toISOString(),
+      });
     }
   }
 
@@ -978,7 +1123,7 @@ export class VannaChat extends LitElement {
     // Check if messageText is actually a string (not an event object)
     const textToSend = (typeof messageText === 'string') ? messageText : this.currentMessage;
 
-    if (!textToSend.trim() || this.disabled) {
+    if (!textToSend.trim() || this.disabled || this.sendInFlight) {
       return Promise.resolve(false);
     }
 
@@ -986,8 +1131,25 @@ export class VannaChat extends LitElement {
   }
 
   private async _sendMessageInternal(messageText: string): Promise<boolean> {
-    // Auto-maximize window when user sends a message (if not already maximized or minimized)
-    if (this.windowState !== 'maximized' && this.windowState !== 'minimized') {
+    const hostDisabled = this.disabled;
+    this.sendInFlight = true;
+    this.disabled = true;
+    try {
+      return await this._sendMessageWhileLocked(messageText);
+    } finally {
+      this.sendInFlight = false;
+      this.disabled = hostDisabled;
+    }
+  }
+
+  private async _sendMessageWhileLocked(messageText: string): Promise<boolean> {
+    // The embedded popup keeps the size the user chose. Auto-maximize only
+    // applies to the standalone chat window.
+    if (
+      this.windowState !== 'maximized' &&
+      this.windowState !== 'minimized' &&
+      !this.hasAttribute('data-hosted-window')
+    ) {
       this.maximizeWindow();
     }
 
@@ -1153,6 +1315,40 @@ export class VannaChat extends LitElement {
     }
   }
 
+  private normalizeChartQuestion(value: unknown): string {
+    return String(value || '').trim().replace(/[。．.！!？?\s]+$/g, '');
+  }
+
+  private appendReplayChart(chart: ConversationChartReplay): boolean {
+    if (!this.componentManager || !Array.isArray(chart?.data) || !chart.data.length || !chart.layout) {
+      return false;
+    }
+    const id = `history-chart-${chart.artifact_id || this.generateId()}`;
+    const timestamp = new Date().toISOString();
+    const component: RichComponent = {
+      id,
+      type: 'chart',
+      lifecycle: 'create',
+      data: {
+        data: chart.data,
+        layout: chart.layout,
+        title: chart.title || '历史图表',
+        config: { displayModeBar: false, responsive: true },
+      },
+      children: [],
+      timestamp,
+      visible: true,
+      interactive: false,
+    };
+    this.componentManager.processUpdate({
+      operation: 'create',
+      target_id: id,
+      component,
+      timestamp,
+    });
+    return true;
+  }
+
   setStatus(status: typeof this.status, message: string, detail?: string) {
     this.status = status;
     this.statusMessage = message;
@@ -1261,7 +1457,7 @@ export class VannaChat extends LitElement {
         };
         this.componentManager.processUpdate(update);
       }
-      
+      if (chunk.rich.type === 'chart') this.scheduleChartIntoView();
       return;
     }
 
@@ -1331,6 +1527,7 @@ export class VannaChat extends LitElement {
   private settleCompletedStream(request: { message?: unknown }): void {
     if (!String(request.message || '').trim() || this.status !== 'working') return;
     this.clearStatus();
+    if (this.shadowRoot?.querySelector('.rich-chart')) this.scheduleChartIntoView();
   }
 
   private isChatStatus(value: unknown): value is ChatStatus {
@@ -1379,7 +1576,7 @@ export class VannaChat extends LitElement {
    * Set custom headers for authentication or other purposes
    */
   setCustomHeaders(headers: Record<string, string>) {
-    this.apiClient.setCustomHeaders(headers);
+    this.getApiClient().setCustomHeaders(headers);
   }
 
   /**
@@ -1458,6 +1655,23 @@ export class VannaChat extends LitElement {
    * frames make the restored message height and the embedded host height settle
    * before choosing the final scroll position.
    */
+  private scheduleChartIntoView(): void {
+    let attempts = 0;
+    const settle = () => {
+      attempts += 1;
+      const messages = this.shadowRoot?.querySelector('.chat-messages') as HTMLElement | null;
+      const charts = this.shadowRoot?.querySelectorAll('.rich-chart');
+      const chart = charts && charts.length ? charts[charts.length - 1] as HTMLElement : null;
+      if (messages && chart) {
+        const delta = chart.getBoundingClientRect().top - messages.getBoundingClientRect().top;
+        messages.scrollTop += delta - 8;
+        return;
+      }
+      if (attempts < 8) requestAnimationFrame(settle);
+    };
+    requestAnimationFrame(settle);
+  }
+
   private scheduleLatestMessageScroll(): void {
     let attempts = 0;
     const settle = () => {

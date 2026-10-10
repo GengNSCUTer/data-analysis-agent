@@ -16,15 +16,20 @@ from .question_router import QuestionRoute
 
 OLIST_CANDIDATE_SQL_PROMPT_VERSION = "olist-candidate-sql-v1"
 
-# These are presentation labels observed from the bounded offline SQL generator.
-# They are intentionally exact, single-line matches: normalization must never
-# guess at or rewrite model-generated SQL/prose.
-# Models sometimes emit a presentation heading before the SQL even when the
-# prompt asks for SQL only.  These are exact, bounded headings; normalization
-# never strips arbitrary prose or repairs SQL.
+# This is the sole completion-unwrapping contract for runtime candidates, DPO,
+# SQLite diagnostics and the official Spider bridge. Models sometimes add a
+# presentation wrapper even when asked for SQL only. The accepted wrappers are
+# deliberately finite and local: this function never searches for SQL inside
+# arbitrary prose and never repairs generated SQL.
 _DISPLAY_PREFIXES = frozenset({"Query", "Query Plan", "Code", "Selection", "Solution"})
 _SQL_OPENING = re.compile(r"^(?:SELECT|WITH)\b", flags=re.IGNORECASE)
 _PRESENTATION_WORD = re.compile(r"^[\w-]+$", flags=re.UNICODE)
+_SQL_PREFIXES = ("sqlquery:", "sql:")
+_SQL_SECTION_MARKERS = frozenset({"### sql", "## sql"})
+_CODE_FENCE_OPENERS = frozenset({"```", "```sql", "```postgresql"})
+_TRAILING_PRESENTATION_SECTION = re.compile(
+    r"^#{2,3}\s+(?:answer|explanation)\b", flags=re.IGNORECASE
+)
 
 
 class CandidateSqlGenerationError(ValueError):
@@ -92,21 +97,28 @@ def render_candidate_sql_prompt(context: CandidateSqlContext) -> str:
 
 
 def unwrap_sql_completion(completion: str) -> str:
-    """Remove a bounded leading presentation wrapper; never repair SQL.
+    """Return SQL after removing only a bounded presentation wrapper.
 
-    The returned content deliberately remains untouched when it contains prose,
-    multiple statements, DDL/DML, invalid identifiers, or an unsupported dialect.
-    Those properties must be rejected by the existing server-side SQL policy.
+    Supported wrappers are one leading SQL section heading, one fenced code
+    block, ``SQLQuery:`` / ``SQL:``, one short presentation heading and a
+    trailing ``### Answer`` / ``### Explanation`` section. Everything else,
+    including prose, multiple statements, unsafe SQL and invalid identifiers,
+    remains untouched for the downstream policy to decide. This is not a SQL
+    parser or repair function.
     """
     if not isinstance(completion, str) or not completion.strip():
         raise CandidateSqlGenerationError("model generated an empty completion")
-    value = completion.strip()
-    if value.startswith("```") and value.endswith("```"):
-        lines = value.splitlines()
-        if len(lines) >= 2 and lines[0].strip().lower() in {"```", "```sql", "```postgresql"}:
-            value = "\n".join(lines[1:-1]).strip()
-    if value[:4].lower() == "sql:":
-        value = value[4:].lstrip()
+    lines = completion.strip().splitlines()
+    if lines and lines[0].strip().lower() in _SQL_SECTION_MARKERS:
+        lines = lines[1:]
+    if lines and lines[0].strip().lower() in _CODE_FENCE_OPENERS:
+        lines = lines[1:]
+        for closing_index, line in enumerate(lines):
+            if line.strip() == "```":
+                lines = lines[:closing_index]
+                break
+    value = "\n".join(lines).strip()
+    value = _strip_leading_sql_prefix(value)
     lines = value.splitlines()
     if lines and _is_leading_presentation_label(lines):
         value = "\n".join(lines[1:]).strip()
@@ -121,14 +133,35 @@ def unwrap_sql_completion(completion: str) -> str:
                 if suffix[:4].upper() == "WITH" or suffix[:6].upper() == "SELECT":
                     value = suffix
                     break
-    # A generator may emit a display label followed by the already-supported
-    # ``SQL:`` marker.  Remove that second presentation layer only; all SQL
-    # content remains untouched for the downstream policy gate.
-    if value[:4].lower() == "sql:":
-        value = value[4:].lstrip()
+    # A generator may emit a display label followed by a SQL marker. Remove
+    # that second presentation layer only; SQL content remains untouched.
+    value = _strip_leading_sql_prefix(value)
+    value = _strip_trailing_presentation_section(value)
     if not value:
         raise CandidateSqlGenerationError("model generated only an empty SQL wrapper")
     return value
+
+
+def _strip_leading_sql_prefix(value: str) -> str:
+    """Strip exactly one known SQL presentation prefix at the completion start."""
+
+    lowered = value.lower()
+    for prefix in _SQL_PREFIXES:
+        if lowered.startswith(prefix):
+            return value[len(prefix) :].lstrip()
+    return value
+
+
+def _strip_trailing_presentation_section(value: str) -> str:
+    """Drop a known Markdown presentation tail after an already-started SQL body."""
+
+    output: list[str] = []
+    for line in value.splitlines():
+        stripped = line.strip()
+        if output and (stripped == "```" or _TRAILING_PRESENTATION_SECTION.match(stripped)):
+            break
+        output.append(line)
+    return "\n".join(output).strip()
 
 
 def _is_leading_presentation_label(lines: list[str]) -> bool:

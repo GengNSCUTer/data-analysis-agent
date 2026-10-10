@@ -18,7 +18,7 @@ from typing import Any, Final, Iterable, Mapping
 from sqlglot import exp, parse
 from sqlglot.errors import SqlglotError
 
-from data_analysis_agent.text_to_sql_output import normalize_text_to_sql_candidate
+from data_analysis_agent.candidate_sql_generator import CandidateSqlGenerationError, unwrap_sql_completion
 
 
 SQLITE_DIALECT: Final = "sqlite"
@@ -326,7 +326,20 @@ class ReadOnlySqliteExecutor:
 
     def execute(self, database_path: Path, sql: str) -> SqliteExecutionOutcome:
         started_at = perf_counter()
-        normalized_sql = normalize_text_to_sql_candidate(sql)
+        try:
+            normalized_sql = unwrap_sql_completion(sql)
+        except CandidateSqlGenerationError as exc:
+            return SqliteExecutionOutcome(
+                status="policy_rejected",
+                original_sql=sql,
+                final_sql=None,
+                row_limit=None,
+                elapsed_ms=_elapsed_ms(started_at),
+                row_count=None,
+                columns=(),
+                error_type="policy",
+                error_message=str(exc),
+            )
         try:
             decision = self.policy.evaluate(normalized_sql)
         except SqliteBenchmarkPolicyViolation as exc:

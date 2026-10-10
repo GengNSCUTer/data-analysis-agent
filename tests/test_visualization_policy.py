@@ -12,7 +12,7 @@ from data_analysis_agent.semantic_catalog import (
     CatalogRetriever,
     ResultContract,
 )
-from data_analysis_agent.visualization import TrustedVisualizeDataTool
+from data_analysis_agent.visualization import TrustedVisualizeDataTool, build_server_chart_component
 from vanna.core.tool import ToolContext
 from vanna.core.user import User
 from vanna.integrations.local.agent_memory import DemoAgentMemory
@@ -49,9 +49,13 @@ def _contract(question: str) -> ChartContract:
 
 
 async def _write_current_result(
-    tmp_path, context: ToolContext, contract: ChartContract, csv: str
+    tmp_path,
+    context: ToolContext,
+    contract: ChartContract,
+    csv: str,
+    *,
+    filename: str = "query_results_1234abcd.csv",
 ) -> str:
-    filename = "query_results_1234abcd.csv"
     context.metadata["chart_contract"] = contract.as_tool_metadata()
     context.metadata["current_result_filename"] = filename
     await LocalFileSystem(str(tmp_path)).write_file(filename, csv, context)
@@ -123,6 +127,121 @@ async def test_line_chart_type_is_server_owned(tmp_path, context: ToolContext) -
     assert trace["type"] == "scatter"
     assert trace["mode"] == "lines+markers"
     assert trace["x"] == ["2017-01-01", "2017-02-01"]
+
+
+@pytest.mark.asyncio
+async def test_area_chart_type_is_server_owned(tmp_path, context: ToolContext) -> None:
+    contract = _contract("2017年按月统计 GMV，并生成面积图")
+    filename = await _write_current_result(
+        tmp_path,
+        context,
+        contract,
+        "time,gmv\n2017-01-01,10\n2017-02-01,20\n",
+    )
+
+    result = await TrustedVisualizeDataTool(LocalFileSystem(str(tmp_path))).execute(
+        context, VisualizeDataArgs(filename=filename)
+    )
+
+    trace = result.metadata["chart"]["data"][0]
+    assert result.success is True
+    assert trace["type"] == "scatter"
+    assert trace["mode"] == "lines+markers"
+    assert trace["fill"] == "tozeroy"
+
+
+@pytest.mark.asyncio
+async def test_horizontal_bar_chart_type_is_server_owned(tmp_path, context: ToolContext) -> None:
+    contract = _contract("按品类统计 GMV，并生成横向条形图")
+    filename = await _write_current_result(
+        tmp_path,
+        context,
+        contract,
+        "product_category_name,gmv\nhealth_beauty,10\nwatches_gifts,5\n",
+    )
+
+    result = await TrustedVisualizeDataTool(LocalFileSystem(str(tmp_path))).execute(
+        context, VisualizeDataArgs(filename=filename)
+    )
+
+    trace = result.metadata["chart"]["data"][0]
+    assert result.success is True
+    assert trace["type"] == "bar"
+    assert trace["orientation"] == "h"
+    assert trace["y"] == ["health_beauty", "watches_gifts"]
+
+
+@pytest.mark.asyncio
+async def test_donut_chart_type_and_non_negative_values_are_server_owned(
+    tmp_path, context: ToolContext
+) -> None:
+    contract = _contract("按州统计 GMV，并生成环形图")
+    filename = await _write_current_result(
+        tmp_path, context, contract, "customer_state,gmv\nSP,10\nRJ,5\n"
+    )
+
+    result = await TrustedVisualizeDataTool(LocalFileSystem(str(tmp_path))).execute(
+        context, VisualizeDataArgs(filename=filename)
+    )
+
+    trace = result.metadata["chart"]["data"][0]
+    assert result.success is True
+    assert trace["type"] == "pie"
+    assert trace["hole"] == 0.45
+    assert trace["labels"] == ["SP", "RJ"]
+
+    negative_filename = await _write_current_result(
+        tmp_path,
+        context,
+        contract,
+        "customer_state,gmv\nSP,-10\nRJ,5\n",
+        filename="query_results_negative.csv",
+    )
+    negative = await TrustedVisualizeDataTool(LocalFileSystem(str(tmp_path))).execute(
+        context, VisualizeDataArgs(filename=negative_filename)
+    )
+    assert negative.success is False
+    assert "负值" in negative.error
+
+
+@pytest.mark.asyncio
+async def test_donut_rejects_more_than_eight_categories(tmp_path, context: ToolContext) -> None:
+    contract = _contract("按州统计 GMV，并生成环形图")
+    rows = "\n".join(f"S{index},{index}" for index in range(9))
+    filename = await _write_current_result(
+        tmp_path, context, contract, f"customer_state,gmv\n{rows}\n"
+    )
+
+    result = await TrustedVisualizeDataTool(LocalFileSystem(str(tmp_path))).execute(
+        context, VisualizeDataArgs(filename=filename)
+    )
+
+    assert result.success is False
+    assert "横轴类别超过图表合同上限 8" in result.error
+
+
+def test_server_can_render_a_validated_chart_without_tool_arguments() -> None:
+    """The product chart path is independent from model tool orchestration."""
+    contract = _contract("按州统计 GMV，并生成柱状图")
+    import pandas as pd
+
+    component = build_server_chart_component(
+        contract,
+        pd.DataFrame([{"customer_state": "SP", "gmv": 10}, {"customer_state": "RJ", "gmv": 5}]),
+    )
+
+    assert component.rich_component.chart_type == "plotly"
+    assert component.rich_component.config["deterministic_after_result_validation"] is True
+    assert component.rich_component.data["data"][0]["type"] == "bar"
+
+
+def test_valid_chart_contract_prompt_reserves_rendering_for_the_server() -> None:
+    """The model must not decide whether a valid requested chart is rendered."""
+    contract = _contract("按州统计有效订单数并生成柱状图")
+
+    assert contract.safe_to_visualize is True
+    assert "服务器会直接渲染图表" in contract.prompt_context()
+    assert "不得调用或讨论 `visualize_data`" in contract.prompt_context()
 
 
 @pytest.mark.asyncio

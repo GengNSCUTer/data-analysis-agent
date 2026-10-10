@@ -10,6 +10,34 @@ from typing import Any, AsyncGenerator
 from vanna.core.llm import LlmRequest, LlmResponse, LlmService, LlmStreamChunk
 
 from .budget import CURRENT_BUDGET
+from .result_presentation import display_label, display_value
+
+
+class LlmPhaseTimeout(TimeoutError):
+    """A project timeout for one phase of a model call."""
+
+    def __init__(self, phase: str) -> None:
+        self.phase = phase
+        super().__init__(phase)
+
+
+def _timeout_phase(exc: BaseException) -> str | None:
+    """Classify a timeout as connect, first byte, or stream idle."""
+
+    if isinstance(exc, LlmPhaseTimeout):
+        return exc.phase
+    try:
+        import httpx
+
+        if isinstance(exc, httpx.ConnectTimeout):
+            return "connect"
+        if isinstance(exc, httpx.ReadTimeout | httpx.WriteTimeout | httpx.PoolTimeout):
+            return "stream_idle"
+    except ImportError:
+        pass
+    if _is_timeout_exception(exc):
+        return "provider"
+    return None
 
 
 def _is_timeout_exception(exc: BaseException) -> bool:
@@ -44,11 +72,29 @@ class ObservedLlmService(LlmService):
     without such a result it becomes a safe query-timeout response.
     """
 
-    def __init__(self, delegate: LlmService, *, timeout_seconds: float = 120.0):
-        if timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
+    def __init__(
+        self,
+        delegate: LlmService,
+        *,
+        connect_timeout_seconds: float = 10.0,
+        first_byte_timeout_seconds: float = 120.0,
+        stream_idle_timeout_seconds: float = 30.0,
+        timeout_seconds: float | None = None,
+    ):
+        if timeout_seconds is not None:
+            first_byte_timeout_seconds = timeout_seconds
+            stream_idle_timeout_seconds = timeout_seconds
+        for name, value in (
+            ("connect_timeout_seconds", connect_timeout_seconds),
+            ("first_byte_timeout_seconds", first_byte_timeout_seconds),
+            ("stream_idle_timeout_seconds", stream_idle_timeout_seconds),
+        ):
+            if value <= 0:
+                raise ValueError(f"{name} must be positive")
         self.delegate = delegate
-        self.timeout_seconds = float(timeout_seconds)
+        self.connect_timeout_seconds = float(connect_timeout_seconds)
+        self.first_byte_timeout_seconds = float(first_byte_timeout_seconds)
+        self.stream_idle_timeout_seconds = float(stream_idle_timeout_seconds)
         self.model = getattr(delegate, "model", "unknown")
 
     async def send_request(self, request: LlmRequest) -> LlmResponse:
@@ -64,11 +110,15 @@ class ObservedLlmService(LlmService):
         started = perf_counter()
         try:
             response = await asyncio.wait_for(
-                self.delegate.send_request(request), timeout=self.timeout_seconds
+                self.delegate.send_request(request),
+                timeout=self.first_byte_timeout_seconds,
             )
+        except TimeoutError:
+            return self._timeout_response(started, phase="first_byte")
         except Exception as exc:
-            if _is_timeout_exception(exc):
-                return self._timeout_response(started)
+            phase = _timeout_phase(exc)
+            if phase is not None:
+                return self._timeout_response(started, phase=phase)
             self._observe(
                 status="error",
                 started=started,
@@ -90,34 +140,102 @@ class ObservedLlmService(LlmService):
     async def stream_request(
         self, request: LlmRequest
     ) -> AsyncGenerator[LlmStreamChunk, None]:
+        usage = CURRENT_BUDGET.get()
+        if usage is not None and usage.can_finalize_trusted_result():
+            usage.mark_deterministic_result_finalized()
+            usage.finish()
+            yield LlmStreamChunk(
+                content=_trusted_result_completion(usage.result_summary),
+                finish_reason="trusted_result_finalized",
+                metadata={"deterministic_result_finalized": True},
+            )
+            return
         started = perf_counter()
+        iterator = self.delegate.stream_request(request).__aiter__()
+        reported_usage = None
         try:
-            async with asyncio.timeout(self.timeout_seconds):
-                async for chunk in self.delegate.stream_request(request):
-                    yield chunk
-        except Exception as exc:
-            if _is_timeout_exception(exc):
-                self._timeout_response(started)
+            try:
+                chunk = await self._next_stream_chunk(
+                    iterator, self.first_byte_timeout_seconds, "first_byte"
+                )
+            except StopAsyncIteration:
+                self._observe(status="completed", started=started, usage_status="unknown")
                 return
+            except Exception as exc:
+                timeout_chunk = self._timeout_chunk(started, exc)
+                if timeout_chunk is None:
+                    raise
+                yield timeout_chunk
+                return
+            reported_usage = _chunk_usage(chunk)
+            yield chunk
+            while True:
+                try:
+                    chunk = await self._next_stream_chunk(
+                        iterator, self.stream_idle_timeout_seconds, "stream_idle"
+                    )
+                except StopAsyncIteration:
+                    break
+                except Exception as exc:
+                    timeout_chunk = self._timeout_chunk(started, exc)
+                    if timeout_chunk is None:
+                        raise
+                    yield timeout_chunk
+                    return
+                reported_usage = _chunk_usage(chunk) or reported_usage
+                yield chunk
+            self._observe(
+                status="completed",
+                started=started,
+                usage_status="reported" if reported_usage is not None else "unknown",
+            )
+            usage = CURRENT_BUDGET.get()
+            if usage is not None and reported_usage is not None:
+                usage.record_usage(reported_usage)
+        finally:
+            aclose = getattr(iterator, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:
+                    pass
+
+    async def _next_stream_chunk(
+        self, iterator: Any, timeout_seconds: float, phase: str
+    ) -> LlmStreamChunk:
+        try:
+            return await asyncio.wait_for(anext(iterator), timeout=timeout_seconds)
+        except TimeoutError as exc:
+            raise LlmPhaseTimeout(phase) from exc
+
+    def _timeout_chunk(self, started: float, exc: BaseException) -> LlmStreamChunk | None:
+        phase = _timeout_phase(exc)
+        if phase is None:
             self._observe(
                 status="error",
                 started=started,
                 usage_status="unknown",
                 error_type=type(exc).__name__,
             )
-            raise
-        self._observe(status="completed", started=started, usage_status="unknown")
+            return None
+        response = self._timeout_response(started, phase=phase)
+        return LlmStreamChunk(
+            content=response.content,
+            finish_reason=response.finish_reason,
+            metadata={"replace_content": True, "timeout_phase": phase},
+        )
 
     async def validate_tools(self, tools: list[Any]) -> list[str]:
         return await self.delegate.validate_tools(tools)
 
-    def _timeout_response(self, started: float) -> LlmResponse:
+    def _timeout_response(self, started: float, *, phase: str) -> LlmResponse:
         usage = CURRENT_BUDGET.get()
         self._observe(
             status="timeout",
             started=started,
             usage_status="unknown",
             error_type="llm_timeout",
+            timeout_phase=phase,
         )
         if usage is not None and usage.result_contract_satisfied:
             usage.finish()
@@ -146,6 +264,7 @@ class ObservedLlmService(LlmService):
         usage_status: str,
         finish_reason: str | None = None,
         error_type: str | None = None,
+        timeout_phase: str | None = None,
     ) -> None:
         usage = CURRENT_BUDGET.get()
         if usage is not None:
@@ -155,7 +274,20 @@ class ObservedLlmService(LlmService):
                 usage_status=usage_status,
                 finish_reason=finish_reason,
                 error_type=error_type,
+                timeout_phase=timeout_phase,
             )
+
+
+def _chunk_usage(chunk: LlmStreamChunk) -> dict[str, int] | None:
+    usage = chunk.metadata.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    parsed: dict[str, int] = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = usage.get(key)
+        if isinstance(value, int):
+            parsed[key] = value
+    return parsed or None
 
 
 def _trusted_result_completion(summary: str | None) -> str:
@@ -224,30 +356,13 @@ def _trusted_result_fallback(columns: list[str], metric_ids: list[str]) -> str:
 def _markdown_preview(
     columns: list[str], rows: list[dict[str, Any]], labels: dict[str, Any]
 ) -> str:
-    header = [str(labels.get(column) or column.replace("_", " "))[:80] for column in columns]
+    header = [display_label(column, labels) for column in columns]
     rendered = ["| " + " | ".join(_escape_markdown(value) for value in header) + " |"]
     rendered.append("| " + " | ".join("---" for _ in columns) + " |")
     for row in rows:
-        values = [_format_preview_value(column, row.get(column)) for column in columns]
+        values = [display_value(column, row.get(column)) for column in columns]
         rendered.append("| " + " | ".join(_escape_markdown(value) for value in values) + " |")
     return "\n".join(rendered)
-
-
-def _format_preview_value(column: str, value: Any) -> str:
-    if value is None:
-        return "-"
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return str(value)[:120]
-    normalized = "".join(character for character in column.lower() if character.isalnum())
-    if normalized == "positivereviewrate" and 0 <= numeric <= 1:
-        return f"{numeric * 100:.2f}%"
-    if normalized == "averagedeliverydays":
-        return f"{numeric:.2f} 天"
-    if numeric.is_integer():
-        return str(int(numeric))
-    return f"{numeric:.2f}"
 
 
 def _escape_markdown(value: str) -> str:

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import asyncio
 from typing import Any, AsyncGenerator, Dict, List, Optional, cast
 
 from vanna.core.llm import (
@@ -45,7 +44,8 @@ class OpenAILlmService(LlmService):
         **extra_client_kwargs: Any,
     ) -> None:
         try:
-            from openai import OpenAI
+            import httpx
+            from openai import AsyncOpenAI
         except Exception as e:  # pragma: no cover - import-time error surface
             raise ImportError(
                 "openai package is required. Install with: pip install 'vanna[openai]'"
@@ -57,25 +57,31 @@ class OpenAILlmService(LlmService):
         base_url = base_url or os.getenv("OPENAI_BASE_URL")
 
         client_kwargs: Dict[str, Any] = {**extra_client_kwargs}
+        # A single SDK timeout used to cover connect, headers and body.  The
+        # project now owns first-byte and idle waits, so the client only bounds
+        # connection setup.  Read waits stay disabled here; cancelling the async
+        # call still closes the HTTP stream.
+        connect_timeout = float(client_kwargs.pop("connect_timeout_seconds", 10.0))
+        client_kwargs.pop("timeout", None)
         if api_key:
             client_kwargs["api_key"] = api_key
         if organization:
             client_kwargs["organization"] = organization
         if base_url:
             client_kwargs["base_url"] = base_url
+        client_kwargs["timeout"] = httpx.Timeout(
+            connect=connect_timeout,
+            read=None,
+            write=connect_timeout,
+            pool=connect_timeout,
+        )
 
-        self._client = OpenAI(**client_kwargs)
+        self._client = AsyncOpenAI(**client_kwargs)
 
     async def send_request(self, request: LlmRequest) -> LlmResponse:
         """Send a non-streaming request to OpenAI and return the response."""
         payload = self._build_payload(request)
-
-        # The OpenAI SDK client is synchronous.  Keep it off the event loop so
-        # request-level cancellation and timeout policies can still be applied
-        # by callers such as the trusted Agent runtime.
-        resp = await asyncio.to_thread(
-            self._client.chat.completions.create, **payload, stream=False
-        )
+        resp = await self._client.chat.completions.create(**payload, stream=False)
 
         if not resp.choices:
             return LlmResponse(content=None, tool_calls=None, finish_reason=None)
@@ -111,15 +117,29 @@ class OpenAILlmService(LlmService):
         accumulated and emitted in a final chunk when the stream ends.
         """
         payload = self._build_payload(request)
+        payload["stream_options"] = {"include_usage": True}
 
-        # Synchronous streaming iterator; iterate within async context.
-        stream = self._client.chat.completions.create(**payload, stream=True)
+        # Async HTTP streaming yields between tokens, so one chat does not
+        # freeze every other request on this process.
+        stream = await self._client.chat.completions.create(**payload, stream=True)
 
         # Builders for streamed tool-calls (index -> partial)
         tc_builders: Dict[int, Dict[str, Optional[str]]] = {}
         last_finish: Optional[str] = None
+        usage: Dict[str, int] = {}
 
-        for event in stream:
+        async for event in stream:
+            event_usage = getattr(event, "usage", None)
+            if event_usage is not None:
+                usage = {
+                    key: int(value)
+                    for key, value in {
+                        "prompt_tokens": getattr(event_usage, "prompt_tokens", 0),
+                        "completion_tokens": getattr(event_usage, "completion_tokens", 0),
+                        "total_tokens": getattr(event_usage, "total_tokens", 0),
+                    }.items()
+                    if value is not None
+                }
             if not getattr(event, "choices", None):
                 continue
 
@@ -176,11 +196,19 @@ class OpenAILlmService(LlmService):
                 )
             )
 
+        terminal_metadata = {"usage": usage} if usage else {}
         if final_tool_calls:
-            yield LlmStreamChunk(tool_calls=final_tool_calls, finish_reason=last_finish)
+            yield LlmStreamChunk(
+                tool_calls=final_tool_calls,
+                finish_reason=last_finish,
+                metadata=terminal_metadata,
+            )
         else:
             # Still emit a terminal chunk to signal completion
-            yield LlmStreamChunk(finish_reason=last_finish or "stop")
+            yield LlmStreamChunk(
+                finish_reason=last_finish or "stop",
+                metadata=terminal_metadata,
+            )
 
     async def validate_tools(self, tools: List[ToolSchema]) -> List[str]:
         """Validate tool schemas. Returns a list of error messages."""

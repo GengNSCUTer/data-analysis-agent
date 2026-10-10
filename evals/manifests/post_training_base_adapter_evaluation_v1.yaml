@@ -27,12 +27,13 @@ comparison_contract:
     max_input_tokens: 1536
     max_new_tokens: 256
   candidate_normalization:
-    implementation: src/data_analysis_agent/text_to_sql_output.py
+    implementation: src/data_analysis_agent/candidate_sql_generator.py:unwrap_sql_completion
     applies_to:
       - SQLite_diagnostic
       - official_Test_Suite_bridge
     allowed_wrapper_removals:
       - opening_SQL_code_fence
+      - leading_SQL_section_heading
       - SQLQuery_or_SQL_prefix
       - answer_or_explanation_Markdown_heading_and_later_content
     prohibited_behavior:

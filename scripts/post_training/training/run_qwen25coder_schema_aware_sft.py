@@ -353,7 +353,9 @@ def main() -> int:
         TASK_A: PairEventDataset([row for row in validation_rows if row["task_type"] == TASK_A], tokenizer, args.max_seq_length),
         TASK_B: PairEventDataset([row for row in validation_rows if row["task_type"] == TASK_B], tokenizer, args.max_seq_length),
     }
-    random.seed(args.seed); np.random.seed(args.seed); set_seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    set_seed(args.seed)
     output_dir.mkdir(parents=True, exist_ok=False)
     model = get_peft_model(
         _load_model(model_dir),
@@ -385,7 +387,8 @@ def main() -> int:
     aggregate_eval = trainer.evaluate()
     task_eval = _evaluate_by_task(trainer, validation_by_task)
     adapter_dir = output_dir / "adapter_final"
-    trainer.save_model(str(adapter_dir)); trainer.save_state()
+    trainer.save_model(str(adapter_dir))
+    trainer.save_state()
     model_manifest = _read_json(model_dir / "download_manifest.json", "model manifest")
     evidence = {
         "report_schema_version": "olist-schema-aware-program-sft-run-v1",

@@ -45,7 +45,7 @@ PYTHONPATH="${ROOT}" "${PYTHON}" -m scripts.post_training.training.run_post_trai
   --gradient-accumulation-steps 2 \
   --per-device-eval-batch-size 2 \
   --evaluation-steps 45 \
-  --save-steps 90 \
+  --save-steps 45 \
   --logging-steps 10 \
   --lora-r 16 \
   --lora-alpha 32 \

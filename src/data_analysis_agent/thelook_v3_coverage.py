@@ -13,6 +13,7 @@ from functools import lru_cache
 import json
 from pathlib import Path
 import re
+from datetime import date
 from typing import Any, Mapping
 
 from .semantic_catalog import Catalog, CatalogLoader
@@ -24,13 +25,13 @@ from .thelook_v2_queryspec import (
 )
 
 
-THELOOK_V3_COVERAGE_CONTRACT_VERSION = "thelook-v3-coverage-contract-v1"
-THELOOK_V3_COVERAGE_SEED_VERSION = "thelook-v3-coverage-seed-v1"
+THELOOK_V3_COVERAGE_CONTRACT_VERSION = "thelook-v3-coverage-contract-v2"
+THELOOK_V3_COVERAGE_SEED_VERSION = "thelook-v3-coverage-seed-v2"
 THELOOK_V3_COVERAGE_CONTRACT_PATH = (
     Path(__file__).resolve().parents[2]
     / "data"
     / "fixtures"
-    / "thelook_v3_coverage_contract_v1.json"
+    / "thelook_v3_coverage_contract_v2.json"
 )
 
 _SEED_ID_RE = re.compile(r"^thelook-v3-coverage-[0-9]{3,4}$")
@@ -183,8 +184,8 @@ def validate_thelook_v3_coverage_contract(contract: Mapping[str, Any]) -> None:
             )
 
     families = contract.get("scenario_families")
-    if not isinstance(families, list) or len(families) != 20:
-        raise TheLookV3CoverageError("coverage contract must define exactly twenty scenario families")
+    if not isinstance(families, list) or len(families) != 21:
+        raise TheLookV3CoverageError("coverage contract must define exactly twenty-one scenario families")
     family_ids: set[str] = set()
     family_by_domain: dict[str, int] = dict.fromkeys(fact_domains, 0)
     for family in families:
@@ -234,6 +235,48 @@ def validate_thelook_v3_coverage_contract(contract: Mapping[str, Any]) -> None:
         raise TheLookV3CoverageError("risk-tag minimum quotas are incomplete")
     for tag, minimum in risk_minima.items():
         _nonnegative_int(minimum, f"risk-tag minimum {tag}")
+
+    seed_policy = _mapping(contract, "seed_policy")
+    high_cardinality_dimensions = seed_policy.get("high_cardinality_dimensions")
+    if (
+        not isinstance(high_cardinality_dimensions, list)
+        or not high_cardinality_dimensions
+        or len(set(high_cardinality_dimensions)) != len(high_cardinality_dimensions)
+    ):
+        raise TheLookV3CoverageError("high-cardinality dimensions must be a unique list")
+    high_cardinality_window_days = seed_policy.get("high_cardinality_window_days")
+    if not isinstance(high_cardinality_window_days, int) or high_cardinality_window_days <= 0:
+        raise TheLookV3CoverageError("high-cardinality window days must be positive")
+
+    identity = _mapping(contract, "identity_and_reuse")
+    if identity.get("v2_overlap_policy") != (
+        "explicit_reuse_allowed_only_for_approved_coverage_families"
+    ):
+        raise TheLookV3CoverageError("coverage contract has an unsupported v2 reuse policy")
+    reuse_families = identity.get("allowed_v2_reuse_scenario_families")
+    if (
+        not isinstance(reuse_families, list)
+        or set(reuse_families) != {"inventory_unsold_snapshot"}
+    ):
+        raise TheLookV3CoverageError("coverage contract must explicitly pin approved v2 reuse families")
+    if (
+        _nonnegative_int(
+            identity.get("expected_v2_query_spec_id_overlap"),
+            "expected v2 QuerySpec overlap",
+        )
+        != 4
+        or _nonnegative_int(
+            identity.get("expected_v2_canonical_gold_sql_sha256_overlap"),
+            "expected v2 Gold SQL overlap",
+        )
+        != 4
+        or _nonnegative_int(
+            identity.get("expected_v2_primary_question_normalized_overlap"),
+            "expected v2 primary question overlap",
+        )
+        != 0
+    ):
+        raise TheLookV3CoverageError("coverage contract has an unexpected v2 reuse count")
 
 
 def derive_thelook_v3_program_signature(spec: TheLookV2QuerySpec) -> str:
@@ -364,6 +407,29 @@ def validate_thelook_v3_coverage_seed(
         raise TheLookV3CoverageError("coverage seed fact domain does not match its scenario family")
     if family_id == spec.query_spec_id:
         raise TheLookV3CoverageError("scenario_family_id must not reuse QuerySpec identity")
+    if (
+        spec.metric_ids == ("current_unsold_inventory_unit_count",)
+        and family_id != "inventory_unsold_snapshot"
+    ):
+        raise TheLookV3CoverageError("inventory snapshot seeds require inventory_unsold_snapshot family")
+
+    high_cardinality_dimensions = set(
+        active_contract["seed_policy"]["high_cardinality_dimensions"]
+    )
+    if spec.dimension in high_cardinality_dimensions:
+        if spec.time.mode != "absolute_range" or not spec.time.start or not spec.time.end_exclusive:
+            raise TheLookV3CoverageError(
+                "high-cardinality dimensions require an absolute short window"
+            )
+        span_days = (
+            date.fromisoformat(spec.time.end_exclusive)
+            - date.fromisoformat(spec.time.start)
+        ).days
+        expected_days = int(active_contract["seed_policy"]["high_cardinality_window_days"])
+        if span_days != expected_days:
+            raise TheLookV3CoverageError(
+                f"high-cardinality windows must span exactly {expected_days} days"
+            )
 
     signature = value.get("program_signature")
     expected_signature = derive_thelook_v3_program_signature(spec)

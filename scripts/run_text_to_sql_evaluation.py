@@ -60,6 +60,13 @@ def evaluate_case(
         selection=selection,
         conversation_state=memory.as_dict(),
     )
+    if route.requires_database:
+        route = router.admit_sql_request(
+            question,
+            user=user,
+            selection=selection,
+            conversation_state=memory.as_dict(),
+        )
     updated_memory = memory.apply(question, route)
     plan = None
     if route.requires_database:

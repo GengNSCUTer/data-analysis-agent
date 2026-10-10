@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from data_analysis_agent.metric_context import OLIST_RUNTIME_WORKSPACE
 from data_analysis_agent.semantic_catalog import (
     CATALOG_PATH,
     CatalogContextEnhancer,
@@ -15,6 +16,7 @@ from data_analysis_agent.semantic_catalog import (
     ResultContract,
 )
 from data_analysis_agent.question_router import QuestionRouter
+from data_analysis_agent.query_plan import QueryPlan
 from data_analysis_agent.sql_policy import ANALYTICS_COLUMNS
 from vanna.core.user import User
 
@@ -160,6 +162,24 @@ def test_result_contract_derives_display_labels_from_catalog(catalog) -> None:
     }
 
 
+def test_category_result_contract_labels_translated_display_values_accurately(catalog) -> None:
+    question = "按品类统计 GMV 前十名"
+    user = _user("analyst")
+    retriever = CatalogRetriever(catalog)
+    selection = retriever.retrieve(question, user)
+    route = QuestionRouter(retriever).classify(question, user=user, selection=selection)
+    plan = QueryPlan.from_selection(selection, question, route)
+    contract = ResultContract.from_selection(
+        selection,
+        question,
+        catalog=catalog,
+        required_result_columns=plan.required_result_columns,
+        requested_dimensions=plan.dimensions,
+    )
+
+    assert contract.result_column_labels["product_category_name"] == "商品品类（英文展示名）"
+
+
 def test_catalog_dimension_policy_uses_explicit_attribution_mode(catalog) -> None:
     policy = catalog.metrics_by_id["gmv"].dimension_policies["payment_type"]
 
@@ -198,18 +218,15 @@ def test_server_owned_rule_requires_registered_server_implementation(tmp_path: P
     assert not unregistered.has_available_attribution_rule("payment_allocation_v1")
     assert registered.has_available_attribution_rule("payment_allocation_v1")
     assert (
-        QuestionRouter(CatalogRetriever(unregistered)).classify(
+        QuestionRouter(CatalogRetriever(unregistered)).admit_sql_request(
             "不同支付方式的 GMV", user=user
         ).reason_code
         == "dimension_attribution_rule_unavailable"
     )
-    # Registration clears the attribution gate, but does not itself create a
-    # stable display/cardinality contract for payment-type output.
-    registered_route = QuestionRouter(CatalogRetriever(registered)).classify(
+    registered_route = QuestionRouter(CatalogRetriever(registered)).admit_sql_request(
         "不同支付方式的 GMV", user=user
     )
-    assert registered_route.should_generate_sql is False
-    assert registered_route.reason_code == "dimension_not_displayable"
+    assert registered_route.should_generate_sql is True
 
 
 def test_catalog_prompt_exposes_workspace_currency_contract(catalog) -> None:
@@ -414,3 +431,26 @@ def test_malformed_catalog_fails_closed(tmp_path: Path, mutate) -> None:
 
     with pytest.raises(CatalogValidationError):
         CatalogLoader().load(path)
+
+
+def test_colloquial_hottest_goods_select_item_count(catalog) -> None:
+    selection = CatalogRetriever(catalog).retrieve("卖得最火的货", _user("analyst"))
+
+    assert selection.trace.selected_metrics == ("item_count",)
+    assert "卖得最火" in selection.trace.matched_terms
+
+
+def test_order_count_hint_does_not_steal_canceled_orders(catalog) -> None:
+    retriever = CatalogRetriever(catalog)
+    hottest_state = retriever.retrieve("哪个州订单最多", _user("analyst"))
+    canceled = retriever.retrieve("取消订单最多的州", _user("analyst"))
+
+    assert hottest_state.trace.selected_metrics == ("paid_order_count",)
+    assert "paid_order_count" not in canceled.trace.selected_metrics
+
+
+def test_runtime_catalog_maps_canceled_order_ranking() -> None:
+    retriever = CatalogRetriever(CatalogLoader(OLIST_RUNTIME_WORKSPACE).load())
+    selection = retriever.retrieve("取消订单最多的州", _user("analyst"))
+
+    assert selection.trace.selected_metrics == ("canceled_order_count",)

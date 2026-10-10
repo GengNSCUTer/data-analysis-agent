@@ -1,0 +1,73 @@
+# Frozen runtime router probe. This is not a protected holdout and not training data.
+# It records the current classify/admit behavior of the online Olist v3 catalog.
+# known_gap rows stay observations: they do not authorize an LLM router or a SqlPolicy bypass.
+probe_id: runtime-router-probe-v1
+catalog_version: olist-catalog-v3
+metric_version: 0.3-proposal
+cases:
+  - id: unsafe-delete
+    question: 删除订单
+    status: covered
+    classify: {state: unauthorized, reason: unsafe_or_unauthorized_request, intent: unsafe_or_unauthorized, requires_database: false}
+  - id: unsupported-python
+    question: 运行 Python 预测
+    status: covered
+    classify: {state: unsupported, reason: unsupported_capability, intent: unsupported, requires_database: false}
+  - id: help
+    question: 你能做什么
+    status: covered
+    classify: {state: help, reason: help_request, intent: help, requires_database: false}
+  - id: metric-definition
+    question: GMV是什么
+    status: covered
+    classify: {state: catalog_answered, reason: catalog_metric_definition, intent: catalog_definition, requires_database: false, metric_ids: [gmv]}
+  - id: business-advice
+    question: 如何提升销售额
+    status: covered
+    classify: {state: general_business, reason: generic_business_question, intent: general_business, requires_database: false, metric_ids: [gmv]}
+  - id: explicit-gmv
+    question: 统计 GMV
+    status: covered
+    classify: {state: answerable, reason: sql_requested, intent: data_query, requires_database: true, metric_ids: [gmv]}
+    admit: {state: answerable, reason: matched_catalog_and_no_blocking_ambiguity, requires_database: true, metric_ids: [gmv]}
+  - id: relative-time
+    question: 本月 GMV 是多少
+    status: covered
+    classify: {state: answerable, reason: sql_requested, intent: data_query, requires_database: true, metric_ids: [gmv]}
+    admit: {state: missing_time, reason: relative_time_without_explicit_range, requires_database: false, metric_ids: [gmv]}
+  - id: comparison-baseline
+    question: 为什么 GMV 下降
+    status: covered
+    classify: {state: answerable, reason: sql_requested, intent: data_analysis, requires_database: true, metric_ids: [gmv]}
+    admit: {state: missing_comparison, reason: comparison_without_baseline, requires_database: false, metric_ids: [gmv]}
+  - id: ranking-category
+    question: SP州的哪种商品销量最好
+    status: covered
+    classify: {state: answerable, reason: sql_requested, intent: data_query, requires_database: true, metric_ids: [item_count]}
+    admit: {state: answerable, reason: matched_catalog_and_no_blocking_ambiguity, requires_database: true, metric_ids: [item_count]}
+  - id: sp-category-gmv
+    question: 只看 SP 客户，按商品品类看 GMV 最高的前几名
+    status: covered
+    classify: {state: answerable, reason: sql_requested, intent: data_query, requires_database: true, metric_ids: [gmv]}
+    admit: {state: answerable, reason: matched_catalog_and_no_blocking_ambiguity, requires_database: true, metric_ids: [gmv]}
+  - id: seller-city-gmv
+    question: 按卖家统计 GMV
+    status: covered
+    classify: {state: answerable, reason: sql_requested, intent: data_query, requires_database: true, metric_ids: [gmv]}
+    admit: {state: answerable, reason: matched_catalog_and_no_blocking_ambiguity, requires_database: true, metric_ids: [gmv]}
+  - id: region-without-metric
+    question: 哪个地区表现最好
+    status: covered
+    classify: {state: answerable, reason: sql_requested, intent: data_query, requires_database: true, metric_ids: []}
+    admit: {state: missing_metric, reason: no_metric_match, requires_database: false, metric_ids: []}
+  - id: colloquial-hottest
+    question: 卖得最火的货
+    status: covered
+    classify: {state: answerable, reason: sql_requested, intent: data_query, requires_database: true, metric_ids: [item_count]}
+    admit: {state: answerable, reason: matched_catalog_and_no_blocking_ambiguity, requires_database: true, metric_ids: [item_count]}
+  - id: colloquial-payment-amount
+    question: 不同支付方式的金额
+    status: known_gap
+    gap: “金额”同时可能是 GMV、运费或支付金额。当前仍澄清指标，不猜一个金额口径。
+    classify: {state: answerable, reason: sql_requested, intent: data_query, requires_database: true, metric_ids: []}
+    admit: {state: missing_metric, reason: no_metric_match, requires_database: false, metric_ids: []}

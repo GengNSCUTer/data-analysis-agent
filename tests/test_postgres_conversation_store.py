@@ -6,6 +6,7 @@ import uuid
 import pytest
 
 from data_analysis_agent.conversation_store import (
+    ConversationStateConflict,
     InvalidConversationId,
     PostgresConversationStore,
 )
@@ -130,3 +131,68 @@ async def test_store_hides_empty_starter_conversations(
     finally:
         await store.delete_conversation(empty_id, user)
         await store.delete_conversation(populated_id, user)
+
+
+@pytest.mark.asyncio
+async def test_store_persists_workspace_and_rejects_stale_state(
+    store: PostgresConversationStore,
+) -> None:
+    suffix = uuid.uuid4().hex[:12]
+    user = User(id=f"workspace-owner-{suffix}", group_memberships=["analyst"])
+    conversation_id = f"workspace-conversation-{suffix}"
+    try:
+        conversation = Conversation(
+            id=conversation_id,
+            user=user,
+            metadata={"workspace_id": "olist-demo", "state_version": 0},
+            messages=[Message(role="user", content="查看订单")],
+        )
+        await store.update_conversation(conversation)
+        assert conversation.metadata["workspace_id"] == "olist-demo"
+        first_version = conversation.metadata["state_version"]
+        assert first_version == 1
+
+        loaded = await store.get_conversation(conversation_id, user, "olist-demo")
+        assert loaded is not None
+        assert loaded.metadata["state_version"] == first_version
+        assert await store.get_conversation(conversation_id, user, "thelook-analytics") is None
+
+        stale = loaded.model_copy(deep=True)
+        await store.update_conversation(loaded)
+        assert loaded.metadata["state_version"] == first_version + 1
+        with pytest.raises(ConversationStateConflict, match="stale"):
+            await store.update_conversation(stale)
+    finally:
+        await store.delete_conversation(conversation_id, user)
+
+
+@pytest.mark.asyncio
+async def test_truncate_removes_last_user_turn_and_clears_memory(store) -> None:
+    suffix = uuid.uuid4().hex[:12]
+    user = User(id=f"truncate-owner-{suffix}", group_memberships=["analyst"])
+    conversation_id = f"truncate-conversation-{suffix}"
+    try:
+        conversation = Conversation(
+            id=conversation_id,
+            user=user,
+            metadata={
+                "workspace_id": "olist-demo",
+                "state_version": 0,
+                "working_memory": {"metric_ids": ["gmv"], "previous_result_summary": "旧结果"},
+            },
+            messages=[
+                Message(role="user", content="第一问"),
+                Message(role="assistant", content="第一答"),
+                Message(role="user", content="第二问"),
+                Message(role="assistant", content="第二答"),
+            ],
+        )
+        await store.update_conversation(conversation)
+        removed = await store.truncate_from_last_user_message(conversation_id, user)
+        assert removed == 2
+        loaded = await store.get_conversation(conversation_id, user, "olist-demo")
+        assert loaded is not None
+        assert [message.content for message in loaded.messages] == ["第一问", "第一答"]
+        assert loaded.metadata["working_memory"] == {}
+    finally:
+        await store.delete_conversation(conversation_id, user)

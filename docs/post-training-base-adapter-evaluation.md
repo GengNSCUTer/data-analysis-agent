@@ -78,11 +78,9 @@ and executes base generation, diagnostics and the Test Suite bridge before it
 starts the adapter member; the two models therefore never contend for the same
 GPU.
 
-```bash
-cd /disk2/gengnan/data-analysis-agent
-screen -dmS daa-qwen15b-base-adapter-v1 \
-  bash scripts/start_post_training_base_adapter_comparison_pair_screen.sh
-```
+The historical pair-driver command has been retired because it defaulted to
+`adapter_final`. Do not rerun this procedure; use only a newly frozen launcher
+that requires `adapter_best` selected on validation before any final test.
 
 The pair driver stops before adapter generation if the base member fails. The
 scripts record launch parameters and `nvidia-smi` summary in external logs; they
@@ -128,11 +126,9 @@ bridge finishes, do not regenerate the member. Resume the pair explicitly with
 records the reuse decision in its external log, then reruns diagnostics and the
 official bridge before the adapter member begins.
 
-```bash
-cd /disk2/gengnan/data-analysis-agent
-BASE_REUSE_GENERATION=1 screen -dmS daa-qwen15b-base-adapter-recovery-v1 \
-  bash scripts/start_post_training_base_adapter_comparison_pair_screen.sh
-```
+The corresponding recovery command is retired for the same reason. Historical
+artifacts remain immutable evidence, but are not eligible for a new headline
+comparison or recovery run.
 
 The recovery mode is deliberately opt-in. It rejects a missing generation
 artifact, an invalid reuse flag, or a directory that already has official

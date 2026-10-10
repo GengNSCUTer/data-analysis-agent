@@ -7,7 +7,7 @@ between LLM services, tools, and conversation storage.
 
 import traceback
 import uuid
-from typing import TYPE_CHECKING, AsyncGenerator, List, Optional
+from typing import TYPE_CHECKING, AsyncGenerator, List, Optional, Union
 
 from vanna.components import (
     UiComponent,
@@ -659,9 +659,17 @@ class Agent:
                 # TODO: Yield thinking indicator
                 pass
 
-            # Get LLM response
+            # Get LLM response. Streaming yields each text delta before the
+            # final LlmResponse so the SSE client can paint tokens immediately.
+            streamed_text: Optional[RichTextComponent] = None
             if self.config.stream_responses:
-                response = await self._handle_streaming_response(request)
+                response = LlmResponse(content=None)
+                async for piece in self._handle_streaming_response(request):
+                    if isinstance(piece, LlmResponse):
+                        response = piece
+                    else:
+                        streamed_text = piece.rich_component  # type: ignore[assignment]
+                        yield piece
             else:
                 response = await self._send_llm_request(request)
 
@@ -678,7 +686,7 @@ class Agent:
                 )
                 conversation.add_message(assistant_message)
 
-                if response.content is not None:
+                if response.content is not None and streamed_text is None:
                     # Yield any partial content from the assistant before tool execution
                     has_tool_invocation_message_in_chat = (
                         self.config.ui_features.can_user_access_feature(
@@ -1038,18 +1046,26 @@ class Agent:
                     )
                 )
 
-                # Yield final text response
+                # Yield final text response. Token deltas already used one
+                # component id; only replace that bubble when middleware changed
+                # the text, otherwise the user would see the answer twice.
                 if response.content:
-                    # Add assistant response to conversation
                     conversation.add_message(
                         Message(role="assistant", content=response.content)
                     )
-                    yield UiComponent(
-                        rich_component=RichTextComponent(
-                            content=response.content, markdown=True
-                        ),
-                        simple_component=SimpleTextComponent(text=response.content),
-                    )
+                    if streamed_text is None:
+                        yield UiComponent(
+                            rich_component=RichTextComponent(
+                                content=response.content, markdown=True
+                            ),
+                            simple_component=SimpleTextComponent(text=response.content),
+                        )
+                    elif getattr(streamed_text, "content", None) != response.content:
+                        updated = streamed_text.update(content=response.content)
+                        yield UiComponent(
+                            rich_component=updated,
+                            simple_component=SimpleTextComponent(text=response.content),
+                        )
                 break
 
         # Check if we hit the tool iteration limit
@@ -1323,8 +1339,10 @@ You can:
 
         return response
 
-    async def _handle_streaming_response(self, request: LlmRequest) -> LlmResponse:
-        """Handle streaming response from LLM."""
+    async def _handle_streaming_response(
+        self, request: LlmRequest
+    ) -> AsyncGenerator[Union[UiComponent, LlmResponse], None]:
+        """Stream text deltas, then yield the completed response object."""
         # Apply before_llm_request middlewares with observability
         for middleware in self.llm_middlewares:
             mw_span = None
@@ -1355,6 +1373,9 @@ You can:
 
         accumulated_content = ""
         accumulated_tool_calls = []
+        text_component: Optional[RichTextComponent] = None
+        finish_reason: Optional[str] = None
+        usage = None
 
         # Create span for streaming
         stream_span = None
@@ -1365,9 +1386,32 @@ You can:
             )
 
         async for chunk in self.llm_service.stream_request(request):
-            if chunk.content:
+            if chunk.finish_reason:
+                finish_reason = chunk.finish_reason
+            chunk_usage = chunk.metadata.get("usage") if chunk.metadata else None
+            if isinstance(chunk_usage, dict):
+                usage = chunk_usage
+            if chunk.metadata.get("replace_content") and chunk.content is not None:
+                accumulated_content = chunk.content
+            elif chunk.content:
                 accumulated_content += chunk.content
-                # Could yield intermediate TextChunk here
+            if accumulated_content and (
+                chunk.content or chunk.metadata.get("replace_content")
+            ):
+                if text_component is None:
+                    text_component = RichTextComponent(
+                        content=accumulated_content, markdown=True
+                    )
+                    yield UiComponent(
+                        rich_component=text_component,
+                        simple_component=SimpleTextComponent(text=accumulated_content),
+                    )
+                else:
+                    text_component = text_component.update(content=accumulated_content)
+                    yield UiComponent(
+                        rich_component=text_component,
+                        simple_component=SimpleTextComponent(text=accumulated_content),
+                    )
 
             if chunk.tool_calls:
                 accumulated_tool_calls.extend(chunk.tool_calls)
@@ -1385,6 +1429,8 @@ You can:
         response = LlmResponse(
             content=accumulated_content if accumulated_content else None,
             tool_calls=accumulated_tool_calls if accumulated_tool_calls else None,
+            finish_reason=finish_reason,
+            usage=usage if isinstance(usage, dict) else None,
         )
 
         # Apply after_llm_response middlewares with observability
@@ -1415,4 +1461,4 @@ You can:
                         },
                     )
 
-        return response
+        yield response

@@ -163,6 +163,11 @@ def _risk_tags(spec: QuerySpec, *, structural_focus: bool = False) -> tuple[str,
         tags.add("review_fact_grain")
     if structural_focus:
         tags.add("structural_focus")
+    # Keep the seed generator aligned with the balanced-release candidate
+    # builder: simple one-metric scalar aggregation is a named stratum, not an
+    # ambiguous empty risk-tag list.
+    if not tags:
+        tags.add("simple_scalar_aggregation")
     return tuple(sorted(tags))
 
 

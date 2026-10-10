@@ -12,6 +12,7 @@ from vanna.core.tool import ToolCall
 from vanna.core.user import User
 
 from data_analysis_agent.conversation_store import PostgresConversationStore
+from data_analysis_agent.local_auth import AccountStore
 from data_analysis_agent.postgres_runner import PostgresConnectionSettings
 from examples.trusted_olist_web_demo import create_app
 
@@ -33,10 +34,12 @@ def settings() -> PostgresConnectionSettings:
 
 
 def test_conversation_routes_scope_users_and_redact_tool_content(
-    settings: PostgresConnectionSettings,
+    settings: PostgresConnectionSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("DATA_ANALYSIS_BOOTSTRAP_USERNAME", "routeowner")
+    monkeypatch.setenv("DATA_ANALYSIS_BOOTSTRAP_PASSWORD", "route-owner-password")
     conversation_id = f"route-test-{uuid.uuid4().hex[:12]}"
-    owner = User(id="demo-analyst", group_memberships=["analyst"])
+    owner = User(id="local:routeowner", group_memberships=["analyst"])
     store = PostgresConversationStore(settings)
     asyncio.run(
         store.update_conversation(
@@ -68,6 +71,11 @@ def test_conversation_routes_scope_users_and_redact_tool_content(
 
     try:
         with TestClient(create_app()) as client:
+            assert client.get("/api/project/conversations").status_code == 401
+            assert client.post(
+                "/api/auth/login",
+                json={"username": "routeowner", "password": "route-owner-password"},
+            ).status_code == 200
             listing = client.get("/api/project/conversations")
             assert listing.status_code == 200
             assert any(
@@ -85,11 +93,20 @@ def test_conversation_routes_scope_users_and_redact_tool_content(
             assert malformed.status_code in {400, 404}
 
             switched = client.post("/api/project/demo-session", json={"role": "admin"})
-            assert switched.status_code == 200
+            assert switched.status_code == 404
+            assert client.get("/api/auth/session").json()["role"] == "analyst"
             assert (
                 client.get(f"/api/project/conversations/{conversation_id}").status_code
-                == 404
+                == 200
             )
+            assert client.post("/api/auth/logout").status_code == 200
+            assert client.get(f"/api/project/conversations/{conversation_id}").status_code == 401
+            AccountStore(settings).create_account("routeother", "route-other-password", "analyst")
+            assert client.post(
+                "/api/auth/login",
+                json={"username": "routeother", "password": "route-other-password"},
+            ).status_code == 200
+            assert client.get(f"/api/project/conversations/{conversation_id}").status_code == 404
     finally:
         connection = psycopg2.connect(
             host=settings.host,

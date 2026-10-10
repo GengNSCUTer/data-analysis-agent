@@ -1,6 +1,12 @@
 # 后训练研究总览
 
-这是后训练文档的规范入口。根目录中的旧路径保留为兼容跳转页；新的文档、链接和学习记录应从本目录进入。
+这是后训练文档的规范入口。根目录中的旧路径保留为兼容跳转页；新的文档、链接和学习记录应从本目录进入。目录生命周期和删除规则见 [`../architecture/documentation-map-v1.md`](../architecture/documentation-map-v1.md)。
+
+## 当前基线（2026-10-10）
+
+当前产品运行 Olist v3 Catalog，默认在线模型仍是 SiliconFlow；本地 Adapter 尚未接入。最新主实验为 Qwen2.5-Coder-1.5B Base 的 bf16 LoRA SQL-only SFT，训练/validation 合计 `6,000/1,500`，其中 Olist 与 TheLook 各 `3,000/750`。`adapter_best` 在两套各 750 条 final test 上的 ordered Gold 匹配分别为 `403/750` 和 `396/750`。两个 Schema 已进入训练，这是已见 Schema 留出评测，不能称为未见 Schema 泛化。DPO 状态为 `stop_no_dpo`，未训练。
+
+当前事实优先看 [`experiments/project-v1-model-card.md`](experiments/project-v1-model-card.md) 和 [`experiments/project-v1-model-baseline.md`](experiments/project-v1-model-baseline.md)。下文保留各轮阶段说明，其中“尚未训练”“v2 默认运行时”“TheLook 未见 Schema”等描述只适用于其历史实验，不作为最新状态。
 
 ## 文档职责
 
@@ -27,12 +33,20 @@ Olist 原始表、分析层粒度、十项项目指标和下一批 Coverage Repa
 
 新增九项 Olist v3 指标的隔离 Catalog、公式、代码边界和数据库回归前置门见 [`../metric-contracts/olist-metrics-v3-proposal.md`](../metric-contracts/olist-metrics-v3-proposal.md)。v3 目前只服务于离线数据构造，默认运行时仍固定在 v2。
 
-当前 Olist SQL-only 数据入口是 [`data/olist-v3-balanced-release-v1-1.md`](data/olist-v3-balanced-release-v1-1.md)：当前 v3.1 release 已完成 `3,000/750/750` JSONL、4,500/4,500 确定性 Gold admission、36,000 条八类纯中文运行时问法/PROMPT overlay、分层精确主问法配额和 3,072 token 无截断审计。48 条 advisory 复核为 45 条 pass、3 条 provider timeout；后者明确记录为非阻塞 advisory 错误，不替代确定性准入。发布级审计现会重算最终 SFT 文件 hash 与 split 身份隔离。训练与 matching Base/Adapter 的冻结协议见 [`data/olist-v3-1-sql-only-training-evaluation-contract.md`](data/olist-v3-1-sql-only-training-evaluation-contract.md)：尚未启动 CPU/GPU smoke、训练或评测。
+当前 Olist SQL-only 数据入口是 [`data/olist-v3-balanced-release-v1-1.md`](data/olist-v3-balanced-release-v1-1.md)：当前 v3.1 release 已完成 `3,000/750/750` JSONL、4,500/4,500 确定性 Gold admission、36,000 条八类纯中文运行时问法/PROMPT overlay、分层精确主问法配额和 3,072 token 无截断审计。48 条 advisory 复核为 45 条 pass、3 条 provider timeout；后者明确记录为非阻塞 advisory 错误，不替代确定性准入。发布级审计现会重算最终 SFT 文件 hash 与 split 身份隔离。训练与 matching Base/Adapter 的冻结协议见 [`data/olist-v3-1-sql-only-training-evaluation-contract.md`](data/olist-v3-1-sql-only-training-evaluation-contract.md)；当前 v3.1 1.5B bf16 LoRA 训练、Olist matching 与 Gold denotation 已完成，结果证据留在仓库外实验目录。
 
-TheLook 的下一版跨 Schema final test 目前只完成前置的 machine-readable coverage contract 与静态
-QuerySpec seed：[`data/thelook-v3-coverage-contract-v1.md`](data/thelook-v3-coverage-contract-v1.md)。它保持
-既有 20 项指标不变，先修正 v2 的事实域、时间粒度、维度和真实 scenario-family 覆盖偏斜；750 条 seed
-尚未渲染 Gold SQL、连接数据库、生成中文问题或调用任何模型，不能当作最终评测集或模型结果。
+TheLook 的跨 Schema final test 已完成 v3 machine-readable coverage contract、静态 QuerySpec seed、
+小批准入和 750 条 protected release，合同与证据入口为 [`data/thelook-v3-coverage-contract-v2.md`](data/thelook-v3-coverage-contract-v2.md)。
+它保持既有 20 项指标不变，使用 21 个 scenario family 覆盖事实域、时间粒度、维度和风险；
+`inventory_unsold_snapshot` family 复用 v2 的 4 个合法 snapshot QuerySpec/Gold，复用已纳入审计。
+44/44 小批样本和 750/750 全量样本均通过 renderer、SqlPolicy、reader role、ResultContract/ResultValidator
+及 200 行展示预算；release audit 为 `pass`。最终目录在仓库外：
+`/disk2/gengnan/data-analysis-agent-data/evals/thelook-cross-schema-final-test-v3-20260915-r3/`。
+该 release 只用于 Base/Adapter 后置评测，不进入 Olist 训练、Prompt、错误回流或模型选择。
+
+多 Schema 电商 SQL-only SFT 的冻结规则见 [`data/multi-schema-ecommerce-sql-only-sft-v1.md`](data/multi-schema-ecommerce-sql-only-sft-v1.md)。Olist v3.1 与 TheLook SFT v1 已按统一 `multi-schema-sql-only-v1` Prompt 物化为 `6,000/1,500` release，并完成 Qwen2.5-Coder-1.5B bf16 LoRA 训练和两套 750 条最终评测。它改善了 TheLook 的跨 workspace 结果，但相对 Olist-only Adapter 出现域内 Gold 回退，因此下一轮以 [`data/multi-schema-dpo-v1-contract.md`](data/multi-schema-dpo-v1-contract.md) 先冻结 SFT-parent 之上的 DPO pair 数据、reference 和 holdout 隔离；当前只授权小批 pair 审计，不改变生产默认路径。
+
+本项目当前对外使用的主模型证据、能主张与不能主张的边界统一见 [`experiments/project-v1-model-baseline.md`](experiments/project-v1-model-baseline.md)。DPO 的两批 48 次诊断均未产生真实 A--C rejected SQL，因此当前结论是 [`experiments/project-v1-dpo-decision.md`](experiments/project-v1-dpo-decision.md) 所述的 `stop_no_dpo`，不是“下一步自动训练 DPO”。
 
 ## 先看这一页
 

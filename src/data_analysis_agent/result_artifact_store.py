@@ -135,6 +135,55 @@ class ResultArtifactStore:
             )
         return manifest
 
+    def load_verified_plotly(
+        self, *, artifact_id: str, user_id: str, workspace_id: str
+    ) -> dict[str, Any]:
+        """Return a hash-checked Plotly figure for conversation replay.
+
+        The figure is limited to traces and layout. Conversation memory stores
+        only the file pointer; this read is the first time the payload leaves disk.
+        """
+        manifest = self.verify_manifest(
+            artifact_id=artifact_id, user_id=user_id, workspace_id=workspace_id
+        )
+        expected_bytes = manifest.get("plotly_bytes")
+        if manifest.get("plotly_ref") != "chart.plotly.json":
+            raise ResultArtifactIntegrityError("artifact has no chart payload")
+        if (
+            not isinstance(expected_bytes, int)
+            or expected_bytes < 0
+            or expected_bytes > _MAX_PLOTLY_REPLAY_BYTES
+        ):
+            raise ResultArtifactIntegrityError("chart payload is too large to replay")
+        path = self._scope(user_id, workspace_id, artifact_id) / "chart.plotly.json"
+        figure = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(figure, dict):
+            raise ValueError("chart payload is not a figure")
+        traces = figure.get("data")
+        layout = figure.get("layout")
+        if not isinstance(traces, list) or not traces or len(traces) > 32:
+            raise ValueError("chart payload has no replayable traces")
+        if not isinstance(layout, dict):
+            raise ValueError("chart payload has no layout")
+        if not all(isinstance(trace, dict) for trace in traces):
+            raise ValueError("chart payload traces are invalid")
+        return {
+            "artifact_id": artifact_id,
+            "title": _chart_title(layout),
+            "data": traces,
+            "layout": layout,
+        }
+
+    def verified_csv_path(
+        self, *, artifact_id: str, user_id: str, workspace_id: str
+    ) -> Path:
+        """Return the complete validated CSV only after its manifest checks pass."""
+
+        self.verify_manifest(
+            artifact_id=artifact_id, user_id=user_id, workspace_id=workspace_id
+        )
+        return self._scope(user_id, workspace_id, artifact_id) / "result.csv"
+
     @staticmethod
     def _verify_file(
         *,
@@ -171,6 +220,18 @@ class ResultArtifactStore:
             handle.write("\n")
             temp_name = handle.name
         os.replace(temp_name, path)
+
+
+_MAX_PLOTLY_REPLAY_BYTES = 1_500_000
+
+
+def _chart_title(layout: Mapping[str, Any]) -> str:
+    raw = layout.get("title")
+    text = raw.get("text") if isinstance(raw, Mapping) else raw
+    if not isinstance(text, str):
+        return "图表"
+    cleaned = "".join(character for character in text if character not in "<>")
+    return cleaned.strip()[:120] or "图表"
 
 
 def _fingerprint(value: str) -> str:

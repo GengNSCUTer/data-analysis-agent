@@ -11,7 +11,7 @@ from data_analysis_agent.budget import (
     RequestBudget,
 )
 from data_analysis_agent.llm_observability import ObservedLlmService
-from vanna.core.llm import LlmRequest, LlmResponse, LlmService
+from vanna.core.llm import LlmRequest, LlmResponse, LlmService, LlmStreamChunk
 from vanna.core.user import User
 
 
@@ -107,6 +107,7 @@ async def test_llm_timeout_without_trusted_result_is_safe_and_terminal() -> None
     assert "未输出未经完整验证的数字结论" in (response.content or "")
     assert usage.termination_reason == "query_timeout"
     assert usage.error_type == "llm_timeout"
+    assert usage.llm_observations[0]["timeout_phase"] == "first_byte"
     assert usage.llm_observations[0]["status"] == "timeout"
     assert usage.llm_observations[0]["usage_status"] == "unknown"
 
@@ -150,6 +151,7 @@ async def test_provider_timeout_uses_the_same_safe_terminal_response() -> None:
             "elapsed_ms": usage.llm_observations[0]["elapsed_ms"],
             "usage_status": "unknown",
             "error_type": "llm_timeout",
+            "timeout_phase": "provider",
         }
     ]
 
@@ -211,18 +213,101 @@ async def test_trusted_result_finalization_falls_back_for_malformed_summary() ->
 
 
 @pytest.mark.asyncio
-async def test_explicit_chart_path_keeps_provider_summary_available() -> None:
+async def test_explicit_chart_path_uses_the_same_provider_free_trusted_summary() -> None:
     usage = BudgetUsage(RequestBudget())
     usage.mark_result_contract_satisfied()
-    usage.disable_deterministic_result_finalization()
+    usage.set_result_summary(
+        '已通过结果合同的可信结果摘要：{"metric_ids":["gmv"],'
+        '"columns":["gmv"],"row_count":1,"column_labels":{"gmv":"商品成交额"},'
+        '"sample_rows":[{"gmv":100}]}'
+    )
     token = CURRENT_BUDGET.set(usage)
     try:
-        response = await ObservedLlmService(ImmediateLlm(), timeout_seconds=1).send_request(
+        response = await ObservedLlmService(FailingLlm(), timeout_seconds=1).send_request(
             _request()
         )
     finally:
         CURRENT_BUDGET.reset(token)
 
-    assert response.content == "ok"
-    assert usage.deterministic_result_finalized is False
-    assert usage.llm_observations[0]["status"] == "completed"
+    assert response.finish_reason == "trusted_result_finalized"
+    assert "商品成交额" in (response.content or "")
+    assert usage.deterministic_result_finalized is True
+    assert usage.llm_observations == []
+
+
+class PacedLlm(ImmediateLlm):
+    def __init__(self, delays: list[tuple[float, str]]) -> None:
+        self.delays = delays
+
+    async def stream_request(self, request: LlmRequest):
+        for delay, text in self.delays:
+            await asyncio.sleep(delay)
+            yield LlmStreamChunk(content=text)
+
+
+@pytest.mark.asyncio
+async def test_stream_first_byte_and_idle_timeouts_are_separate() -> None:
+    usage = BudgetUsage(RequestBudget())
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        first_byte = [
+            chunk
+            async for chunk in ObservedLlmService(
+                PacedLlm([(0.05, "晚")]),
+                first_byte_timeout_seconds=0.01,
+                stream_idle_timeout_seconds=1,
+            ).stream_request(_request())
+        ]
+    finally:
+        CURRENT_BUDGET.reset(token)
+
+    assert first_byte[-1].metadata["timeout_phase"] == "first_byte"
+    assert usage.llm_observations[-1]["timeout_phase"] == "first_byte"
+
+    usage = BudgetUsage(RequestBudget())
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        idle = [
+            chunk
+            async for chunk in ObservedLlmService(
+                PacedLlm([(0.0, "先"), (0.05, "后")]),
+                first_byte_timeout_seconds=1,
+                stream_idle_timeout_seconds=0.01,
+            ).stream_request(_request())
+        ]
+    finally:
+        CURRENT_BUDGET.reset(token)
+
+    assert idle[0].content == "先"
+    assert idle[-1].metadata["timeout_phase"] == "stream_idle"
+    assert usage.llm_observations[-1]["timeout_phase"] == "stream_idle"
+
+
+@pytest.mark.asyncio
+async def test_stream_waits_let_other_tasks_run() -> None:
+    order: list[str] = []
+
+    class OrderedLlm(ImmediateLlm):
+        async def stream_request(self, request: LlmRequest):
+            order.append("model-start")
+            await asyncio.sleep(0.05)
+            order.append("model-token")
+            yield LlmStreamChunk(content="token")
+
+    async def other() -> None:
+        await asyncio.sleep(0.01)
+        order.append("other-request")
+
+    other_task = asyncio.create_task(other())
+    chunks = [
+        chunk
+        async for chunk in ObservedLlmService(
+            OrderedLlm(),
+            first_byte_timeout_seconds=1,
+            stream_idle_timeout_seconds=1,
+        ).stream_request(_request())
+    ]
+    await other_task
+
+    assert [chunk.content for chunk in chunks] == ["token"]
+    assert order == ["model-start", "other-request", "model-token"]

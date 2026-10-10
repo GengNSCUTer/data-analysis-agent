@@ -15,6 +15,18 @@ class DataFrameComponent(RichComponent):
     description: Optional[str] = None
     row_count: int = 0
     column_count: int = 0
+    # Server-owned presenter contract. ``rows`` remains preview-only.
+    total_row_count: int = 0
+    preview_row_count: int = 0
+    display_truncated: bool = False
+    column_labels: Dict[str, str] = Field(default_factory=dict)
+    column_units: Dict[str, str] = Field(default_factory=dict)
+    workspace_id: Optional[str] = None
+    dataset_version: Optional[str] = None
+    metric_version: Optional[str] = None
+    audit_ref: Optional[str] = None
+    preview_export_allowed: bool = False
+    full_export_allowed: bool = False
 
     # Display options
     max_rows_displayed: int = 100  # Limit rows shown in UI
@@ -61,6 +73,10 @@ class DataFrameComponent(RichComponent):
                 self.row_count = 0
             if "column_count" not in kwargs:
                 self.column_count = len(self.columns) if self.columns else 0
+        if "preview_row_count" not in kwargs:
+            self.preview_row_count = len(self.rows)
+        if "total_row_count" not in kwargs:
+            self.total_row_count = self.row_count
 
     @classmethod
     def from_records(

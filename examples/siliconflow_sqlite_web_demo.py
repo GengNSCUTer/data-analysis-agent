@@ -34,7 +34,7 @@ from vanna.tools import RunSqlTool
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DATABASE_PATH = REPOSITORY_ROOT / "examples" / "data" / "vanna_demo.sqlite"
-HOST_PAGE_PATH = REPOSITORY_ROOT / "examples" / "embedded_analyst_host.html"
+HOST_PAGE_PATH = REPOSITORY_ROOT / "examples" / "embeddable_copilot_shell.html"
 WEB_COMPONENT_DIST = REPOSITORY_ROOT / "frontends" / "webcomponent" / "dist"
 QUERY_RESULTS_DIRECTORY = (
     Path(

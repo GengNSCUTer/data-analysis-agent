@@ -168,12 +168,12 @@ metrics:
     source_tables: [fact_orders, fact_order_items]
     source_columns: [fact_orders.order_status, fact_order_items.price]
     default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
-    allowed_dimensions: [date, customer_state, customer_city, product_category_name, payment_type]
+    allowed_dimensions: [date, customer_state, seller_state, seller_city, customer_city, product_category_name, payment_type]
     result_value_constraints: {minimum: 0}
     dimension_policies:
       payment_type:
-        description: "一个订单可能对应多条支付记录；必须先明确 GMV 按支付方式拆分、分摊或归属的业务规则，禁止自行使用 payment_sequential=1 代替归属口径。"
-        mode: requires_attribution
+        description: "金额按订单内 payment_value 占比分摊到 payment_type，禁止只用第一条支付代表整单。"
+        mode: payment_share
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 
@@ -190,11 +190,11 @@ metrics:
     result_value_constraints: {minimum: 0, integer_like: true}
     dimension_policies:
       product_category_name:
-        description: "一个订单可能包含多个品类；按品类计订单时必须先冻结订单归属、去重或分摊口径，禁止把含该品类的订单直接当作可跨品类相加的订单数。"
-        mode: requires_attribution
+        description: "订单进入它包含的每一个品类。各品类订单数相加可以大于总订单数。"
+        mode: multi_membership
       payment_type:
-        description: "一个订单可能对应多条支付记录；必须先明确订单归属支付方式的业务规则，禁止自行使用 payment_sequential=1 代替归属口径。"
-        mode: requires_attribution
+        description: "订单进入它使用过的每一种支付方式。各支付方式订单数相加可以大于总订单数。"
+        mode: multi_membership
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 
@@ -211,8 +211,8 @@ metrics:
     result_value_constraints: {minimum: 0}
     dimension_policies:
       product_category_name:
-        description: "一个订单可能包含多个品类；按品类汇总履约天数时，必须先明确是按订单归属、按商品行加权还是采用其他分摊规则，禁止直接通过订单商品行重复订单履约时长。"
-        mode: requires_attribution
+        description: "履约天数属于订单。订单进入它包含的每一个品类，各品类都使用该订单的同一履约天数。"
+        mode: multi_membership
     recommended_chart: line
     role_visibility: [analyst, admin]
 
@@ -229,26 +229,26 @@ metrics:
     result_value_constraints: {minimum: 0, maximum: 1}
     dimension_policies:
       product_category_name:
-        description: "一条订单评价可能关联多个品类；按品类汇总好评率时，必须先明确评价归属或分摊规则，禁止通过订单商品行复制评价后直接计算。"
-        mode: requires_attribution
+        description: "评价进入该订单包含的每一个品类。各品类评价数相加可以大于总评价数。"
+        mode: multi_membership
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 
   - metric_id: item_count
     name: 商品件数
     description: "有效订单的商品行数；Olist 每个 (order_id, order_item_id) 为一件商品行，不按订单去重。"
-    aliases: [商品件数, 商品数量, 销售件数, 商品行数, item count]
+    aliases: [商品件数, 商品数量, 销售件数, 商品行数, 销量, item count]
     grain: order_item
     time_field: fact_orders.order_purchase_timestamp
     source_tables: [fact_orders, fact_order_items]
     source_columns: [fact_orders.order_status, fact_order_items.order_id, fact_order_items.order_item_id]
     default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
-    allowed_dimensions: [date, customer_state, customer_city, product_category_name, payment_type]
+    allowed_dimensions: [date, customer_state, seller_state, seller_city, customer_city, product_category_name, payment_type]
     result_value_constraints: {minimum: 0, integer_like: true}
     dimension_policies:
       payment_type:
-        description: "一个订单可能对应多条支付记录；按支付方式统计商品件数必须先明确商品行的支付归属或分摊规则。"
-        mode: requires_attribution
+        description: "商品行进入该订单使用过的每一种支付方式。这不是按支付金额拆开的件数。"
+        mode: multi_membership
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 
@@ -317,12 +317,12 @@ metrics:
     source_tables: [fact_orders, fact_order_items]
     source_columns: [fact_orders.order_status, fact_order_items.freight_value]
     default_filters: ["fact_orders.order_status NOT IN ('canceled', 'unavailable')"]
-    allowed_dimensions: [date, customer_state, customer_city, product_category_name, payment_type]
+    allowed_dimensions: [date, customer_state, seller_state, seller_city, customer_city, product_category_name, payment_type]
     result_value_constraints: {minimum: 0}
     dimension_policies:
       payment_type:
-        description: "一个订单可能对应多条支付记录；按支付方式统计运费金额必须先明确运费的支付归属或分摊规则。"
-        mode: requires_attribution
+        description: "运费按订单内 payment_value 占比分摊到 payment_type，禁止只用第一条支付代表整单。"
+        mode: payment_share
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
 

@@ -147,8 +147,9 @@ Schema 权限和真实 Olist 查询审计。它不调用 SiliconFlow，不代表
 
 新增 `evals/cases/text_to_sql_online_v1.yaml`、
 `scripts/run_online_text_to_sql_evaluation.py` 与对应合同测试。在线清单从 60 条离线 golden
-中选择 24 条，真实请求必须经过 `POST /api/project/demo-session` 与
-`POST /api/vanna/v2/chat_sse`，随后用同一 request ID 从 `app.agent_runs` 和
+中选择 24 条。当时的真实请求经过 `POST /api/project/demo-session` 与
+`POST /api/vanna/v2/chat_sse`。产品身份现已改为本地密码会话，评测脚本改为
+`POST /api/auth/login`，不再签发演示角色 Cookie。证据仍用同一 request ID 从 `app.agent_runs` 和
 `app.query_audits` 读取脱敏运行证据。报告及人工标签文件位于 `evals/reports/`，目录被 Git
 忽略；其内容不保存问题、回答、SQL、行数据、cookie 或密钥。
 

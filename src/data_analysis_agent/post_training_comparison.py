@@ -17,7 +17,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from data_analysis_agent.text_to_sql_output import normalize_text_to_sql_candidate
+from data_analysis_agent.candidate_sql_generator import CandidateSqlGenerationError, unwrap_sql_completion
 
 
 COMPARISON_REPORT_VERSION = "1"
@@ -220,7 +220,12 @@ def _run_profile(
         detail_counts[classify_execution_detail(execution)] += 1
         presentation_counts[classify_presentation_pattern(completion)] += 1
         generated_tokens.append(_required_non_negative_int(record, "generated_tokens"))
-        normalized_lengths.append(len(normalize_text_to_sql_candidate(completion)))
+        try:
+            normalized_lengths.append(len(unwrap_sql_completion(completion)))
+        except CandidateSqlGenerationError:
+            # Diagnostics should remain total even for empty completions. The
+            # executor/policy still records the actual rejection separately.
+            normalized_lengths.append(0)
 
     return {
         "status_counts": dict(sorted(status_counts.items())),

@@ -9,8 +9,8 @@ production Vanna/PostgreSQL runtime in `src/data_analysis_agent/`.
 | `data/` | Build audited benchmark candidates/splits and Olist structural Gold intermediates. | `build_spider_sft_candidates.py`, `split_post_training_candidates.py`, `build_olist_surface_form_pilot.py`, `build_olist_domain_sft_release_v2.py`, `audit_olist_question_diversity.py`, `export_olist_protected_family_summary.py`, `materialize_olist_queryspecs.py` |
 | `training/` | Freeze a model, run SFT, validate an Adapter, verify artifacts. | `run_post_training_sft_smoke.py` |
 | `inference/` | Generate Base or Adapter SQL candidates without benchmark gold SQL. | `generate_post_training_text_to_sql.py` |
-| `evaluation/` | Verify matching evidence, then run SQLite, Test Suite, denotation and protected Olist transfer diagnostics. | `verify_cspider_matching_generation.py`, `run_sqlite_benchmark.py` |
-| `launchers/` | Explicit `screen` launchers for approved long-running jobs. | `start_post_training_cspider_base_adapter_evaluation_screen.sh` |
+| `evaluation/` | Generate matching candidates, then run governed execution and post-generation Gold denotation. | `run_olist_medium_matching_evaluation.py`, `run_olist_medium_gold_denotation_audit.py`, `evaluate_thelook_matching_outputs.py` |
+| `launchers/` | Explicit `screen` launchers for approved long-running jobs. | `start_qwen25_multischema_v3_1_matching_evaluation_screen.sh` |
 
 The root-level names in `scripts/` are compatibility entry points. New code,
 new documentation and new imports should use this capability-based layout. New
@@ -23,6 +23,12 @@ python -m scripts.post_training.data.split_post_training_candidates --help
 The candidate generator remains an offline proposal component. It never owns
 production database permissions, SQL policy, metric semantics or result
 validation.
+
+The current multi-schema Olist + TheLook protocol is terminal only when both
+datasets have a post-generation Gold denotation report and
+`summarize_multischema_matching_evaluation.py` has written a safe terminal
+summary. Olist ResultContract validity is an operational compliance metric; it
+must not be reported as Gold semantic accuracy.
 
 `materialize_olist_queryspecs.py` is deliberately earlier than candidate-SQL
 training: it accepts only structural coverage seeds and a protected family

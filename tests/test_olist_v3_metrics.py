@@ -272,14 +272,14 @@ def test_average_item_price_is_the_only_new_category_safe_metric(catalog) -> Non
             "refuse",
             1,
         ),
-        # A grouped time series has no buckets in an empty range, therefore
-        # the correct user-facing state is clarification, not a numeric zero.
+        # A grouped time series has no buckets in an empty range. Show the
+        # empty table with a note instead of hiding it or inventing a zero.
         (
             "empty_window_series_requires_clarification",
             ("canceled_order_count",),
             "time_series",
             QueryTime("series", "2025-01-01", "2025-02-01", "month"),
-            "needs_clarification",
+            "degraded",
             0,
         ),
     ],

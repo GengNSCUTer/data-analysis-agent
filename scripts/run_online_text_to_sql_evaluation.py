@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from http.cookiejar import CookieJar
 import json
+import os
 from pathlib import Path
 from time import perf_counter, sleep
 from typing import Any
@@ -64,6 +65,24 @@ class LiveCase:
     question_suffix: str = ""
 
 
+def _evaluation_credentials() -> tuple[str, str]:
+    username = (
+        os.getenv("DATA_ANALYSIS_EVAL_USERNAME", "").strip()
+        or os.getenv("DATA_ANALYSIS_BOOTSTRAP_USERNAME", "").strip()
+        or "analyst"
+    )
+    password = os.getenv("DATA_ANALYSIS_EVAL_PASSWORD", "").strip() or os.getenv(
+        "DATA_ANALYSIS_BOOTSTRAP_PASSWORD", ""
+    ).strip()
+    if not password:
+        path = Path("/disk2/gengnan/data-analysis-agent-data/local-auth/bootstrap-password.txt")
+        if path.is_file():
+            password = path.read_text(encoding="utf-8").strip()
+    if not password:
+        raise RuntimeError("evaluation login requires a bootstrap password")
+    return username, password
+
+
 class DemoSseClient:
     """Cookie-aware client for the trusted local demo's SSE boundary."""
 
@@ -71,7 +90,7 @@ class DemoSseClient:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.opener = build_opener(HTTPCookieProcessor(CookieJar()))
-        self._post_json("/api/project/demo-session", {"role": role})
+        self._login(role)
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> bytes:
         request = Request(
@@ -85,6 +104,20 @@ class DemoSseClient:
         )
         with self.opener.open(request, timeout=self.timeout_seconds) as response:
             return response.read()
+
+    def _login(self, role: str) -> None:
+        username, password = _evaluation_credentials()
+        self._post_json("/api/auth/login", {"username": username, "password": password})
+        request = Request(
+            f"{self.base_url}/api/auth/session",
+            headers={"Accept": "application/json"},
+        )
+        with self.opener.open(request, timeout=self.timeout_seconds) as response:
+            session = json.loads(response.read().decode("utf-8"))
+        if session.get("role") != role or session.get("auth_mode") != "local_session":
+            raise RuntimeError(
+                f"logged-in role {session.get('role')!r} does not match requested role {role!r}"
+            )
 
     def _stream_chat(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Read only through the SSE completion event, as the browser does.

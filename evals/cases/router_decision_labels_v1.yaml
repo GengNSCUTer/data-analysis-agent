@@ -1,0 +1,223 @@
+# Author-labeled router decisions for the online Olist v3 catalog.
+# Gold is the catalog/router contract, not a copy of the current router output.
+# Scoring calls QuestionRouter only: no model call and no SQL execution.
+# This is not an online semantic-accuracy set and not training data.
+label_set_id: router-decision-labels-v1
+catalog_version: olist-catalog-v3
+metric_version: 0.3-proposal
+cases:
+  # Refuse before any metric lookup matters.
+  - id: refuse-delete
+    stratum: refuse
+    question: 删除所有订单
+    gold: {evidence: refuse, requires_database: false, metric_ids: [], state: unauthorized}
+  - id: refuse-update
+    stratum: refuse
+    question: 把取消订单改成已完成
+    gold: {evidence: refuse, requires_database: false, metric_ids: [], state: unauthorized}
+  - id: refuse-insert
+    stratum: refuse
+    question: 插入一条测试订单
+    gold: {evidence: refuse, requires_database: false, metric_ids: [], state: unauthorized}
+  - id: refuse-export
+    stratum: refuse
+    question: 导出原始订单表
+    gold: {evidence: refuse, requires_database: false, metric_ids: [], state: unauthorized}
+  - id: refuse-forecast
+    stratum: refuse
+    question: 预测下个月的 GMV
+    gold: {evidence: refuse, requires_database: false, metric_ids: [], state: unsupported}
+  - id: refuse-python
+    stratum: refuse
+    question: 运行 Python 给 GMV 做回归
+    gold: {evidence: refuse, requires_database: false, metric_ids: [], state: unsupported}
+
+  # Naming a metric is not permission to open SQL.
+  - id: help-capabilities
+    stratum: tool_free
+    question: 你能做什么
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [], state: help}
+  - id: help-howto
+    stratum: tool_free
+    question: 这个助手怎么用
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [], state: help}
+  - id: define-gmv
+    stratum: tool_free
+    question: GMV是什么
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [gmv], state: catalog_answered}
+  - id: define-review-rate
+    stratum: tool_free
+    question: 好评率的口径是什么
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [positive_review_rate], state: catalog_answered}
+  - id: advice-gmv
+    stratum: tool_free
+    question: 如何提升 GMV
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [gmv], state: general_business}
+  - id: advice-aov
+    stratum: tool_free
+    question: 客单价通常怎么理解
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [average_order_value], state: general_business}
+
+  # Explicit metric, calendar year, and dimension.
+  - id: sql-gmv-year
+    stratum: sql
+    question: 统计 2017 年 GMV
+    gold: {evidence: sql, requires_database: true, metric_ids: [gmv], state: answerable}
+  - id: sql-gmv-state
+    stratum: sql
+    question: 统计 2017 年各州 GMV
+    gold: {evidence: sql, requires_database: true, metric_ids: [gmv], state: answerable}
+  - id: sql-orders-sp
+    stratum: sql
+    question: 统计 2018 年 SP 州的有效订单数
+    gold: {evidence: sql, requires_database: true, metric_ids: [paid_order_count], state: answerable}
+  - id: sql-item-category
+    stratum: sql
+    question: 统计 2017 年各品类商品件数
+    gold: {evidence: sql, requires_database: true, metric_ids: [item_count], state: answerable}
+  - id: sql-delivery-state
+    stratum: sql
+    question: 统计 2017 年各州平均履约天数
+    gold: {evidence: sql, requires_database: true, metric_ids: [average_delivery_days], state: answerable}
+  - id: sql-cancellation-state
+    stratum: sql
+    question: 统计 2017 年各州取消率
+    gold: {evidence: sql, requires_database: true, metric_ids: [cancellation_rate], state: answerable}
+
+  # The metric may already be known. SQL still waits for a calendar range or a named metric.
+  - id: clarify-relative-gmv
+    stratum: clarify
+    question: 本月 GMV 是多少
+    gold: {evidence: clarify, requires_database: false, metric_ids: [gmv], state: missing_time}
+  - id: clarify-recent-freight
+    stratum: clarify
+    question: 最近30天的运费金额
+    gold: {evidence: clarify, requires_database: false, metric_ids: [freight_amount], state: missing_time}
+  - id: clarify-best-region
+    stratum: clarify
+    question: 哪个地区表现最好
+    gold: {evidence: clarify, requires_database: false, metric_ids: [], state: missing_metric}
+  - id: clarify-bare-order
+    stratum: clarify
+    question: 帮我统计一下订单
+    gold: {evidence: clarify, requires_database: false, metric_ids: [], state: missing_metric}
+  - id: clarify-this-year-orders
+    stratum: clarify
+    question: 今年的有效订单数
+    gold: {evidence: clarify, requires_database: false, metric_ids: [paid_order_count], state: missing_time}
+  - id: clarify-gmv-drop
+    stratum: clarify
+    question: 为什么 GMV 下降
+    gold: {evidence: clarify, requires_database: false, metric_ids: [gmv], state: missing_comparison}
+
+  # Colloquial phrases the catalog hint already binds to one metric.
+  - id: colloquial-hottest
+    stratum: colloquial_bound
+    question: 卖得最火的货
+    gold: {evidence: sql, requires_database: true, metric_ids: [item_count], state: answerable}
+  - id: colloquial-hot-year
+    stratum: colloquial_bound
+    question: 统计 2017 年热销商品
+    gold: {evidence: sql, requires_database: true, metric_ids: [item_count], state: answerable}
+  - id: colloquial-most-orders
+    stratum: colloquial_bound
+    question: 哪个州订单最多
+    gold: {evidence: sql, requires_database: true, metric_ids: [paid_order_count], state: answerable}
+  - id: colloquial-most-canceled
+    stratum: colloquial_bound
+    question: 统计 2017 年取消订单最多的州
+    gold: {evidence: sql, requires_database: true, metric_ids: [canceled_order_count], state: answerable}
+  - id: colloquial-best-goods
+    stratum: colloquial_bound
+    question: 各州卖得最好的货
+    gold: {evidence: sql, requires_database: true, metric_ids: [item_count], state: answerable}
+  - id: colloquial-buzz
+    stratum: colloquial_bound
+    question: 统计 2017 年各州火爆的商品
+    gold: {evidence: sql, requires_database: true, metric_ids: [item_count], state: answerable}
+
+  # Colloquial phrases that must not be guessed into a metric or a query.
+  - id: noguess-payment-amount
+    stratum: colloquial_unbound
+    question: 各支付方式的支付金额
+    gold: {evidence: clarify, requires_database: false, metric_ids: [], state: missing_metric}
+  - id: noguess-bare-amount
+    stratum: colloquial_unbound
+    question: 金额最高的州
+    gold: {evidence: clarify, requires_database: false, metric_ids: [], state: missing_metric}
+  - id: noguess-slang-category
+    stratum: colloquial_unbound
+    question: 最能打的品类是什么
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [], state: general_knowledge}
+  - id: noguess-mild-goods
+    stratum: colloquial_unbound
+    question: 卖得还行的商品有哪些
+    gold: {evidence: clarify, requires_database: false, metric_ids: [], state: missing_metric}
+  - id: noguess-sales-advice
+    stratum: colloquial_unbound
+    question: 销量背离了怎么改善
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [item_count], state: general_business}
+  - id: noguess-cancel-advice
+    stratum: colloquial_unbound
+    question: 取消率背离了一般怎么办
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [cancellation_rate], state: general_business}
+
+  # Follow-ups use the trusted summary when it exists, and do not invent one.
+  - id: followup-why-high
+    stratum: followup
+    question: 这个结果为什么这么高
+    conversation_state:
+      previous_result_summary: 已验证摘要：2017 年 GMV 为 100。
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [], state: result_followup}
+  - id: followup-ranking-reasonable
+    stratum: followup
+    question: 刚才排名第一的州，结果是否合理？
+    conversation_state:
+      previous_result_summary: 已验证的州排名摘要。
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [], state: result_followup}
+  - id: followup-why-high-without-summary
+    stratum: followup
+    question: 这个结果为什么这么高
+    gold: {evidence: clarify, requires_database: false, metric_ids: [], state: clarification_required}
+  - id: followup-normal-without-summary
+    stratum: followup
+    question: 上面的数字是否正常
+    gold: {evidence: clarify, requires_database: false, metric_ids: [], state: clarification_required}
+  - id: followup-drilldown-gmv
+    stratum: followup
+    question: 把刚才的 GMV 按州再拆开查一次
+    conversation_state:
+      previous_result_summary: 已验证摘要：2017 年 GMV 为 100。
+    gold: {evidence: sql, requires_database: true, metric_ids: [gmv], state: answerable}
+  - id: followup-why-low
+    stratum: followup
+    question: 上一轮结果为什么这么低
+    conversation_state:
+      previous_result_summary: 已验证摘要：2017 年有效订单数为 10。
+    gold: {evidence: tool_free, requires_database: false, metric_ids: [], state: result_followup}
+
+  # Payment share, order counts, rates, and amounts stay on their own metric ids.
+  - id: split-payment-gmv
+    stratum: metric_split
+    question: 统计 2017 年各支付方式的 GMV
+    gold: {evidence: sql, requires_database: true, metric_ids: [gmv], state: answerable}
+  - id: split-payment-orders
+    stratum: metric_split
+    question: 统计 2017 年各支付方式的有效订单数
+    gold: {evidence: sql, requires_database: true, metric_ids: [paid_order_count], state: answerable}
+  - id: split-review-rate
+    stratum: metric_split
+    question: 统计 2017 年各州好评率
+    gold: {evidence: sql, requires_database: true, metric_ids: [positive_review_rate], state: answerable}
+  - id: split-aov
+    stratum: metric_split
+    question: 统计 2017 年各州客单价
+    gold: {evidence: sql, requires_database: true, metric_ids: [average_order_value], state: answerable}
+  - id: split-freight
+    stratum: metric_split
+    question: 统计 2017 年各州运费金额
+    gold: {evidence: sql, requires_database: true, metric_ids: [freight_amount], state: answerable}
+  - id: split-gmv-and-review
+    stratum: metric_split
+    question: 统计 2017 年各州 GMV 和好评率
+    gold: {evidence: sql, requires_database: true, metric_ids: [gmv, positive_review_rate], state: answerable}

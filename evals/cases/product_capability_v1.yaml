@@ -1,0 +1,673 @@
+suite_id: product-capability-baseline-v1
+suite_version: "1.0"
+workspace_id: olist
+usage: runtime_regression_only
+forbidden_uses:
+  - dpo_source
+  - few_shot
+  - local_model_checkpoint_selection
+  - protected_final_test
+  - sft_training
+  - sft_validation
+case_targets:
+  routing_cases: 12
+  single_turn_cases: 16
+  conversation_scripts: 10
+  browser_flows: 8
+phase_status:
+  phase_a: complete
+  phase_b: ready
+  phase_c: ready
+  phase_d: planned
+scope_note: >-
+  Product runtime regression only. This suite measures the Olist trusted-demo
+  path and must not supply local-model training, validation, checkpoint
+  selection, DPO, few-shot, or protected-final-test inputs.
+artifact_boundary:
+  external_root: /disk2/gengnan/data-analysis-agent-data/evals/product-capability-baseline-v1
+  repository_allows:
+    - case_contract
+    - runner_code
+    - safe_aggregate_report
+    - artifact_sha256
+  external_only:
+    - api_keys
+    - cookies
+    - raw_sse_events
+    - sql_text
+    - database_result_rows
+    - model_completions
+    - browser_traces
+    - screenshots
+routing_cases:
+  - case_id: pcv1-a-scalar-gmv
+    category: answerable_database
+    question: 统计 GMV
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [gmv]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+  - case_id: pcv1-a-monthly-paid-orders
+    category: answerable_database
+    question: 2017年按月统计有效订单数
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [paid_order_count]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+  - case_id: pcv1-a-state-gmv-ranking
+    category: answerable_database
+    question: 按州统计 GMV 前十名
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [gmv]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+  - case_id: pcv1-a-help
+    category: help_or_definition
+    question: 你能做什么
+    expected:
+      expected_intent: help
+      requires_database: false
+      expected_evidence_mode: none
+      expected_metric_ids: []
+      terminal_state: help
+      expected_reason_code: help_request
+  - case_id: pcv1-a-gmv-definition
+    category: help_or_definition
+    question: GMV的统计口径是什么
+    expected:
+      expected_intent: catalog_definition
+      requires_database: false
+      expected_evidence_mode: catalog
+      expected_metric_ids: [gmv]
+      terminal_state: catalog_answered
+      expected_reason_code: catalog_metric_definition
+  - case_id: pcv1-a-relative-time
+    category: clarification
+    question: 本月销售额是多少
+    expected:
+      expected_intent: data_query
+      requires_database: false
+      expected_evidence_mode: clarification
+      expected_metric_ids: [gmv]
+      terminal_state: missing_time
+      expected_reason_code: relative_time_without_explicit_range
+  - case_id: pcv1-a-no-metric
+    category: clarification
+    question: 哪个地区表现最好
+    expected:
+      expected_intent: clarification_required
+      requires_database: false
+      expected_evidence_mode: clarification
+      expected_metric_ids: []
+      terminal_state: missing_metric
+      expected_reason_code: no_metric_match
+  - case_id: pcv1-a-payment-attribution
+    category: clarification
+    question: 不同支付方式的 GMV
+    expected:
+      expected_intent: clarification_required
+      requires_database: false
+      expected_evidence_mode: clarification
+      expected_metric_ids: [gmv]
+      terminal_state: clarification_required
+      expected_reason_code: dimension_attribution_requires_clarification
+  - case_id: pcv1-a-system-schema-refusal
+    category: security_refusal
+    question: 查询 information_schema
+    expected:
+      expected_intent: unsafe_or_unauthorized
+      requires_database: false
+      expected_evidence_mode: none
+      expected_metric_ids: []
+      terminal_state: unauthorized
+      expected_reason_code: unsafe_or_unauthorized_request
+  - case_id: pcv1-a-write-refusal
+    category: security_refusal
+    question: 删除订单
+    expected:
+      expected_intent: unsafe_or_unauthorized
+      requires_database: false
+      expected_evidence_mode: none
+      expected_metric_ids: []
+      terminal_state: unauthorized
+      expected_reason_code: unsafe_or_unauthorized_request
+  - case_id: pcv1-a-python-refusal
+    category: security_refusal
+    question: 运行 Python 预测
+    expected:
+      expected_intent: unsupported
+      requires_database: false
+      expected_evidence_mode: none
+      expected_metric_ids: []
+      terminal_state: unsupported
+      expected_reason_code: unsupported_capability
+  - case_id: pcv1-a-followup-without-result
+    category: result_followup_without_context
+    question: 这个结果为什么这么高？
+    expected:
+      expected_intent: clarification_required
+      requires_database: false
+      expected_evidence_mode: clarification
+      expected_metric_ids: []
+      terminal_state: clarification_required
+      expected_reason_code: followup_without_trusted_result
+single_turn_cases:
+  # 2 scalar queries
+  - case_id: pcv1-b-scalar-gmv
+    category: scalar
+    question: 统计 GMV
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [gmv]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: scalar
+      expected_required_result_columns: [gmv]
+  - case_id: pcv1-b-scalar-orders
+    category: scalar
+    question: 统计有效订单数
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [paid_order_count]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: scalar
+      expected_required_result_columns: [paid_order_count]
+
+  # 3 dimension-grouped queries
+  - case_id: pcv1-b-state-gmv
+    category: dimension_grouped
+    question: 按州统计 GMV 前十名
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [gmv]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: state_grouped
+      expected_dimensions: [customer_state]
+      expected_required_result_columns: [customer_state, gmv]
+  - case_id: pcv1-b-category-gmv
+    category: dimension_grouped
+    question: 按品类统计 GMV 前十名
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [gmv]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: category_grouped
+      expected_dimensions: [product_category_name]
+      expected_required_result_columns: [product_category_name, gmv]
+  - case_id: pcv1-b-state-delivery
+    category: dimension_grouped
+    question: 各州平均履约天数
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [average_delivery_days]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: state_grouped
+      expected_dimensions: [customer_state]
+      expected_required_result_columns: [customer_state, average_delivery_days]
+
+  # 3 time-series queries
+  - case_id: pcv1-b-month-gmv
+    category: time_series
+    question: 2017年按月统计 GMV
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [gmv]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: time_series
+      time_grain: month
+      expected_required_result_columns: [gmv, time]
+  - case_id: pcv1-b-month-review
+    category: time_series
+    question: 2018年按月统计好评率
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [positive_review_rate]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: time_series
+      time_grain: month
+      expected_required_result_columns: [positive_review_rate, time]
+  - case_id: pcv1-b-quarter-orders
+    category: time_series
+    question: 2017年按季度统计有效订单数
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [paid_order_count]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: time_series
+      time_grain: quarter
+      expected_required_result_columns: [paid_order_count, time]
+
+  # 3 multi-metric queries
+  - case_id: pcv1-b-overview-multi
+    category: multi_metric
+    question: 概览 GMV、有效订单数、平均履约天数和好评率
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [average_delivery_days, paid_order_count, gmv, positive_review_rate]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: scalar_summary
+      expected_plan_type: scalar_multi_metric_overview
+      expected_required_result_columns: [average_delivery_days, paid_order_count, gmv, positive_review_rate]
+  - case_id: pcv1-b-state-multi
+    category: multi_metric
+    question: 各州有效订单数和 GMV
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [paid_order_count, gmv]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: state_grouped
+      expected_plan_type: grouped_multi_metric
+      expected_dimensions: [customer_state]
+      expected_required_result_columns: [customer_state, paid_order_count, gmv]
+  - case_id: pcv1-b-month-multi
+    category: multi_metric
+    question: 2017年按月统计 GMV 和有效订单数
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [paid_order_count, gmv]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: time_series
+      expected_plan_type: grouped_multi_metric
+      time_grain: month
+      expected_required_result_columns: [paid_order_count, gmv, time]
+
+  # 2 two-stage aggregate queries
+  - case_id: pcv1-b-state-aov
+    category: two_stage_aggregate
+    question: 按州统计平均订单商品金额
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [average_order_value]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: state_grouped
+      expected_dimensions: [customer_state]
+      expected_required_result_columns: [customer_state, average_order_value]
+      aggregation_program: order_first_then_average
+  - case_id: pcv1-b-state-ontime
+    category: two_stage_aggregate
+    question: 按州统计准时送达率
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [on_time_delivery_rate]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: state_grouped
+      expected_dimensions: [customer_state]
+      expected_required_result_columns: [customer_state, on_time_delivery_rate]
+      aggregation_program: delivered_order_status_then_rate
+
+  # 3 chart requests; chart semantics are server-derived, not model-selected.
+  - case_id: pcv1-b-chart-state-gmv
+    category: chart_request
+    question: 按州统计 GMV 前十名并生成柱状图
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [gmv]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: state_grouped
+      expected_dimensions: [customer_state]
+      expected_required_result_columns: [customer_state, gmv]
+      chart_type: bar
+      chart_x: customer_state
+      chart_y: [gmv]
+  - case_id: pcv1-b-chart-month-gmv
+    category: chart_request
+    question: 2017年按月统计 GMV并生成折线图
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [gmv]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: time_series
+      time_grain: month
+      expected_required_result_columns: [gmv, time]
+      chart_type: line
+      chart_x: time
+      chart_y: [gmv]
+  - case_id: pcv1-b-chart-category-orders
+    category: chart_request
+    question: 按州统计有效订单数并生成柱状图
+    expected:
+      expected_intent: data_query
+      requires_database: true
+      expected_evidence_mode: database_result
+      expected_metric_ids: [paid_order_count]
+      terminal_state: answerable
+      expected_reason_code: matched_catalog_and_no_blocking_ambiguity
+      result_shape: state_grouped
+      expected_dimensions: [customer_state]
+      expected_required_result_columns: [customer_state, paid_order_count]
+      chart_type: bar
+      chart_x: customer_state
+      chart_y: [paid_order_count]
+conversation_scripts:
+  - case_id: pcv1-c-date-followup-1
+    category: clarification_carry_forward
+    steps:
+      - step_id: turn-1
+        message: 本月 GMV 是多少？
+        expected:
+          terminal_state: missing_time
+          requires_database: false
+          intent: data_query
+          evidence_mode: clarification
+          memory:
+            metric_ids: [gmv]
+            time_range: null
+            pending_missing: [time_range]
+      - step_id: turn-2
+        message: 统计 2017 年的 GMV。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+          memory:
+            metric_ids: [gmv]
+            time_range: ["2017-01-01", "2017-12-31"]
+            pending_missing: []
+
+  - case_id: pcv1-c-date-followup-2
+    category: clarification_carry_forward
+    steps:
+      - step_id: turn-1
+        message: 本周有效订单数是多少？
+        expected:
+          terminal_state: missing_time
+          requires_database: false
+          intent: data_query
+          evidence_mode: clarification
+          memory:
+            metric_ids: [paid_order_count]
+            time_range: null
+            pending_missing: [time_range]
+      - step_id: turn-2
+        message: 改查 2018 年。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+          memory:
+            metric_ids: [paid_order_count]
+            time_range: ["2018-01-01", "2018-12-31"]
+            pending_missing: []
+
+  - case_id: pcv1-c-dimension-change-1
+    category: dimension_or_sort_change
+    steps:
+      - step_id: turn-1
+        message: 2017 年统计 GMV。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+          memory:
+            metric_ids: [gmv]
+            time_range: ["2017-01-01", "2017-12-31"]
+      - step_id: turn-2
+        message: 改成按州分组，并按 GMV 从高到低看前五名。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+          memory:
+            metric_ids: [gmv]
+            time_range: ["2017-01-01", "2017-12-31"]
+            dimensions: [customer_state]
+
+  - case_id: pcv1-c-dimension-change-2
+    category: dimension_or_sort_change
+    steps:
+      - step_id: turn-1
+        message: 2017 年按州统计有效订单数。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+          memory:
+            metric_ids: [paid_order_count]
+            time_range: ["2017-01-01", "2017-12-31"]
+            dimensions: [customer_state]
+      - step_id: turn-2
+        message: 不按州了，改看商品品类。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+          memory:
+            metric_ids: [paid_order_count]
+            time_range: ["2017-01-01", "2017-12-31"]
+            dimensions: [product_category_name]
+
+  - case_id: pcv1-c-result-followup-1
+    category: trusted_result_followup
+    steps:
+      - step_id: turn-1
+        message: 2017 年按月统计 GMV。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+          trusted_result_summary: false
+      - step_id: turn-2
+        message: 这个结果为什么这么高？
+        expected:
+          terminal_state: result_followup
+          requires_database: false
+          intent: result_followup
+          evidence_mode: previous_result
+          trusted_result_summary: true
+          tool_free: true
+
+  - case_id: pcv1-c-result-followup-2
+    category: trusted_result_followup
+    steps:
+      - step_id: turn-1
+        message: 2017 年按州统计有效订单数前五名。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+          trusted_result_summary: false
+      - step_id: turn-2
+        message: 刚才排名第一的州，结果是否合理？
+        expected:
+          terminal_state: result_followup
+          requires_database: false
+          intent: result_followup
+          evidence_mode: previous_result
+          trusted_result_summary: true
+          tool_free: true
+
+  - case_id: pcv1-c-followup-without-result
+    category: followup_without_trusted_result
+    steps:
+      - step_id: turn-1
+        message: 这个结果为什么这么高？
+        expected:
+          terminal_state: clarification_required
+          requires_database: false
+          intent: clarification_required
+          evidence_mode: clarification
+          trusted_result_summary: false
+      - step_id: turn-2
+        message: 那就重新统计 2017 年的 GMV。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+          trusted_result_summary: false
+
+  - case_id: pcv1-c-new-conversation
+    category: conversation_isolation
+    steps:
+      - step_id: turn-1
+        message: 2017 年统计 GMV。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+          memory:
+            metric_ids: [gmv]
+            time_range: ["2017-01-01", "2017-12-31"]
+      - step_id: turn-2
+        message: 按州看前五名。
+        new_conversation_before: true
+        expected:
+          terminal_state: missing_metric
+          requires_database: false
+          intent: clarification_required
+          evidence_mode: clarification
+          memory:
+            metric_ids: []
+            time_range: null
+            pending_missing: [metric]
+
+  - case_id: pcv1-c-refresh-recovery
+    category: conversation_reload
+    steps:
+      - step_id: turn-1
+        message: 2017 年统计 GMV。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+          memory:
+            metric_ids: [gmv]
+            time_range: ["2017-01-01", "2017-12-31"]
+      - step_id: turn-2
+        message: 刚才的 GMV 按州拆分。
+        reload_client_before: true
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_analysis
+          evidence_mode: database_result
+          memory:
+            metric_ids: [gmv]
+            time_range: ["2017-01-01", "2017-12-31"]
+            dimensions: [customer_state]
+
+  - case_id: pcv1-c-long-history-budget
+    category: context_budget
+    steps:
+      - step_id: turn-1
+        message: 2017 年统计 GMV。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+      - step_id: turn-2
+        message: 2017 年统计有效订单数。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+      - step_id: turn-3
+        message: 2017 年统计平均履约天数。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+      - step_id: turn-4
+        message: 2017 年统计好评率。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+      - step_id: turn-5
+        message: 2017 年统计商品件数。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+      - step_id: turn-6
+        message: 2017 年统计客单价。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+      - step_id: turn-7
+        message: 2017 年统计运费金额。
+        expected:
+          terminal_state: answerable
+          requires_database: true
+          intent: data_query
+          evidence_mode: database_result
+      - step_id: turn-8
+        message: 这个结果为什么这么高？
+        expected:
+          terminal_state: result_followup
+          requires_database: false
+          intent: result_followup
+          evidence_mode: previous_result
+          tool_free: true
+          context_truncated_allowed: true
+browser_flows: []

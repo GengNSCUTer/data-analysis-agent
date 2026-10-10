@@ -308,6 +308,11 @@ def _risk_tags(spec: QuerySpec, *, structural_focus: bool = False) -> tuple[str,
         tags.add("review_fact_grain")
     if structural_focus:
         tags.add("structural_focus")
+    # An empty list used to mean "ordinary one-metric scalar aggregation".
+    # That is unambiguous but unusable for downstream stratified audits, which
+    # need to distinguish this low-structural-complexity class explicitly.
+    if not tags:
+        tags.add("simple_scalar_aggregation")
     return tuple(sorted(tags))
 
 

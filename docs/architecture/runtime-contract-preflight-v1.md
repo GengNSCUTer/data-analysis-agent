@@ -14,16 +14,36 @@
 1. Candidate SQL and future Gold SQL share a maximum of four requested metrics per query. Requests above that require a smaller query rather than partial metric retrieval.
 2. `seller_id` is never an analyst-visible dimension. Its use remains allowed only inside permitted joins or aggregates under SQL Policy.
 3. `customer_city` is not a supported grouped output until a separate Top-N, ordering, row-budget, and truncation contract exists.
-4. Grouped temporal output must fit the 200-row analyst result budget according to Catalog-declared dimension bounds. When an ISO absolute range is available, preflight uses its conservative inclusive day/week/month/quarter/year bucket count; otherwise it uses the global bound. Daily series additionally require an explicit bounded date range.
+4. Grouped temporal output must fit the configured database execution cap according to Catalog-declared dimension bounds. The protected/default policy cap remains 200 rows; the online Olist composition root uses a 1,000-row execution cap. When an ISO absolute range is available, preflight uses its conservative inclusive day/week/month/quarter/year bucket count; otherwise it uses the global bound. Daily series additionally require an explicit bounded date range.
 5. Exact result columns and value ranges are server-owned contracts. Formula correctness and arbitrary join multiplication remain outside value-only result validation and require deterministic SQL construction plus semantic review.
 
 ## Historical Evaluation Migration
 
-`evals/cases/text_to_sql_v2.yaml` remains a protected `olist-catalog-v1` / `0.1-draft` artifact and is not edited to fit this v2 Catalog. Replaying it against the new runtime yields `57/60` expected matches: `data_014` and `multi_006` now require an unfrozen category-order attribution rule, while `multi_005` is rejected because the conservative `customer_state × month` estimate is `27 × 36 = 972` rows, above the analyst limit of 200. These are explicit contract migrations, not model-quality or v2 regression scores.
+`evals/cases/text_to_sql_v2.yaml` remains a protected `olist-catalog-v1` / `0.1-draft` artifact and is not edited to fit this v2 Catalog. Replaying it against the historical/default 200-row contract yields `57/60` expected matches: `data_014` and `multi_006` now require an unfrozen category-order attribution rule, while `multi_005` is rejected because the conservative `customer_state × month` estimate is `27 × 36 = 972` rows. These are explicit contract migrations, not model-quality or v2 regression scores.
+
+## Execution Cap vs Display Preview
+
+The runtime intentionally separates three states that must not be conflated:
+
+- **Execution cap:** the maximum rows fetched by PostgreSQL. Online Olist uses
+  `1,000` by default (`DATA_ANALYSIS_MAX_ROWS`); reaching this cap remains a
+  `needs_clarification` result because completeness cannot be proven.
+- **Display preview budget:** the UI renders at most `200` rows. A validated
+  201--1,000 row result is still a complete execution and is marked
+  `display_truncated=true`, not an execution failure. The full bounded CSV
+  remains available to the current run's controlled downstream tools.
+- **Chart budget:** `ChartContract.max_rows=200` remains independent. An overly
+  large result may be shown as a table preview while chart generation asks the
+  user to reduce the grouping scope.
+
+Protected TheLook v3 admission/evaluation continues to inject an explicit
+`SqlPolicy(analyst_limit=200)` and `ResultValidator(max_rows=200)`. This keeps its
+200-row complete-denotation release contract unchanged while the online demo no
+longer rejects safe 201--1,000 row grouped queries before SQL generation.
 
 ## Verification Scope
 
 - Unit coverage verifies Catalog fail-closed displayability, router preflight, metric-count refusal, QueryPlan row-shape bounds, ResultContract metadata, ResultValidator exact columns/value ranges, and the SQL Policy's effective row limit.
-- PostgreSQL integration coverage verifies that a SQL Policy-allowed extra result column is refused by the server result contract, and that a query reaching the Policy-added 200-row limit becomes a clarification rather than a partial answer. `SecurePostgresRunner` enables `ResultValidator` by default, so this boundary does not depend on a composition root remembering to inject it.
+- PostgreSQL integration coverage verifies that a SQL Policy-allowed extra result column is refused by the server result contract, and that a query reaching the configured execution limit becomes a clarification rather than a partial answer. Unit coverage separately verifies that 250 rows are valid with a `display_truncated` marker while 1,000 rows remain an execution truncation. `SecurePostgresRunner` enables `ResultValidator` by default, so this boundary does not depend on a composition root remembering to inject it.
 - `PolicyDecision.policy_limit_applied` distinguishes an absent/over-budget SQL `LIMIT` that Policy inserted or tightened from a smaller `LIMIT` already present in candidate SQL. Only the former is deterministic evidence of a policy-truncated answer. An unjustified candidate-side `LIMIT` remains a QueryPlan/renderer semantic risk; this preflight does not claim to solve it.
 - The checks do not prove a metric formula, a generated SQL program, arbitrary join multiplicity, business attribution, or online-model semantic accuracy.

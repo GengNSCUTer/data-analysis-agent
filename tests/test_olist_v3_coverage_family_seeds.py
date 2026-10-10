@@ -13,6 +13,10 @@ from scripts.post_training.data.build_olist_v3_coverage_family_seeds import (
     MIN_NEW_METRIC_FAMILY_COVERAGE,
     NEW_METRICS,
     SEED_SCHEMA_VERSION,
+    _risk_tags as seed_risk_tags,
+)
+from scripts.post_training.data.build_olist_v3_balanced_release_candidates import (
+    _risk_tags as release_risk_tags,
 )
 from scripts.post_training.data.materialize_olist_queryspecs import family_id, family_payload
 
@@ -127,3 +131,12 @@ def test_family_payload_keeps_v2_identity_stable_and_labels_v3_contract() -> Non
     assert family_id(v2_spec) == "family_400f815c189fe49ae02692f9"
     assert family_payload(v3_spec)["aggregation_contract"] == "olist-metrics-0.3-proposal"
     assert family_id(v3_spec) != family_id(v2_spec)
+
+
+def test_simple_scalar_aggregation_has_an_explicit_risk_stratum() -> None:
+    """Future Olist builders must not recreate blank risk-tag lists."""
+
+    spec = QuerySpec.create(metric_ids=("gmv",), result_shape="scalar")
+
+    assert seed_risk_tags(spec) == ("simple_scalar_aggregation",)
+    assert release_risk_tags(spec) == ("simple_scalar_aggregation",)

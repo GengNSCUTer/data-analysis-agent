@@ -507,6 +507,9 @@ export class DataFrameComponentRenderer extends BaseComponentRenderer {
       description,
       row_count = 0,
       column_count = 0,
+      total_row_count,
+      preview_row_count,
+      display_truncated = false,
       max_rows_displayed = 100,
       searchable = true,
       sortable = true,
@@ -520,7 +523,17 @@ export class DataFrameComponentRenderer extends BaseComponentRenderer {
 
     // Limit displayed rows
     const displayedData = data.slice(0, max_rows_displayed);
-    const hasMoreRows = data.length > max_rows_displayed;
+    // Prefer the server-owned presenter contract while retaining compatibility
+    // with older DataFrame components that only supplied row_count.
+    const totalRowCount = Number.isFinite(Number(total_row_count))
+      ? Number(total_row_count)
+      : Number(row_count);
+    const previewRowCount = Number.isFinite(Number(preview_row_count))
+      ? Number(preview_row_count)
+      : displayedData.length;
+    const isDisplayTruncated = Boolean(display_truncated)
+      || previewRowCount < totalRowCount;
+    const hasMoreRows = isDisplayTruncated || data.length > max_rows_displayed;
 
     let headerHTML = '';
     if (title || description) {
@@ -529,7 +542,7 @@ export class DataFrameComponentRenderer extends BaseComponentRenderer {
           ${title ? `<h3 class="dataframe-title">${title}</h3>` : ''}
           ${description ? `<p class="dataframe-description">${description}</p>` : ''}
           <div class="dataframe-meta">
-            <span class="row-count">${row_count} rows</span>
+            <span class="row-count">${isDisplayTruncated ? `${previewRowCount} / ${totalRowCount} rows` : `${totalRowCount} rows`}</span>
             <span class="column-count">${column_count} columns</span>
           </div>
         </div>
@@ -589,7 +602,7 @@ export class DataFrameComponentRenderer extends BaseComponentRenderer {
           </table>
           ${hasMoreRows ? `
             <div class="dataframe-truncated">
-              <em>Showing ${max_rows_displayed} of ${row_count} rows</em>
+              <em>Showing ${previewRowCount} of ${totalRowCount} rows</em>
             </div>
           ` : ''}
         </div>
@@ -816,6 +829,14 @@ export class TextComponentRenderer extends BaseComponentRenderer {
 
 
     return container;
+  }
+
+  update(element: HTMLElement, component: RichComponent): void {
+    // Keep the same DOM node. Replacing it would drop the manager's element
+    // map, so later token updates would paint into a detached node.
+    const fresh = this.render(component);
+    element.className = fresh.className;
+    element.innerHTML = fresh.innerHTML;
   }
 
   private escapeHtml(text: string): string {

@@ -23,6 +23,7 @@ from transformers import (
     AutoTokenizer,
     BitsAndBytesConfig,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
     set_seed,
 )
@@ -137,6 +138,15 @@ def load_rows(path: Path, expected_split: str) -> list[dict[str, Any]]:
     for row in rows:
         if row.get("split", {}).get("name") != expected_split:
             raise ValueError(f"{row['sample_id']} is not in expected {expected_split} split")
+        # The multi-schema release carries its completed deterministic
+        # admission in the release manifest plus row-level admitted status;
+        # it deliberately does not duplicate database result evidence into
+        # every training row.
+        if (
+            row.get("prompt_format_version") == "multi-schema-sql-only-v1"
+            and row.get("admission_status") == "admitted"
+        ):
+            continue
         outcome = row.get("execution_outcome", {})
         if not isinstance(outcome, dict):
             raise ValueError(f"{row['sample_id']} lacks execution evidence")
@@ -164,6 +174,10 @@ def validate_split_audit(
     audit: dict[str, Any], train_path: Path, validation_path: Path
 ) -> None:
     """校验已知数据协议的切分审计与当前训练输入一致。"""
+
+    if audit.get("release_version") == "multi-schema-ecommerce-sql-only-sft-v1-r1":
+        validate_multi_schema_release_manifest(audit, train_path, validation_path)
+        return
 
     checks = audit.get("checks")
     if not isinstance(checks, dict) or checks.get("status") != "pass":
@@ -212,6 +226,56 @@ def validate_split_audit(
                 f"expected {expected_rows}, got {actual_rows}"
             )
     validate_materialized_length_contract(audit)
+
+
+def validate_multi_schema_release_manifest(
+    manifest: dict[str, Any], train_path: Path, validation_path: Path
+) -> None:
+    """Bind training to the immutable Olist+TheLook release rather than an old split audit."""
+
+    checks = manifest.get("checks")
+    outputs = manifest.get("outputs")
+    tokenizer = manifest.get("tokenizer")
+    split_audit = manifest.get("split_audit")
+    if not all(isinstance(value, dict) for value in (checks, outputs, tokenizer, split_audit)):
+        raise ValueError("multi-schema release manifest lacks required audit sections")
+    required_checks = (
+        "all_rows_admitted_before_question_materialization",
+        "eight_variants_one_primary_question",
+        "protected_tests_not_training_sources",
+        "questions_have_no_sql_hash_or_result_leakage",
+        "tokenizer_length_audited",
+    )
+    if checks.get("status") != "pass" or checks.get("silent_truncation") is not False:
+        raise ValueError("multi-schema release did not pass its admission audit")
+    if any(checks.get(name) is not True for name in required_checks):
+        raise ValueError("multi-schema release is missing a required quality check")
+    if checks.get("query_spec_gold_question_cross_split_overlap") is not False:
+        raise ValueError("multi-schema release has a cross-split identity collision")
+    if tokenizer.get("max_seq_length") != 3072 or tokenizer.get("silent_truncation") is not False:
+        raise ValueError("multi-schema release has an invalid tokenizer length contract")
+    for name, path, expected_rows in (
+        ("train", train_path, 6000),
+        ("validation", validation_path, 1500),
+    ):
+        metadata = outputs.get(name)
+        stats = split_audit.get(name)
+        if not isinstance(metadata, dict) or not isinstance(stats, dict):
+            raise ValueError(f"multi-schema release lacks {name} metadata")
+        if metadata.get("rows") != expected_rows or stats.get("rows") != expected_rows:
+            raise ValueError(f"multi-schema {name} row count drift")
+        if metadata.get("sha256") != sha256_file(path):
+            raise ValueError(f"multi-schema {name} hash drift")
+        if stats.get("by_workspace") != {"olist": expected_rows // 2, "thelook": expected_rows // 2}:
+            raise ValueError(f"multi-schema {name} workspace balance drift")
+        variants = stats.get("by_primary_variant")
+        if not isinstance(variants, dict) or set(variants) != {f"v{i}" for i in range(1, 9)}:
+            raise ValueError(f"multi-schema {name} does not preserve the v1-v8 surface contract")
+        if sum(variants.values()) != expected_rows:
+            raise ValueError(f"multi-schema {name} primary variant count drift")
+        sequence = stats.get("sequence_tokens")
+        if not isinstance(sequence, dict) or sequence.get("max", 0) > 3072:
+            raise ValueError(f"multi-schema {name} exceeds the frozen length contract")
 
 
 def validate_spider_candidate_audit(checks: dict[str, Any], policy: dict[str, Any]) -> None:
@@ -499,6 +563,46 @@ class CausalSqlCollator:
         return {name: torch.stack(values) for name, values in batch.items()}
 
 
+class FinalAdapterSnapshotCallback(TrainerCallback):
+    """Capture the actual final-step LoRA weights before best-model reload.
+
+    ``Trainer(load_best_model_at_end=True)`` replaces the in-memory model with
+    the best checkpoint before ``train()`` returns.  A callback at the final
+    optimizer step is therefore the only reliable place to retain the final
+    adapter for an explicit final-vs-best comparison.
+    """
+
+    def __init__(self, output_dir: Path) -> None:
+        self.output_dir = output_dir
+        self.captured_step: int | None = None
+
+    def on_step_end(self, args: TrainingArguments, state: Any, control: Any, **kwargs: Any) -> Any:
+        del args
+        model = kwargs.get("model")
+        if model is None or state.global_step <= 0 or state.global_step != state.max_steps:
+            return control
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        model.save_pretrained(str(self.output_dir))
+        self.captured_step = int(state.global_step)
+        return control
+
+
+def validate_checkpoint_intervals(evaluation_steps: int, save_steps: int) -> None:
+    """Require every validation point to have a matching checkpoint.
+
+    The SQL-only contract selects the best checkpoint by ``eval_loss``.  Equal
+    intervals make that selection unambiguous and prevent an evaluated step
+    from being discarded before ``load_best_model_at_end`` can restore it.
+    """
+    if evaluation_steps <= 0 or save_steps <= 0:
+        raise ValueError("evaluation and save intervals must be positive")
+    if evaluation_steps != save_steps:
+        raise ValueError(
+            "validation-best selection requires save_steps == evaluation_steps; "
+            "otherwise the best evaluation point may have no checkpoint"
+        )
+
+
 def count_parameters(model: torch.nn.Module) -> tuple[int, int]:
     """统计可训练参数 / 模型全部参数，用来输出LoRA占比"""
     total = sum(parameter.numel() for parameter in model.parameters())
@@ -510,6 +614,24 @@ def latest_metric(log_history: list[dict[str, Any]], key: str) -> float | None:
     """从Trainer日志历史取出最新一条指标，用于审计报告"""
     values = [item[key] for item in log_history if key in item]
     return float(values[-1]) if values else None
+
+
+def checkpoint_step(checkpoint: str | Path | None) -> int | None:
+    """Extract the optimizer step from a ``checkpoint-N`` path.
+
+    ``TrainerState.best_global_step`` is not present in every supported
+    Transformers release, while ``best_model_checkpoint`` is persisted by
+    all of them.  Evidence should therefore derive the step from the stable
+    checkpoint path and remain compatible across environments.
+    """
+    if checkpoint is None:
+        return None
+    name = Path(checkpoint).name
+    prefix = "checkpoint-"
+    if not name.startswith(prefix):
+        return None
+    value = name[len(prefix) :]
+    return int(value) if value.isdigit() else None
 
 
 def current_gpu_identity() -> tuple[Any, str]:
@@ -547,6 +669,7 @@ def main() -> int:
         raise ValueError("max steps must be positive when epochs are not configured")
     if args.num_train_epochs is not None and args.num_train_epochs <= 0:
         raise ValueError("num train epochs must be positive")
+    validate_checkpoint_intervals(args.evaluation_steps, args.save_steps)
     if min(
         args.gradient_accumulation_steps,
         args.per_device_train_batch_size,
@@ -603,6 +726,8 @@ def main() -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = args.output_dir / "adapter_checkpoints"
+    final_adapter_dir = args.output_dir / "adapter_final"
+    best_adapter_dir = args.output_dir / "adapter_best"
 
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
@@ -670,6 +795,9 @@ def main() -> int:
         save_strategy="steps",
         save_steps=args.save_steps,
         save_total_limit=2,  # 最多保存2个checkpoint，防止磁盘爆满
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         bf16=True,
         tf32=True,
         # bf16 LoRA 的默认优化器不量化 optimizer state；QLoRA 历史模式仍使用 paged AdamW。
@@ -691,6 +819,7 @@ def main() -> int:
         train_dataset=train_dataset,
         eval_dataset=validation_dataset,
         data_collator=CausalSqlCollator(tokenizer.pad_token_id),
+        callbacks=[FinalAdapterSnapshotCallback(final_adapter_dir)],
     )
 
     started = datetime.now(timezone.utc)
@@ -698,12 +827,22 @@ def main() -> int:
     train_result = trainer.train(
         resume_from_checkpoint=(str(args.resume_from_checkpoint) if args.resume_from_checkpoint else None)
     )
-    # 训练结束后跑一次验证集评估
+    if not final_adapter_dir.is_dir():
+        raise RuntimeError(
+            "final adapter snapshot was not captured at the last optimizer step; "
+            "refuse to publish a best-vs-final comparison"
+        )
+    best_checkpoint = trainer.state.best_model_checkpoint
+    if best_checkpoint is None or not Path(best_checkpoint).is_dir():
+        raise RuntimeError(
+            "no persisted validation-best checkpoint was produced; "
+            "increase training steps or evaluate/save more frequently"
+        )
+    # Trainer 已在 train() 返回前恢复 validation-best 权重；单独保存该产物。
+    trainer.save_model(str(best_adapter_dir))
+    # 训练结束后跑一次验证集评估，评估对象明确是 best adapter。
     evaluation = trainer.evaluate()
 
-    # 保存最终LoRA适配器权重
-    adapter_dir = args.output_dir / "adapter_final"
-    trainer.save_model(str(adapter_dir))
     trainer.save_state()
 
     elapsed_seconds = (datetime.now(timezone.utc) - started).total_seconds()
@@ -769,6 +908,21 @@ def main() -> int:
             "last_logged_train_loss": latest_metric(trainer.state.log_history, "loss"),
             "evaluation_loss": float(evaluation["eval_loss"]),
             "elapsed_seconds": elapsed_seconds,
+            "checkpoint_selection": {
+                "metric": "eval_loss",
+                "direction": "min",
+                "load_best_model_at_end": True,
+                "best_metric": (
+                    float(trainer.state.best_metric)
+                    if trainer.state.best_metric is not None
+                    else None
+                ),
+                "best_global_step": checkpoint_step(best_checkpoint),
+                "best_model_checkpoint": best_checkpoint,
+                "final_global_step": int(trainer.state.global_step),
+                "final_adapter_dir": str(final_adapter_dir),
+                "best_adapter_dir": str(best_adapter_dir),
+            },
         },
         "gpu": {
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
@@ -786,7 +940,9 @@ def main() -> int:
             "bitsandbytes": __import__("bitsandbytes").__version__,
         },
         "outputs": {
-            "adapter_dir": str(adapter_dir),
+            "adapter_dir": str(best_adapter_dir),
+            "adapter_best_dir": str(best_adapter_dir),
+            "adapter_final_dir": str(final_adapter_dir),
             "checkpoint_dir": str(checkpoint_dir),
             "adapter_is_lora_only": True,
             "production_postgres_or_vanna_modified": False,

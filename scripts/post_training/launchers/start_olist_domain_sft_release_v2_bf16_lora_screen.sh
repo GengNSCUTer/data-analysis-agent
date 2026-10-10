@@ -55,7 +55,7 @@ nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total,utilization.gpu 
   --gradient-accumulation-steps 4 \
   --per-device-eval-batch-size 1 \
   --evaluation-steps 150 \
-  --save-steps 300 \
+  --save-steps 150 \
   --logging-steps 10 \
   --lora-r 16 \
   --lora-alpha 32 \

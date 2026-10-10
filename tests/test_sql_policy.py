@@ -44,6 +44,20 @@ def test_policy_normalizes_tokenization_failures_to_policy_violations(
         policy.evaluate(sql, role="analyst")
 
 
+def test_policy_normalizes_recursive_parser_failures_to_policy_violations(
+    policy: SqlPolicy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One pathological model completion must not abort the whole batch."""
+
+    def recurse(_: str, *, read: str) -> list[object]:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr("data_analysis_agent.sql_policy.parse", recurse)
+
+    with pytest.raises(PolicyViolation, match="SQL parse failed"):
+        policy.evaluate("SELECT 1 FROM fact_orders", role="analyst")
+
+
 def test_policy_qualifies_tables_and_adds_analyst_limit(policy: SqlPolicy) -> None:
     decision = policy.evaluate(
         "SELECT customer_state, COUNT(order_id) AS orders "
@@ -77,6 +91,14 @@ def test_policy_keeps_a_smaller_explicit_limit_distinct_from_a_policy_cap(
 
     assert decision.row_limit == 5
     assert decision.policy_limit_applied is False
+
+
+def test_online_policy_can_use_1000_row_execution_cap_without_changing_protected_default() -> None:
+    online = SqlPolicy(analyst_limit=1_000, admin_limit=1_000)
+    decision = online.evaluate("SELECT customer_state FROM dim_customers", role="analyst")
+
+    assert decision.row_limit == 1_000
+    assert decision.final_sql.endswith("LIMIT 1000")
 
 
 def test_policy_allows_count_of_join_key_but_not_raw_identifier(policy: SqlPolicy) -> None:
@@ -192,3 +214,25 @@ def test_policy_allows_sensitive_join_keys_inside_scalar_subqueries(
         policy.evaluate(
             "SELECT (SELECT order_id FROM fact_orders) AS leaked_order_id"
         )
+
+
+def test_execution_probe_discards_the_extra_cap_row() -> None:
+    from data_analysis_agent.postgres_runner import cap_probed_rows, execution_probe
+
+    unchanged, count = execution_probe("SELECT 1 LIMIT 20", 20, policy_limit_applied=False)
+    assert count == 20
+    assert "1001" not in unchanged
+
+    probed, count = execution_probe("SELECT 1 LIMIT 1000", 1000, policy_limit_applied=True)
+    assert count == 1001
+    assert "1001" in probed
+
+    extra = [{"n": index} for index in range(1001)]
+    kept, truncated = cap_probed_rows(extra, 1000, policy_limit_applied=True)
+    assert truncated is True
+    assert len(kept) == 1000
+    assert kept[-1]["n"] == 999
+
+    exact, truncated = cap_probed_rows(extra[:1000], 1000, policy_limit_applied=True)
+    assert truncated is False
+    assert len(exact) == 1000

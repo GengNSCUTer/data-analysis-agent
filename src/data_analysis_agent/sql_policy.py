@@ -74,7 +74,12 @@ SENSITIVE_PROJECTION_COLUMNS: Final[frozenset[str]] = frozenset(
         "dataset_version_id", "archive_sha256", "source_url",
     }
 )
-DEFAULT_ANALYST_RESULT_LIMIT: Final[int] = 200
+# The 200-row value is retained as the protected/default policy cap for
+# offline contracts. Online composition roots may explicitly raise the
+# execution cap to 1,000; the UI still keeps its separate 200-row preview.
+DISPLAY_RESULT_ROW_BUDGET: Final[int] = 200
+DEFAULT_ANALYST_EXECUTION_LIMIT: Final[int] = 1_000
+DEFAULT_ANALYST_RESULT_LIMIT: Final[int] = DISPLAY_RESULT_ROW_BUDGET
 DEFAULT_ADMIN_RESULT_LIMIT: Final[int] = 1_000
 FORBIDDEN_FUNCTIONS: Final[frozenset[str]] = frozenset(
     {"PG_SLEEP", "PG_READ_FILE", "PG_READ_BINARY_FILE", "LO_IMPORT", "DBLINK", "SET_CONFIG"}
@@ -133,7 +138,11 @@ class SqlPolicy:
             raise PolicyViolation("SQL must not be empty")
         try:
             statements = [statement for statement in parse(sql, read="postgres") if statement]
-        except (ParseError, TokenError) as exc:
+        # Model output can also construct a syntactically pathological nesting
+        # shape that overflows sqlglot's recursive parser. Treat it as the same
+        # untrusted parse failure as malformed/truncated SQL: reject this one
+        # candidate and let an offline batch continue with the next record.
+        except (ParseError, TokenError, RecursionError) as exc:
             raise PolicyViolation(f"SQL parse failed: {exc}") from exc
         if len(statements) != 1:
             raise PolicyViolation("exactly one SQL statement is allowed")

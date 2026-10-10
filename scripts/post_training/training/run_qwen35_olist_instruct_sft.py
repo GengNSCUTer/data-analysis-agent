@@ -45,9 +45,12 @@ from data_analysis_agent.qwen35_sft_training import (
     select_bounded_rows,
 )
 from scripts.post_training.training.run_post_training_sft_smoke import (
+    FinalAdapterSnapshotCallback,
+    checkpoint_step,
     load_rows,
     sha256_file,
     validate_split_audit,
+    validate_checkpoint_intervals,
 )
 
 
@@ -133,7 +136,28 @@ def validate_layout_audit(
     manifest = _read_json(model_dir / "download_manifest.json", "Qwen3.5 model manifest")
     if not all(isinstance(value, dict) for value in (template, model, source, splits)):
         raise Qwen35SftFormatError("layout audit lacks template, model, source, or split evidence")
-    if (
+    if layout.get("report_schema_version") == "qwen35-multi-schema-sql-only-layout-audit-v1":
+        if (
+            template.get("version") != QWEN35_OLIST_SFT_TEMPLATE_VERSION
+            or template.get("official_chat_template") is not True
+            or template.get("enable_thinking") is not False
+            or template.get("silent_truncation") is not False
+            or model.get("id") != expected_model_id
+            or model.get("id") != manifest.get("model_id")
+            or model.get("revision") != manifest.get("revision")
+            or model.get("download_manifest_sha256") != sha256_file(model_dir / "download_manifest.json")
+            or source.get("train_jsonl_sha256") != sha256_file(train_jsonl)
+            or source.get("validation_jsonl_sha256") != sha256_file(validation_jsonl)
+            or source.get("release_manifest_sha256") != sha256_file(split_audit)
+            or source.get("workspace_balance") != {"olist": 0.5, "thelook": 0.5}
+            or source.get("protected_tests_forbidden_for_training") is not True
+            or layout.get("max_seq_length") != max_seq_length
+        ):
+            raise Qwen35SftFormatError("layout audit differs from frozen multi-schema training inputs")
+        expected_rows_by_split = (("train", 6000), ("validation", 1500))
+    else:
+        expected_rows_by_split = (("train", 2400), ("validation", 600))
+    if layout.get("report_schema_version") != "qwen35-multi-schema-sql-only-layout-audit-v1" and (
         layout.get("report_schema_version") != "qwen35-olist-sft-layout-audit-v1"
         or template.get("version") != QWEN35_OLIST_SFT_TEMPLATE_VERSION
         or template.get("official_chat_template") is not True
@@ -151,7 +175,7 @@ def validate_layout_audit(
         or layout.get("max_seq_length") != max_seq_length
     ):
         raise Qwen35SftFormatError("layout audit differs from frozen Qwen3.5 training inputs")
-    for split_name, expected_rows in (("train", 2400), ("validation", 600)):
+    for split_name, expected_rows in expected_rows_by_split:
         stats = splits.get(split_name)
         if (
             not isinstance(stats, dict)
@@ -273,6 +297,12 @@ def main() -> int:
         raise Qwen35SftFormatError("set exactly one of positive max steps or num train epochs")
     if args.num_train_epochs is not None:
         _positive(args.num_train_epochs, "num train epochs")
+    # The final test may never choose a checkpoint.  Enforce a persisted
+    # checkpoint at every validation point so `adapter_best` is reproducible.
+    try:
+        validate_checkpoint_intervals(args.evaluation_steps, args.save_steps)
+    except ValueError as exc:
+        raise Qwen35SftFormatError(str(exc)) from exc
     if not torch.cuda.is_available():
         raise Qwen35SftFormatError("CUDA is required for Qwen3.5 SFT")
     gpu, gpu_uuid = current_gpu_identity()
@@ -362,6 +392,8 @@ def main() -> int:
         raise Qwen35SftFormatError("LoRA injection did not leave a frozen base with trainable adapters")
 
     checkpoint_dir = output_dir / "adapter_checkpoints"
+    final_adapter_dir = output_dir / "adapter_final"
+    best_adapter_dir = output_dir / "adapter_best"
     training_args = TrainingArguments(
         output_dir=str(checkpoint_dir),
         do_train=True,
@@ -381,6 +413,9 @@ def main() -> int:
         save_strategy="steps",
         save_steps=args.save_steps,
         save_total_limit=2,
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         bf16=True,
         tf32=True,
         optim="adamw_torch",
@@ -400,15 +435,28 @@ def main() -> int:
         train_dataset=train_dataset,
         eval_dataset=validation_dataset,
         data_collator=collator,
+        callbacks=[FinalAdapterSnapshotCallback(final_adapter_dir)],
     )
     started_at = datetime.now(timezone.utc)
     train_result = trainer.train()
+    if not final_adapter_dir.is_dir():
+        raise Qwen35SftFormatError(
+            "final adapter snapshot was not captured before validation-best reload"
+        )
+    best_checkpoint = trainer.state.best_model_checkpoint
+    if best_checkpoint is None or not Path(best_checkpoint).is_dir():
+        raise Qwen35SftFormatError("no persisted validation-best checkpoint was produced")
+    # Trainer has restored validation-best weights at this point.  This is the
+    # only artifact later final-test launchers are permitted to load.
+    trainer.save_model(str(best_adapter_dir))
     evaluation = trainer.evaluate()
-    adapter_dir = output_dir / "adapter_final"
-    trainer.save_model(str(adapter_dir))
     trainer.save_state()
     global_step = int(trainer.state.global_step)
     last_logged_train_loss = latest_metric(trainer.state.log_history, "loss")
+    best_metric = (
+        float(trainer.state.best_metric) if trainer.state.best_metric is not None else None
+    )
+    best_global_step = checkpoint_step(best_checkpoint)
 
     # A successful Trainer save is insufficient evidence: reload the adapter
     # into a fresh bf16 base and prove one masked validation forward is finite.
@@ -417,7 +465,7 @@ def main() -> int:
     gc.collect()
     torch.cuda.empty_cache()
     reload_base = _load_base_model(args.model_dir)
-    reloaded = PeftModel.from_pretrained(reload_base, adapter_dir, is_trainable=False)
+    reloaded = PeftModel.from_pretrained(reload_base, best_adapter_dir, is_trainable=False)
     reloaded.eval()
     with torch.no_grad():
         reloaded_output = reloaded(**reload_batch)
@@ -469,6 +517,13 @@ def main() -> int:
             "optimizer_state_quantized": False,
             "weight_decay": args.weight_decay,
             "gradient_checkpointing": True,
+            "checkpoint_selection": {
+                "metric": "eval_loss",
+                "direction": "min",
+                "load_best_model_at_end": True,
+                "evaluation_steps": args.evaluation_steps,
+                "save_steps": args.save_steps,
+            },
             "compute_dtype": "bfloat16",
             "lora_r": args.lora_r,
             "lora_alpha": args.lora_alpha,
@@ -485,6 +540,12 @@ def main() -> int:
             "last_logged_train_loss": last_logged_train_loss,
             "evaluation_loss": float(evaluation["eval_loss"]),
             "fresh_reload_finite_loss": reload_loss,
+            "best_metric": best_metric,
+            "best_global_step": best_global_step,
+            "best_model_checkpoint": best_checkpoint,
+            "final_global_step": global_step,
+            "adapter_best_dir": str(best_adapter_dir),
+            "adapter_final_dir": str(final_adapter_dir),
             "elapsed_seconds": elapsed_seconds,
         },
         "gpu": {

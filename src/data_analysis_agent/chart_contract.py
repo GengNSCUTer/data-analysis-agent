@@ -1,10 +1,10 @@
 """Server-owned contracts for charts built from trusted SQL result artifacts.
 
-The language model may request a visualization tool call, but it does not get
-to choose the chart semantics.  This module derives a small, deterministic
-contract from the already server-owned :class:`QueryPlan` and
-:class:`ResultContract`.  The visualization tool validates the current SQL
-artifact against this contract and renders it without display-time aggregation.
+The language model generates at most one candidate SQL statement.  It does not
+choose chart semantics: this module derives a deterministic contract from the
+already server-owned :class:`QueryPlan` and :class:`ResultContract`, then the
+server renders only the current validated result artifact without display-time
+aggregation.
 """
 
 from __future__ import annotations
@@ -19,27 +19,47 @@ from .query_plan import QueryPlan
 from .semantic_catalog import ResultContract
 
 
-CHART_CONTRACT_VERSION = "chart-contract-v1"
+CHART_CONTRACT_VERSION = "chart-contract-v2"
 ChartStatus = Literal[
     "not_requested",
     "valid",
     "clarification_required",
     "unsupported",
 ]
-ChartType = Literal["bar", "line"]
+ChartType = Literal["bar", "horizontal_bar", "line", "area", "donut"]
+
+_CHART_TYPES = frozenset({"bar", "horizontal_bar", "line", "area", "donut"})
 
 _VISUALIZATION_REQUEST = re.compile(
-    r"图表|图形|可视化|柱状图|条形图|折线图|曲线图|饼图|散点图|热力图|地图|画图|绘图"
+    r"图表|图形|可视化|柱状图|条形图|横向条形图|横向柱状图|水平条形图|"
+    r"折线图|曲线图|面积图|饼图|环形图|甜甜圈图|占比构成|散点图|热力图|地图|画图|绘图"
 )
-_BAR_REQUEST = re.compile(r"柱状图|条形图")
+_BAR_REQUEST = re.compile(r"(?<!横向)(?<!水平)(?<!竖向)(?<!纵向)柱状图|竖向柱状图|纵向柱状图")
+_HORIZONTAL_BAR_REQUEST = re.compile(r"横向条形图|横向柱状图|水平条形图|条形图")
 _LINE_REQUEST = re.compile(r"折线图|曲线图")
+_AREA_REQUEST = re.compile(r"面积图|面积趋势图")
+_DONUT_REQUEST = re.compile(r"饼图|环形图|甜甜圈图|占比构成")
+_DONUT_COMPATIBLE_METRICS = frozenset(
+    {
+        "gmv",
+        "paid_order_count",
+        "item_count",
+        "freight_amount",
+        "canceled_order_count",
+        "delivered_order_count",
+        "unavailable_order_count",
+        "review_count",
+    }
+)
 _UNSUPPORTED_REQUESTS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"饼图"), "饼图"),
     (re.compile(r"散点图"), "散点图"),
     (re.compile(r"热力图"), "热力图"),
     (re.compile(r"地图|地理图|地图可视化"), "地图"),
     (re.compile(r"雷达图"), "雷达图"),
-    (re.compile(r"面积图"), "面积图"),
+    (re.compile(r"直方图|分布图"), "直方图"),
+    (re.compile(r"漏斗图"), "漏斗图"),
+    (re.compile(r"瀑布图"), "瀑布图"),
+    (re.compile(r"堆叠柱状图|堆叠条形图"), "堆叠图"),
 )
 
 
@@ -106,14 +126,24 @@ class ChartContract:
                 f"当前受控图表仅支持柱状图和折线图；不能把你请求的{unsupported}静默替换为其他图表。",
             )
 
-        explicit_bar = bool(_BAR_REQUEST.search(question))
-        explicit_line = bool(_LINE_REQUEST.search(question))
-        if explicit_bar and explicit_line:
+        explicit_types = tuple(
+            chart_type
+            for chart_type, pattern in (
+                ("bar", _BAR_REQUEST),
+                ("horizontal_bar", _HORIZONTAL_BAR_REQUEST),
+                ("line", _LINE_REQUEST),
+                ("area", _AREA_REQUEST),
+                ("donut", _DONUT_REQUEST),
+            )
+            if pattern.search(question)
+        )
+        if len(explicit_types) > 1:
             return cls._blocked(
                 "clarification_required",
                 allowed,
-                "请只指定一种图表类型：柱状图或折线图。",
+                "请只指定一种图表类型：柱状图、横向条形图、折线图、面积图或环形图。",
             )
+        requested_type = explicit_types[0] if explicit_types else None
 
         dimensions = query_plan.dimensions
         if len(dimensions) > 2 or (query_plan.time_grain and len(dimensions) > 1):
@@ -123,18 +153,51 @@ class ChartContract:
                 "当前一次图表最多支持一个时间轴和一个业务分组维度；请缩小分组范围后重试。",
             )
 
-        if explicit_line and not query_plan.time_grain:
+        if requested_type == "line" and not query_plan.time_grain:
             return cls._blocked(
                 "clarification_required",
                 allowed,
                 "折线图需要明确的时间粒度；请补充按年、季度、月、周或日汇总。",
             )
+        if requested_type == "area" and (
+            not query_plan.time_grain
+            or query_plan.dimensions
+            or len(query_plan.metric_ids) != 1
+        ):
+            return cls._blocked(
+                "clarification_required",
+                allowed,
+                "面积图仅支持一个指标、无业务分组的时间序列；请补充时间粒度并缩小为单指标趋势。",
+            )
+        if requested_type == "horizontal_bar" and query_plan.time_grain:
+            return cls._blocked(
+                "clarification_required",
+                allowed,
+                "横向条形图需要一个业务分组横轴，不能用于时间序列；请改用折线图、面积图或柱状图。",
+            )
+        if requested_type == "donut":
+            if query_plan.time_grain or len(dimensions) != 1 or len(query_plan.metric_ids) != 1:
+                return cls._blocked(
+                    "clarification_required",
+                    allowed,
+                    "环形图仅支持一个可汇总业务维度和一个指标，不能混用时间轴、多指标或多分组。",
+                )
+            if query_plan.metric_ids[0] not in _DONUT_COMPATIBLE_METRICS:
+                return cls._blocked(
+                    "unsupported",
+                    allowed,
+                    "当前环形图只支持可相加的金额或数量指标，不能把比率、均值或时长解释成构成占比。",
+                )
         if query_plan.time_grain:
             chart_type: ChartType = "line"
             x_column = "time"
             series = dimensions[0] if dimensions else None
         elif dimensions:
-            chart_type = "bar"
+            chart_type = (
+                "horizontal_bar"
+                if dimensions[0] == "product_category_name"
+                else "bar"
+            )
             x_column = dimensions[0]
             series = dimensions[1] if len(dimensions) == 2 else None
         else:
@@ -144,10 +207,8 @@ class ChartContract:
                 "图表需要横轴。请补充时间粒度或一个可汇总的业务维度。",
             )
 
-        if explicit_bar:
-            chart_type = "bar"
-        elif explicit_line:
-            chart_type = "line"
+        if requested_type is not None:
+            chart_type = requested_type  # type: ignore[assignment]
 
         required_fields = (x_column, *query_plan.metric_ids, *( (series,) if series else () ))
         if not set(required_fields) <= set(allowed):
@@ -161,13 +222,14 @@ class ChartContract:
             status="valid",
             requested=True,
             chart_type=chart_type,
-            explicit_type=explicit_bar or explicit_line,
+            explicit_type=requested_type is not None,
             x_column=x_column,
             y_columns=tuple(query_plan.metric_ids),
             series_column=series,
             allowed_result_columns=allowed,
             title=cls._title(chart_type, x_column, query_plan.metric_ids, result_contract),
             clarification=None,
+            max_x_values=8 if chart_type == "donut" else 120,
         )
 
     @classmethod
@@ -187,7 +249,7 @@ class ChartContract:
             }:
                 return None
             chart_type = raw.get("chart_type")
-            if chart_type is not None and chart_type not in {"bar", "line"}:
+            if chart_type is not None and chart_type not in _CHART_TYPES:
                 return None
             return cls(
                 status=status,  # type: ignore[arg-type]
@@ -241,7 +303,7 @@ class ChartContract:
         return "\n".join(
             [
                 "\n### 服务器图表合同",
-                "- 仅可对本轮 `run_sql` 成功后写出的当前结果文件调用 `visualize_data`。",
+                "- 用户已明确请求图表。本轮 `run_sql` 结果通过验证后，服务器会直接渲染图表；不得调用或讨论 `visualize_data`。",
                 f"- 图表类型固定为 `{self.chart_type}`；标题由服务器固定为“{self.title}”。",
                 f"- 横轴固定为 `{self.x_column}`；指标列固定为 {', '.join(f'`{item}`' for item in self.y_columns)}。",
                 f"- 系列列：`{self.series_column}`。" if self.series_column else "- 本轮无系列拆分。",
@@ -281,6 +343,9 @@ class ChartContract:
                 chart_frame[column] = pd.to_numeric(chart_frame[column], errors="raise")
             except (TypeError, ValueError) as exc:
                 raise ChartContractError(f"指标列 `{column}` 不是完整数值列，不能安全绘图。") from exc
+
+        if self.chart_type == "donut" and (chart_frame.loc[:, self.y_columns] < 0).any().any():
+            raise ChartContractError("环形图不能展示负值；请改用柱状图查看该指标。")
 
         if self.x_column == "time":
             try:
@@ -335,7 +400,7 @@ class ChartContract:
         labels = result_contract.result_column_labels
         metric_labels = "、".join(labels.get(metric_id, metric_id) for metric_id in metric_ids)
         axis = labels.get(x_column, "时间" if x_column == "time" else x_column)
-        suffix = "趋势" if chart_type == "line" else "对比"
+        suffix = "构成" if chart_type == "donut" else "趋势" if chart_type in {"line", "area"} else "对比"
         return f"按{axis}{suffix}：{metric_labels}"
 
     @staticmethod

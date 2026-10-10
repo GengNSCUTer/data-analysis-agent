@@ -1,6 +1,6 @@
 # Olist 指标目录
 
-当前运行时 Catalog 为 `olist-catalog-v2` / `metric_version=0.2-frozen`，包含 10 个已经冻结的业务指标。机器可读定义是 [`data/catalog/olist_catalog.yaml`](../data/catalog/olist_catalog.yaml)；公式、分母、维度归属和数据快照证据见 [十项业务指标合同 v2](metric-contracts/olist-metrics-v2.md)。
+下面这张表是冻结测试用的 `olist-catalog-v2` / `metric_version=0.2-frozen`，共 10 个指标。机器可读定义是 [`data/catalog/olist_catalog.yaml`](../data/catalog/olist_catalog.yaml)；公式见 [十项业务指标合同 v2](metric-contracts/olist-metrics-v2.md)。在线演示读取 [`data/catalog/olist_catalog_v3.yaml`](../data/catalog/olist_catalog_v3.yaml)，指标版本 `0.3-proposal`，见 [v3 指标合同](metric-contracts/olist-metrics-v3-proposal.md)。
 
 | metric_id | 中文名称 | 事实粒度 | 默认时间字段 |
 | --- | --- | --- | --- |

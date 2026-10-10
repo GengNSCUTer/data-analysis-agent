@@ -1,5 +1,5 @@
 import { LitElement, html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { vannaDesignTokens } from '../styles/vanna-design-tokens.js';
 import { renderMarkdown } from './markdown-renderer.js';
@@ -50,26 +50,29 @@ export class VannaMessage extends LitElement {
       }
 
       .message.assistant {
-        background: var(--vanna-background-root);
-        border: 1px solid var(--vanna-outline-dimmer);
+        background: transparent;
+        border: 0;
         color: var(--vanna-foreground-default);
-        box-shadow: var(--vanna-shadow-sm);
+        box-shadow: none;
         max-width: 100%;
-        border-radius: var(--vanna-chat-bubble-radius) var(--vanna-chat-bubble-radius) var(--vanna-chat-bubble-radius) var(--vanna-space-2);
+        border-radius: 0;
+        padding-left: 0;
+        padding-right: 0;
       }
 
       .message.user {
+        width: fit-content;
+        max-width: min(78%, 420px);
         margin-left: auto;
-        max-width: min(80%, 500px);
-        background: linear-gradient(135deg, var(--vanna-accent-primary-stronger) 0%, var(--vanna-accent-primary-default) 100%);
-        color: white;
-        box-shadow: var(--vanna-shadow-md);
-        border-radius: var(--vanna-chat-bubble-radius) var(--vanna-chat-bubble-radius) var(--vanna-space-2) var(--vanna-chat-bubble-radius);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: #eef3f6;
+        color: #1c2430;
+        box-shadow: none;
+        border-radius: 8px;
+        border: 1px solid #e4e7eb;
       }
 
       .message:hover {
-        transform: translateY(-1px);
+        transform: none;
       }
 
       .message.assistant:hover {
@@ -255,8 +258,69 @@ export class VannaMessage extends LitElement {
         color: rgba(255, 255, 255, 0.8);
       }
 
-      :host([theme="dark"]) .message.user .message-timestamp::before {
+      :host([theme="dark"])       .message.user .message-timestamp::before {
         background: rgba(255, 255, 255, 0.8);
+      }
+
+      .edit-question {
+        align-self: flex-end;
+        margin-top: 6px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.92);
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+      }
+
+      .edit-box {
+        display: grid;
+        gap: 8px;
+        width: min(80%, 500px);
+        margin-left: auto;
+        padding: 10px;
+        background: #ffffff;
+        border: 1px solid #c5d0d6;
+        border-radius: 8px;
+        box-shadow: 0 8px 20px rgba(23, 48, 66, 0.12);
+      }
+
+      .edit-box textarea {
+        width: 100%;
+        min-height: 72px;
+        padding: 10px 12px;
+        border: 1px solid #b7c4cb;
+        border-radius: 6px;
+        background: #f7fafb;
+        color: #17212b;
+        caret-color: #17212b;
+        font: inherit;
+        resize: vertical;
+      }
+
+      .edit-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .edit-actions button {
+        min-height: 28px;
+        padding: 0 10px;
+        border-radius: 6px;
+        border: 1px solid #b7c4cb;
+        background: #ffffff;
+        color: #173042;
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+      }
+
+      .edit-actions button:last-child {
+        border-color: #0f766e;
+        background: #0f766e;
+        color: #ffffff;
       }
 
       @media (max-width: 600px) {
@@ -265,7 +329,8 @@ export class VannaMessage extends LitElement {
         }
 
         .message.user {
-          max-width: 100%;
+          width: fit-content;
+          max-width: 88%;
         }
       }
     `
@@ -276,6 +341,9 @@ export class VannaMessage extends LitElement {
   @property({ type: Boolean }) markdown = false;
   @property({ type: Number }) timestamp = Date.now();
   @property({ reflect: true }) theme = 'light';
+  @property({ type: Boolean }) canEdit = false;
+  @state() private editing = false;
+  @state() private draft = '';
 
   private formatTimestamp(timestamp: number): string {
     return new Date(timestamp).toLocaleTimeString([], {
@@ -284,8 +352,44 @@ export class VannaMessage extends LitElement {
     });
   }
 
+  private startEdit() {
+    this.draft = this.content;
+    this.editing = true;
+  }
+
+  private cancelEdit() {
+    this.editing = false;
+  }
+
+  private submitEdit() {
+    const content = this.draft.trim();
+    if (!content || content === this.content.trim()) {
+      this.editing = false;
+      return;
+    }
+    this.editing = false;
+    this.dispatchEvent(new CustomEvent('replace-question', {
+      detail: { content },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
   render() {
     const isMarkdown = this.markdown && this.type === 'assistant';
+    if (this.type === 'user' && this.editing) {
+      return html`
+        <div class="edit-box">
+          <textarea .value=${this.draft} @input=${(event: Event) => {
+            this.draft = (event.target as HTMLTextAreaElement).value;
+          }}></textarea>
+          <div class="edit-actions">
+            <button type="button" @click=${this.cancelEdit}>取消</button>
+            <button type="button" @click=${this.submitEdit}>发送</button>
+          </div>
+        </div>
+      `;
+    }
     return html`
       <div class="message ${this.type}">
         <div class="message-content ${isMarkdown ? 'markdown' : ''}">
@@ -294,6 +398,9 @@ export class VannaMessage extends LitElement {
         <div class="message-timestamp">
           ${this.formatTimestamp(this.timestamp)}
         </div>
+        ${this.type === 'user' && this.canEdit ? html`
+          <button class="edit-question" type="button" @click=${this.startEdit}>编辑</button>
+        ` : ''}
       </div>
     `;
   }

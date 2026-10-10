@@ -34,8 +34,8 @@
 | 请求与会话 | `chat_runtime.py`、`question_router.py`、`working_memory.py`、`conversation_store.py`、`budget.py`、`llm_observability.py` | 决定是否查库、维护受控上下文、限制调用预算并记录模型观测。 |
 | 语义与计划 | `semantic_catalog.py`、`metric_context.py`、`query_plan.py`、`workspace.py` | 从工作区配置和 Catalog 得到指标、可见表列/Join、查询粒度和版本化结果合同。 |
 | 安全执行与审计 | `sql_policy.py`、`postgres_runner.py`、`result_validator.py`、`sql_repair.py`、`trusted_sql_tool.py`、`run_recorder.py` | AST 约束、PostgreSQL 双角色执行、结果合同、一次受控修复和审计证据。 |
-| 呈现与 Demo | `chart_contract.py`、`visualization.py`、`text_to_sql_output.py`、`trusted_workflow.py`、`demo_session.py` | 约束图表和结果呈现，定制 Demo 工作流与演示身份。 |
-| 离线 Text-to-SQL 研究 | `spider_sft_format.py`、`frozen_sqlite_baseline.py`、`sqlite_benchmark.py`、`spider_test_suite.py`、`post_training_comparison.py`、`candidate_sql_generator.py`、`olist_candidate_sql_evaluation.py`、`external_artifacts.py` | 建模输入格式、候选生成、SQLite/Spider 诊断、业务迁移评测和仓库外原始产物边界。 |
+| 呈现与 Demo | `chart_contract.py`、`visualization.py`、`trusted_workflow.py`、`demo_session.py` | 约束图表和结果呈现，定制 Demo 工作流与演示身份。 |
+| 离线 Text-to-SQL 研究 | `spider_sft_format.py`、`frozen_sqlite_baseline.py`、`sqlite_benchmark.py`、`spider_test_suite.py`、`post_training_comparison.py`、`candidate_sql_generator.py`、`olist_candidate_sql_evaluation.py`、`external_artifacts.py` | 建模输入格式、候选生成、SQLite/Spider 诊断、业务迁移评测和仓库外原始产物边界；其中 `candidate_sql_generator.unwrap_sql_completion()` 是所有离线 completion 的唯一、有界展示包装清洗入口。 |
 
 产品运行时最值得先掌握的一条线是：
 

@@ -50,6 +50,35 @@ def test_dimension_metric_bar_chart_has_fixed_dimension_axis() -> None:
     assert contract.y_columns == ("gmv",)
 
 
+def test_category_chart_defaults_to_horizontal_bar_for_readable_labels() -> None:
+    contract = _chart_contract("按品类统计 GMV，并生成图表")
+
+    assert contract.status == "valid"
+    assert contract.chart_type == "horizontal_bar"
+    assert contract.x_column == "product_category_name"
+
+
+def test_area_chart_is_limited_to_one_unsegmented_time_series() -> None:
+    valid = _chart_contract("2017年按月统计 GMV，并生成面积图")
+    invalid = _chart_contract("2017年按月统计 GMV 和有效订单数，并生成面积图")
+
+    assert valid.status == "valid"
+    assert valid.chart_type == "area"
+    assert invalid.status == "clarification_required"
+    assert "一个指标" in invalid.clarification
+
+
+def test_donut_chart_requires_one_additive_grouped_metric() -> None:
+    valid = _chart_contract("按州统计 GMV，并生成环形图")
+    invalid = _chart_contract("按州统计平均履约天数，并生成环形图")
+
+    assert valid.status == "valid"
+    assert valid.chart_type == "donut"
+    assert valid.max_x_values == 8
+    assert invalid.status == "unsupported"
+    assert "可相加" in invalid.clarification
+
+
 def test_explicit_line_without_time_grain_requires_clarification() -> None:
     contract = _chart_contract("按州统计 GMV，并生成折线图")
 
@@ -75,7 +104,7 @@ def test_scalar_chart_requires_an_axis() -> None:
 
 
 def test_unsupported_type_is_not_silently_downgraded() -> None:
-    contract = _chart_contract("按州统计 GMV，并生成饼图")
+    contract = _chart_contract("按州统计 GMV，并生成散点图")
 
     assert contract.status == "unsupported"
-    assert "饼图" in contract.clarification
+    assert "散点图" in contract.clarification

@@ -10,7 +10,10 @@ pytest.importorskip("torch", reason="SFT dataset tests run in the isolated QLoRA
 from scripts.run_post_training_sft_smoke import (
     CausalSqlCollator,
     CausalSqlDataset,
+    FinalAdapterSnapshotCallback,
+    checkpoint_step,
     sha256_file,
+    validate_checkpoint_intervals,
     validate_split_audit,
 )
 
@@ -62,6 +65,48 @@ def test_sft_dataset_rejects_mismatched_target_or_silent_truncation() -> None:
 
     with pytest.raises(ValueError, match="refuse to truncate target SQL"):
         CausalSqlDataset([row()], tokenizer, max_seq_length=10)
+
+
+def test_validation_best_requires_matching_evaluation_and_save_intervals() -> None:
+    validate_checkpoint_intervals(4, 4)
+
+    with pytest.raises(ValueError, match="save_steps == evaluation_steps"):
+        validate_checkpoint_intervals(4, 8)
+
+
+@pytest.mark.parametrize(
+    ("checkpoint", "expected"),
+    [("/tmp/checkpoint-120", 120), (Path("checkpoint-0"), 0), ("adapter_best", None), (None, None)],
+)
+def test_checkpoint_step_is_compatible_with_trainer_state_path(checkpoint, expected) -> None:
+    assert checkpoint_step(checkpoint) == expected
+
+
+def test_final_adapter_snapshot_captures_only_the_last_optimizer_step(tmp_path) -> None:
+    class FakeModel:
+        def __init__(self) -> None:
+            self.saved_to: Path | None = None
+
+        def save_pretrained(self, path: str) -> None:
+            self.saved_to = Path(path)
+            self.saved_to.mkdir(parents=True, exist_ok=True)
+            (self.saved_to / "adapter_model.safetensors").write_bytes(b"adapter")
+
+    class State:
+        max_steps = 3
+        global_step = 2
+
+    model = FakeModel()
+    callback = FinalAdapterSnapshotCallback(tmp_path / "adapter_final")
+    control = object()
+    assert callback.on_step_end(None, State(), control, model=model) is control
+    assert model.saved_to is None
+    assert callback.captured_step is None
+
+    State.global_step = 3
+    assert callback.on_step_end(None, State(), control, model=model) is control
+    assert model.saved_to == tmp_path / "adapter_final"
+    assert callback.captured_step == 3
 
 
 def test_split_audit_must_match_current_split_files(tmp_path) -> None:

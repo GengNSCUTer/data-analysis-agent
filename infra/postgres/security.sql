@@ -4,21 +4,40 @@ CREATE TABLE IF NOT EXISTS app.conversations (
     conversation_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     user_role TEXT NOT NULL,
+    workspace_id TEXT NOT NULL DEFAULT 'olist-demo',
     title TEXT,
     dataset_version_id TEXT NOT NULL,
     metric_version TEXT NOT NULL,
     working_memory JSONB NOT NULL DEFAULT '{}'::jsonb,
     status TEXT NOT NULL DEFAULT 'active',
     message_count INTEGER NOT NULL DEFAULT 0,
+    state_version INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (user_role IN ('analyst', 'admin')),
     CHECK (status IN ('active', 'deleted')),
-    CHECK (message_count >= 0)
+    CHECK (message_count >= 0),
+    CHECK (state_version >= 0)
 );
 
 ALTER TABLE app.conversations
     ADD COLUMN IF NOT EXISTS working_memory JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE app.conversations
+    ADD COLUMN IF NOT EXISTS workspace_id TEXT;
+ALTER TABLE app.conversations
+    ADD COLUMN IF NOT EXISTS state_version INTEGER NOT NULL DEFAULT 0;
+UPDATE app.conversations
+SET workspace_id = 'olist-demo'
+WHERE workspace_id IS NULL OR btrim(workspace_id) = '';
+ALTER TABLE app.conversations
+    ALTER COLUMN workspace_id SET DEFAULT 'olist-demo',
+    ALTER COLUMN workspace_id SET NOT NULL;
+DO $$
+BEGIN
+    ALTER TABLE app.conversations DROP CONSTRAINT IF EXISTS conversations_state_version_check;
+    ALTER TABLE app.conversations
+        ADD CONSTRAINT conversations_state_version_check CHECK (state_version >= 0);
+END $$;
 
 CREATE TABLE IF NOT EXISTS app.messages (
     message_id BIGSERIAL PRIMARY KEY,
@@ -86,7 +105,8 @@ CREATE TABLE IF NOT EXISTS app.agent_runs (
     CHECK (termination_reason IN (
         'running', 'completed', 'clarification_required', 'tool_budget_exhausted',
         'context_truncated', 'sql_policy_rejected', 'query_timeout',
-        'execution_error', 'unsupported_request', 'catalog_answered', 'input_too_long'
+        'execution_error', 'unsupported_request', 'catalog_answered', 'input_too_long',
+        'state_conflict'
     ))
 );
 
@@ -105,7 +125,8 @@ BEGIN
         ADD CONSTRAINT agent_runs_termination_reason_check CHECK (termination_reason IN (
             'running', 'completed', 'clarification_required', 'tool_budget_exhausted',
             'context_truncated', 'sql_policy_rejected', 'query_timeout',
-            'execution_error', 'unsupported_request', 'catalog_answered', 'input_too_long'
+            'execution_error', 'unsupported_request', 'catalog_answered', 'input_too_long',
+            'state_conflict'
         ));
 END $$;
 
@@ -140,6 +161,8 @@ ALTER TABLE app.query_audits ADD COLUMN IF NOT EXISTS repair_evidence JSONB;
 
 CREATE INDEX IF NOT EXISTS conversations_user_updated_idx
     ON app.conversations (user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS conversations_user_workspace_updated_idx
+    ON app.conversations (user_id, workspace_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS messages_conversation_index_idx
     ON app.messages (conversation_id, message_index);
 CREATE INDEX IF NOT EXISTS agent_runs_user_started_idx
@@ -191,3 +214,56 @@ GRANT INSERT, SELECT, UPDATE, DELETE ON app.conversations, app.messages, app.age
 GRANT INSERT, SELECT ON app.query_audits TO daa_app_writer;
 GRANT USAGE, SELECT ON SEQUENCE app.query_audits_audit_id_seq TO daa_app_writer;
 GRANT USAGE, SELECT ON SEQUENCE app.messages_message_id_seq TO daa_app_writer;
+
+CREATE TABLE IF NOT EXISTS app.user_preferences (
+    organization_id TEXT NOT NULL DEFAULT 'demo',
+    subject_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    memory_kind TEXT NOT NULL,
+    value_text TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (organization_id, subject_id, workspace_id, memory_kind)
+);
+
+CREATE TABLE IF NOT EXISTS app.saved_analyses (
+    saved_id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL DEFAULT 'demo',
+    subject_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    dataset_version TEXT NOT NULL,
+    metric_version TEXT NOT NULL,
+    artifact_id TEXT,
+    summary TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+GRANT INSERT, SELECT, UPDATE, DELETE ON app.user_preferences, app.saved_analyses TO daa_app_writer;
+
+CREATE TABLE IF NOT EXISTS app.accounts (
+    subject_id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    organization_id TEXT NOT NULL DEFAULT 'demo',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (role IN ('analyst', 'admin')),
+    CHECK (subject_id LIKE 'local:%')
+);
+
+CREATE TABLE IF NOT EXISTS app.export_audits (
+    export_id BIGSERIAL PRIMARY KEY,
+    artifact_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    user_role TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    row_count INTEGER NOT NULL,
+    csv_sha256 TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (user_role IN ('analyst', 'admin')),
+    CHECK (row_count >= 0),
+    CHECK (char_length(csv_sha256) = 64)
+);
+
+GRANT INSERT, SELECT, UPDATE, DELETE ON app.accounts TO daa_app_writer;
+GRANT INSERT, SELECT ON app.export_audits TO daa_app_writer;
+GRANT USAGE, SELECT ON SEQUENCE app.export_audits_export_id_seq TO daa_app_writer;

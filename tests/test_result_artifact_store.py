@@ -28,7 +28,10 @@ def test_result_artifact_store_writes_csv_manifest_and_plotly(tmp_path) -> None:
         artifact_id="rta_test",
         user_id="user-a",
         workspace_id="olist_analytics",
-        figure={"data": [], "layout": {}},
+        figure={
+            "data": [{"type": "bar", "x": ["SP"], "y": [10]}],
+            "layout": {"title": {"text": "2017年各州GMV"}},
+        },
     )
     assert updated["plotly_ref"] == "chart.plotly.json"
     assert store.load_manifest(
@@ -38,6 +41,15 @@ def test_result_artifact_store_writes_csv_manifest_and_plotly(tmp_path) -> None:
         artifact_id="rta_test", user_id="user-a", workspace_id="olist_analytics"
     )
     assert verified["artifact_id"] == "rta_test"
+    figure = store.load_verified_plotly(
+        artifact_id="rta_test", user_id="user-a", workspace_id="olist_analytics"
+    )
+    assert figure["data"][0]["type"] == "bar"
+    assert figure["title"] == "2017年各州GMV"
+    with pytest.raises(FileNotFoundError):
+        store.load_verified_plotly(
+            artifact_id="rta_test", user_id="user-b", workspace_id="olist_analytics"
+        )
 
 
 def test_result_artifact_store_scopes_users_and_workspaces(tmp_path) -> None:
@@ -52,6 +64,14 @@ def test_result_artifact_store_scopes_users_and_workspaces(tmp_path) -> None:
         dataset_version="v1",
         metric_version="m1",
     )
+    csv_path = store.verified_csv_path(
+        artifact_id="rta_test", user_id="user-a", workspace_id="olist_analytics"
+    )
+    assert csv_path.read_text(encoding="utf-8").splitlines()[0] == "gmv"
+    with pytest.raises(FileNotFoundError):
+        store.verified_csv_path(
+            artifact_id="rta_test", user_id="user-b", workspace_id="olist_analytics"
+        )
     with pytest.raises(FileNotFoundError):
         store.load_manifest(
             artifact_id="rta_test", user_id="user-b", workspace_id="olist_analytics"
