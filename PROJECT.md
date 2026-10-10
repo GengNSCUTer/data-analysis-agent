@@ -912,3 +912,11 @@ README 已更新为当前本地登录、来源绑定嵌入令牌、完整 CSV �
 当前代码基线 `8bdb1de` 已推送到 origin/main。结合用户简历的两个项目和第二轮学习计划，新增 [`plan/process-agent-internship-improvement-v1.md`](plan/process-agent-internship-improvement-v1.md)，默认四周、每次一个具体单元。第一周掌握真实链路并完成产品质量基线；第二周围绕前三类真实错误改善业务回答；第三周补隔离环境部署、可配置 workspace、权限与并发证据；第四周审阅既有 SFT 并形成开源交付与面试口径。企业规模交付不作为四周承诺。
 
 本项目突出结构化数据、指标 grain/口径、SQL 信任边界和结果证据；另一知识 Agent 项目继续承担 RAG、通用工具与 Durable 主题。计算机基础不重复安排。后训练保留为小比例、可解释的已有实验专题；本地候选接入必须先验证离线 QuerySpec 与在线 QueryPlan 输入关系，默认 provider 不自动切换。新一轮大规模数据扩展、完整训练、DPO/RL 与 protected test 重跑均未启动。路线当前为 Planned，下一单元是第一周 Day 1 的请求链追踪与用户复述。当前事实、核验范围、口径修正及四周路线已同步飞书项目文档 revision 253。
+
+### 2026-10-10：四周路线 Day 1 开始，请求追踪与分段读代码
+
+用户授权开始 Day 1。按当前代码修正 [`产品请求架构`](docs/architecture/product-request-architecture-v1.md)：Catalog 检索先于 Router.classify，查库准入后由服务端生成 QueryPlan/结果及图表合同，再交给在线模型生成 SQL 工具调用；拒绝、澄清、定义及受控结果解释有不查库分支。补充各环节输入输出和代码/模型职责。
+
+对“按客户州统计有效订单数前五名，并生成柱状图”执行一次真实 HTTP/SSE 请求：run `55193f08-9fd4-453f-b9f1-414a0885f9f5`、SQL audit `31913`，一次 SQL、策略 allowed、结果合同满足、一个图表块，五个州的结果及顺序与固定 Gold 一致。原始证据留在仓库外 `evals/day1-request-trace-4OupjSaN/`。临时核验器最初未适配中文展示列，复用既有产品解析函数后通过，没有重发模型请求。既有路由/脚本用例 `3 passed, 3 deselected`；未重跑浏览器验收，不能视为在线整体准确率。
+
+[`Agent 代码学习记录`](docs/learning/agent-project-walkthrough-v1.md) 从 create_app 和 chat_sse 两个入口开始；用户尚未完成复述，TASK-001 仍未完成。QueryPlan 的 top_n 未覆盖本次“前五”数量，实际 SQL LIMIT 和返回行数正确；结构化排行约束覆盖列入后续计划审阅。不启动新训练、终测或功能扩展，不切换默认模型。本次事实已同步飞书项目文档 revision 254。

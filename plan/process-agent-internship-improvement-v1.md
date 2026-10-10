@@ -4,13 +4,13 @@ version: 1.0
 date_created: 2026-10-10
 last_updated: 2026-10-10
 owner: 李耿楠
-status: Planned
+status: In Progress
 tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 ---
 
 # Introduction
 
-![Status: Planned](https://img.shields.io/badge/status-Planned-blue)
+![Status: In Progress](https://img.shields.io/badge/status-In_Progress-blue)
 
 本计划以 2026-10-10 的仓库实现为起点，参考用户的《后端实习简历_v3》和《第二轮面试准备计划_2026-09-28》。目标是在四周内形成可解释、有业务质量证据、能在其他机器复现的实习项目版本；企业级通用产品作为后续方向，不把四周计划写成商业交付承诺。代码基线已经提交并推送为 `8bdb1de`。
 
@@ -20,7 +20,7 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 
 **时间安排。** 默认每周五个主题单元、每单元 90–120 分钟，另外预留每周半天处理必要的小改动。遇到面试或另一项目占用时间，按完成条件顺延，不赶工。建议本项目时间约 60% 用于业务质量与工程补缺，25% 用于代码理解和面试复述，15% 用于后训练学习与有限验证；比例是执行建议，不是岗位统计结论。
 
-**每日方式。** 一个真实场景 → 用户先口述 → 阅读 1–3 个关键函数 → 跟踪输入/状态/输出 → 做一个测试或小改动 → 记录证据与边界 → 再次口述。发现缺陷立即列明影响；只修本单元需要的问题。通用学习材料不复制另一个项目，后训练概念沿用既有学习目录。当前任务是冻结路线，下面的功能任务均未自动启动。
+**每日方式。** 一个真实场景 → 用户先口述 → 阅读 1–3 个关键函数 → 跟踪输入/状态/输出 → 做一个测试或小改动 → 记录证据与边界 → 再次口述。发现缺陷立即列明影响；只修本单元需要的问题。通用学习材料不复制另一个项目，后训练概念沿用既有学习目录。2026-10-10 用户授权开始 Day 1；后续功能任务未自动启动。
 
 ## 1. Requirements & Constraints
 
@@ -54,6 +54,8 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 | TASK-005 | Day 5：复用 scripts/run_product_capability_online.py 和 conversations.py 的结果记录，读取仓库外回答证据，完成已有 Phase B 的人工标注；若旧输出缺失，明确标缺失。另冻结 evals/cases/product_release_dev_v1.yaml 的 60 条新开发用例：单轮业务10、澄清10、两窗口比较/趋势10、多轮10、安全与范围10、图表/下载/空结果10。来源不复写既有 SFT 或 final test；输出当前 baseline 和第一周五分钟口述。 | 否 | — |
 
 第一周退出条件：能画出并解释请求链、身份链、结果链、会话链和离线模型链；已有 Phase B 审核有可回查状态；60 条新开发用例的目标行为、业务口径和来源记录齐全。没有证据的能力明确标记待测。
+
+Day 1 当前进行中：已校正产品请求架构并完成一次真实 HTTP/SSE 请求核验，结果、顺序、SQL 次数和图表通过固定场景对照；用户正在阅读启动装配与请求入口，尚未复述。TASK-001 仍为“否”。代码学习与问答集中在 [`docs/learning/agent-project-walkthrough-v1.md`](../docs/learning/agent-project-walkthrough-v1.md)，请求证据见架构文档，不复制到后训练学习笔记。
 
 ### Implementation Phase 2
 
