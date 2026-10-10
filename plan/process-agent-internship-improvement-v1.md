@@ -55,7 +55,7 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 
 第一周退出条件：能画出并解释请求链、身份链、结果链、会话链和离线模型链；已有 Phase B 审核有可回查状态；60 条新开发用例的目标行为、业务口径和来源记录齐全。没有证据的能力明确标记待测。
 
-Day 1 当前进行中：已校正产品请求架构并完成一次真实 HTTP/SSE 请求核验，结果、顺序、SQL 次数和图表通过固定场景对照；用户正在阅读启动装配与请求入口，尚未复述。TASK-001 仍为“否”。代码学习与问答集中在 [`docs/learning/agent-project-walkthrough-v1.md`](../docs/learning/agent-project-walkthrough-v1.md)，请求证据见架构文档，不复制到后训练学习笔记。
+Day 1 当前进行中：已校正产品请求架构并完成一次真实 HTTP/SSE 请求核验，结果、顺序、SQL 次数和图表通过固定场景对照；用户已复述启动装配与请求入口，当前进入 Catalog 与 Router 小段。TASK-001 仍为“否”。代码学习与问答集中在 [`docs/learning/agent-project-walkthrough-v1.md`](../docs/learning/agent-project-walkthrough-v1.md)，请求证据见架构文档，不复制到后训练学习笔记。
 
 ### Implementation Phase 2
 

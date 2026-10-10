@@ -74,4 +74,4 @@ SSE 是这一 HTTP 请求内逐块返回的传输方式，并不代表每个数�
 
 审阅边界：本次 QueryPlan 的 `top_n` 为空，不能据此称“前五”已完整冻结进计划。本次 SQL 与返回行数实际正确；排行数量的结构化约束覆盖应在后续 QueryPlan 审阅中核对。
 
-Day 1 的学习进度记录在 [`../learning/agent-project-walkthrough-v1.md`](../learning/agent-project-walkthrough-v1.md)。当前仅进入第一小段，用户尚未完成代码复述，Day 1 不标记完成。
+Day 1 的学习进度记录在 [`../learning/agent-project-walkthrough-v1.md`](../learning/agent-project-walkthrough-v1.md)。用户已完成入口复述，当前进入 Catalog 与 Router 小段；完整链路复述尚未完成，Day 1 不标记完成。
