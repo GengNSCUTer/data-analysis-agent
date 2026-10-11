@@ -9,12 +9,21 @@ intentionally has no Transformers, PEFT, database, or repair dependency.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 import re
+from typing import TYPE_CHECKING
 
 from .question_router import QuestionRoute
 
+if TYPE_CHECKING:
+    from .query_plan import QueryPlan
+    from .semantic_catalog import CatalogSelection, ResultContract
+    from .workspace import WorkspaceProfile
+
 
 OLIST_CANDIDATE_SQL_PROMPT_VERSION = "olist-candidate-sql-v1"
+RUNTIME_CANDIDATE_SQL_PROMPT_VERSION = "runtime-candidate-sql-v2"
 
 # This is the sole completion-unwrapping contract for runtime candidates, DPO,
 # SQLite diagnostics and the official Spider bridge. Models sometimes add a
@@ -94,6 +103,108 @@ def render_candidate_sql_prompt(context: CandidateSqlContext) -> str:
             "### SQL",
         ]
     )
+
+
+@dataclass(frozen=True)
+class CandidateSqlRequest:
+    """Immutable SQL-component input, shared by runtime and data replay.
+
+    These JSON strings contain server-derived contracts, never an offline
+    QuerySpec, assistant summary, SQL target, result rows or tool transcript.
+    This is a component boundary, not the full conversational Agent request.
+    """
+
+    question: str
+    catalog_prompt: str
+    scope_json: str
+    query_plan_json: str
+    result_contract_json: str
+
+    @property
+    def prompt_sha256(self) -> str:
+        return hashlib.sha256(render_runtime_candidate_prompt(self).encode("utf-8")).hexdigest()
+
+    def safe_evidence(self) -> dict[str, str]:
+        """Only version and fingerprint may be copied to safe run evidence."""
+        return {
+            "prompt_version": RUNTIME_CANDIDATE_SQL_PROMPT_VERSION,
+            "prompt_sha256": self.prompt_sha256,
+        }
+
+
+def build_runtime_candidate_request(
+    *,
+    question: str,
+    selection: CatalogSelection,
+    query_plan: QueryPlan,
+    result_contract: ResultContract,
+    workspace: WorkspaceProfile,
+    route: QuestionRoute,
+) -> CandidateSqlRequest:
+    """Build from actual runtime facts; there is intentionally no Spec argument.
+
+    Call only after server routing and admission. Shared construction prevents
+    offline callers from quietly adding the correct plan from the Gold label.
+    A successful build is not SQL admission or proof that NL parsing is right.
+    """
+    require_database_route(route)
+    if not isinstance(question, str) or not question.strip() or not selection.prompt.strip():
+        raise CandidateSqlGenerationError("question and selected Catalog must be non-empty")
+    for field in ("catalog_version", "dataset_version", "metric_version", "policy_version"):
+        if not (
+            getattr(selection.trace, field)
+            == getattr(result_contract, field)
+            == getattr(workspace, field)
+        ):
+            raise CandidateSqlGenerationError(f"workspace/selection/contract {field} mismatch")
+    if not query_plan.required_result_columns or (
+        query_plan.required_result_columns != result_contract.required_result_columns
+    ):
+        raise CandidateSqlGenerationError("QueryPlan/ResultContract result columns mismatch")
+    if set(query_plan.metric_ids) != set(result_contract.metric_ids):
+        raise CandidateSqlGenerationError("QueryPlan/ResultContract metrics mismatch")
+
+    def encode(value: object) -> str:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    scope = {
+        "workspace_id": workspace.workspace_id,
+        "dialect": workspace.sql_dialect,
+        **{field: getattr(workspace, field) for field in (
+            "catalog_version", "dataset_version", "metric_version", "policy_version"
+        )},
+    }
+    return CandidateSqlRequest(
+        question=question.strip(),
+        catalog_prompt=selection.prompt.strip(),
+        scope_json=encode(scope),
+        query_plan_json=encode(query_plan.as_dict()),
+        result_contract_json=encode(result_contract.as_tool_metadata()),
+    )
+
+
+def render_runtime_candidate_prompt(request: CandidateSqlRequest) -> str:
+    """Render the same SQL-only request in data, evaluation and future serving."""
+    return "\n".join([
+        "### Task",
+        "Generate exactly one read-only PostgreSQL SELECT or WITH ... SELECT query.",
+        "Return SQL only. Do not return Markdown, explanation or a tool call.",
+        "Use only the supplied Catalog objects, joins and business definitions.",
+        "Preserve metric fact grains; aggregate each metric before combining fact domains.",
+        "Return exactly the QueryPlan required_result_columns in their declared order.",
+        "The server independently checks AST policy, readonly access and ResultContract.",
+        "### Server-provided Workspace",
+        request.scope_json,
+        "### Server-provided Semantic Catalog",
+        request.catalog_prompt,
+        "### Server-provided QueryPlan",
+        request.query_plan_json,
+        "### Server-provided ResultContract",
+        request.result_contract_json,
+        "### Question",
+        request.question,
+        "### SQL",
+    ])
 
 
 def unwrap_sql_completion(completion: str) -> str:

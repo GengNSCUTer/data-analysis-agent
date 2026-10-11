@@ -146,6 +146,12 @@
 
 本轮仍停留在第三小段补充理解，没有开始新训练、输入适配改造或下一段执行链。本段补充复述题：离线完整 QuerySpec 的模型评测通过后，为什么仍需验证它在当前线上 QueryPlan 上下文和工具协议下的表现？
 
+2026-10-11 补充复述与新任务：
+
+用户正确指出输入组织和输出协议不同：离线 Catalog/QuerySpec/ResultContract JSON + 问题 → SQL，线上系统提示词/Catalog/受控状态/QueryPlan/消息与工具 → run_sql 调用；提出复用既有数据改造后再训练验证。反馈：公平比较要求同一评测输入、解码与评测规则，但并非需要小模型学习全部 Agent 对话和工具职责。可以将 SQL-only 输出由服务端适配为工具调用，重点对齐候选输入的真实可用信息和语义。
+
+这次实际回放 train/validation 后发现结果列序、TheLook 维度/粒度等输入错配，不能只改字段名或包装格式。具体事实与阶段计划见 [`runtime 候选训练对齐计划`](../../plan/refactor-runtime-candidate-sft-alignment-v1.md)。已经实现 `candidate_sql_generator.py:build_runtime_candidate_request/render_runtime_candidate_prompt`，运行时与离线共用构造器；运行时先记录候选输入 hash，默认 API 仍使用完整 Agent 协议。当前插入该任务，尚未生成新 release 或启动训练，Day 1 的执行链小段仍待学习；本轮不增加复述题。
+
 ### 后续小段（尚未讲解）
 
 - 工具执行到结果证据：为什么 SQL 可运行、合同通过、业务正确是不同层次。

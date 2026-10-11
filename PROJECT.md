@@ -920,3 +920,13 @@ README 已更新为当前本地登录、来源绑定嵌入令牌、完整 CSV �
 对“按客户州统计有效订单数前五名，并生成柱状图”执行一次真实 HTTP/SSE 请求：run `55193f08-9fd4-453f-b9f1-414a0885f9f5`、SQL audit `31913`，一次 SQL、策略 allowed、结果合同满足、一个图表块，五个州的结果及顺序与固定 Gold 一致。原始证据留在仓库外 `evals/day1-request-trace-4OupjSaN/`。临时核验器最初未适配中文展示列，复用既有产品解析函数后通过，没有重发模型请求。既有路由/脚本用例 `3 passed, 3 deselected`；未重跑浏览器验收，不能视为在线整体准确率。
 
 [`Agent 代码学习记录`](docs/learning/agent-project-walkthrough-v1.md) 从 create_app 和 chat_sse 两个入口开始；用户尚未完成复述，TASK-001 仍未完成。QueryPlan 的 top_n 未覆盖本次“前五”数量，实际 SQL LIMIT 和返回行数正确；结构化排行约束覆盖列入后续计划审阅。不启动新训练、终测或功能扩展，不切换默认模型。本次事实已同步飞书项目文档 revision 254。
+
+### 2026-10-11：候选 SQL 训练/运行时输入对齐，共用入口与数据回放
+
+Day 1 用户已复述入口、Router 与 QueryPlan/QuerySpec 的主要职责，并提出复用既有数据重建输入、重新训练验证。新增 [`runtime 候选 SFT 对齐计划`](plan/refactor-runtime-candidate-sft-alignment-v1.md)：小模型保留 SQL-only 候选职责，服务端负责工具包装与既有治理；统一真实请求构造器，不从离线 Spec 注入答案。先修复查询要求错配，再小批、物化、GPU smoke 和 1.5B LoRA；默认 provider 不切换。
+
+新增单轮无 grounder 诊断 `runtime_alignment_audit.py` 与脚本 `audit_runtime_input_alignment.py`，回放原 `multi-schema-ecommerce-sql-only-v1-r1` 的 6,000 train / 1,500 validation。源文件 hash 与原 manifest 一致。Olist train/validation 结构含列序一致为 1480/338，列序差异为 1493/404，路由未准入为 27/8；TheLook 为一致 1494/132、列序差异 500/97、未准入 23/5，另有维度差异 775/455、粒度差异 208/61、结果列集合差异 983/516，后三类有重叠。记录位于仓库外 `evals/runtime-candidate-alignment-20261011-r1/{summary.json,records.jsonl}`，不含 raw SQL 或题目。
+
+实现 `candidate_sql_generator.py:CandidateSqlRequest/build_runtime_candidate_request/render_runtime_candidate_prompt` 的 `runtime-candidate-sql-v2` 共用入口，输入来自实际 CatalogSelection、QueryPlan、ResultContract、workspace 与问题；没有 QuerySpec/Gold/摘要参数。`BudgetedChatHandler` 的查库准入分支调用同构造器，仅记录候选 Prompt 版本/hash；不替换默认 API Agent，不声称其完整工具调用 Prompt 已变成 SQL-only 模板。离线 `replay_single_turn(workspace=...)` 调用同一入口。v1 renderer 与完成清洗合同保持可回查，AGENTS 改为约束新实验必须复用版本化构造器，旧实验不迁移覆盖。
+
+共用 v2 回放证据为仓库外 `evals/runtime-candidate-alignment-20261011-v2-r1/{summary.json,records.jsonl}`；7,500 行记录与初始审计的来源 hash、各组差异统计一致，生成 7,437 个不重复候选输入 hash，63 条未准入。两组定向测试共 119 passed、7 skipped（数据库集成未启用），Ruff/compileall/diff check 通过；覆盖 runtime/offline 输入文本及 hash 相同、版本/列/指标漂移拒绝、拒绝路由不得构造输入、摘要排除、客户端假 hash 被服务端覆盖。该诊断只比较规则推导的结构，并非完整输入准入或模型准确率；没有验证端点语义或全部表列依赖。TheLook 是现有规则的假设复用，不代表线上已接入。没有读取 final test、调用数据库/LLM/GPU、生成新正式 release 或启动训练。下一项是必要的维度、时间、结果列合同修复，随后一次物化、smoke 与正式训练；不会把缺月粒度的问题靠注入 Gold 计划包装为合格训练行。本次事实已同步飞书项目文档 revision 255。

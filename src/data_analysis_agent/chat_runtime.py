@@ -15,6 +15,7 @@ from vanna.servers.base.models import ChatRequest, ChatStreamChunk
 
 from .analysis_lifecycle import prepare_turn_memory
 from .catalog_grounding import ConstrainedCatalogGrounder, grounded_retrieval_question
+from .candidate_sql_generator import build_runtime_candidate_request
 from .question_router import (
     _is_clarification_continuation,
     expand_retrieval_question,
@@ -361,6 +362,20 @@ class BudgetedChatHandler(ChatHandler):
                 if query_plan is not None:
                     request.request_context.metadata["query_plan"] = query_plan.as_dict()
                     catalog_evidence["query_plan"] = query_plan.as_dict()
+                    candidate_request = build_runtime_candidate_request(
+                        question=request.message,
+                        selection=selection,
+                        query_plan=query_plan,
+                        result_contract=result_contract,
+                        workspace=self.workspace,
+                        route=route,
+                    )
+                    # A shared SQL-component fingerprint, not a replacement
+                    # for the default conversational provider or its tools.
+                    request.request_context.metadata["candidate_request"] = (
+                        candidate_request.safe_evidence()
+                    )
+                    catalog_evidence["candidate_request"] = candidate_request.safe_evidence()
                 if chart_contract is not None:
                     catalog_evidence["chart_contract"] = chart_contract.as_evidence()
                 usage.record_catalog(catalog_evidence)

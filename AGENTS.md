@@ -39,7 +39,7 @@
 ## 5. 项目架构边界
 
 - 产品运行时是 Python 3.12、FastAPI、Vanna、PostgreSQL、SQLAlchemy/Alembic、`sqlglot` 和原生 `<vanna-chat>`；不另建独立前端，不引入没有实际需求的 Redis、多 Agent、MCP 或任意 Python 执行。
-- Olist 领域 SFT 的训练输入必须复用真实 `olist-candidate-sql-v1` Prompt（Catalog + QueryPlan + ResultContract），目标仅为 canonical PostgreSQL SQL 加 EOS；不能退化为 SQLite Schema-only 模板。
+- 新的候选 SQL SFT、matching 评测和后续 opt-in 运行时接入必须共用 `candidate_sql_generator.py` 的版本化请求构造器与 renderer（Catalog + 实际问题派生的 QueryPlan + ResultContract），目标仅为 PostgreSQL SQL 加 EOS；不得把离线 QuerySpec 改名后作为运行时计划输入，不得退化为 SQLite Schema-only 模板。历史 `olist-candidate-sql-v1` 和 `multi-schema-sql-only-v1` 的冻结数据/结果保留原协议，不覆盖迁移。
 - `QuerySpec` 是离线、版本锁定的结构化施工图，不是自然语言解析结果，也不是 SQL 字符串；renderer 只编译已验证结构，不解析问题、不执行 SQL、不调用 LLM。
 - 训练数据、模型实验和生产运行时分开；后训练 Adapter 未通过匹配 Base/Adapter 业务质量门前，不接入生产默认路径。
 - 长历史上下文只能通过有界、可追溯的 `HistorySummary`/`ContextBudget` 机制处理。语义摘要可以帮助理解对话脉络，但不能成为指标、时间、筛选、权限、SQL 或业务结果事实；这些只能来自验证过的 WorkingMemory、QueryPlan、ResultContract 和 ResultArtifact。长期记忆、向量检索和跨会话自动事实召回必须另立合同，不能在上下文压缩任务中顺手引入。

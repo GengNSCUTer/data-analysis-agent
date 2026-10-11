@@ -474,7 +474,10 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
         message="2017年按月统计 GMV",
         conversation_id="conversation-2",
         request_context=RequestContext(
-            metadata={"required_result_columns": ["client_supplied"]}
+            metadata={
+                "required_result_columns": ["client_supplied"],
+                "candidate_request": {"prompt_sha256": "client_supplied"},
+            }
         ),
     )
 
@@ -497,6 +500,12 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
     assert recorder.usage.catalog_trace["result_contract"]["metric_ids"] == ["gmv"]
     assert "month" in recorder.usage.catalog_trace["result_contract"]["result_time_column_aliases"]
     assert recorder.usage.query_plan["plan_type"] == "single_metric"
+    candidate_evidence = agent.metadata["candidate_request"]
+    assert set(candidate_evidence) == {"prompt_version", "prompt_sha256"}
+    assert candidate_evidence["prompt_version"] == "runtime-candidate-sql-v2"
+    assert len(candidate_evidence["prompt_sha256"]) == 64
+    assert candidate_evidence["prompt_sha256"] != "client_supplied"
+    assert recorder.usage.catalog_trace["candidate_request"] == candidate_evidence
     assert recorder.usage.deterministic_result_finalization_disabled is False
 
 
