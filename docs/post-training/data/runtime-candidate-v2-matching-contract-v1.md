@@ -92,3 +92,5 @@ PYTHONPATH=src /disk2/gengnan/conda_envs/data-analysis-agent-qlora/bin/python \
 ```
 
 兼容和启动编排定向测试共45项、相关回归70项通过；包含真实 CLI argv 解析、重复启动、GPU忙、生成失败阻断、先核验两侧再Gold、失联/超时和独立Spec绑定。没有重跑模型 smoke；此前真实GPU smoke的生成、执行和判分组件未修改，新增存档适配由合成边界测试及全量输入物化验证。
+
+正式screen已于2026-10-11 23:55（Asia/Shanghai）启动，代码基线 `b82381a`：`daa-runtime-v2-base-20261011-r2` / `daa-runtime-v2-adapter-20261011-r2`。启动回读确认两个worker与生成进程、UUID/GPU及首条completion写出；质量结果尚未完成。运行证据都在r2目录：`launch.json`、`base-generation.log`、`adapter-generation.log`、两侧 `raw-completions.jsonl` / `generation.json` / `*-exit.json`；后置报告目标是 `evaluation/safe-report.json`，需以其完整出现且 `evaluation-exit.json` exit0作为完成证据。

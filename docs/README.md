@@ -9,7 +9,7 @@
 | 了解项目目标、当前阶段和技术决策 | [`../PROJECT.md`](../PROJECT.md) | 当前项目基线 |
 | 查看新的四周产品完善、代码学习与实习面试路线 | [`../plan/process-agent-internship-improvement-v1.md`](../plan/process-agent-internship-improvement-v1.md) | 2026-10-10 计划；不重复计算机基础，不自动启动训练 |
 | 按小段亲自阅读 Agent 代码并复述 | [`learning/agent-project-walkthrough-v1.md`](learning/agent-project-walkthrough-v1.md) | Day 1 请求入口；问答随用户学习更新 |
-| 核对 SQL-only 训练与真实候选输入的对齐改造 | [`../plan/refactor-runtime-candidate-sft-alignment-v1.md`](../plan/refactor-runtime-candidate-sft-alignment-v1.md) | 2026-10-11 正式数据 5,980 train / 1,500 validation、长度 4,096；完整两 epoch 已结束，best=step 2,500，产物回读与 fresh reload 通过。[v2 matching 入口和合同](post-training/data/runtime-candidate-v2-matching-contract-v1.md) 已通过两条 validation GPU/Gold smoke；两套各 750 条完整终测待运行 |
+| 核对 SQL-only 训练与真实候选输入的对齐改造 | [`../plan/refactor-runtime-candidate-sft-alignment-v1.md`](../plan/refactor-runtime-candidate-sft-alignment-v1.md) | 2026-10-11 正式数据 5,980 train / 1,500 validation、长度 4,096；完整两 epoch 已结束，best=step 2,500，产物回读与 fresh reload 通过。[v2 matching 入口和合同](post-training/data/runtime-candidate-v2-matching-contract-v1.md) 已通过 validation GPU/Gold smoke；r2正式1,500条输入封存，Base/Adapter在两个screen生成中，完成后自动Gold对照 |
 | 了解本周已核实的用户请求/可信执行链 | [`architecture/project-v1-baseline-review.md`](architecture/project-v1-baseline-review.md) | Week 1 当前审查基线 |
 | 查看有证据支持的产品优化候选与暂不处理项 | [`architecture/project-v1-gap-map.md`](architecture/project-v1-gap-map.md) | Week 1 缺口地图，不是实时任务台账 |
 | 查看嵌入式 Copilot 与长对话状态的目标架构 | [`architecture/embedded-copilot-and-memory-design-v1.md`](architecture/embedded-copilot-and-memory-design-v1.md) | M1 宿主合同入口；按 M1–M7 状态阅读 |

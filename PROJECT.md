@@ -1012,3 +1012,7 @@ smoke 的平均 train loss 0.215921、4 条 validation loss 0.150052；392 个 L
 仓库外 `evals/runtime-candidate-v2-matching-final-20261011-r2/inputs/inputs.jsonl` 已封存1,500条，SHA-256 `b96a1a268498b1c572071927aea9ae6c36840591e7cd3202deb2ecd80a870bb8`。Olist736 ready/14路由拒绝；TheLook717 ready/33路由拒绝。合计拒绝为12条缺查询动作、2条指标定义问题、33条缺时间粒度，保留总分母。已构造输入1,180–2,884token，没有超长或截断；不据此修protected问题或规则。
 
 新增一次性 `scripts/post_training/launchers/start_runtime_candidate_matching_screen.py`：两个screen独立生成；逻辑CUDA0/物理GPU2给Base，逻辑CUDA1/物理GPU3给best Adapter，均RTX4090且记录UUID。独占launch防重复启动、原子status发布、实际argv/hash回读；Adapter成功后等待Base退出及两侧完整标识/hash核验，再自动调用统一evaluate。生成失败、worker失联或等待超过24小时均阻断Gold，不覆盖输出或补跑失败题。定向入口/启动编排45项、相关回归70项通过，Ruff、compileall、diff check通过。实际启动及首段运行证据随后记录；此时暂无正式质量成绩。
+
+实际启动验收通过：2026-10-11 23:55（Asia/Shanghai），代码基线 `b82381a`，screen `daa-runtime-v2-base-20261011-r2` / `daa-runtime-v2-adapter-20261011-r2` 已detach；两个worker和generate子进程均存在，两侧首条已写记录，GPU运行正常。外部r2根目录的 `launch.json` 保存argv/GPU/自身hash，`screens-started.json` 记录成功启动；`base-generation.log` / `adapter-generation.log` 每条更新，worker log记录编排。完成时各写 `base-exit.json` / `adapter-exit.json`，后置执行写 `evaluation.log`、`evaluation-exit.json` 与 `evaluation/safe-report.json`。关闭SSH不影响screen。此状态仅为生成运行中，不能据首条或进程存活宣称质量改善；最终结果待生成和Gold全部完成。
+
+实际重复启动检查被拒绝，未产生额外screen或生成进程。本次启动事实已通过lark-doc追加飞书项目文档revision263，并回读确认。
