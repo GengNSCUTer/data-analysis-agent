@@ -8,7 +8,7 @@
 
 当前事实优先看 [`experiments/project-v1-model-card.md`](experiments/project-v1-model-card.md) 和 [`experiments/project-v1-model-baseline.md`](experiments/project-v1-model-baseline.md)。下文保留各轮阶段说明，其中“尚未训练”“v2 默认运行时”“TheLook 未见 Schema”等描述只适用于其历史实验，不作为最新状态。
 
-最新推进项是 [训练与实际候选输入对齐](../../plan/refactor-runtime-candidate-sft-alignment-v1.md)，正式 `runtime-candidate-sql-v2-r1` 数据已在仓库外生成：train/validation `5,980/1,500`，其中 Olist `3,000/750`、TheLook `2,980/750`；20 条 TheLook 品牌分组保守预算拒绝，不填数。所有准入 Gold 通过实际 Catalog/QueryPlan/Policy/reader/ResultValidator 与父 Gold denotation 对照，长度冻结为 4,096、未截断。QuerySpec 仅作离线审计，不进入新模型输入。Trainer v2 兼容、全量 CPU 输入/标签检查与 8 train / 4 validation 的 2 step GPU smoke 已通过，micro-batch=2、累积=2；2026-10-11 20:05（Asia/Shanghai）完整两 epoch 在 `daa-runtime-sft-20261011-r1` screen 启动，目前训练中。新实验未完成终测，既有主模型及成绩不变。原验证集事实域偏斜、Olist 65 条空风险 metadata 已明确报告，不将输入迁移写成全面覆盖扩展。
+最新推进项是 [训练与实际候选输入对齐](../../plan/refactor-runtime-candidate-sft-alignment-v1.md)，正式 `runtime-candidate-sql-v2-r1` 数据已在仓库外生成：train/validation `5,980/1,500`，其中 Olist `3,000/750`、TheLook `2,980/750`；20 条 TheLook 品牌分组保守预算拒绝，不填数。所有准入 Gold 通过实际 Catalog/QueryPlan/Policy/reader/ResultValidator 与父 Gold denotation 对照，长度冻结为 4,096、未截断。QuerySpec 仅作离线审计，不进入新模型输入。Trainer v2 兼容、全量 CPU 输入/标签检查与 8 train / 4 validation 的 2 step GPU smoke 已通过，micro-batch=2、累积=2。2026-10-11 22:17:59（Asia/Shanghai）完整两 epoch 正常结束，2,990 步，validation-best 在 step 2,500，eval_loss=0.0000192972；best/final 与各自 checkpoint 的权重/hash、fp32 AdamW state 和两个 workspace 的独立 fresh reload 验收通过，详见 [训练结束验收](experiments/runtime-candidate-sft-v2-r1.md)。新实验尚未进行 v2 matching/Gold 终测，既有主模型及成绩不变。下一项先实现共用候选模板的 matching 入口，不能直接使用旧 QuerySpec 评测模板。原验证集事实域偏斜、Olist 65 条空风险 metadata 已明确报告，不将输入迁移写成全面覆盖扩展。
 
 ## 文档职责
 

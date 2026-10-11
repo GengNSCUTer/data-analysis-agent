@@ -982,3 +982,13 @@ smoke 的平均 train loss 0.215921、4 条 validation loss 0.150052；392 个 L
 首个step250完成全量validation，`eval_loss=0.0004893963341601193`，耗时159.6秒，checkpoint保存后继续训练。首checkpoint只读回读确认LoRA配置、2,990总步数、fp32 AdamW m/v及optimizer/scheduler/RNG/trainer_state齐全，审计通过；loss/grad_norm有限、没有OOM/CUDA错误。此值仅用于训练期checkpoint选择，不能推出生成质量改善；正式训练尚未结束，最终adapter_best尚未确定。
 
 仓库外运行目录为 `experiments/runtime-candidate-qwen25coder15b-bf16-lora-2epoch-20261011-r1/`，日志为 `evals/runtime-candidate-qwen25coder15b-sft-20261011-r1.log`，同名前缀下保存 `-launch.json` 与 `-first-checkpoint-audit.json`，结束后保存 `-exit.json`；外部根目录为 `/disk2/gengnan/data-analysis-agent-data/`。完整结束后Trainer会写运行目录的 `sft_smoke.json`、`adapter_best/`和`adapter_final/`。按当前速度整轮粗估约两小时；下一项等待完成后审查训练/validation-best证据，再准备matching Base/Adapter生成与Gold评测。本次事实已通过 lark-doc 同步飞书项目文档 revision 260。
+
+### 2026-10-11：runtime candidate v2 两 epoch 训练完成与 best 冻结
+
+完成对齐计划 TASK-007。训练于 22:17:59（Asia/Shanghai）正常退出，exit 0，完整两 epoch / 2,990 step；Trainer 记录含验证/复验耗时约 2 小时 11 分钟，平均 train loss 0.0012747832。12 个预先指定的完整 validation 点中 step 2,500 最优，eval_loss 为 0.000019297187463962473。末步权重的 loss 为 0.000027163852792000398；恢复 best 后完整复验回到最优值，两次 step 2,990 日志已经分开审计。
+
+训练结束回读确认 release/runtime/Base 文件 hash 不变，保存的超参符合合同；best 精确匹配 checkpoint-2500，final 精确匹配 checkpoint-2990，两者 392 个 LoRA 张量均不同且有限。两个保留 checkpoint 的 optimizer/scheduler/RNG/trainer_state 齐全，AdamW m/v 为 fp32。独立进程重新加载原 Base + best，复用训练 Dataset，在两个 workspace 最长 validation 样本上通过权重、标签/EOS 和有限 loss 检查；没有再次评估全量 validation 或读取 final test。
+
+完整结论见 [`训练结束验收`](docs/post-training/experiments/runtime-candidate-sft-v2-r1.md)。仓库外 eval 同名前缀新增 `-completion-audit.json`、`-best-checkpoint-freeze.json` 和 `-validation-curve.csv/.html`；后续只使用 `adapter_best`，权重 SHA-256 `926d16e4218fb9f83dc99cb1ef79094dac90adc397e3c5e0ad9526c7eb834c9e`。低 loss 不等于自由生成 SQL 的业务准确率；当前受控模板和 TheLook validation 三指标偏斜仍是限制。既有 Olist 403/750、TheLook 396/750 headline 成绩不变，默认在线 provider 不变。
+
+下一项为 v2 matching 入口实现与共同解码合同冻结：共用真实候选构造器，保留原问题，非准入/超长记录仍计入各 750 条总分母。旧 QuerySpec 评测模板不能直接套用这轮 Adapter。本轮没有启动生成终测。本次事实已通过 lark-doc 同步飞书项目文档 revision 261。

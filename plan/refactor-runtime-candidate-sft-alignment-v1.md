@@ -12,7 +12,7 @@ tags: [Text-to-SQL, SFT, QueryPlan, runtime, alignment]
 
 ![Status: In progress](https://img.shields.io/badge/status-In_progress-yellow)
 
-用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成共用候选请求入口、运行时合同修复、原 6,000 train / 1,500 validation 全量回放、32 条小批准入，以及新的 runtime-candidate-sql-v2-r1 正式数据 release。全量准入 5,980 train / 1,500 validation，20 条 TheLook 品牌分组因保守执行上界排除；全部 7,480 条通过只读执行与父 Gold 结果对照。最长 3,592 token，正式长度冻结为 4,096，未截断。Trainer v2 兼容、全量 CPU 标签/长度审计与最小 GPU smoke 已通过，实际 batch=2、累计=2、有效 batch=4；2026-10-11 20:05（Asia/Shanghai）已在独立 screen 启动完整两 epoch 训练，目前训练中。下一项等待完成后分析 validation-best 和训练证据，再进入一次 matching 评测。
+用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成共用候选请求入口、运行时合同修复、原 6,000 train / 1,500 validation 全量回放、32 条小批准入，以及新的 runtime-candidate-sql-v2-r1 正式数据 release。全量准入 5,980 train / 1,500 validation，20 条 TheLook 品牌分组因保守执行上界排除；全部 7,480 条通过只读执行与父 Gold 结果对照。最长 3,592 token，正式长度冻结为 4,096，未截断。Trainer v2 兼容、全量 CPU 标签/长度审计与最小 GPU smoke 已通过，实际 batch=2、累计=2、有效 batch=4；完整两 epoch 于 2026-10-11 22:17:59（Asia/Shanghai）正常结束。2,990 步训练验收通过，step 2,500 的 validation-best 已冻结，best/final checkpoint 和独立重新加载均核对通过。下一项实现并测试 v2 matching 入口，再进行一次固定评测；尚未读取 final test。
 
 任务卡：目标是同一服务端候选请求在数据构建、matching Base/Adapter 生成及 opt-in 接入时得到一致文本；输入是既有 train/validation、当前 Catalog/Router/WorkingMemory/QueryPlan；输出是版本化构造器、可追踪的新 release、一次 1.5B SFT 和匹配评测。保持指标口径、权限、数据快照和 SQL-only 目标；不引入 Task B、DPO、新指标、全量 Agent 对话训练或默认 provider 切换。先修已发现的输入错配，再小批、全量、smoke、正式训练，逐步审阅。
 
@@ -124,7 +124,7 @@ TASK-007 当前小单元任务卡：输入是已冻结的 `runtime-candidate-sql
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-007 | 在 `run_post_training_sft_smoke.py` 新增 v2 release 审计分支，验证输入版本、标签 mask、hash/split 与未截断长度；先最小 GPU smoke 后在空闲 3090/4090 上 screen 启动 1.5B 完整 LoRA，记录 logical/physical/UUID 与日志。复用验证损失选择 adapter_best，不能把历史不同 split/Prompt 的 loss 直接比较为改善。 | 训练中 | 2026-10-11 |
+| TASK-007 | 在 `run_post_training_sft_smoke.py` 新增 v2 release 审计分支，验证输入版本、标签 mask、hash/split 与未截断长度；先最小 GPU smoke 后在空闲 3090/4090 上 screen 启动 1.5B 完整 LoRA，记录 logical/physical/UUID 与日志。复用验证损失选择 adapter_best，不能把历史不同 split/Prompt 的 loss 直接比较为改善。 | 是 | 2026-10-11 |
 | TASK-008 | 对冻结验证期 adapter_best，用 TASK-002 同一构造器物化独立 test 输入视图和 matching Base/Adapter 生成，源问题来自原 protected holdout，仅用于此冻结实验的最终评测。非准入、缺失上下文或超过长度记录失败并留在总分母，禁止根据 test 再修解析器。生成输出冻结后再执行 Gold；按预定列序协议保留原 Gold 证据与规范化对照，输出协议/合同/denotation 指标。 | 否 | — |
 | TASK-009 | 汇总 v2 的实际训练量、validation-best、两 workspace 结果、解析失败与候选 SQL 失败。相对旧实验的比较标明 Prompt/目标列序变化，不用差值证明单独因果。另在独立产品开发用例验证 opt-in 请求→SQL→可信执行链，实际接入失败不能用离线成绩替代；更新 PROJECT/飞书事实。 | 否 | — |
 
@@ -134,13 +134,19 @@ TASK-007 前半段已通过：Trainer 校验固定 manifest SHA-256、train/vali
 
 正式训练配置冻结：从原 `Qwen/Qwen2.5-Coder-1.5B` revision `df3ce67c0e24480f20468b6ef2894622d69eb73b` 新训练；bf16 Base，不量化权重或 optimizer state；LoRA r16/alpha32/dropout0.05，覆盖七类 attention/MLP 投影；AdamW lr=1e-4、constant scheduler、weight_decay=0.01；seed=20261011；train/eval micro-batch=2、累积=2、有效 batch=4、2 epoch、max_seq_length=4096、动态右 padding、non-reentrant gradient checkpointing。每 250 optimizer step 对完整 1,500 validation eval/save，末步也 eval/save；保留 2 个 checkpoint，按最小 eval_loss 恢复并单独保存 adapter_best，adapter_final 只作诊断；不在训练前评估完整 validation、不使用 smoke adapter 续训。源 train 5,980 行整除有效 batch，单卡每 epoch 1,495 optimizer step、两 epoch 2,990。实际选择只比较预先指定验证点，不读取 final test；原 TheLook validation 三指标偏斜保留为解释限制。
 
-本单元定向 Trainer/历史输入回归 42 passed，共用候选/物化回归 28 passed，Ruff、compileall、bash -n、diff check 通过；完整训练与 matching 尚未运行，TASK-007 仍未标完成。
+smoke 单元定向 Trainer/历史输入回归 42 passed，共用候选/物化回归 28 passed，Ruff、compileall、bash -n、diff check 通过；当时完整训练与 matching 尚未运行。后续训练启动与结束验收见以下记录。
 
 TASK-007 正式启动任务卡：复用上一小单元的已冻结参数和通过的 smoke，从原 Base 在独立 screen 启动完整两 epoch。新增明确的正式 launcher，启动前校验 release/smoke/model manifest hash 和 GPU 空闲状态；输出仓库外 launch manifest、日志、checkpoint 与退出状态。保持 batch2×累计2、1,500 条完整 validation、250 步 eval/save、末步额外 eval/save、最小 eval_loss 选择 best；不更换数据/参数、不读 final test、不续训 smoke、不自动启动生成终测。启动验收至少观察实际 optimizer 更新、有限 loss/grad_norm 与首个 checkpoint 的验证/保存，关闭 SSH 不影响 screen。训练结束后的质量分析另属下一小单元。
 
 正式启动验收已通过：2026-10-11 20:05（Asia/Shanghai）在逻辑 CUDA 1 / 物理 GPU 3（RTX 4090，UUID 同 smoke）启动 `daa-runtime-sft-20261011-r1`，代码基线 `ad5179a`。正式 launcher 为 `scripts/post_training/launchers/start_runtime_candidate_sft_training_screen.sh`，其真实 argv 已经由 Trainer parser 回读，与冻结配置逐项核对通过；重复启动尝试返回 exit 2，未产生第二个训练进程。首个 step 250 对完整 1,500 validation 的 eval_loss 为 `0.0004893963341601193`，评估耗时 159.6 秒；checkpoint 保存后训练继续。只读回读确认 LoRA r/alpha/dropout、2,990 总步数、AdamW lr1e-4/weight_decay0.01、fp32 m/v 以及 optimizer/scheduler/RNG/trainer_state 齐全；首点 best 仍是临时训练状态，不是最终模型选择或 SQL 语义成绩。
 
 仓库外证据：运行目录 `experiments/runtime-candidate-qwen25coder15b-bf16-lora-2epoch-20261011-r1/`；完整日志 `evals/runtime-candidate-qwen25coder15b-sft-20261011-r1.log`；启动 argv/code hash 为同名前缀的 `-launch.json`；首 checkpoint hash/状态回读为 `-first-checkpoint-audit.json`；结束时 launcher 写 `-exit.json`，Trainer 写运行目录下 `sft_smoke.json` 和 `adapter_best/adapter_final`。以上外部根目录为 `/disk2/gengnan/data-analysis-agent-data/`。这次仅启动并确认运行正常；完整训练尚未结束，未自动终测。按首阶段速度粗估整轮约两小时，实际耗时以日志为准。
+
+TASK-007 训练结束验收任务卡：输入是本轮固定 run、launch/exit、完整 Trainer state、release manifest 和 best/final checkpoint；输出是仓库外完成审计、validation 曲线、best 权重 hash 与独立重新加载证据，以及本地/飞书实验结论。检查两 epoch/2,990 步、预定验证点、最小验证损失选择、best/final 权重对应关系、有限参数/梯度、未量化 optimizer state 和来源 hash。用同一 `CausalSqlDataset` 在两个 workspace 的最长 validation 样本上 fresh reload，不重跑全量 validation、不读取 final test、不改超参、不自动启动终测。验收通过才冻结 step 2,500 的 Adapter 供下一项 v2 matching 使用；旧 QuerySpec 模板的评测入口不能直接套用新 Adapter。
+
+训练结束验收已通过：22:17:59 正常退出，完成两 epoch / 2,990 步；12 个预选 validation 点中 step 2,500 的 eval_loss `0.000019297187463962473` 最低，恢复 best 后的完整复验与之相同。step 2,990 的 final eval_loss 为 `0.000027163852792000398`，与恢复 best 后同 step 标记的复验日志分开。best/final 各自精确匹配 checkpoint-2500/2990，两者 392 个 LoRA 张量均不同且有限；两个 checkpoint 的续训状态齐全，AdamW m/v 均 fp32。固定 source/runtime/Base 文件 hash 未漂移。独立进程用共享 Dataset 在两个 workspace 最长 validation 样本上 fresh reload，通过权重、标签/EOS 和有限 loss 检查。
+
+best 权重 SHA-256 `926d16e4218fb9f83dc99cb1ef79094dac90adc397e3c5e0ad9526c7eb834c9e`。外部同一 eval 前缀下新增 `-completion-audit.json`、`-best-checkpoint-freeze.json`、`-validation-curve.csv/.html` 和可回读审计脚本。完整结果与局限见 [`训练结束验收`](../docs/post-training/experiments/runtime-candidate-sft-v2-r1.md)。TASK-007 完成，TASK-008 尚未开始；本轮没有 SQL 生成/终测，低 loss 不能作为项目模型改善成绩。旧 QuerySpec matching 模板与旧 reload encoder 都不能直接用于 v2，本次独立 reload 已复用实际 Trainer 的 Dataset；下一项只实现 v2 评测入口与冻结共同解码规则。
 
 ## 3. Alternatives
 
