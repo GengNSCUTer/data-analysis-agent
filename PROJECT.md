@@ -962,3 +962,13 @@ Day 1 用户已复述入口、Router 与 QueryPlan/QuerySpec 的主要职责，�
 正式输入为实际问题派生的 Catalog/QueryPlan/ResultContract；目标为规范顶层列序后的 PostgreSQL SQL 加 EOS，公式、过滤和 Join 不变。来源与输出的样本、QuerySpec、Gold、规范化问题和 Prompt 无重复或跨 split 交集。Olist 按原 family、TheLook 按独立 program 的 split_family_id 也为零交集；TheLook 共享 scenario 类别仅为覆盖标签，不作为隔离单位。`coverage-audit.json` 保存四组源/新指标、维度、grain、shape、风险和主问法分布；`evidence.jsonl` 保存每条溯源及只读执行证据。
 
 train 长度 1,265–3,538（p95=3,300），validation 1,165–3,592（p95=3,339），合计 862 条超过旧 3,072，均完整保留；正式 manifest 冻结 **max_seq_length=4,096**，零截断、零长度排除。train SHA-256 `372254d553248ce7f5068b966f3ee99e805d9b78b0e0ed9d4cc1bab482b10b31`，validation `161e02be0e2b2c12cae4cf1e99d990a6b4370370e82b174b00e2e2622e7cc4a6`。独立回读逐条重算输入/标签、父记录/hash 和 token 长度通过，报告在外部 `evals/runtime-candidate-release-verification-20261011-r1.json`。相关回归 **230 passed**，Ruff、compileall、diff 检查通过。本轮没有读取 final test、调用 LLM/GPU 或启动训练；下一项为 Trainer v2 manifest/标签兼容、训练配置审阅与最小 GPU smoke。本次事实已通过 lark-doc 同步飞书项目文档 revision 258。
+
+### 2026-10-11：候选输入对齐第五步，Trainer v2 兼容与最小 GPU smoke
+
+完成 TASK-007 的审阅/smoke 小单元，完整训练尚未启动。`run_post_training_sft_smoke.py` 支持新 release：校验固定 manifest SHA-256、文件 hash/行数、实际逐条准入、运行时资产与 tokenizer 身份及 4,096 上限；全量 5,980/1,500 输入重新 tokenize 并确认记录长度、Prompt/completion 分界无漂移。v2 推理前缀精确停在 `### SQL`，分隔换行与 SQL/EOS 一起监督，Prompt 和 padding 不计 loss；旧格式标签布局不改。末步额外 eval/save，避免非周期末步不能进入 validation-best 选择。
+
+新增有界 smoke 参数和 `scripts/post_training/launchers/start_runtime_candidate_sft_smoke_screen.sh`：校验完整 release 后，各 workspace 选择最长样本，实际只训练 8 条、评估 4 条，运行两次更新。逻辑 CUDA 1 / 物理 GPU 3 RTX 4090、UUID `GPU-10863af0-8588-7625-5609-640ba794f64b`，screen `daa-runtime-smoke-b2-20261011` 正常退出。batch=2、累积=2、有效 batch=4 无 OOM；峰值分配/预留 17.89/22.98 GiB，实际最长样本 3,592，未宣称验证任意恰好 4,096 的序列。
+
+smoke 的平均 train loss 0.215921、4 条 validation loss 0.150052；392 个 LoRA 张量实际更新，Base 冻结，AdamW m/v 为 fp32。adapter_best 在 step 2，保存权重逐张量与 checkpoint-2 一致；重新加载 Base+best 后单条 loss 0.137117 有限。证据在外部 `experiments/runtime-candidate-sft-smoke-20261011-b2-r1/sft_smoke.json`（SHA-256 `79854c528ed8ffad6d34431f17228e2b428c10217bec0a35bfe58d418bb5fee2`），日志在 `evals/runtime-candidate-sft-smoke-20261011-b2-r1.log`。这些值仅证明工程流程可用，不能作为全量 validation 或生成质量提升。
+
+下一步正式训练配置在原对齐计划中冻结：从原 1.5B Base 新训 bf16 LoRA，r16/alpha32/dropout0.05；非量化 AdamW、lr1e-4、constant scheduler、weight_decay0.01；train/eval batch2、累积2、两 epoch、seed20261011、max_seq_length4096。每250 optimizer step及最后一步对完整validation评估/保存，最小eval_loss选择adapter_best，adapter_final仅诊断；预期2,990 optimizer step。未使用 smoke adapter 续训，未读取 final test，默认在线 provider 未变。定向训练/旧格式回归42 passed、共用候选/物化回归28 passed，Ruff、compileall、bash语法和diff检查通过。本次事实已通过 lark-doc 同步飞书项目文档 revision 259。

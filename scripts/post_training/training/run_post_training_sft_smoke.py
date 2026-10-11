@@ -6,8 +6,11 @@ Evidence records counts, hashes and metrics but never copies questions or SQL.
 """
 from __future__ import annotations
 import argparse
+from collections import Counter
+import gc
 import hashlib
 import json
+import math
 import os
 import random
 from dataclasses import dataclass
@@ -16,7 +19,7 @@ from pathlib import Path
 from typing import Any
 import numpy as np
 import torch
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from torch.utils.data import Dataset
 from transformers import (
     AutoModelForCausalLM,
@@ -31,6 +34,8 @@ from data_analysis_agent.spider_sft_format import PROMPT_FORMAT_VERSION
 
 # 分隔符：Prompt 和目标SQL之间的标记
 SQL_MARKER = "\n\n### SQL\n"
+RUNTIME_PROMPT_VERSION = "runtime-candidate-sql-v2"
+RUNTIME_RELEASE_VERSION = "runtime-candidate-sql-v2-r1"
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,6 +49,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validation-jsonl", type=Path, required=True)
     # 数据集切分审计文件，用于校验数据集合法性
     parser.add_argument("--split-audit", type=Path, required=True)
+    parser.add_argument(
+        "--expected-release-manifest-sha256",
+        help="Required immutable manifest hash for runtime-candidate releases.",
+    )
+    parser.add_argument(
+        "--smoke-samples-per-workspace", type=int, default=None,
+        help="Validate the full release, then train this many longest rows per workspace; eval uses two per workspace.",
+    )
     # 输出目录：LoRA适配器、checkpoint、日志、证据清单，**必须放在git仓库外**
     parser.add_argument("--output-dir", type=Path, required=True)
     # 断点续训路径，同样禁止放在git仓库内
@@ -138,6 +151,20 @@ def load_rows(path: Path, expected_split: str) -> list[dict[str, Any]]:
     for row in rows:
         if row.get("split", {}).get("name") != expected_split:
             raise ValueError(f"{row['sample_id']} is not in expected {expected_split} split")
+        if row.get("prompt_format_version") == RUNTIME_PROMPT_VERSION:
+            evidence = row.get("execution_evidence", {})
+            if not isinstance(evidence, dict) or not (
+                row.get("admission_status") == "admitted"
+                and row.get("training_length_status") == "within_frozen_contract"
+                and evidence.get("transaction_read_only") is True
+                and evidence.get("policy_state") == "allowed"
+                and evidence.get("query_plan_guard") == "passed"
+                and evidence.get("result_state") == "valid"
+                and evidence.get("execution_truncated") is False
+                and evidence.get("denotation") == "ordered_denotation_match"
+            ):
+                raise ValueError(f"{row['sample_id']} lacks runtime admission evidence")
+            continue
         # The multi-schema release carries its completed deterministic
         # admission in the release manifest plus row-level admitted status;
         # it deliberately does not duplicate database result evidence into
@@ -175,6 +202,9 @@ def validate_split_audit(
 ) -> None:
     """校验已知数据协议的切分审计与当前训练输入一致。"""
 
+    if audit.get("release_version") == RUNTIME_RELEASE_VERSION:
+        validate_runtime_release_manifest(audit, train_path, validation_path)
+        return
     if audit.get("release_version") == "multi-schema-ecommerce-sql-only-sft-v1-r1":
         validate_multi_schema_release_manifest(audit, train_path, validation_path)
         return
@@ -226,6 +256,82 @@ def validate_split_audit(
                 f"expected {expected_rows}, got {actual_rows}"
             )
     validate_materialized_length_contract(audit)
+
+
+def validate_runtime_release_manifest(
+    manifest: dict[str, Any], train_path: Path, validation_path: Path,
+) -> None:
+    """Bind v2 training to admitted, untruncated, train/validation-only files."""
+    if train_path.resolve() == validation_path.resolve():
+        raise ValueError("train and validation paths must be distinct")
+    if (
+        manifest.get("prompt_format_version") != RUNTIME_PROMPT_VERSION
+        or manifest.get("not_a_formal_training_release") is not False
+    ):
+        raise ValueError("runtime release is not a formal v2 training release")
+    checks = manifest.get("checks", {})
+    if not isinstance(checks, dict) or not (
+        checks.get("status") == "pass"
+        and checks.get("source_and_split_preserved") is True
+        and checks.get("runtime_derived_inputs") is True
+        and checks.get("readonly_gold_comparison") is True
+        and checks.get("train_validation_identity_audit") == "pass"
+        and checks.get("final_test_read") is False
+        and checks.get("silent_truncation") is False
+    ):
+        raise ValueError("runtime release lacks required admission/isolation checks")
+    tokenizer = manifest.get("tokenizer", {})
+    if not isinstance(tokenizer, dict) or not (
+        tokenizer.get("max_seq_length") == 4096
+        and tokenizer.get("silent_truncation") is False
+    ):
+        raise ValueError("runtime release has an invalid tokenizer length contract")
+    total = 0
+    for name, path in (("train", train_path), ("validation", validation_path)):
+        metadata = manifest.get("outputs", {}).get(name, {})
+        stats = manifest.get("split_audit", {}).get(name, {})
+        if metadata.get("sha256") != sha256_file(path):
+            raise ValueError(f"runtime {name} file hash drift")
+        rows = load_rows(path, name)
+        if metadata.get("rows") != len(rows) or stats.get("rows") != len(rows):
+            raise ValueError(f"runtime {name} row count drift")
+        if prompt_format_version(rows) != RUNTIME_PROMPT_VERSION:
+            raise ValueError(f"runtime {name} prompt version drift")
+        if stats.get("by_workspace") != dict(Counter(row["workspace_key"] for row in rows)):
+            raise ValueError(f"runtime {name} workspace count drift")
+        if any(not isinstance(row.get("token_length"), int) or row["token_length"] > 4096 for row in rows):
+            raise ValueError(f"runtime {name} length contract drift")
+        if stats.get("sequence_tokens", {}).get("max") != max(row["token_length"] for row in rows):
+            raise ValueError(f"runtime {name} length audit drift")
+        total += len(rows)
+    if manifest.get("admitted") != total or manifest.get("execution_summary") != {
+        "result_states": {"valid": total}, "denotation": {"ordered_denotation_match": total},
+    }:
+        raise ValueError("runtime release execution counts drift")
+    root = Path(__file__).resolve().parents[3]
+    assets = manifest.get("runtime_asset_sha256")
+    if not isinstance(assets, dict) or not assets:
+        raise ValueError("runtime release lacks pinned runtime assets")
+    for name, expected in assets.items():
+        path = (root / name).resolve()
+        if not path.is_relative_to(root) or sha256_file(path) != expected:
+            raise ValueError(f"runtime asset hash drift: {name}")
+
+
+def select_smoke_rows(rows: list[dict[str, Any]], per_workspace: int) -> list[dict[str, Any]]:
+    """Interleave the longest rows of each workspace without changing split identity."""
+    if per_workspace < 2:
+        raise ValueError("smoke requires at least two samples per workspace")
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault(row["workspace_key"], []).append(row)
+    if set(groups) != {"olist", "thelook"}:
+        raise ValueError("runtime smoke must cover both workspaces")
+    for group in groups.values():
+        if len(group) < per_workspace:
+            raise ValueError("not enough rows for the requested smoke")
+        group.sort(key=lambda row: (-row["token_length"], row["sample_id"]))
+    return [groups[workspace][i] for i in range(per_workspace) for workspace in sorted(groups)]
 
 
 def validate_multi_schema_release_manifest(
@@ -404,6 +510,10 @@ def validate_olist_pilot_audit(
 
 def required_max_seq_length(audit: dict[str, Any]) -> int | None:
     """Return a frozen materialization cap when this audit defines one."""
+    if audit.get("release_version") in {
+        RUNTIME_RELEASE_VERSION, "multi-schema-ecommerce-sql-only-sft-v1-r1",
+    }:
+        return int(audit["tokenizer"]["max_seq_length"])
     checks = audit.get("checks")
     cspider_contract = checks.get("length_contract") if isinstance(checks, dict) else None
     if isinstance(cspider_contract, dict):
@@ -473,6 +583,16 @@ def split_prompt_and_target(row: dict[str, Any]) -> tuple[str, str]:
     if not isinstance(training_text, str) or not isinstance(candidate_sql, str):
         raise ValueError(f"{row['sample_id']} lacks training text or target SQL")
     rendered_prompt = row.get("rendered_prompt")
+    if row.get("prompt_format_version") == RUNTIME_PROMPT_VERSION:
+        if not isinstance(rendered_prompt, str) or not rendered_prompt.endswith("\n### SQL"):
+            raise ValueError(f"{row['sample_id']} has an invalid runtime v2 prompt boundary")
+        if not candidate_sql.strip() or candidate_sql != candidate_sql.strip():
+            raise ValueError(f"{row['sample_id']} has an invalid canonical target SQL")
+        if training_text != rendered_prompt + "\n" + candidate_sql:
+            raise ValueError(f"{row['sample_id']} runtime prompt and target SQL mismatch")
+        # Inference ends at ### SQL. The separator is part of the completion,
+        # not unseen context that the old mask silently required at inference.
+        return rendered_prompt, "\n" + candidate_sql
     if rendered_prompt is not None:
         if not isinstance(rendered_prompt, str) or not rendered_prompt.strip():
             raise ValueError(f"{row['sample_id']} has an invalid rendered runtime prompt")
@@ -506,6 +626,12 @@ class CausalSqlDataset(Dataset[dict[str, torch.Tensor]]):
             prompt, target = split_prompt_and_target(row)
             prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
             target_ids = tokenizer(target, add_special_tokens=False)["input_ids"]
+            if row.get("prompt_format_version") == RUNTIME_PROMPT_VERSION:
+                full_ids = tokenizer(row["training_text"], add_special_tokens=False)["input_ids"]
+                if full_ids != prompt_ids + target_ids:
+                    raise ValueError(f"{row['sample_id']} tokenizer merges across runtime prompt boundary")
+                if row.get("token_length") != len(full_ids) + 1:
+                    raise ValueError(f"{row['sample_id']} recorded token length drift")
             # 完整输入序列 = Prompt + TargetSQL + EOS
             input_ids = prompt_ids + target_ids + [tokenizer.eos_token_id]
             # label：Prompt部分‑100屏蔽，SQL和EOS计算损失
@@ -572,9 +698,10 @@ class FinalAdapterSnapshotCallback(TrainerCallback):
     adapter for an explicit final-vs-best comparison.
     """
 
-    def __init__(self, output_dir: Path) -> None:
+    def __init__(self, output_dir: Path, evaluate_final_step: bool = False) -> None:
         self.output_dir = output_dir
         self.captured_step: int | None = None
+        self.evaluate_final_step = evaluate_final_step
 
     def on_step_end(self, args: TrainingArguments, state: Any, control: Any, **kwargs: Any) -> Any:
         del args
@@ -584,6 +711,11 @@ class FinalAdapterSnapshotCallback(TrainerCallback):
         self.output_dir.mkdir(parents=True, exist_ok=True)
         model.save_pretrained(str(self.output_dir))
         self.captured_step = int(state.global_step)
+        if self.evaluate_final_step:
+            # Include the final weights in validation-best selection even
+            # when the epoch boundary is not a multiple of eval/save_steps.
+            control.should_evaluate = True
+            control.should_save = True
         return control
 
 
@@ -681,6 +813,10 @@ def main() -> int:
         raise ValueError("batch and step interval arguments must be positive")
     if args.weight_decay < 0:
         raise ValueError("weight decay must be non-negative")
+    if args.smoke_samples_per_workspace is not None and (
+        args.num_train_epochs is not None or not 1 <= args.max_steps <= 4
+    ):
+        raise ValueError("bounded smoke requires max_steps in 1..4 and no epochs")
 
     # 强约束：输出目录、断点目录禁止放在Git仓库内，避免大文件提交污染版本库
     repository_root = Path(__file__).resolve().parents[3]
@@ -704,6 +840,15 @@ def main() -> int:
 
     # 读取切分审计文件，校验数据集切分流程已经通过所有安全检查
     split_audit = json.loads(args.split_audit.read_text(encoding="utf-8"))
+    runtime_release = train_prompt_format == RUNTIME_PROMPT_VERSION
+    if runtime_release and (
+        split_audit.get("release_version") != RUNTIME_RELEASE_VERSION
+        or not args.expected_release_manifest_sha256
+        or sha256_file(args.split_audit) != args.expected_release_manifest_sha256
+    ):
+        raise ValueError("runtime training requires the frozen release manifest SHA-256")
+    if args.smoke_samples_per_workspace is not None and not runtime_release:
+        raise ValueError("bounded workspace smoke requires a runtime v2 release")
     validate_split_audit(split_audit, args.train_jsonl, args.validation_jsonl)
     frozen_max_seq_length = required_max_seq_length(split_audit)
     if frozen_max_seq_length is not None and frozen_max_seq_length != args.max_seq_length:
@@ -716,6 +861,11 @@ def main() -> int:
 
     # 加载分词器；如果没有pad_token，则使用eos_token补齐；右padding
     tokenizer = AutoTokenizer.from_pretrained(args.model_dir, local_files_only=True)
+    if runtime_release and (
+        Path(split_audit["tokenizer"]["path"]).resolve() != args.model_dir.resolve()
+        or tokenizer.eos_token_id != split_audit["tokenizer"]["eos_token_id"]
+    ):
+        raise ValueError("runtime tokenizer/model identity drift")
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
@@ -723,7 +873,25 @@ def main() -> int:
     # 构建PyTorch数据集
     train_dataset = CausalSqlDataset(train_rows, tokenizer, args.max_seq_length)
     validation_dataset = CausalSqlDataset(validation_rows, tokenizer, args.max_seq_length)
+    full_input_stats = {"train": dict(train_dataset.stats), "validation": dict(validation_dataset.stats)}
+    smoke = args.smoke_samples_per_workspace is not None
+    smoke_selection = None
+    if smoke:
+        train_rows = select_smoke_rows(train_rows, args.smoke_samples_per_workspace)
+        validation_rows = select_smoke_rows(validation_rows, 2)
+        smoke_selection = {
+            "strategy": "longest_per_workspace_then_interleave_v1",
+            "train_sample_ids": [row["sample_id"] for row in train_rows],
+            "validation_sample_ids": [row["sample_id"] for row in validation_rows],
+            "full_release_verified_before_selection": True,
+        }
+        train_dataset = CausalSqlDataset(train_rows, tokenizer, args.max_seq_length)
+        validation_dataset = CausalSqlDataset(validation_rows, tokenizer, args.max_seq_length)
+    print(json.dumps({"stage": "inputs_verified", "full_input_stats": full_input_stats,
+                      "smoke_selection": smoke_selection}, ensure_ascii=False), flush=True)
 
+    if runtime_release and args.output_dir.exists() and any(args.output_dir.iterdir()) and not args.resume_from_checkpoint:
+        raise ValueError("runtime training output is nonempty; use a new directory or explicit resume")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = args.output_dir / "adapter_checkpoints"
     final_adapter_dir = args.output_dir / "adapter_final"
@@ -771,6 +939,12 @@ def main() -> int:
     )
 
     trainable, total = count_parameters(model)
+    if any("lora_" not in name for name, parameter in model.named_parameters() if parameter.requires_grad):
+        raise RuntimeError("a non-LoRA base parameter is trainable")
+    initial_adapter = (
+        {name: parameter.detach().cpu().clone() for name, parameter in model.named_parameters() if parameter.requires_grad}
+        if smoke else None
+    )
     planned_max_steps = -1 if args.num_train_epochs is not None else args.max_steps
 
     optimizer_name = "adamw_torch" if args.base_weight_mode == "bf16_lora" else "paged_adamw_8bit"
@@ -819,7 +993,7 @@ def main() -> int:
         train_dataset=train_dataset,
         eval_dataset=validation_dataset,
         data_collator=CausalSqlCollator(tokenizer.pad_token_id),
-        callbacks=[FinalAdapterSnapshotCallback(final_adapter_dir)],
+        callbacks=[FinalAdapterSnapshotCallback(final_adapter_dir, evaluate_final_step=runtime_release)],
     )
 
     started = datetime.now(timezone.utc)
@@ -842,6 +1016,31 @@ def main() -> int:
     trainer.save_model(str(best_adapter_dir))
     # 训练结束后跑一次验证集评估，评估对象明确是 best adapter。
     evaluation = trainer.evaluate()
+    if not all(math.isfinite(value) for value in (train_result.training_loss, evaluation["eval_loss"])):
+        raise RuntimeError("SFT produced a non-finite training or validation loss")
+
+    smoke_checks = None
+    if initial_adapter is not None:
+        changed = sum(
+            not torch.equal(initial_adapter[name], parameter.detach().cpu())
+            for name, parameter in model.named_parameters() if parameter.requires_grad
+        )
+        # Accelerate wraps the underlying torch optimizer; inspect real state
+        # tensors rather than inferring precision from the command-line name.
+        optimizer = getattr(trainer.optimizer, "optimizer", trainer.optimizer)
+        state_dtypes = sorted({
+            str(value.dtype) for state in optimizer.state.values()
+            for name, value in state.items() if name in {"exp_avg", "exp_avg_sq"}
+        })
+        if not changed or (args.base_weight_mode == "bf16_lora" and state_dtypes != ["torch.float32"]):
+            raise RuntimeError("smoke failed LoRA-update or unquantized optimizer-state checks")
+        smoke_checks = {
+            "changed_lora_tensors_after_best_reload": changed,
+            "base_parameters_frozen": True,
+            "optimizer_class": type(optimizer).__name__,
+            "moment_state_dtypes": state_dtypes,
+            "finite_train_and_validation_loss": True,
+        }
 
     trainer.save_state()
 
@@ -851,7 +1050,8 @@ def main() -> int:
     model_manifest = json.loads((args.model_dir / "download_manifest.json").read_text(encoding="utf-8"))
     # 生成完整实验证据清单 sft_smoke.json，记录全部超参、数据集哈希、硬件、指标，实现全链路可复现
     evidence = {
-        "experiment_type": "adapter_sft_coverage_ablation",
+        "experiment_type": ("runtime_candidate_sft_smoke" if smoke else "runtime_candidate_sft")
+        if runtime_release else "adapter_sft_coverage_ablation",
         "experiment_label": args.experiment_label,
         "started_at": started.replace(microsecond=0).isoformat(),
         "model": {
@@ -865,7 +1065,10 @@ def main() -> int:
             "split_audit_sha256": sha256_file(args.split_audit),
             "train": train_dataset.stats,
             "validation": validation_dataset.stats,
+            "full_input_stats": full_input_stats,
+            "smoke_selection": smoke_selection,
             "prompt_format_version": train_prompt_format,
+            "target_boundary": "separator_newline + SQL + EOS" if runtime_release else "SQL + EOS",
             "raw_question_or_sql_saved": False,
             "v2_holdout_used": False,
         },
@@ -886,6 +1089,7 @@ def main() -> int:
             ),
             "learning_rate": args.learning_rate,
             "optimizer": optimizer_name,
+            "lr_scheduler_type": "constant",
             "weight_decay": args.weight_decay,
             "gradient_checkpointing": True,
             "base_weight_mode": args.base_weight_mode,
@@ -908,6 +1112,7 @@ def main() -> int:
             "last_logged_train_loss": latest_metric(trainer.state.log_history, "loss"),
             "evaluation_loss": float(evaluation["eval_loss"]),
             "elapsed_seconds": elapsed_seconds,
+            "smoke_checks": smoke_checks,
             "checkpoint_selection": {
                 "metric": "eval_loss",
                 "direction": "min",
@@ -949,6 +1154,32 @@ def main() -> int:
         },
     }
     evidence_path = args.output_dir / "sft_smoke.json"
+    if smoke:
+        from safetensors.torch import load_file
+
+        best_weights = load_file(str(best_adapter_dir / "adapter_model.safetensors"))
+        checkpoint_weights = load_file(str(Path(best_checkpoint) / "adapter_model.safetensors"))
+        if best_weights.keys() != checkpoint_weights.keys() or any(
+            not torch.equal(value, checkpoint_weights[name]) for name, value in best_weights.items()
+        ):
+            raise RuntimeError("adapter_best does not match the selected checkpoint")
+        del trainer, model, optimizer, best_weights, checkpoint_weights, initial_adapter
+        gc.collect()
+        torch.cuda.empty_cache()
+        reload_base = AutoModelForCausalLM.from_pretrained(args.model_dir, **model_load_kwargs)
+        reload_model = PeftModel.from_pretrained(reload_base, str(best_adapter_dir), is_trainable=False)
+        reload_model.eval()
+        batch = CausalSqlCollator(tokenizer.pad_token_id)([validation_dataset[0]])
+        with torch.no_grad():
+            reload_loss = float(reload_model(**{name: value.to("cuda:0") for name, value in batch.items()}).loss)
+        if not math.isfinite(reload_loss):
+            raise RuntimeError("fresh adapter_best reload produced non-finite loss")
+        evidence["results"]["smoke_checks"].update({
+            "best_weights_match_selected_checkpoint": True,
+            "fresh_adapter_best_reload_loss": reload_loss,
+            "fresh_reload_finite": True,
+            "adapter_best_sha256": sha256_file(best_adapter_dir / "adapter_model.safetensors"),
+        })
     evidence_path.write_text(
         json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

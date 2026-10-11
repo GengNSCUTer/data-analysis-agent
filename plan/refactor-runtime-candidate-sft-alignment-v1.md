@@ -12,7 +12,7 @@ tags: [Text-to-SQL, SFT, QueryPlan, runtime, alignment]
 
 ![Status: In progress](https://img.shields.io/badge/status-In_progress-yellow)
 
-用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成共用候选请求入口、运行时合同修复、原 6,000 train / 1,500 validation 全量回放、32 条小批准入，以及新的 runtime-candidate-sql-v2-r1 正式数据 release。全量准入 5,980 train / 1,500 validation，20 条 TheLook 品牌分组因保守执行上界排除；全部 7,480 条通过只读执行与父 Gold 结果对照。最长 3,592 token，正式长度冻结为 4,096，未截断。下一步仅做 Trainer 输入/标签/manifest 兼容、配置审阅和最小 GPU smoke，再启动正式训练。
+用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成共用候选请求入口、运行时合同修复、原 6,000 train / 1,500 validation 全量回放、32 条小批准入，以及新的 runtime-candidate-sql-v2-r1 正式数据 release。全量准入 5,980 train / 1,500 validation，20 条 TheLook 品牌分组因保守执行上界排除；全部 7,480 条通过只读执行与父 Gold 结果对照。最长 3,592 token，正式长度冻结为 4,096，未截断。Trainer v2 兼容、全量 CPU 标签/长度审计与最小 GPU smoke 已通过，实际 batch=2、累计=2、有效 batch=4；完整两 epoch 训练尚未启动。下一小单元用已审阅配置启动独立正式训练。
 
 任务卡：目标是同一服务端候选请求在数据构建、matching Base/Adapter 生成及 opt-in 接入时得到一致文本；输入是既有 train/validation、当前 Catalog/Router/WorkingMemory/QueryPlan；输出是版本化构造器、可追踪的新 release、一次 1.5B SFT 和匹配评测。保持指标口径、权限、数据快照和 SQL-only 目标；不引入 Task B、DPO、新指标、全量 Agent 对话训练或默认 provider 切换。先修已发现的输入错配，再小批、全量、smoke、正式训练，逐步审阅。
 
@@ -120,11 +120,21 @@ TASK-006 已冻结正式 release：`/disk2/gengnan/data-analysis-agent-data/eval
 
 - **GOAL-004**: 验证输入对齐是否改善 SQL 候选质量，完成一次有边界的实验。
 
+TASK-007 当前小单元任务卡：输入是已冻结的 `runtime-candidate-sql-v2-r1` 全量 train/validation 与本地固定 Base；输出是 Trainer 的 v2 manifest 校验、推理一致的标签边界、可复现的有界 smoke 与 GPU 证据。先校验全部来源 hash/长度，再从两个 workspace 各取最长样本，使用 8 train / 4 validation、2 次 optimizer step、每步 eval/save；不在 smoke 中评估全量 1,500 条。新 Prompt 精确停在 `### SQL`，其后的分隔换行归属 completion，与 SQL/EOS 一起监督；Prompt 与 padding 均不参与 loss。保留旧协议标签边界。本小单元不启动长训练、不读取 final test；以有限 loss、LoRA 实际更新、冻结 Base、未量化 AdamW、best/final 保存与重新加载成功为验收。完整训练仍按 CON-001，实际并行 batch 在 smoke 后确定。
+
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
 | TASK-007 | 在 `run_post_training_sft_smoke.py` 新增 v2 release 审计分支，验证输入版本、标签 mask、hash/split 与未截断长度；先最小 GPU smoke 后在空闲 3090/4090 上 screen 启动 1.5B 完整 LoRA，记录 logical/physical/UUID 与日志。复用验证损失选择 adapter_best，不能把历史不同 split/Prompt 的 loss 直接比较为改善。 | 否 | — |
 | TASK-008 | 对冻结验证期 adapter_best，用 TASK-002 同一构造器物化独立 test 输入视图和 matching Base/Adapter 生成，源问题来自原 protected holdout，仅用于此冻结实验的最终评测。非准入、缺失上下文或超过长度记录失败并留在总分母，禁止根据 test 再修解析器。生成输出冻结后再执行 Gold；按预定列序协议保留原 Gold 证据与规范化对照，输出协议/合同/denotation 指标。 | 否 | — |
 | TASK-009 | 汇总 v2 的实际训练量、validation-best、两 workspace 结果、解析失败与候选 SQL 失败。相对旧实验的比较标明 Prompt/目标列序变化，不用差值证明单独因果。另在独立产品开发用例验证 opt-in 请求→SQL→可信执行链，实际接入失败不能用离线成绩替代；更新 PROJECT/飞书事实。 | 否 | — |
+
+TASK-007 前半段已通过：Trainer 校验固定 manifest SHA-256、train/validation 文件与行数、逐条准入、运行时资产 hash、4,096 长度与 tokenizer；全部 7,480 行回算 token 和 Prompt/completion 边界。v2 的分隔换行进入 completion 监督，保留历史格式的 mask。新增 `--smoke-samples-per-workspace`，全量验证之后再按 workspace 选最长 8 train / 4 validation；该模式只允许 1–4 step，不允许 epoch 模式。末步额外 eval/save 保证完整训练的最后一步能参与 validation-best 选择。
+
+最小 smoke 于 2026-10-11 在逻辑 CUDA 1 / 物理 GPU 3（RTX 4090，UUID `GPU-10863af0-8588-7625-5609-640ba794f64b`）通过；入口是 `scripts/post_training/launchers/start_runtime_candidate_sft_smoke_screen.sh`，screen `daa-runtime-smoke-b2-20261011` 已正常退出。外部 `experiments/runtime-candidate-sft-smoke-20261011-b2-r1/sft_smoke.json` SHA-256 `79854c528ed8ffad6d34431f17228e2b428c10217bec0a35bfe58d418bb5fee2`，日志在外部 `evals/runtime-candidate-sft-smoke-20261011-b2-r1.log`。实际优化/评估 12.6 秒，含全量 CPU 检查、加载/回读总约 2 分钟；两次更新平均 train loss 0.215921，4 条 smoke validation loss 0.150052。392 个 LoRA 张量改变，Base 冻结，AdamW m/v 是 fp32；best 在 step 2，其权重逐张量匹配 checkpoint-2，重新加载后单条 loss 0.137117 有限。峰值 allocated/reserved 为 19,212,910,592 / 24,668,798,976 字节（17.89 / 22.98 GiB）。这是流程与最长实际样本显存验证，不是全量验证准确率或 SQL 质量提升；4,096 是接纳上限，此次实际最长 3,592，未测试人工构造的恰好 4,096 序列。
+
+正式训练配置冻结：从原 `Qwen/Qwen2.5-Coder-1.5B` revision `df3ce67c0e24480f20468b6ef2894622d69eb73b` 新训练；bf16 Base，不量化权重或 optimizer state；LoRA r16/alpha32/dropout0.05，覆盖七类 attention/MLP 投影；AdamW lr=1e-4、constant scheduler、weight_decay=0.01；seed=20261011；train/eval micro-batch=2、累积=2、有效 batch=4、2 epoch、max_seq_length=4096、动态右 padding、non-reentrant gradient checkpointing。每 250 optimizer step 对完整 1,500 validation eval/save，末步也 eval/save；保留 2 个 checkpoint，按最小 eval_loss 恢复并单独保存 adapter_best，adapter_final 只作诊断；不在训练前评估完整 validation、不使用 smoke adapter 续训。源 train 5,980 行整除有效 batch，单卡每 epoch 1,495 optimizer step、两 epoch 2,990。实际选择只比较预先指定验证点，不读取 final test；原 TheLook validation 三指标偏斜保留为解释限制。
+
+本单元定向 Trainer/历史输入回归 42 passed，共用候选/物化回归 28 passed，Ruff、compileall、bash -n、diff check 通过；完整训练与 matching 尚未运行，TASK-007 仍未标完成。
 
 ## 3. Alternatives
 
