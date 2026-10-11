@@ -11,6 +11,7 @@ from collections import Counter
 import hashlib
 import json
 from typing import Any, Mapping, Sequence
+import unicodedata
 
 from sqlglot import exp, parse
 from sqlglot.optimizer.scope import traverse_scope
@@ -34,6 +35,20 @@ class RuntimeMaterializationError(ValueError):
 
 def text_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def normalized_question_sha256(question: str) -> str:
+    normalized = "".join(
+        character for character in unicodedata.normalize("NFKC", question).casefold()
+        if not character.isspace() and not unicodedata.category(character).startswith("P")
+    )
+    return text_sha256(normalized)
+
+
+def split_family_id(row: Mapping[str, Any]) -> str:
+    """TheLook scenario labels describe coverage; its program is the split unit."""
+    key = "scenario_family_id" if row["workspace_key"] == "olist" else "program_id"
+    return f"{row['workspace_key']}:{row[key]}"
 
 
 def repair_source_question(
@@ -167,6 +182,8 @@ def materialize_runtime_candidate_row(
             raise RuntimeMaterializationError("source_workspace_version_drift")
     question, changes = repair_source_question(source, retriever, workspace)
     replay = replay_single_turn(question, retriever, workspace=workspace)
+    if replay["plan"] is None:
+        raise RuntimeMaterializationError("runtime_route:" + replay["route_reason"])
     mismatches = set(compare_source_semantics(replay, source["query_spec"])) - {"result_column_order_mismatch"}
     if mismatches:
         raise RuntimeMaterializationError("runtime_semantics:" + ",".join(sorted(mismatches)))
@@ -175,6 +192,7 @@ def materialize_runtime_candidate_row(
     retained = {key: source[key] for key in (
         "sample_id", "workspace_key", "split", "query_spec", "query_spec_id",
         "scenario_family_id", "program_id", "risk_tags", "primary_variant_id",
+        "seed_id", "source_release", "surface_variant_count",
     ) if key in source}
     prompt = replay["candidate_prompt"]
     return {
@@ -184,6 +202,9 @@ def materialize_runtime_candidate_row(
         "query_plan": replay["plan"], "result_contract": replay["result_contract"],
         "rendered_prompt": prompt, "candidate_sql": sql,
         "training_text": prompt + "\n" + sql, "admission_status": "pending_execution",
+        "canonical_gold_sql_sha256": text_sha256(sql),
+        "question_normalized_sha256": normalized_question_sha256(question),
+        "split_family_id": split_family_id(source),
         "provenance": {
             "parent_question": source["question"], "question_changes": changes,
             "parent_question_sha256": text_sha256(source["question"]),

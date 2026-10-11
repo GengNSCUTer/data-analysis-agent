@@ -148,3 +148,90 @@ def test_dependency_check_does_not_borrow_a_hidden_column_from_the_workspace(sou
     ]
     with pytest.raises(RuntimeMaterializationError, match="gold_column_missing"):
         catalog_dependency_evidence(source["candidate_sql"], replay, retriever, OLIST_RUNTIME_WORKSPACE)
+
+
+@pytest.mark.parametrize("lengths,expected", [([1410, 3072], 3072), ([2137, 3463], 4096), ([4097], 5120)])
+def test_length_contract_retains_every_sequence_without_truncation(lengths, expected):
+    from scripts.post_training.data.materialize_runtime_candidate_release import freeze_max_seq_length
+    assert freeze_max_seq_length(lengths) == expected
+
+
+def test_unsupported_lengths_cannot_publish_a_release():
+    from scripts.post_training.data.materialize_runtime_candidate_release import freeze_max_seq_length
+    with pytest.raises(ValueError, match="remains draft"):
+        freeze_max_seq_length([8193])
+    with pytest.raises(ValueError, match="empty"):
+        freeze_max_seq_length([])
+
+
+def test_split_audit_distinguishes_scenario_category_from_thelook_program(source):
+    from scripts.post_training.data.materialize_runtime_candidate_release import audit_identities
+    rows = []
+    for split in ("train", "validation"):
+        row = deepcopy(source)
+        row.update(sample_id=split, split={"name": split}, workspace_key="thelook",
+                   query_spec_id=f"qs-{split}", scenario_family_id="shared-coverage-category",
+                   program_id=f"independent-program-{split}", rendered_prompt=f"prompt-{split}",
+                   candidate_sql=f"SELECT '{split}'", question=f"{split}问题")
+        rows.append(row)
+    report = audit_identities(rows)
+    assert report["shared_scenario_category_count"] == 1
+    assert report["split_family_id"]["cross_split_overlap"] == 0
+    rows[1]["program_id"] = rows[0]["program_id"]
+    with pytest.raises(ValueError, match="split_family_id"):
+        audit_identities(rows)
+
+
+@pytest.mark.parametrize("field", ["sample_id", "query_spec_id", "candidate_sql", "question", "rendered_prompt"])
+def test_release_audit_rejects_duplicate_training_identity(source, field):
+    from scripts.post_training.data.materialize_runtime_candidate_release import audit_identities
+    first, second = deepcopy(source), deepcopy(source)
+    first.update(query_spec_id="qs-first")
+    second.update(sample_id="second", query_spec_id="qs-second", candidate_sql="SELECT 2",
+                  question="不同的问题", rendered_prompt="different prompt", scenario_family_id="second-family")
+    second[field] = first[field]
+    with pytest.raises(ValueError, match="duplicate"):
+        audit_identities([first, second])
+
+
+def test_collector_timeout_is_an_exclusion_but_connection_loss_stops_batch(source, monkeypatch):
+    import psycopg2
+    from scripts.post_training.data import materialize_runtime_candidate_release as module
+    monkeypatch.setattr(module, "materialize_runtime_candidate_row", lambda *args: {})
+    def fail_timeout(*args):
+        raise psycopg2.errors.QueryCanceled("timeout")
+    monkeypatch.setattr(module, "admit_execution", fail_timeout)
+    row, evidence = module.build_one(source, {"olist": object()}, None)
+    assert row is None and evidence["reason"] == "statement_timeout"
+    def fail_connection(*args):
+        raise psycopg2.OperationalError("connection lost")
+    monkeypatch.setattr(module, "admit_execution", fail_connection)
+    with pytest.raises(psycopg2.OperationalError):
+        module.build_one(source, {"olist": object()}, None)
+
+
+def test_release_gate_rejects_tampered_or_incomplete_pilot(tmp_path):
+    import hashlib
+    import json
+    from scripts.post_training.data.materialize_runtime_candidate_release import (
+        SOURCE_HASHES, verify_completed_pilot,
+    )
+    records = [{"sample_id": str(i), "state": "admitted", "execution": {
+        "transaction_read_only": True, "execution_truncated": False,
+        "result_state": "valid", "denotation": "ordered_denotation_match",
+    }} for i in range(32)]
+    data = "\n".join(json.dumps(row) for row in records)
+    (tmp_path / "evidence.jsonl").write_text(data)
+    manifest = {"selected": 32, "admitted": 32, "excluded": 0,
+                "source_files": {key: {"sha256": value} for key, value in SOURCE_HASHES.items()},
+                "artifacts": {"evidence.jsonl": {"sha256": hashlib.sha256(data.encode()).hexdigest()}}}
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    assert verify_completed_pilot(tmp_path)["sha256"]
+    (tmp_path / "evidence.jsonl").write_text(data + "\n{}")
+    with pytest.raises(ValueError, match="artifact hash drift"):
+        verify_completed_pilot(tmp_path)
+    (tmp_path / "evidence.jsonl").write_text(data)
+    manifest["admitted"] = 31
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="completed 32-case pilot"):
+        verify_completed_pilot(tmp_path)

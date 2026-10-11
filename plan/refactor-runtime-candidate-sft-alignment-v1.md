@@ -12,7 +12,7 @@ tags: [Text-to-SQL, SFT, QueryPlan, runtime, alignment]
 
 ![Status: In progress](https://img.shields.io/badge/status-In_progress-yellow)
 
-用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成共用候选请求入口、必要的运行时合同修复、同一 6,000 train / 1,500 validation 的全量回放，以及 32 条小批物化与真实只读执行准入。小批修正问法歧义后，原 Gold 与规范顶层列序后的 Gold 全部结果匹配；9 条超过 3,072 token 审计起点，未截断，暂不作为正式训练 release。下一步全量重建 train/validation，按实际准入和长度分布冻结新 release；不能直接用新 Prompt 包住旧 Gold 开始训练。
+用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成共用候选请求入口、运行时合同修复、原 6,000 train / 1,500 validation 全量回放、32 条小批准入，以及新的 runtime-candidate-sql-v2-r1 正式数据 release。全量准入 5,980 train / 1,500 validation，20 条 TheLook 品牌分组因保守执行上界排除；全部 7,480 条通过只读执行与父 Gold 结果对照。最长 3,592 token，正式长度冻结为 4,096，未截断。下一步仅做 Trainer 输入/标签/manifest 兼容、配置审阅和最小 GPU smoke，再启动正式训练。
 
 任务卡：目标是同一服务端候选请求在数据构建、matching Base/Adapter 生成及 opt-in 接入时得到一致文本；输入是既有 train/validation、当前 Catalog/Router/WorkingMemory/QueryPlan；输出是版本化构造器、可追踪的新 release、一次 1.5B SFT 和匹配评测。保持指标口径、权限、数据快照和 SQL-only 目标；不引入 Task B、DPO、新指标、全量 Agent 对话训练或默认 provider 切换。先修已发现的输入错配，再小批、全量、smoke、正式训练，逐步审阅。
 
@@ -27,7 +27,7 @@ tags: [Text-to-SQL, SFT, QueryPlan, runtime, alignment]
 - **REQ-007**: 时间必须表达确定的区间及端点含义。新候选请求采用 start-inclusive / end-exclusive；用户表示含结束日时转换为下一日上界。既有 WorkingMemory/ResultContract 的字段兼容必须明确实现和测试，不能把同一个 end 字符串未经转换就解释为任意端点语义。
 - **SEC-001**: 不读取 protected final test 来设计解析规则、改问法、训练或挑 checkpoint。旧两套各 750 条 final test 保持冻结；新实验的 test JSONL 是新的输入视图，不是新的语义题目。只在候选模板与 checkpoint 冻结后构造其推理输入，不把标签/结果提供给模型，并按固定合同做一次 matching Base/Adapter + Gold 对照。
 - **SEC-002**: 所有大文件留在仓库外新目录。保留 AST Policy、readonly role、Plan SQL guard、ResultValidator、1000 行执行上限、200 行预览和审计；不通过放宽这些门解决 Gold/input 冲突。
-- **CON-001**: 首轮复用 Qwen2.5-Coder-1.5B Base 与 bf16 LoRA，r=16、alpha=32、dropout=0.05、adamw_torch、lr=1e-4、weight_decay=0.01、effective batch=4、2 epoch，重新从原 Base 训练独立 Adapter，不接着旧 Adapter 续训以免混淆变化来源。3072 是长度审计起点，超过则先报告，禁止截断。
+- **CON-001**: 首轮复用 Qwen2.5-Coder-1.5B Base 与 bf16 LoRA，r=16、alpha=32、dropout=0.05、adamw_torch、lr=1e-4、weight_decay=0.01、effective batch=4、2 epoch，重新从原 Base 训练独立 Adapter，不接着旧 Adapter 续训以免混淆变化来源。3,072 是初始长度审计起点；全量数据最长 3,592，TASK-006 已冻结正式上限 4,096，禁止截断。实际 batch/梯度累计由该长度的 GPU smoke 决定，不能提前宣称显存适配。
 - **GUD-001**: matching 的公平性指同一批问题、候选输入、解码与治理/Gold 比较规则一致；不要求 SFT 小模型承担完整对话职责。一次固定场景/结构审计通过不等于语义正确或产品可上线。每一步通过一次相关验证后继续，不重复多层准入。
 
 ## 2. Implementation Steps
@@ -84,10 +84,12 @@ TheLook 已准入行的维度、粒度、列集合差异均为 0；列序差异 
 
 TASK-005 小批任务卡：按 Olist/TheLook × train/validation 各取 8 条，共 32 条，在每组覆盖现有结果形态，并优先补充不同指标、维度、粒度、风险与问法修正类型。确定性选择只读取既有 train/validation。输出仓库外小批 JSONL、修正与父 hash、准入/排除证据及 manifest；逐条执行原 Gold 和仅顶层重排列后的 Gold，比较规范列序下的 denotation。不更换指标公式、过滤条件、关联或 split，不启动完整物化、训练或终测。若出现实际 Catalog 缺列/跨层合同冲突，先修通用合同并重跑这个小批，不把来源 Spec 填入模型输入。
 
+TASK-006 全量任务卡：扩展同一入口的 release 模式，输入固定的 6,000 train / 1,500 validation 与已通过的小批证据；逐条执行相同问题修正、运行时重建、Catalog/计划/Policy/只读执行/结果对照。使用最多 4 个独立只读任务并发，screen 持久记录日志；来源或版本漂移立即停批，普通不支持样本留脱敏排除原因。输出新仓库外 train/validation、逐条证据、source/output hash、split/重复审计、workspace/family/program/风险/八问法覆盖和完整 tokenizer 分布。3,072、4,096 等长度仅作候选统计，按实际全量结果选择无截断上限后冻结 release；不读 final test、不训练、不改默认 provider。
+
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
 | TASK-005 | 新增 `scripts/post_training/data/materialize_runtime_candidate_release.py`，先取 train/validation 的 32 条分层小批。补清有来源证据的结束日/粒度或查询动作歧义，记录原问题 hash、修正原因、新 hash，再经真实规则重建 QueryPlan 与候选输入；独立比较原 QuerySpec，Gold 保留公式并规范顶层列序。核对时间端点、Gold 依赖的表列与实际 Catalog；运行小批 Policy/reader/ResultContract/Gold 回归。执行预算或语义冲突的行排除；输入超长记录待定长度状态，不截断、不发布为正式训练集。 | 是 | 2026-10-11 |
-| TASK-006 | 小批通过后写新外部 `runtime-candidate-sql-v2-r1/train.jsonl`、`validation.jsonl`、manifest、长度统计与 exclusions，报告 workspace/family/program/风险覆盖及实际减少量。保持旧 split，重算所有输入/目标/父文件 hash。重新使用统一构造器生成 Prompt，不给模型 QuerySpec；不改写旧 6,000/1,500 文件。 | 否 | — |
+| TASK-006 | 小批通过后写新外部 `runtime-candidate-sql-v2-r1/train.jsonl`、`validation.jsonl`、manifest、长度统计与 exclusions，报告 workspace/family/program/风险覆盖及实际减少量。保持旧 split，重算所有输入/目标/父文件 hash。重新使用统一构造器生成 Prompt，不给模型 QuerySpec；不改写旧 6,000/1,500 文件。 | 是 | 2026-10-11 |
 
 TASK-005 最终证据在仓库外 `evals/runtime-candidate-pilot-20261011-r3/`：Olist/TheLook × train/validation 各 8 条，32/32 准入，0 排除；小批 train/validation 各 16 条，仅用于工程审阅。选择清单 SHA-256 为 `e00163e69d5896a3ce9f52d374c3ed4756ea2b34bdc700a6059b217c075c30c1`，执行前冻结，失败时不换样本。覆盖 35 个不同指标、5 种结果形态、8 个逻辑维度，以及日/周/月/季度/年全部粒度；小批不代表完整来源覆盖。
 
@@ -96,6 +98,23 @@ TASK-005 最终证据在仓库外 `evals/runtime-candidate-pilot-20261011-r3/`�
 原/新 Gold 在同一 REPEATABLE READ 只读事务中执行，分别使用 `daa_analytics_reader` 与 `daa_thelook_reader`，通过计划 Guard、SqlPolicy、1,000 行执行预算和真实 ResultContract/ResultValidator；32 条结果状态均为 valid，按既有数值容差协议比较均为 ordered_denotation_match。结果 hash 用于溯源，不以字节相等代替数值 denotation 判断。发现并修正两处通用问题：v2 计划只使用声明的 top_n，不再误继承 Olist 旧城市 Top20；Catalog 可用翻译 Join 不证明 SQL 返回英文品类，标签改为中性“商品品类”。无版本的历史 Guard 保留原规则。
 
 本地固定 tokenizer 加 EOS 长度为 1,410–3,463，23 条不超过 3,072，9 条标记 requires_length_decision；manifest 标记 not_a_formal_training_release。全量长度审计后再冻结上限，4,096 仅是候选，不提前作为正式配置。相关回归 218 passed，定向 Ruff、compileall 通过；本轮没有读取 final test、调用 LLM/GPU 或启动训练。r1/r2 保留为诊断中间产物，以 r3 为最终小批证据。
+
+TASK-006 已冻结正式 release：`/disk2/gengnan/data-analysis-agent-data/evals/runtime-candidate-sql-v2-r1/`。4 路独立只读任务在 `daa-runtime-release-20261011` screen 执行，日志为外部 `evals/runtime-candidate-materialization-20261011-r1.log`。先写 staging，源文件/运行时代码/Catalog hash、重复与 split 审计通过之后一次发布正式目录；原 source 与 pilot 文件不改写。
+
+| workspace / split | 来源 | 正式准入 | 排除 | 场景类别 | 独立切分 family / program | 原形态覆盖 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Olist train | 3000 | 3000 | 0 | 455 | 455 family；11 program 类别 | scalar 792；州分组 680；品类 17；时序 1511 |
+| Olist validation | 750 | 750 | 0 | 113 | 113 family；10 program 类别 | scalar 183；州分组 142；品类 8；时序 417 |
+| TheLook train | 3000 | 2980 | 20 | 16 | 596 program | scalar 1040；维度分组 955；时序 985 |
+| TheLook validation | 750 | 750 | 0 | 5 | 150 program | scalar 5；维度分组 455；时序 290 |
+
+20 条全部为 `runtime_route:result_row_budget_exceeded`，对应原 4 个 TheLook 品牌分组 program × 5 个窗口，保守基数门拒绝；不修改日期、不换样本填数、不放宽预算。相对原来源没有丢失指标、场景类别或时间粒度。Olist 两组保留 19 项指标；TheLook train 保留原 18 项、validation 保留原 3 项（event_count、registered_user_count、unique_session_count），验证覆盖偏向用户/事件事实域，不能描述为全面均衡。此次迁移保持原 split，不重新分配验证集。
+
+3,824 条问题有修改：3,630 次补清排除结束日、159 次补清粒度、35 次明确数据查询动作；原因可重叠。保持一条样本唯一主问法和原 v1–v8 身份，train 各类 744–750 条、validation 各类 186–188 条；未新增问法变体或把变体算作新样本。Olist 保留原 49 条 train / 16 条 validation 的空 risk_tags，并在 coverage-audit 显式报告；此前 DPO collector 的 simple-scalar 补标签仅作用于其选择 metadata，未覆盖冻结 source。这些标签不进入 SQL-only 模型输入，当前不能主张全部风险元数据完备。
+
+所有 7,480 条准入样本的结果状态均 valid，与父 Gold 按既有容差全部 ordered_denotation_match。训练长度 1,265–3,538（p95=3,300），验证 1,165–3,592（p95=3,339）；660 train + 202 validation 超过旧 3,072，但均小于 4,096，因此正式上限为 4,096、零截断、零长度排除。后续 Trainer 必须读 manifest 的上限，不能再沿用旧默认值。
+
+来源与输出均无样本/QuerySpec/Gold/规范化问题/Prompt 重复或跨 split 交集；Olist 切分按原 family，TheLook 按 program，独立 split_family_id 零交集。TheLook 有一个共享 scenario 类别，这是覆盖标签，不是切分单位。正式 train SHA-256 `372254d553248ce7f5068b966f3ee99e805d9b78b0e0ed9d4cc1bab482b10b31`，validation `161e02be0e2b2c12cae4cf1e99d990a6b4370370e82b174b00e2e2622e7cc4a6`，manifest `5a850f34cbc2e3dd36d770ea9203e0cf7e1cda0ef4b7d73351c4b47138ff904d`。独立逐条回读重算 7,480 条 token 长度、输入/标签与父记录/hash，验收为 pass，报告在外部 `evals/runtime-candidate-release-verification-20261011-r1.json`。相关回归 230 passed；未读取 final test、调用 LLM/GPU 或启动训练。
 
 ### Implementation Phase 4
 

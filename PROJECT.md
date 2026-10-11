@@ -950,3 +950,15 @@ Day 1 用户已复述入口、Router 与 QueryPlan/QuerySpec 的主要职责，�
 每条原/新 Gold 均在同一 REPEATABLE READ 只读事务执行，使用 `daa_analytics_reader` / `daa_thelook_reader`；经过计划 Guard、SqlPolicy、1,000 行执行预算和真实 ResultValidator，结果状态均为 valid，按既有数值容差协议均为 ordered_denotation_match。该证据证明迁移保持父 Gold 的结果，不是模型准确率或指标口径的独立业务证明。修复两处实际跨层问题：v2 Guard 只接受计划声明的 top_n，避免误套 Olist 旧城市 Top20；不能从可用翻译 Join 推断返回品类语言，展示标签改为“商品品类”。历史无版本计划仍保留旧 Guard 行为。
 
 小批含 EOS token 长度为 1,410–3,463：23 条不超过 3,072，9 条标记 requires_length_decision；未截断，manifest 明确不是正式训练 release。下一项全量重建原 6,000 train / 1,500 validation，报告实际准入、排除、覆盖和长度分布后再冻结上限；4,096 暂为候选。本轮相关回归 218 passed，定向 Ruff、compileall 和 diff 检查通过；没有读取 final test、调用 LLM/GPU 或启动训练。本次事实已同步飞书项目文档 revision 257。
+
+### 2026-10-11：候选输入对齐第四步，正式 train/validation 重建与 4,096 长度冻结
+
+完成 TASK-006：同一物化入口新增 release 模式，绑定已完成的 32 条 pilot 与固定 source manifest/hash，在独立 screen `daa-runtime-release-20261011` 中以最多 4 路只读任务处理 7,500 条来源。原/新 Gold 经实际计划 Guard、SqlPolicy、各 workspace reader role、ResultContract/ResultValidator 与结果对照；先写 staging，源文件与运行时/Catalog hash、split/重复审计通过后发布正式目录 `/disk2/gengnan/data-analysis-agent-data/evals/runtime-candidate-sql-v2-r1/`。完整日志在外部 `evals/runtime-candidate-materialization-20261011-r1.log`，未覆盖旧 release。
+
+正式 train/validation 为 **5,980/1,500**：Olist **3,000/750**、TheLook **2,980/750**，共 **7,480** 条。20 条排除均为原 TheLook 品牌分组的保守 `result_row_budget_exceeded`（4 program × 5 window），不换问题填数、不放宽预算。全部准入行结果状态 valid，按既有数值容差全部 ordered_denotation_match。3,824 条问题有可追溯修改：补清排除结束日 3,630 次、粒度 159 次、查询动作 35 次，原因可重叠；保留原八问法主变体，train 各类 744–750 条，validation 186–188 条。
+
+相对原来源没有丢失指标、场景类别或时间粒度。Olist train/validation 场景 family 为 455/113，program 类别 11/10；TheLook 场景类别 16/5，独立 program 596/150。Olist 两组覆盖 19 指标；TheLook train 18 指标、validation 3 指标，后者集中 event_count、registered_user_count、unique_session_count，仍有原分布的事实域偏斜。Olist 49 train + 16 validation 原 risk_tags 为空，coverage-audit 如实保留并报告；此前补标签在 DPO collector 的选择 metadata 中，不改写冻结 source，且风险标签不进入本次 SQL-only Prompt。此轮是输入协议迁移，不主张全面覆盖扩展。
+
+正式输入为实际问题派生的 Catalog/QueryPlan/ResultContract；目标为规范顶层列序后的 PostgreSQL SQL 加 EOS，公式、过滤和 Join 不变。来源与输出的样本、QuerySpec、Gold、规范化问题和 Prompt 无重复或跨 split 交集。Olist 按原 family、TheLook 按独立 program 的 split_family_id 也为零交集；TheLook 共享 scenario 类别仅为覆盖标签，不作为隔离单位。`coverage-audit.json` 保存四组源/新指标、维度、grain、shape、风险和主问法分布；`evidence.jsonl` 保存每条溯源及只读执行证据。
+
+train 长度 1,265–3,538（p95=3,300），validation 1,165–3,592（p95=3,339），合计 862 条超过旧 3,072，均完整保留；正式 manifest 冻结 **max_seq_length=4,096**，零截断、零长度排除。train SHA-256 `372254d553248ce7f5068b966f3ee99e805d9b78b0e0ed9d4cc1bab482b10b31`，validation `161e02be0e2b2c12cae4cf1e99d990a6b4370370e82b174b00e2e2622e7cc4a6`。独立回读逐条重算输入/标签、父记录/hash 和 token 长度通过，报告在外部 `evals/runtime-candidate-release-verification-20261011-r1.json`。相关回归 **230 passed**，Ruff、compileall、diff 检查通过。本轮没有读取 final test、调用 LLM/GPU 或启动训练；下一项为 Trainer v2 manifest/标签兼容、训练配置审阅与最小 GPU smoke。本次事实已通过 lark-doc 同步飞书项目文档 revision 258。

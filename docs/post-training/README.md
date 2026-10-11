@@ -2,11 +2,13 @@
 
 这是后训练文档的规范入口。根目录中的旧路径保留为兼容跳转页；新的文档、链接和学习记录应从本目录进入。目录生命周期和删除规则见 [`../architecture/documentation-map-v1.md`](../architecture/documentation-map-v1.md)。
 
-## 当前基线（2026-10-10）
+## 当前基线（2026-10-11）
 
 当前产品运行 Olist v3 Catalog，默认在线模型仍是 SiliconFlow；本地 Adapter 尚未接入。最新主实验为 Qwen2.5-Coder-1.5B Base 的 bf16 LoRA SQL-only SFT，训练/validation 合计 `6,000/1,500`，其中 Olist 与 TheLook 各 `3,000/750`。`adapter_best` 在两套各 750 条 final test 上的 ordered Gold 匹配分别为 `403/750` 和 `396/750`。两个 Schema 已进入训练，这是已见 Schema 留出评测，不能称为未见 Schema 泛化。DPO 状态为 `stop_no_dpo`，未训练。
 
 当前事实优先看 [`experiments/project-v1-model-card.md`](experiments/project-v1-model-card.md) 和 [`experiments/project-v1-model-baseline.md`](experiments/project-v1-model-baseline.md)。下文保留各轮阶段说明，其中“尚未训练”“v2 默认运行时”“TheLook 未见 Schema”等描述只适用于其历史实验，不作为最新状态。
+
+最新推进项是 [训练与实际候选输入对齐](../../plan/refactor-runtime-candidate-sft-alignment-v1.md)，正式 `runtime-candidate-sql-v2-r1` 数据已在仓库外生成：train/validation `5,980/1,500`，其中 Olist `3,000/750`、TheLook `2,980/750`；20 条 TheLook 品牌分组保守预算拒绝，不填数。所有准入 Gold 通过实际 Catalog/QueryPlan/Policy/reader/ResultValidator 与父 Gold denotation 对照，长度冻结为 4,096、未截断。QuerySpec 仅作离线审计，不进入新模型输入。新 Trainer 兼容、GPU smoke 和完整训练尚未进行，既有主模型及成绩不变。原验证集事实域偏斜、Olist 65 条空风险 metadata 已明确报告，不将输入迁移写成全面覆盖扩展。
 
 ## 文档职责
 

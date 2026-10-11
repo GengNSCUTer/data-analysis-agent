@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Materialize and execute a pinned 32-case train/validation alignment pilot.
+"""Materialize and execute pinned train/validation runtime-alignment data.
 
 Outputs are always outside Git. No model, final test, or original release is
-modified. This entry intentionally does not yet expose full-release mode.
+modified. Release mode requires a completed pilot and freezes a length contract
+from the full admitted population before publishing the new directory.
 """
 
 from __future__ import annotations
 
 import argparse
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 import sys
 from time import perf_counter
+import uuid
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
@@ -32,7 +35,8 @@ from data_analysis_agent.query_plan import QueryPlan  # noqa: E402
 from data_analysis_agent.query_time import DATE_RANGE, EXCLUSIVE_END  # noqa: E402
 from data_analysis_agent.result_validator import ResultValidator  # noqa: E402
 from data_analysis_agent.runtime_candidate_materializer import (  # noqa: E402
-    MATERIALIZER_VERSION, RuntimeMaterializationError, materialize_runtime_candidate_row, text_sha256,
+    MATERIALIZER_VERSION, RuntimeMaterializationError, materialize_runtime_candidate_row,
+    normalized_question_sha256, split_family_id, text_sha256,
 )
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever  # noqa: E402
 from data_analysis_agent.sql_policy import PolicyViolation, SqlPolicy  # noqa: E402
@@ -46,6 +50,20 @@ SOURCE_HASHES = {
 WORKSPACES = {"olist": OLIST_RUNTIME_WORKSPACE, "thelook": THELOOK_V2_WORKSPACE}
 DATABASES = {"olist": "data_analysis_agent", "thelook": "thelook_analytics"}
 TOKENIZER_PATH = "/disk2/gengnan/data-analysis-agent-data/models/qwen2.5-coder-1.5b-base-df3ce67c0e24480f20468b6ef2894622d69eb73b"
+SOURCE_MANIFEST_HASH = "4afb0eeb9a5962eaa8dea9af4a30894ac5841f3ea270c98313c256f52f2c52d3"
+RELEASE_VERSION = "runtime-candidate-sql-v2-r1"
+LENGTH_CEILINGS = (3072, 4096, 5120, 6144, 8192)
+
+
+def runtime_asset_hashes():
+    paths = [Path(__file__).resolve(), *[ROOT / "src/data_analysis_agent" / name for name in (
+        "runtime_candidate_materializer.py", "runtime_alignment_audit.py", "candidate_sql_generator.py",
+        "semantic_catalog.py", "query_plan.py", "query_time.py", "question_router.py", "working_memory.py",
+        "workspace.py", "metric_context.py", "thelook_v2_context.py", "plan_sql_guard.py", "result_validator.py",
+        "postgres_runner.py", "sql_policy.py",
+    )], *[workspace.catalog_path for workspace in WORKSPACES.values()],
+        ROOT / "data/catalog/thelook_runtime_shape_bounds_v1.json"]
+    return {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
 
 
 def features(row):
@@ -163,13 +181,136 @@ def write_jsonl(path, rows):
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def audit_identities(rows):
+    """Reject exact duplicates/leakage; retain shared coverage categories."""
+    ids = [row["sample_id"] for row in rows]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate sample_id")
+    by_split = {split: [row for row in rows if row["split"] == {"name": split}] for split in SOURCE_HASHES}
+    if sum(map(len, by_split.values())) != len(rows):
+        raise ValueError("only train/validation rows are allowed")
+    report = {}
+    extractors = {
+        "query_spec_id": lambda row: row["query_spec_id"],
+        "gold_sql_sha256": lambda row: text_sha256(row["candidate_sql"]),
+        "normalized_question": lambda row: normalized_question_sha256(row["question"]),
+        "prompt_sha256": lambda row: text_sha256(row["rendered_prompt"]),
+        "split_family_id": split_family_id,
+    }
+    for key, extract in extractors.items():
+        values = {split: [extract(row) for row in group] for split, group in by_split.items()}
+        overlap = set(values["train"]) & set(values["validation"])
+        duplicates = {split: len(items) - len(set(items)) for split, items in values.items()}
+        if overlap or key != "split_family_id" and any(duplicates.values()):
+            raise ValueError(f"duplicate/cross-split identity: {key}")
+        report[key] = {"cross_split_overlap": len(overlap), "within_split_repeated": duplicates}
+    # Scenario categories intentionally overlap in TheLook. They are not its
+    # program-level split identity and must not be advertised as disjoint.
+    categories = {split: {f"{r['workspace_key']}:{r['scenario_family_id']}" for r in group}
+                  for split, group in by_split.items()}
+    report["shared_scenario_category_count"] = len(categories["train"] & categories["validation"])
+    return report
+
+
+def freeze_max_seq_length(lengths):
+    if not lengths:
+        raise ValueError("cannot freeze an empty release")
+    longest = max(lengths)
+    for ceiling in LENGTH_CEILINGS:
+        if longest <= ceiling:
+            return ceiling
+    raise ValueError(f"observed sequence {longest} exceeds supported length ceilings; release remains draft")
+
+
+def length_stats(lengths):
+    ordered = sorted(lengths)
+    if not ordered:
+        return {"count": 0}
+    return {"count": len(ordered), "min": ordered[0], "max": ordered[-1],
+            "mean": round(sum(ordered) / len(ordered), 2),
+            **{f"p{percent}": ordered[((len(ordered) - 1) * percent + 99) // 100]
+               for percent in (50, 90, 95, 99)},
+            "over_ceiling": {str(ceiling): sum(n > ceiling for n in ordered) for ceiling in LENGTH_CEILINGS}}
+
+
+def coverage_stats(rows):
+    def counts(values):
+        return dict(sorted(Counter(str(value) for value in values).items()))
+    return {
+        "rows": len(rows), "query_spec_count": len({r["query_spec_id"] for r in rows}),
+        "scenario_family_count": len({r["scenario_family_id"] for r in rows}),
+        "split_family_count": len({split_family_id(r) for r in rows}),
+        "program_count": len({r["program_id"] for r in rows}),
+        "by_result_shape": counts(r["query_spec"]["result_shape"] for r in rows),
+        "by_dimension": counts(r["query_spec"].get("dimension") for r in rows),
+        "by_time_grain": counts(r["query_spec"]["time"].get("grain") for r in rows),
+        "by_metric": counts(metric for r in rows for metric in r["query_spec"]["metric_ids"]),
+        "by_metric_count": counts(len(r["query_spec"]["metric_ids"]) for r in rows),
+        "by_risk_tag": counts(tag for r in rows for tag in r.get("risk_tags", ())),
+        "missing_risk_tags": sum(not r.get("risk_tags") for r in rows),
+        "by_primary_variant": counts(r["primary_variant_id"] for r in rows),
+    }
+
+
+def verify_completed_pilot(root):
+    manifest = json.loads((root / "manifest.json").read_text())
+    if (manifest.get("selected"), manifest.get("admitted"), manifest.get("excluded")) != (32, 32, 0):
+        raise ValueError("full release requires the completed 32-case pilot")
+    for split, expected in SOURCE_HASHES.items():
+        if manifest["source_files"][split]["sha256"] != expected:
+            raise ValueError("pilot/source hash drift")
+    for name, info in manifest["artifacts"].items():
+        if hashlib.sha256((root / name).read_bytes()).hexdigest() != info["sha256"]:
+            raise ValueError("pilot artifact hash drift")
+    records = [json.loads(line) for line in (root / "evidence.jsonl").read_text().splitlines()]
+    if len(records) != 32 or len({row["sample_id"] for row in records}) != 32:
+        raise ValueError("pilot execution evidence incomplete")
+    for row in records:
+        execution = row["execution"]
+        if (row["state"] != "admitted" or not execution["transaction_read_only"]
+                or execution["execution_truncated"] or execution["result_state"] != "valid"
+                or execution["denotation"] not in {"ordered_denotation_match", "bag_denotation_match"}):
+            raise ValueError("pilot execution gate did not pass")
+    return {"path": str(root.resolve()), "sha256": hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest()}
+
+
+def build_one(source, retrievers, tokenizer):
+    record = {"sample_id": source["sample_id"], "workspace_key": source["workspace_key"], "split": source["split"]}
+    try:
+        row = materialize_runtime_candidate_row(source, retrievers[source["workspace_key"]], WORKSPACES[source["workspace_key"]])
+        execution = admit_execution(source, row, WORKSPACES[source["workspace_key"]])
+        row["token_length"] = len(tokenizer.encode(row["training_text"], add_special_tokens=False)) + 1
+        row["admission_status"] = "admitted"
+        row["execution_evidence"] = execution
+        return row, {**record, "state": "admitted", "provenance": row["provenance"],
+                     "token_length": row["token_length"], "execution": execution}
+    except psycopg2.errors.QueryCanceled:
+        return None, {**record, "state": "excluded", "reason": "statement_timeout"}
+    except psycopg2.OperationalError:
+        raise  # A lost database is a batch failure, not a dataset exclusion.
+    except (RuntimeMaterializationError, PolicyViolation, psycopg2.Error) as error:
+        code = error.code if isinstance(error, RuntimeMaterializationError) else type(error).__name__
+        if "drift" in code or code == "readonly_reader_identity_mismatch":
+            raise
+        return None, {**record, "state": "excluded", "reason": code}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-dir", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--mode", choices=("pilot", "release"), default="pilot")
+    parser.add_argument("--pilot-dir", type=Path)
+    parser.add_argument("--workers", type=int, choices=range(1, 5), default=1)
     args = parser.parse_args()
     output = ensure_path_outside_repository(args.output_dir, ROOT)
-    output.mkdir(parents=True, exist_ok=False)
+    if output.exists():
+        raise ValueError("output already exists; frozen releases cannot be overwritten")
+    pilot = None
+    if args.mode == "release":
+        if args.pilot_dir is None:
+            parser.error("release requires --pilot-dir")
+        pilot = verify_completed_pilot(args.pilot_dir)
     source_rows, source_files = [], {}
     for split, expected in SOURCE_HASHES.items():
         path = args.source_dir / f"{split}.jsonl"
@@ -182,7 +323,17 @@ def main():
             raise ValueError("split identity disagrees with source filename")
         source_rows.extend(rows)
         source_files[split] = {"sha256": digest, "rows": len(rows)}
-    selected = select_pilot(source_rows)
+    source_audit = audit_identities(source_rows)
+    manifest_path = args.source_dir / "manifest.json"
+    if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != SOURCE_MANIFEST_HASH:
+        raise ValueError("source manifest hash drift")
+    selected = select_pilot(source_rows) if args.mode == "pilot" else source_rows
+    pinned_assets = runtime_asset_hashes()
+    destination = output
+    output = output.parent / f".{output.name}.staging-{uuid.uuid4().hex}"
+    output.mkdir(parents=True, exist_ok=False)
+    print(json.dumps({"event": "started", "mode": args.mode, "selected": len(selected),
+                      "workers": args.workers, "staging": str(output)}, ensure_ascii=False), flush=True)
     write_jsonl(output / "selection-manifest.jsonl", [{
         "sample_id": row["sample_id"], "workspace_key": row["workspace_key"], "split": row["split"],
         "shape": row["query_spec"]["result_shape"], "features": sorted(features(row)),
@@ -190,25 +341,24 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH, local_files_only=True)
     retrievers = {key: CatalogRetriever(CatalogLoader(workspace).load()) for key, workspace in WORKSPACES.items()}
     accepted, excluded, evidence = [], [], []
-    for source in selected:
-        record = {"sample_id": source["sample_id"], "workspace_key": source["workspace_key"], "split": source["split"]}
-        try:
-            row = materialize_runtime_candidate_row(source, retrievers[source["workspace_key"]], WORKSPACES[source["workspace_key"]])
-            execution = admit_execution(source, row, WORKSPACES[source["workspace_key"]])
-            row["token_length"] = len(tokenizer.encode(row["training_text"], add_special_tokens=False)) + 1
-            row["training_length_status"] = "within_3072" if row["token_length"] <= 3072 else "requires_length_decision"
-            row["admission_status"] = "admitted"
-            row["execution_evidence"] = execution
-            accepted.append(row)
-            evidence.append({**record, "state": "admitted", "provenance": row["provenance"],
-                             "token_length": row["token_length"], "execution": execution})
-        except (RuntimeMaterializationError, PolicyViolation, psycopg2.Error) as error:
-            code = error.code if isinstance(error, RuntimeMaterializationError) else type(error).__name__
-            if "drift" in code:
-                raise  # Source corruption is a batch stop, not an exclusion.
-            excluded.append({**record, "reason": code})
-            evidence.append({**record, "state": "excluded", "reason": code})
-        print(json.dumps({**record, "processed": len(evidence), "admitted": len(accepted), "excluded": len(excluded)}, ensure_ascii=False), flush=True)
+    with (output / "collection-journal.jsonl").open("x", encoding="utf-8") as journal:
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            for row, record in executor.map(lambda source: build_one(source, retrievers, tokenizer), selected):
+                evidence.append(record)
+                if row is None:
+                    excluded.append({key: value for key, value in record.items() if key != "state"})
+                else:
+                    accepted.append(row)
+                journal.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+                if args.mode == "pilot" or len(evidence) % 100 == 0 or len(evidence) == len(selected):
+                    journal.flush()
+                    print(json.dumps({"processed": len(evidence), "admitted": len(accepted), "excluded": len(excluded),
+                                      "exclusion_reasons": dict(Counter(r["reason"] for r in excluded))}, ensure_ascii=False), flush=True)
+    output_audit = audit_identities(accepted)
+    max_seq_length = freeze_max_seq_length([row["token_length"] for row in accepted]) if args.mode == "release" else None
+    for row in accepted:
+        row["training_length_status"] = ("within_frozen_contract" if max_seq_length else
+                                         "within_3072" if row["token_length"] <= 3072 else "requires_length_decision")
     for split in SOURCE_HASHES:
         write_jsonl(output / f"{split}.jsonl", [row for row in accepted if row["split"] == {"name": split}])
     write_jsonl(output / "evidence.jsonl", evidence)
@@ -218,8 +368,8 @@ def main():
         edited_grain = next((row for row in accepted if "clarify_time_grain" in row["provenance"]["question_changes"]), None)
         if edited_grain:
             examples.append(edited_grain)
-        lines = ["# 运行时候选输入对齐：小批审阅样本", "",
-                 "这是 train/validation 小批，尚非正式训练 release。输入是 rendered_prompt；标签是 candidate_sql 加 EOS。",
+        lines = ["# 运行时候选输入对齐：审阅样本", "",
+                 f"模式：{args.mode}。输入是 rendered_prompt；标签是 candidate_sql 加 EOS。",
                  "query_spec、provenance 和 execution_evidence 是审计信息，不进入模型输入；training_text 是输入与 SQL 标签的拼接。", ""]
         for i, row in enumerate(examples):
             lines.extend([f"## {row['sample_id']}", "", f"原问题：{row['provenance']['parent_question']}", "",
@@ -233,9 +383,24 @@ def main():
         (output / "review-preview.md").write_text("\n".join(lines), encoding="utf-8")
     for split, original in source_files.items():
         if hashlib.sha256((args.source_dir / f"{split}.jsonl").read_bytes()).hexdigest() != original["sha256"]:
-            raise ValueError("source changed during pilot")
+            raise ValueError("source changed during materialization")
+    if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != SOURCE_MANIFEST_HASH:
+        raise ValueError("source manifest changed during materialization")
+    if runtime_asset_hashes() != pinned_assets:
+        raise ValueError("runtime assets changed during materialization")
+    coverage = {}
+    for workspace in WORKSPACES:
+        for split in SOURCE_HASHES:
+            key = f"{workspace}/{split}"
+            source_group = [r for r in selected if r["workspace_key"] == workspace and r["split"] == {"name": split}]
+            admitted_group = [r for r in accepted if r["workspace_key"] == workspace and r["split"] == {"name": split}]
+            coverage[key] = {"source": coverage_stats(source_group), "admitted": coverage_stats(admitted_group),
+                             "sequence_tokens": length_stats([r["token_length"] for r in admitted_group])}
+    (output / "coverage-audit.json").write_text(json.dumps(coverage, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     summary = {
-        "version": MATERIALIZER_VERSION, "scope": "32-case train/validation pilot; no final test",
+        "version": MATERIALIZER_VERSION, "release_version": RELEASE_VERSION if args.mode == "release" else None,
+        "prompt_format_version": accepted[0]["prompt_format_version"] if accepted else None,
+        "scope": args.mode + "; train/validation only; no final test", "pilot_evidence": pilot,
         "generated_at": datetime.now(timezone.utc).isoformat(), "source_files": source_files,
         "selected": len(selected), "admitted": len(accepted), "excluded": len(excluded),
         "exclusion_reasons": dict(Counter(row["reason"] for row in excluded)),
@@ -245,15 +410,36 @@ def main():
         "coverage": {key: dict(Counter(str(row["query_spec"].get(key)) for row in accepted))
                      for key in ("result_shape", "dimension")},
         "tokenizer": {"path": TOKENIZER_PATH, "eos_token_id": tokenizer.eos_token_id,
+                      "max_seq_length": max_seq_length, "length_selection": "smallest supported ceiling retaining all admitted sequences",
                       "min_observed_with_eos": min((row["token_length"] for row in accepted), default=0),
                       "max_observed_with_eos": max((row["token_length"] for row in accepted), default=0),
                       "over_3072": sum(row["token_length"] > 3072 for row in accepted), "silent_truncation": False},
+        "source_manifest_sha256": SOURCE_MANIFEST_HASH,
+        "runtime_asset_sha256": pinned_assets,
+        "source_identity_audit": source_audit, "output_identity_audit": output_audit,
+        "outputs": {split: {"rows": sum(r["split"] == {"name": split} for r in accepted),
+                             "sha256": hashlib.sha256((output / f"{split}.jsonl").read_bytes()).hexdigest()}
+                    for split in SOURCE_HASHES},
+        "split_audit": {split: {"rows": sum(r["split"] == {"name": split} for r in accepted),
+                                 "by_workspace": dict(Counter(r["workspace_key"] for r in accepted if r["split"] == {"name": split})),
+                                 "sequence_tokens": length_stats([r["token_length"] for r in accepted if r["split"] == {"name": split}])}
+                        for split in SOURCE_HASHES},
+        "execution_contract": {"analyst_execution_row_cap": 1000, "display_preview_row_budget": 200,
+                               "query_timeout_ms": 5000, "workers": args.workers},
+        "execution_summary": {"result_states": dict(Counter(r["execution_evidence"]["result_state"] for r in accepted)),
+                              "denotation": dict(Counter(r["execution_evidence"]["denotation"] for r in accepted))},
+        "checks": {"status": "pass", "source_and_split_preserved": True,
+                   "runtime_derived_inputs": True, "readonly_gold_comparison": True,
+                   "train_validation_identity_audit": "pass", "final_test_read": False, "silent_truncation": False},
         "artifacts": {path.name: {"sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "bytes": path.stat().st_size}
                       for path in sorted(output.iterdir()) if path.is_file()},
-        "not_a_formal_training_release": True,
+        "not_a_formal_training_release": args.mode != "release",
     }
     (output / "manifest.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
+    output.rename(destination)
+    print(json.dumps({"event": "release_published", "output_dir": str(destination),
+                      "admitted": summary["admitted"], "excluded": summary["excluded"],
+                      "groups": summary["groups"], "tokenizer": summary["tokenizer"]}, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":
