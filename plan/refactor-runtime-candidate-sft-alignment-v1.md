@@ -12,7 +12,7 @@ tags: [Text-to-SQL, SFT, QueryPlan, runtime, alignment]
 
 ![Status: In progress](https://img.shields.io/badge/status-In_progress-yellow)
 
-用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成共用候选请求入口、必要的运行时合同修复和同一 6,000 train / 1,500 validation 的全量回放。TheLook 已准入行的指标、维度、粒度、时间端点和列集合已对齐；Olist 新发现 3,630 行自然语言未说明结束日排除，而原 Gold 使用排除上界，需在新 release 中补清问题并留下修改来源。列顺序需规范化，非准入行需修正歧义或排除；不能直接用新 Prompt 包住旧 Gold 开始训练。
+用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成共用候选请求入口、必要的运行时合同修复、同一 6,000 train / 1,500 validation 的全量回放，以及 32 条小批物化与真实只读执行准入。小批修正问法歧义后，原 Gold 与规范顶层列序后的 Gold 全部结果匹配；9 条超过 3,072 token 审计起点，未截断，暂不作为正式训练 release。下一步全量重建 train/validation，按实际准入和长度分布冻结新 release；不能直接用新 Prompt 包住旧 Gold 开始训练。
 
 任务卡：目标是同一服务端候选请求在数据构建、matching Base/Adapter 生成及 opt-in 接入时得到一致文本；输入是既有 train/validation、当前 Catalog/Router/WorkingMemory/QueryPlan；输出是版本化构造器、可追踪的新 release、一次 1.5B SFT 和匹配评测。保持指标口径、权限、数据快照和 SQL-only 目标；不引入 Task B、DPO、新指标、全量 Agent 对话训练或默认 provider 切换。先修已发现的输入错配，再小批、全量、smoke、正式训练，逐步审阅。
 
@@ -82,10 +82,20 @@ TheLook 已准入行的维度、粒度、列集合差异均为 0；列序差异 
 
 - **GOAL-003**: 复用旧语义资产，生成新的可训练版本。
 
+TASK-005 小批任务卡：按 Olist/TheLook × train/validation 各取 8 条，共 32 条，在每组覆盖现有结果形态，并优先补充不同指标、维度、粒度、风险与问法修正类型。确定性选择只读取既有 train/validation。输出仓库外小批 JSONL、修正与父 hash、准入/排除证据及 manifest；逐条执行原 Gold 和仅顶层重排列后的 Gold，比较规范列序下的 denotation。不更换指标公式、过滤条件、关联或 split，不启动完整物化、训练或终测。若出现实际 Catalog 缺列/跨层合同冲突，先修通用合同并重跑这个小批，不把来源 Spec 填入模型输入。
+
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-005 | 新增 `scripts/post_training/data/materialize_runtime_candidate_release.py`，先取 train/validation 的 32 条分层小批。补清有来源证据的结束日/粒度或查询动作歧义，记录原问题 hash、修正原因、新 hash，再经真实规则重建 QueryPlan 与候选输入；独立比较原 QuerySpec，Gold 保留公式并规范顶层列序。核对时间端点、Gold依赖的表列与实际Catalog；运行必要的小批 Policy/reader/ResultContract/Gold 回归。超预算或仍冲突的行排除，不进入训练标签。 | 否 | — |
+| TASK-005 | 新增 `scripts/post_training/data/materialize_runtime_candidate_release.py`，先取 train/validation 的 32 条分层小批。补清有来源证据的结束日/粒度或查询动作歧义，记录原问题 hash、修正原因、新 hash，再经真实规则重建 QueryPlan 与候选输入；独立比较原 QuerySpec，Gold 保留公式并规范顶层列序。核对时间端点、Gold 依赖的表列与实际 Catalog；运行小批 Policy/reader/ResultContract/Gold 回归。执行预算或语义冲突的行排除；输入超长记录待定长度状态，不截断、不发布为正式训练集。 | 是 | 2026-10-11 |
 | TASK-006 | 小批通过后写新外部 `runtime-candidate-sql-v2-r1/train.jsonl`、`validation.jsonl`、manifest、长度统计与 exclusions，报告 workspace/family/program/风险覆盖及实际减少量。保持旧 split，重算所有输入/目标/父文件 hash。重新使用统一构造器生成 Prompt，不给模型 QuerySpec；不改写旧 6,000/1,500 文件。 | 否 | — |
+
+TASK-005 最终证据在仓库外 `evals/runtime-candidate-pilot-20261011-r3/`：Olist/TheLook × train/validation 各 8 条，32/32 准入，0 排除；小批 train/validation 各 16 条，仅用于工程审阅。选择清单 SHA-256 为 `e00163e69d5896a3ce9f52d374c3ed4756ea2b34bdc700a6059b217c075c30c1`，执行前冻结，失败时不换样本。覆盖 35 个不同指标、5 种结果形态、8 个逻辑维度，以及日/周/月/季度/年全部粒度；小批不代表完整来源覆盖。
+
+16 条 Olist 问题补明“含开始日、不含结束日”，2 条 TheLook 问题补明来源规定的时间粒度；修改问题之后再从问题独立推导 QueryPlan，没有从 Spec 给计划补字段。`runtime_candidate_materializer.py` 检查父 Gold hash、workspace 版本、运行时语义和实际检索片段中的表/列/Join；标签仅规范顶层投影，保留父/新 SQL hash 与问题、输入 hash。`review-preview.md` 可直接查看原/新问题、QueryPlan、完整输入及 SQL 标签；Spec、provenance 与执行证据不进入模型输入。
+
+原/新 Gold 在同一 REPEATABLE READ 只读事务中执行，分别使用 `daa_analytics_reader` 与 `daa_thelook_reader`，通过计划 Guard、SqlPolicy、1,000 行执行预算和真实 ResultContract/ResultValidator；32 条结果状态均为 valid，按既有数值容差协议比较均为 ordered_denotation_match。结果 hash 用于溯源，不以字节相等代替数值 denotation 判断。发现并修正两处通用问题：v2 计划只使用声明的 top_n，不再误继承 Olist 旧城市 Top20；Catalog 可用翻译 Join 不证明 SQL 返回英文品类，标签改为中性“商品品类”。无版本的历史 Guard 保留原规则。
+
+本地固定 tokenizer 加 EOS 长度为 1,410–3,463，23 条不超过 3,072，9 条标记 requires_length_decision；manifest 标记 not_a_formal_training_release。全量长度审计后再冻结上限，4,096 仅是候选，不提前作为正式配置。相关回归 218 passed，定向 Ruff、compileall 通过；本轮没有读取 final test、调用 LLM/GPU 或启动训练。r1/r2 保留为诊断中间产物，以 r3 为最终小批证据。
 
 ### Implementation Phase 4
 
@@ -121,7 +131,7 @@ TheLook 已准入行的维度、粒度、列集合差异均为 0；列序差异 
 - **TEST-001**: 当前已通过 6 条 focused tests：问题派生输入不受 source Spec 影响、定义/越权/相对时间不能生成 Prompt、缺失时间和列序错配被识别。
 - **TEST-002**: 候选构造器使用同一参数在 runtime 与离线生成相同文本/hash；禁止离线 provenance、Gold、结果或摘要注入；测试不能靠手工注入正确 Spec 制造一致性。已验证此边界，以及版本/指标/列合同漂移拒绝、路由拒绝、客户端 hash 被服务端覆盖；两组定向测试共 119 passed、7 skipped（数据库集成未启用），Ruff 通过。此证据不证明日期端点或 Gold 标签已对齐。
 - **TEST-003**: 单轮绝对日期、含/不含结束日、单年、季度、Olist/TheLook 重名维度和多指标列序回归已完成；当前一组相关回归 250 passed、7 skipped。新的端点合同并不让旧 Olist 问题自动符合 Gold，需要下一阶段修正 train/validation 问法。
-- **TEST-004**: 小批 read-only 执行与标签 mask/长度/hash审计，随后最小 GPU smoke。通过之后只做一次正式训练和匹配 final test，不用终测调整配置。
+- **TEST-004**: 32 条小批 read-only 执行、Catalog 依赖、问题/SQL/hash、未截断长度及原/新 Gold 对照已通过；相关回归 218 passed，包含源文件不变、保护 test split、显式含结束日冲突拒绝、源 Spec 不可注入维度、顶层投影外 AST 不变及分层选择可复现。Trainer 标签 mask 与 GPU smoke 在正式 release 完成后验证，尚未运行。随后只做一次正式训练和匹配 final test，不用终测调整配置。
 
 ## 7. Risks & Assumptions
 

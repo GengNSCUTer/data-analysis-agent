@@ -58,3 +58,12 @@ def test_ranking_category_plan_requires_limit() -> None:
         )
         is None
     )
+
+
+def test_v2_workspace_city_without_top_n_does_not_inherit_olist_limit():
+    plan = {"query_plan_version": "query-plan-v2", "dimensions": ["customer_city"], "top_n": {}}
+    sql = "SELECT city AS customer_city, COUNT(*) AS completed_item_count FROM users GROUP BY city"
+    assert sql_plan_mismatch(sql, plan) is None
+    assert sql_plan_mismatch(sql, {**plan, "top_n": {"customer_city": 20}}) is not None
+    # Legacy plans keep their original rule for historical callers.
+    assert sql_plan_mismatch(sql, {"dimensions": ["customer_city"]}) is not None

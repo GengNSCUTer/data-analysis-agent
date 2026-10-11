@@ -297,16 +297,15 @@ class ResultContract:
                 # presentation metadata and never changes the SQL contract.
                 if column.aliases:
                     result_column_labels.setdefault(column.name, column.aliases[0])
-        # The Olist online result contract canonicalizes category-grouped
-        # output through the translation dimension.  The physical SQL alias is
-        # still product_category_name, so the display label must not imply the
-        # returned values are the original Portuguese category strings.
+        # An available translation join is context, not proof that a future
+        # SQL projection uses the translated column. Keep the UI label neutral
+        # until actual result provenance establishes the display language.
         selected_join_ids = tuple(join.join_id for join in selection.joins)
         if (
             "product_category_name" in requested_dimensions
             and "products_translation" in selected_join_ids
         ):
-            result_column_labels["product_category_name"] = "商品品类（英文展示名）"
+            result_column_labels["product_category_name"] = "商品品类"
         if result_time_column:
             result_column_labels.setdefault("time", "时间")
         attribution_requirements = cls._attribution_requirements(

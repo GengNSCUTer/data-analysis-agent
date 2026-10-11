@@ -50,6 +50,8 @@ def replay_single_turn(
         "route_reason": route.reason,
         "selected_metrics": list(selection.trace.selected_metrics),
         "selected_tables": list(selection.trace.selected_tables),
+        "selected_columns": dict(selection.trace.selected_columns),
+        "selected_joins": list(selection.trace.selected_joins),
         "plan": None,
         "candidate_prompt": None,
     }
@@ -66,6 +68,7 @@ def replay_single_turn(
         requested_dimensions=plan.dimensions,
     )
     output["plan"] = plan.as_dict()
+    output["result_contract"] = contract.as_tool_metadata()
     output["candidate_prompt"] = render_candidate_sql_prompt(
         CandidateSqlContext(
             question=question,

@@ -162,7 +162,7 @@ def test_result_contract_derives_display_labels_from_catalog(catalog) -> None:
     }
 
 
-def test_category_result_contract_labels_translated_display_values_accurately(catalog) -> None:
+def test_category_label_does_not_infer_language_from_an_available_join(catalog) -> None:
     question = "按品类统计 GMV 前十名"
     user = _user("analyst")
     retriever = CatalogRetriever(catalog)
@@ -177,7 +177,10 @@ def test_category_result_contract_labels_translated_display_values_accurately(ca
         requested_dimensions=plan.dimensions,
     )
 
-    assert contract.result_column_labels["product_category_name"] == "商品品类（英文展示名）"
+    # Retrieval provides a possible translation join, not evidence that the
+    # eventual SQL actually used its English projection.
+    assert "products_translation" in contract.selected_join_ids
+    assert contract.result_column_labels["product_category_name"] == "商品品类"
 
 
 def test_catalog_dimension_policy_uses_explicit_attribution_mode(catalog) -> None:

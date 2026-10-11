@@ -27,7 +27,9 @@ def sql_plan_mismatch(sql: str, plan: Mapping[str, Any] | None) -> str | None:
         code = warning.split(":", 1)[1].casefold()
         if "customer_state" not in folded or code not in folded:
             return f"SQL 必须按客户州筛选 customer_state = '{code.upper()}'，且不要把该州做成分组列。"
-    limits = dict(_TOP_N_DIMENSIONS)
+    # v2 plans explicitly own ranking limits. TheLook city groupings must not
+    # inherit the legacy Olist top-20 rule after preflight admitted a window.
+    limits = {} if plan.get("query_plan_version") == "query-plan-v2" else dict(_TOP_N_DIMENSIONS)
     raw_top_n = plan.get("top_n")
     if isinstance(raw_top_n, Mapping):
         for key, value in raw_top_n.items():

@@ -9,7 +9,7 @@
 | 了解项目目标、当前阶段和技术决策 | [`../PROJECT.md`](../PROJECT.md) | 当前项目基线 |
 | 查看新的四周产品完善、代码学习与实习面试路线 | [`../plan/process-agent-internship-improvement-v1.md`](../plan/process-agent-internship-improvement-v1.md) | 2026-10-10 计划；不重复计算机基础，不自动启动训练 |
 | 按小段亲自阅读 Agent 代码并复述 | [`learning/agent-project-walkthrough-v1.md`](learning/agent-project-walkthrough-v1.md) | Day 1 请求入口；问答随用户学习更新 |
-| 核对 SQL-only 训练与真实候选输入的对齐改造 | [`../plan/refactor-runtime-candidate-sft-alignment-v1.md`](../plan/refactor-runtime-candidate-sft-alignment-v1.md) | 2026-10-11 已完成共用入口、维度/时间/列序修复及 7,500 行回放；下一步修正旧问法歧义、小批物化，新 release 与训练尚未启动 |
+| 核对 SQL-only 训练与真实候选输入的对齐改造 | [`../plan/refactor-runtime-candidate-sft-alignment-v1.md`](../plan/refactor-runtime-candidate-sft-alignment-v1.md) | 2026-10-11 已完成共用入口、合同修复、7,500 行回放与 32 条小批物化/只读 Gold 对照；下一步全量重建 train/validation 并冻结长度，新正式 release 与训练尚未启动 |
 | 了解本周已核实的用户请求/可信执行链 | [`architecture/project-v1-baseline-review.md`](architecture/project-v1-baseline-review.md) | Week 1 当前审查基线 |
 | 查看有证据支持的产品优化候选与暂不处理项 | [`architecture/project-v1-gap-map.md`](architecture/project-v1-gap-map.md) | Week 1 缺口地图，不是实时任务台账 |
 | 查看嵌入式 Copilot 与长对话状态的目标架构 | [`architecture/embedded-copilot-and-memory-design-v1.md`](architecture/embedded-copilot-and-memory-design-v1.md) | M1 宿主合同入口；按 M1–M7 状态阅读 |

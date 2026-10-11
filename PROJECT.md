@@ -940,3 +940,13 @@ Day 1 用户已复述入口、Router 与 QueryPlan/QuerySpec 的主要职责，�
 最终 7,500 行回放为仓库外 `evals/runtime-candidate-alignment-20261011-fixed-r2/{summary.json,records.jsonl}`；源文件 hash 未变，中间 `fixed-r1` 仅留作诊断。TheLook train/validation 已准入 2,857/714 条，已准入行的指标/维度/粒度/端点/列集合均匹配原规格，仅列序差异 1,237/254。剩余缺粒度 123/36，train 20 条品牌分组超保守执行上界。Olist 已准入 2,973/742，但其中 2,902/728 条问题未声明排除结束日，而 Gold 使用排除上界；该旧问题歧义直到显式端点审计才被暴露。Olist 列序差异 2,026/545；未准入 27/8，原因是缺明确查询动作 24/4 和被判定义问题 3/4。各类有重叠，不相加，不作为 SQL 准确率。
 
 相关 Python 回归 250 passed、7 skipped（数据库集成未启用），定向 Ruff、compileall、diff check 通过。覆盖真实维度列、预算、非法/闰日/同日区间、周/月/季度/年粒度、旧状态确认、列序、端点合同漂移与原工具/工件/图表链；尚未做新 Gold 小批执行准入。下一项直接在 train/validation 小批物化中补清可追溯的问法歧义、规范 Gold 顶层投影、核对实际 Catalog 依赖，再生成新 release。未读取 final test、调用 LLM/GPU或启动训练，默认 provider 与在线 Olist workspace 不变。本次事实已同步飞书项目文档 revision 256。
+
+### 2026-10-11：候选输入对齐第三步，32 条小批物化与只读 Gold 准入
+
+完成对齐计划 TASK-005。新增 `runtime_candidate_materializer.py` 和 `scripts/post_training/data/materialize_runtime_candidate_release.py`，从冻结的 train/validation 中确定性选取 Olist/TheLook × train/validation 各 8 条。先修正问题端点/粒度歧义并保存父问题与修改原因，再经实际 Catalog/Router/QueryPlan/ResultContract 共用入口生成 `runtime-candidate-sql-v2` 输入。模型输入是 rendered_prompt，监督目标是 candidate_sql 加 EOS；Spec、family、父 hash、执行结果仅为审计信息。Gold 仅规范顶层投影列序，不改公式、过滤或 Join。
+
+最终小批证据在仓库外 `/disk2/gengnan/data-analysis-agent-data/evals/runtime-candidate-pilot-20261011-r3/`：32/32 准入、0 排除，train/validation 各 16 条；覆盖 35 个不同指标、5 种结果形态、8 个逻辑维度和日/周/月/季度/年粒度。16 条补清排除结束日，2 条补清时间粒度。`review-preview.md` 展示原/新问题、实际 QueryPlan、输入与 SQL 标签；`selection-manifest.jsonl` 冻结来源，`evidence.jsonl` 留下每条问题/SQL/输入 hash、真实表列依赖、reader 角色、结果状态和 denotation，`manifest.json` 留下来源和输出文件 hash。r1/r2 是诊断中间产物，以 r3 为最终小批证据。
+
+每条原/新 Gold 均在同一 REPEATABLE READ 只读事务执行，使用 `daa_analytics_reader` / `daa_thelook_reader`；经过计划 Guard、SqlPolicy、1,000 行执行预算和真实 ResultValidator，结果状态均为 valid，按既有数值容差协议均为 ordered_denotation_match。该证据证明迁移保持父 Gold 的结果，不是模型准确率或指标口径的独立业务证明。修复两处实际跨层问题：v2 Guard 只接受计划声明的 top_n，避免误套 Olist 旧城市 Top20；不能从可用翻译 Join 推断返回品类语言，展示标签改为“商品品类”。历史无版本计划仍保留旧 Guard 行为。
+
+小批含 EOS token 长度为 1,410–3,463：23 条不超过 3,072，9 条标记 requires_length_decision；未截断，manifest 明确不是正式训练 release。下一项全量重建原 6,000 train / 1,500 validation，报告实际准入、排除、覆盖和长度分布后再冻结上限；4,096 暂为候选。本轮相关回归 218 passed，定向 Ruff、compileall 和 diff 检查通过；没有读取 final test、调用 LLM/GPU 或启动训练。本次事实已同步飞书项目文档 revision 257。
