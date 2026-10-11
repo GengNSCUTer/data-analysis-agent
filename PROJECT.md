@@ -992,3 +992,15 @@ smoke 的平均 train loss 0.215921、4 条 validation loss 0.150052；392 个 L
 完整结论见 [`训练结束验收`](docs/post-training/experiments/runtime-candidate-sft-v2-r1.md)。仓库外 eval 同名前缀新增 `-completion-audit.json`、`-best-checkpoint-freeze.json` 和 `-validation-curve.csv/.html`；后续只使用 `adapter_best`，权重 SHA-256 `926d16e4218fb9f83dc99cb1ef79094dac90adc397e3c5e0ad9526c7eb834c9e`。低 loss 不等于自由生成 SQL 的业务准确率；当前受控模板和 TheLook validation 三指标偏斜仍是限制。既有 Olist 403/750、TheLook 396/750 headline 成绩不变，默认在线 provider 不变。
 
 下一项为 v2 matching 入口实现与共同解码合同冻结：共用真实候选构造器，保留原问题，非准入/超长记录仍计入各 750 条总分母。旧 QuerySpec 评测模板不能直接套用这轮 Adapter。本轮没有启动生成终测。本次事实已通过 lark-doc 同步飞书项目文档 revision 261。
+
+### 2026-10-11：runtime candidate v2 matching 入口、共同合同与 validation smoke
+
+完成 TASK-008 的入口部分，正式终测尚未运行。新增 `runtime_candidate_matching.py` 与统一 CLI `scripts/post_training/evaluation/run_runtime_candidate_matching.py`，按 freeze → prepare → generate(Base/Adapter) → evaluate 执行。生成侧只投影原问题与 ID，调用真实 Catalog/Router/QueryPlan/ResultContract 及共同候选 builder；不从 QuerySpec/Gold 反向补计划，也不修改 protected 问法。两侧完整输出的模型身份、输入、数量和 hash 核对后才读取 Gold；拒绝、超长、空输出和长度停止都留在固定分母。
+
+解码固定 bf16、greedy、beam1、seed20261011、输入4096/输出1024、EOS，无采样或 SQL 修复。后置复用 Plan Guard、SqlPolicy、各 workspace PostgreSQL reader 的只读事务、1,000 行多读探测、ResultValidator 和容差 1e-6 的 ordered/bag 对照；只按预存合同规范时间结果列别名、按冻结列序重排 Gold 顶层投影，不改公式、Join 或过滤。safe report 保留原/规范 Gold 与候选 hash、生成/EOS、reader/合同/denotation；问题、SQL、错误原文和结果行不进入报告。原问题/Spec 的语义差异在生成后另报，不能一律算模型错误。
+
+最终 validation smoke 使用两个 workspace 各一条固定验证样本，同一输入 hash。在物理 GPU 0/1 的两张 RTX3090 分别加载 Base/step2,500 best：Adapter 两条均 EOS、valid、ordered Gold 匹配；Base 一条 1,024 token 无 EOS，另一条 SQLSTATE42702 字段歧义。证据位于仓库外 `evals/runtime-candidate-v2-matching-validation-smoke-20261011-r3/`，结果为 `evaluation/safe-report.json`。生成耗时约29/37秒，不比较跨卡速度。此前 r1/r2 保留作中途诊断，以 r3 为最终版本证据。两条只能证明真实生成、受控执行和判分走通，不作为整体质量提升或新 headline 成绩。
+
+新入口30项定向测试通过；共用候选/回放、统一清洗、Gold 比较、SqlPolicy、Plan Guard 和 ResultValidator 另70项回归通过，Ruff、compileall、diff check 通过。正式合同为仓库外 `evals/runtime-candidate-v2-matching-final-20261011-r1/contract.json`，SHA-256 `f68fdeda3aff58e492f50a9935b23b7e52cb12550c8f6b7193e6709ec1ba97a3`。冻结时只计算两个 final 来源的文件 hash，没有读取问题/Spec/Gold 字段、物化正式输入或启动完整生成。下一小单元按此合同处理原 Olist750 + TheLook750，screen 生成 Base/Adapter，完成后统一 Gold 对照。完整规则和代码地图见 [matching 合同](docs/post-training/data/runtime-candidate-v2-matching-contract-v1.md)。
+
+本次事实已通过 lark-doc 追加飞书项目文档 revision 262，并局部回读确认成功。

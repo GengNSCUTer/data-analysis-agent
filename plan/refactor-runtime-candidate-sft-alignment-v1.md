@@ -12,7 +12,7 @@ tags: [Text-to-SQL, SFT, QueryPlan, runtime, alignment]
 
 ![Status: In progress](https://img.shields.io/badge/status-In_progress-yellow)
 
-用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成共用候选请求入口、运行时合同修复、原 6,000 train / 1,500 validation 全量回放、32 条小批准入，以及新的 runtime-candidate-sql-v2-r1 正式数据 release。全量准入 5,980 train / 1,500 validation，20 条 TheLook 品牌分组因保守执行上界排除；全部 7,480 条通过只读执行与父 Gold 结果对照。最长 3,592 token，正式长度冻结为 4,096，未截断。Trainer v2 兼容、全量 CPU 标签/长度审计与最小 GPU smoke 已通过，实际 batch=2、累计=2、有效 batch=4；完整两 epoch 于 2026-10-11 22:17:59（Asia/Shanghai）正常结束。2,990 步训练验收通过，step 2,500 的 validation-best 已冻结，best/final checkpoint 和独立重新加载均核对通过。下一项实现并测试 v2 matching 入口，再进行一次固定评测；尚未读取 final test。
+用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成共用候选请求入口、运行时合同修复、原 6,000 train / 1,500 validation 全量回放、32 条小批准入，以及新的 runtime-candidate-sql-v2-r1 正式数据 release。全量准入 5,980 train / 1,500 validation，20 条 TheLook 品牌分组因保守执行上界排除；全部 7,480 条通过只读执行与父 Gold 结果对照。最长 3,592 token，正式长度冻结为 4,096，未截断。Trainer v2 兼容、全量 CPU 标签/长度审计与最小 GPU smoke 已通过，实际 batch=2、累计=2、有效 batch=4；完整两 epoch 于 2026-10-11 22:17:59（Asia/Shanghai）正常结束。2,990 步训练验收通过，step 2,500 的 validation-best 已冻结，best/final checkpoint 和独立重新加载均核对通过。v2 matching 入口已实现，两条 validation GPU 生成、只读执行和 Gold smoke 通过，正式评测合同已冻结；尚未物化或运行 protected final 输入。
 
 任务卡：目标是同一服务端候选请求在数据构建、matching Base/Adapter 生成及 opt-in 接入时得到一致文本；输入是既有 train/validation、当前 Catalog/Router/WorkingMemory/QueryPlan；输出是版本化构造器、可追踪的新 release、一次 1.5B SFT 和匹配评测。保持指标口径、权限、数据快照和 SQL-only 目标；不引入 Task B、DPO、新指标、全量 Agent 对话训练或默认 provider 切换。先修已发现的输入错配，再小批、全量、smoke、正式训练，逐步审阅。
 
@@ -125,7 +125,7 @@ TASK-007 当前小单元任务卡：输入是已冻结的 `runtime-candidate-sql
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
 | TASK-007 | 在 `run_post_training_sft_smoke.py` 新增 v2 release 审计分支，验证输入版本、标签 mask、hash/split 与未截断长度；先最小 GPU smoke 后在空闲 3090/4090 上 screen 启动 1.5B 完整 LoRA，记录 logical/physical/UUID 与日志。复用验证损失选择 adapter_best，不能把历史不同 split/Prompt 的 loss 直接比较为改善。 | 是 | 2026-10-11 |
-| TASK-008 | 对冻结验证期 adapter_best，用 TASK-002 同一构造器物化独立 test 输入视图和 matching Base/Adapter 生成，源问题来自原 protected holdout，仅用于此冻结实验的最终评测。非准入、缺失上下文或超过长度记录失败并留在总分母，禁止根据 test 再修解析器。生成输出冻结后再执行 Gold；按预定列序协议保留原 Gold 证据与规范化对照，输出协议/合同/denotation 指标。 | 否 | — |
+| TASK-008 | 对冻结验证期 adapter_best，用 TASK-002 同一构造器物化独立 test 输入视图和 matching Base/Adapter 生成，源问题来自原 protected holdout，仅用于此冻结实验的最终评测。非准入、缺失上下文或超过长度记录失败并留在总分母，禁止根据 test 再修解析器。生成输出冻结后再执行 Gold；按预定列序协议保留原 Gold 证据与规范化对照，输出协议/合同/denotation 指标。入口及 validation smoke 已完成，正式终测待运行。 | 否 | 2026-10-11（入口） |
 | TASK-009 | 汇总 v2 的实际训练量、validation-best、两 workspace 结果、解析失败与候选 SQL 失败。相对旧实验的比较标明 Prompt/目标列序变化，不用差值证明单独因果。另在独立产品开发用例验证 opt-in 请求→SQL→可信执行链，实际接入失败不能用离线成绩替代；更新 PROJECT/飞书事实。 | 否 | — |
 
 TASK-007 前半段已通过：Trainer 校验固定 manifest SHA-256、train/validation 文件与行数、逐条准入、运行时资产 hash、4,096 长度与 tokenizer；全部 7,480 行回算 token 和 Prompt/completion 边界。v2 的分隔换行进入 completion 监督，保留历史格式的 mask。新增 `--smoke-samples-per-workspace`，全量验证之后再按 workspace 选最长 8 train / 4 validation；该模式只允许 1–4 step，不允许 epoch 模式。末步额外 eval/save 保证完整训练的最后一步能参与 validation-best 选择。
@@ -147,6 +147,12 @@ TASK-007 训练结束验收任务卡：输入是本轮固定 run、launch/exit�
 训练结束验收已通过：22:17:59 正常退出，完成两 epoch / 2,990 步；12 个预选 validation 点中 step 2,500 的 eval_loss `0.000019297187463962473` 最低，恢复 best 后的完整复验与之相同。step 2,990 的 final eval_loss 为 `0.000027163852792000398`，与恢复 best 后同 step 标记的复验日志分开。best/final 各自精确匹配 checkpoint-2500/2990，两者 392 个 LoRA 张量均不同且有限；两个 checkpoint 的续训状态齐全，AdamW m/v 均 fp32。固定 source/runtime/Base 文件 hash 未漂移。独立进程用共享 Dataset 在两个 workspace 最长 validation 样本上 fresh reload，通过权重、标签/EOS 和有限 loss 检查。
 
 best 权重 SHA-256 `926d16e4218fb9f83dc99cb1ef79094dac90adc397e3c5e0ad9526c7eb834c9e`。外部同一 eval 前缀下新增 `-completion-audit.json`、`-best-checkpoint-freeze.json`、`-validation-curve.csv/.html` 和可回读审计脚本。完整结果与局限见 [`训练结束验收`](../docs/post-training/experiments/runtime-candidate-sft-v2-r1.md)。TASK-007 完成，TASK-008 尚未开始；本轮没有 SQL 生成/终测，低 loss 不能作为项目模型改善成绩。旧 QuerySpec matching 模板与旧 reload encoder 都不能直接用于 v2，本次独立 reload 已复用实际 Trainer 的 Dataset；下一项只实现 v2 评测入口与冻结共同解码规则。
+
+TASK-008 入口实现任务卡：本小单元冻结 v2 matching 合同，实现统一的 freeze/prepare/generate/evaluate 入口，并用合成样本和 train/validation smoke 验证完整链路。输入为 step 2,500 best 冻结清单、固定 Base 和两个原 final 来源；生成侧仅投影 sample ID 与原问题，经 shared replay/builder 重建候选输入，不读取 Spec/Gold 修正问题。输出为仓库外合同、输入视图、每个模型完整候选记录、完成 hash 和统一治理/Gold 报告。解码固定 bf16、greedy、beam1、seed20261011、输入4096/输出1024，无修复重试；拒绝/超长/空输出/长度停止均留在总分母。Gold 在两个生成文件封存且身份/hash 对齐后才读取，使用原标签合同执行；规范列序仅重排最终投影，时间别名只按预存 ResultContract 规范化 DataFrame，不改 SQL 语义。另报 runtime/source Spec 差异，不把旧问题歧义误称模型错误。验收覆盖泄漏、版本漂移、两模型输入一致、缺失/重复记录、失败计数、安全/只读/合同/结果对照；本小单元不启动完整 protected 终测，不更换 best，不修改产品解析器或默认 provider。
+
+TASK-008 入口验收通过：新增 `runtime_candidate_matching.py` 与统一 CLI `run_runtime_candidate_matching.py`。新入口 30 项定向测试通过，另有 70 项共用候选、清洗、Gold 比较、Policy、Plan Guard 和 ResultValidator 回归通过；Ruff、compileall、diff check 通过。最终版本 smoke 使用 validation 中两个 workspace 各一条，Base/Adapter 同一输入 hash。物理 GPU 0/1 的两张 RTX 3090 上分别生成，Adapter 2/2 EOS、valid、ordered Gold 匹配；Base 为一条长度停止、一条 PostgreSQL 字段歧义。该两条只验证工程链路，不替代正式准确率。
+
+最终 smoke 证据为仓库外 `evals/runtime-candidate-v2-matching-validation-smoke-20261011-r3/`；正式合同为 `evals/runtime-candidate-v2-matching-final-20261011-r1/contract.json`，SHA-256 `f68fdeda3aff58e492f50a9935b23b7e52cb12550c8f6b7193e6709ec1ba97a3`。冻结时只计算两个 final 来源的文件 hash，没有读取问题/Spec/Gold 字段或物化正式输入。完整规则及代码入口见 [`v2 matching 合同`](../docs/post-training/data/runtime-candidate-v2-matching-contract-v1.md)。下一小单元物化原两套各 750 条输入、screen 生成 Base/Adapter，再运行后置统一治理与 Gold 对照；不以 smoke 结果修改正式解码。
 
 ## 3. Alternatives
 
