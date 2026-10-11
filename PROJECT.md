@@ -972,3 +972,13 @@ train 长度 1,265–3,538（p95=3,300），validation 1,165–3,592（p95=3,339
 smoke 的平均 train loss 0.215921、4 条 validation loss 0.150052；392 个 LoRA 张量实际更新，Base 冻结，AdamW m/v 为 fp32。adapter_best 在 step 2，保存权重逐张量与 checkpoint-2 一致；重新加载 Base+best 后单条 loss 0.137117 有限。证据在外部 `experiments/runtime-candidate-sft-smoke-20261011-b2-r1/sft_smoke.json`（SHA-256 `79854c528ed8ffad6d34431f17228e2b428c10217bec0a35bfe58d418bb5fee2`），日志在 `evals/runtime-candidate-sft-smoke-20261011-b2-r1.log`。这些值仅证明工程流程可用，不能作为全量 validation 或生成质量提升。
 
 下一步正式训练配置在原对齐计划中冻结：从原 1.5B Base 新训 bf16 LoRA，r16/alpha32/dropout0.05；非量化 AdamW、lr1e-4、constant scheduler、weight_decay0.01；train/eval batch2、累积2、两 epoch、seed20261011、max_seq_length4096。每250 optimizer step及最后一步对完整validation评估/保存，最小eval_loss选择adapter_best，adapter_final仅诊断；预期2,990 optimizer step。未使用 smoke adapter 续训，未读取 final test，默认在线 provider 未变。定向训练/旧格式回归42 passed、共用候选/物化回归28 passed，Ruff、compileall、bash语法和diff检查通过。本次事实已通过 lark-doc 同步飞书项目文档 revision 259。
+
+### 2026-10-11：候选输入对齐第六步，正式两 epoch 训练已启动
+
+20:05（Asia/Shanghai）按上一步冻结配置，从原 Qwen2.5-Coder-1.5B Base 新训 bf16 LoRA。使用已冻结的 5,980 train / 1,500 validation，batch2、累积2、两 epoch、4,096 上限、lr1e-4、weight_decay0.01、seed20261011，预计2,990 optimizer step。逻辑CUDA1 / 物理GPU3 RTX4090、UUID `GPU-10863af0-8588-7625-5609-640ba794f64b`；screen `daa-runtime-sft-20261011-r1` 已 detached，关闭SSH不影响运行。没有使用smoke adapter、旧adapter或final test。
+
+新增 `scripts/post_training/launchers/start_runtime_candidate_sft_training_screen.sh`，代码基线 `ad5179a`：启动前核对release/smoke/model manifest hash、GPU空闲状态，记录完整argv、代码hash、git commit与开始时间，结束时保存exit状态；重复调用拒绝覆盖，未重复开训练。实际命令用Trainer parser核对冻结配置通过，bash语法、diff检查通过；Trainer代码复用上一轮已通过70条回归的版本，未改训练实现。
+
+首个step250完成全量validation，`eval_loss=0.0004893963341601193`，耗时159.6秒，checkpoint保存后继续训练。首checkpoint只读回读确认LoRA配置、2,990总步数、fp32 AdamW m/v及optimizer/scheduler/RNG/trainer_state齐全，审计通过；loss/grad_norm有限、没有OOM/CUDA错误。此值仅用于训练期checkpoint选择，不能推出生成质量改善；正式训练尚未结束，最终adapter_best尚未确定。
+
+仓库外运行目录为 `experiments/runtime-candidate-qwen25coder15b-bf16-lora-2epoch-20261011-r1/`，日志为 `evals/runtime-candidate-qwen25coder15b-sft-20261011-r1.log`，同名前缀下保存 `-launch.json` 与 `-first-checkpoint-audit.json`，结束后保存 `-exit.json`；外部根目录为 `/disk2/gengnan/data-analysis-agent-data/`。完整结束后Trainer会写运行目录的 `sft_smoke.json`、`adapter_best/`和`adapter_final/`。按当前速度整轮粗估约两小时；下一项等待完成后审查训练/validation-best证据，再准备matching Base/Adapter生成与Gold评测。本次事实已通过 lark-doc 同步飞书项目文档 revision 260。
