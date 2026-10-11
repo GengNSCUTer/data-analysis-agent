@@ -274,6 +274,7 @@ class SecurePostgresRunner(SqlRunner):
                 time_bucket_grain=time_bucket_grain,
                 requested_start=context.metadata.get("requested_start"),
                 requested_end=context.metadata.get("requested_end"),
+                requested_end_exclusive=context.metadata.get("requested_end_exclusive", False) is True,
                 # Truncation is true only when the policy cap probe saw one
                 # extra row. That row is already discarded. An explicit
                 # smaller LIMIT is not evidence of a policy truncation.

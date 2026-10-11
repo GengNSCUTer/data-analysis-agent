@@ -27,8 +27,8 @@ def test_scalar_multi_metric_plan_requires_one_cte_per_metric() -> None:
     assert plan.execution_strategy == "one_cte_per_metric_then_cross_join"
     assert plan.metric_ids == (
         "average_delivery_days",
-        "paid_order_count",
         "gmv",
+        "paid_order_count",
         "positive_review_rate",
     )
     assert plan.required_result_columns == plan.metric_ids
@@ -51,13 +51,15 @@ def test_calendar_year_is_a_filter_not_a_time_series() -> None:
     assert route.should_generate_sql is True
     assert plan.dimensions == ("customer_state",)
     assert plan.time_grain is None
-    assert plan.time_range == {"start": "2018-01-01", "end": "2018-12-31"}
+    assert plan.time_range == {
+        "start": "2018-01-01", "end": "2019-01-01", "end_semantics": "exclusive",
+    }
     assert plan.required_result_columns == ("customer_state", "gmv")
     assert "`time`" not in plan.prompt_context().split("时间粒度")[0]
     contract = ResultContract.from_selection(
         selection,
         question,
-        memory["time_range"],
+        plan.time_range,
         catalog=router.retriever.catalog,
         required_result_columns=plan.required_result_columns,
         requested_dimensions=plan.dimensions,
@@ -83,10 +85,12 @@ def test_grouped_plan_detects_dimension_and_time_grain() -> None:
     assert plan.execution_strategy == "one_cte_per_metric_then_join_on_group_keys"
     assert plan.dimensions == ("customer_state",)
     assert plan.time_grain == "month"
-    assert plan.required_result_columns[-1] == "time"
-    assert plan.time_range == {"start": "2017-01-01", "end": "2017-12-31"}
+    assert plan.required_result_columns == ("customer_state", "time", "gmv", "paid_order_count")
+    assert plan.time_range == {
+        "start": "2017-01-01", "end": "2018-01-01", "end_semantics": "exclusive",
+    }
     prompt = plan.prompt_context()
-    assert "`customer_state`, `paid_order_count`, `gmv`, `time`" in prompt
+    assert "`customer_state`, `time`, `gmv`, `paid_order_count`" in prompt
     assert "最终结果别名、GROUP BY 或 ORDER BY 中" in prompt
 
 

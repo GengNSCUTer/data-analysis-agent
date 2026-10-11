@@ -666,6 +666,7 @@ class QuestionRouter:
         # deduplication rule or choose an arbitrary fact-row representative.
         # Import locally to avoid the QueryPlan -> QuestionRoute module cycle.
         from .query_plan import QueryPlan
+        from .query_time import DATE_LITERAL, extract_absolute_range
 
         metric_objects = tuple(
             self.retriever.catalog.metrics_by_id[metric_id]
@@ -675,11 +676,19 @@ class QuestionRouter:
         selected_metrics = {metric.metric_id: metric for metric in selection.metrics}
         # Grouping comes from query shape, not from every mention of “州/商品”.
         # A filter such as “SP州” must not become a state breakdown.
-        for dimension in QueryPlan._dimensions(question, metric_objects, state):
+        workspace = self.retriever.catalog.workspace
+        dimensions = QueryPlan._dimensions(question, metric_objects, state, workspace=workspace)
+        for dimension in dimensions:
             for metric_id in metric_ids:
                 metric = selected_metrics.get(metric_id)
                 if metric is None:
                     metric = self.retriever.catalog.metrics_by_id.get(metric_id)
+                if metric is not None and dimension not in metric.allowed_dimensions:
+                    return QuestionRoute(
+                        "clarification_required", ("dimension",), metric_ids,
+                        f"指标“{metric.name}”不支持按“{dimension}”分组，请拆分查询或选择共同维度。",
+                        "dimension_not_supported_by_all_metrics",
+                    )
                 policy = metric.dimension_policies.get(dimension) if metric else None
                 if policy is None or policy.mode in {
                     "safe_direct",
@@ -718,6 +727,20 @@ class QuestionRouter:
                         evidence_mode="clarification",
                     )
 
+        parsed_range = extract_absolute_range(question)
+        remembered_range = QueryPlan._time_range(state)
+        if DATE_LITERAL.search(question) and parsed_range is None:
+            return QuestionRoute("clarification_required", ("time_range",), metric_ids,
+                                 "日期范围无效，请确认真实日期及开始、结束顺序。", "invalid_absolute_range")
+        if (parsed_range is None and remembered_range is not None
+                and remembered_range.get("end_semantics") != "exclusive"):
+            return QuestionRoute("clarification_required", ("time_endpoint",), metric_ids,
+                                 "上一轮保存的时间端点含义未确认，请重新给出范围并说明是否包含结束日。",
+                                 "legacy_time_endpoint_unconfirmed")
+        if (re.search(r"趋势|时间序列|时间变化|时间切面", question)
+                and QueryPlan._time_grain(question) is None):
+            return QuestionRoute("clarification_required", ("time_grain",), metric_ids,
+                                 "请说明按日、周、月、季度还是年统计时间变化。", "time_grain_unspecified")
         preflight = QueryPlan.preflight(
             tuple(
                 self.retriever.catalog.metrics_by_id[metric_id]
@@ -727,6 +750,7 @@ class QuestionRouter:
             question,
             state,
             max_result_rows=self.max_result_rows,
+            workspace=workspace,
         )
         if not preflight.allowed:
             return QuestionRoute(
@@ -765,7 +789,12 @@ class QuestionRouter:
                 requires_database=False,
                 evidence_mode="clarification",
             )
-        if _COMPARISON.search(question) and not (
+        series_only = (
+            QueryPlan._time_grain(question) is not None
+            and re.search(r"变化|趋势", question) is not None
+            and re.search(r"相比|对比|比较|增长|下降|异常|同比|环比", question) is None
+        )
+        if _COMPARISON.search(question) and not series_only and not (
             state.get("comparison") or state.get("comparison_baseline")
         ):
             explicit_baseline = bool(

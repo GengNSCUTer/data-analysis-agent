@@ -52,11 +52,12 @@ def main() -> None:
         "groups": {},
         "limits": [
             "TheLook replay is a hypothetical use of existing runtime rules, not an online workspace.",
-            "Structural agreement does not prove end-date inclusivity, SQL semantics or Catalog completeness.",
+            "Explicit endpoint/shape agreement does not prove Gold SQL semantics or Catalog completeness.",
             "No final test, new split, training, GPU or default provider change.",
         ],
     }
-    groups = defaultdict(lambda: {"total": 0, "structural_match": 0, "reasons": Counter(), "routes": Counter()})
+    groups = defaultdict(lambda: {"total": 0, "structural_match": 0,
+                                  "semantic_structure_match": 0, "reasons": Counter(), "routes": Counter()})
     with (output / "records.jsonl").open("x", encoding="utf-8") as records:
         for split in ("train", "validation"):
             path = args.source_dir / f"{split}.jsonl"
@@ -80,6 +81,7 @@ def main() -> None:
                 group = groups[f"{workspace}/{split}"]
                 group["total"] += 1
                 group["structural_match"] += not reasons
+                group["semantic_structure_match"] += set(reasons) <= {"result_column_order_mismatch"}
                 group["reasons"].update(reasons)
                 group["routes"].update([replay["route_state"]])
                 records.write(json.dumps({

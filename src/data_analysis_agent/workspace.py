@@ -9,6 +9,7 @@ while the current Olist catalog remains an adapter in ``metric_context`` and
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 import re
 from types import MappingProxyType
@@ -16,6 +17,15 @@ from typing import Mapping
 
 
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]+$")
+
+
+@dataclass(frozen=True)
+class DimensionBinding:
+    """Logical grouping alias and vetted physical sources for one workspace."""
+
+    aliases: tuple[str, ...]
+    sources: tuple[tuple[str, str], ...]
+    max_cardinality: int
 
 
 @dataclass(frozen=True)
@@ -38,6 +48,10 @@ class WorkspaceProfile:
     analyst_tables: frozenset[str] = frozenset()
     sensitive_projection_columns: frozenset[str] = frozenset()
     catalog_path: Path | None = None
+    dimension_bindings: Mapping[str, DimensionBinding] = field(default_factory=dict)
+    # Frozen unfiltered fact-row counts per UTC date. Used only for conservative
+    # preflight bounds, never rendered into model input or used as query results.
+    fact_date_counts: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -85,6 +99,34 @@ class WorkspaceProfile:
         object.__setattr__(self, "allowed_columns", MappingProxyType(normalized_tables))
         object.__setattr__(self, "analyst_tables", analyst_tables)
         object.__setattr__(self, "sensitive_projection_columns", sensitive)
+        bindings = dict(self.dimension_bindings)
+        for name, binding in bindings.items():
+            if not _IDENTIFIER.fullmatch(name) or not isinstance(binding, DimensionBinding):
+                raise ValueError("invalid workspace dimension binding")
+            if not binding.aliases or any(not alias.strip() for alias in binding.aliases):
+                raise ValueError("dimension aliases must be non-empty")
+            if type(binding.max_cardinality) is not int or binding.max_cardinality < 1:
+                raise ValueError("dimension cardinality must be positive")
+            if not binding.sources or any(
+                column not in normalized_tables.get(table, ())
+                or column in sensitive
+                for table, column in binding.sources
+            ):
+                raise ValueError("dimension sources must be safe workspace columns")
+        counts = {
+            source_field: MappingProxyType(dict(days))
+            for source_field, days in self.fact_date_counts.items()
+        }
+        for source_field, days in counts.items():
+            table, separator, column = source_field.partition(".")
+            if not separator or column not in normalized_tables.get(table, ()):
+                raise ValueError("fact-date count source must be a workspace column")
+            if any(type(value) is not int or value < 0 for value in days.values()):
+                raise ValueError("fact-date counts must be non-negative integers")
+            for day in days:
+                date.fromisoformat(day)
+        object.__setattr__(self, "dimension_bindings", MappingProxyType(bindings))
+        object.__setattr__(self, "fact_date_counts", MappingProxyType(counts))
         if self.catalog_path is not None:
             object.__setattr__(self, "catalog_path", Path(self.catalog_path))
 

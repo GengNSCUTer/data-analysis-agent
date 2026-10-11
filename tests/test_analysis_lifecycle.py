@@ -152,6 +152,11 @@ async def test_matching_version_still_reuses_analysis_state(router: QuestionRout
             self.conversation = conversation
 
     handler = _handler(Store(), router)
+    # Reuse a confirmed new-format range. Unmarked legacy ranges intentionally
+    # require endpoint reconfirmation and must not reach candidate generation.
+    handler.agent.conversation_store.conversation.metadata["working_memory"]["time_range"] = {
+        "start": "2016-01-01", "end": "2017-01-01", "end_semantics": "exclusive",
+    }
     request = ChatRequest(
         message="最近的 GMV 变化",
         conversation_id="conversation-lifecycle",
@@ -165,7 +170,7 @@ async def test_matching_version_still_reuses_analysis_state(router: QuestionRout
     assert "分析上下文已失效" not in titles
     assert handler.agent.conversation_store.conversation.metadata["working_memory"][
         "time_range"
-    ] == {"start": "2016-01-01", "end": "2016-12-31"}
+    ] == {"start": "2016-01-01", "end": "2017-01-01", "end_semantics": "exclusive"}
 
 
 @pytest.mark.asyncio

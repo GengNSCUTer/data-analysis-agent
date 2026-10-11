@@ -36,7 +36,8 @@ def test_working_memory_preserves_original_metric_across_clarification() -> None
     assert completed.metric_ids == ("gmv",)
     assert completed.time_range == {
         "start": "2017-01-01",
-        "end": "2017-12-31",
+        "end": "2018-01-01",
+        "end_semantics": "exclusive",
     }
     assert completed.pending_question is None
     assert completed.pending_missing == ()

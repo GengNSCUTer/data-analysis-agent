@@ -930,3 +930,13 @@ Day 1 用户已复述入口、Router 与 QueryPlan/QuerySpec 的主要职责，�
 实现 `candidate_sql_generator.py:CandidateSqlRequest/build_runtime_candidate_request/render_runtime_candidate_prompt` 的 `runtime-candidate-sql-v2` 共用入口，输入来自实际 CatalogSelection、QueryPlan、ResultContract、workspace 与问题；没有 QuerySpec/Gold/摘要参数。`BudgetedChatHandler` 的查库准入分支调用同构造器，仅记录候选 Prompt 版本/hash；不替换默认 API Agent，不声称其完整工具调用 Prompt 已变成 SQL-only 模板。离线 `replay_single_turn(workspace=...)` 调用同一入口。v1 renderer 与完成清洗合同保持可回查，AGENTS 改为约束新实验必须复用版本化构造器，旧实验不迁移覆盖。
 
 共用 v2 回放证据为仓库外 `evals/runtime-candidate-alignment-20261011-v2-r1/{summary.json,records.jsonl}`；7,500 行记录与初始审计的来源 hash、各组差异统计一致，生成 7,437 个不重复候选输入 hash，63 条未准入。两组定向测试共 119 passed、7 skipped（数据库集成未启用），Ruff/compileall/diff check 通过；覆盖 runtime/offline 输入文本及 hash 相同、版本/列/指标漂移拒绝、拒绝路由不得构造输入、摘要排除、客户端假 hash 被服务端覆盖。该诊断只比较规则推导的结构，并非完整输入准入或模型准确率；没有验证端点语义或全部表列依赖。TheLook 是现有规则的假设复用，不代表线上已接入。没有读取 final test、调用数据库/LLM/GPU、生成新正式 release 或启动训练。下一项是必要的维度、时间、结果列合同修复，随后一次物化、smoke 与正式训练；不会把缺月粒度的问题靠注入 Gold 计划包装为合格训练行。本次事实已同步飞书项目文档 revision 255。
+
+### 2026-10-11：候选输入对齐第二步，运行时合同修复与旧问题歧义识别
+
+完成对齐计划 TASK-003/004：`WorkspaceProfile.DimensionBinding` 将 TheLook 13 个逻辑维度绑定真实列，Catalog/QueryPlan 共用；明确不支持的维度进入澄清，不能忽略后变成标量查询。基于冻结 TheLook 数据库的只读聚合导出维度基数和五个事实字段的每日未过滤行数，用作结果上界预检；只保存聚合元数据、不放入候选 Prompt。Quarter 明确措辞、周一分桶、不同 workspace 年数边界均修正；只有“时间变化”而无粒度时澄清，单纯按季度看变化不误要求比较基线，真实比较请求仍检查基线。
+
+`query-plan-v2` 规范列序为维度、时间、排序指标。`query_time.py` 统一绝对区间，明确 start-inclusive/end-exclusive：未排除结束日时转为下一日上界；单年为下一年首日上界。旧未标记会话状态不改写、需重新确认；ResultContract/Runner/Validator 显式传递排除上界标记，共用候选构造器拒绝端点漂移。保留历史离线模板和评测默认语义。回放修正为线上 1,000 行执行预算，而非旧默认 200 行预览预算。
+
+最终 7,500 行回放为仓库外 `evals/runtime-candidate-alignment-20261011-fixed-r2/{summary.json,records.jsonl}`；源文件 hash 未变，中间 `fixed-r1` 仅留作诊断。TheLook train/validation 已准入 2,857/714 条，已准入行的指标/维度/粒度/端点/列集合均匹配原规格，仅列序差异 1,237/254。剩余缺粒度 123/36，train 20 条品牌分组超保守执行上界。Olist 已准入 2,973/742，但其中 2,902/728 条问题未声明排除结束日，而 Gold 使用排除上界；该旧问题歧义直到显式端点审计才被暴露。Olist 列序差异 2,026/545；未准入 27/8，原因是缺明确查询动作 24/4 和被判定义问题 3/4。各类有重叠，不相加，不作为 SQL 准确率。
+
+相关 Python 回归 250 passed、7 skipped（数据库集成未启用），定向 Ruff、compileall、diff check 通过。覆盖真实维度列、预算、非法/闰日/同日区间、周/月/季度/年粒度、旧状态确认、列序、端点合同漂移与原工具/工件/图表链；尚未做新 Gold 小批执行准入。下一项直接在 train/validation 小批物化中补清可追溯的问法歧义、规范 Gold 顶层投影、核对实际 Catalog 依赖，再生成新 release。未读取 final test、调用 LLM/GPU或启动训练，默认 provider 与在线 Olist workspace 不变。本次事实已同步飞书项目文档 revision 256。

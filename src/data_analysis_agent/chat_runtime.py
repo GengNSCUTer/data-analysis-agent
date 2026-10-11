@@ -230,7 +230,9 @@ class BudgetedChatHandler(ChatHandler):
                         has_metric_match=has_metric_match,
                     )
                     and memory.dimensions
-                    and not QueryPlan._dimensions(request.message, selection.metrics)
+                    and not QueryPlan._dimensions(
+                        request.message, selection.metrics, workspace=selection.workspace
+                    )
                 ):
                     route_state = {
                         **route_state,

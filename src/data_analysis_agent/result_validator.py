@@ -198,6 +198,7 @@ class ResultValidator:
         time_bucket_grain: str | None = None,
         requested_start: str | date | datetime | None = None,
         requested_end: str | date | datetime | None = None,
+        requested_end_exclusive: bool = False,
         limit_applied: bool = False,
         execution_truncated: bool | None = None,
         join_multiplicity: Mapping[str, int] | None = None,
@@ -360,7 +361,9 @@ class ResultValidator:
                         start = _bucket_start(start, time_bucket_grain)
                     if (
                         start is not None and parsed.min() < start
-                        or end is not None and parsed.max() > end
+                        or end is not None and (
+                            parsed.max() >= end if requested_end_exclusive else parsed.max() > end
+                        )
                     ):
                         shape_notes.append(
                             "结果时间覆盖与请求范围不完全一致："

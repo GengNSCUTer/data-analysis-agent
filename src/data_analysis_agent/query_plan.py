@@ -8,8 +8,7 @@ Vanna.  The SQL Policy remains the final security boundary.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
-import math
+from datetime import date, timedelta
 import re
 from typing import Any, Literal, Mapping
 
@@ -20,6 +19,8 @@ from .semantic_catalog import (
     MetricDefinition,
 )
 from .sql_policy import DEFAULT_ANALYST_RESULT_LIMIT
+from .query_time import copy_time_range, extract_absolute_range, time_range_instruction
+from .workspace import WorkspaceProfile
 
 
 PlanType = Literal[
@@ -33,12 +34,11 @@ _TIME_GRAINS: tuple[tuple[str, str], ...] = (
     # A calendar mention such as "2018年" is a filter, not a series. Require
     # an explicit grouping word so the result contract does not demand a
     # `time` column the user never asked to see.
-    (r"按月|每月|月度|各月|分月", "month"),
-    (r"按周|每周|周度|各周|分周", "week"),
+    (r"按月|每(?:个)?月|月度|各月|分月", "month"),
+    (r"按周|每(?:个)?周|周度|各周|分周", "week"),
     (r"按日|每天|每日|日度|各日|分日", "day"),
-    (r"按季度|每季度|各季度|分季度", "quarter"),
-    (r"按年|每年|年度|各年|分年", "year"),
-    (r"趋势|时间序列", "day"),
+    (r"按季度|每(?:个)?季度|各季度|分季度|季度(?:度)?(?:汇总|统计|时间序列|序列|趋势|变化)", "quarter"),
+    (r"按年|每(?:个)?年|年度|各年|分年", "year"),
 )
 _DIMENSION_ALIASES: tuple[tuple[str, str], ...] = (
     ("各州", "customer_state"),
@@ -50,6 +50,9 @@ _DIMENSION_ALIASES: tuple[tuple[str, str], ...] = (
     ("地区", "customer_state"),
     ("省份", "customer_state"),
     ("城市", "customer_city"),
+    ("客户城市", "customer_city"),
+    ("卖家城市", "seller_city"),
+    ("商家城市", "seller_city"),
     ("品类", "product_category_name"),
     ("类目", "product_category_name"),
     ("卖家州", "seller_state"),
@@ -93,11 +96,6 @@ _TIME_GRAIN_CARDINALITY: dict[str, int] = {
     "week": 160,
     "day": 1_100,
 }
-_EXPLICIT_DATE_RANGE = re.compile(
-    r"(?P<start>20\d{2}-\d{2}-\d{2})\s*(?:至|到|到|-|~|～)\s*"
-    r"(?P<end>20\d{2}-\d{2}-\d{2})"
-)
-_EXPLICIT_YEAR = re.compile(r"(?<!\d)20\d{2}(?!\d)")
 _BR_STATE_CODE = (
     "AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO"
 )
@@ -209,6 +207,7 @@ class QueryPlan:
         conversation_state: Mapping[str, Any] | None = None,
         *,
         max_result_rows: int = DEFAULT_ANALYST_RESULT_LIMIT,
+        workspace: WorkspaceProfile | None = None,
     ) -> QueryPlanPreflight:
         """Reject query shapes the configured execution contract cannot bound.
 
@@ -219,7 +218,7 @@ class QueryPlan:
         """
         if max_result_rows <= 0:
             raise ValueError("max_result_rows must be positive")
-        dimensions = cls._dimensions(question, metrics, conversation_state)
+        dimensions = cls._dimensions(question, metrics, conversation_state, workspace=workspace)
         non_displayable = next(
             (dimension for dimension in dimensions if dimension in _NON_DISPLAYABLE_DIMENSIONS),
             None,
@@ -232,11 +231,8 @@ class QueryPlan:
             )
         time_grain = cls._time_grain(question)
         state = conversation_state or {}
-        has_explicit_range = bool(
-            cls._time_range(state)
-            or _EXPLICIT_DATE_RANGE.search(question)
-            or _EXPLICIT_YEAR.search(question)
-        )
+        resolved_range = extract_absolute_range(question) or cls._time_range(state)
+        has_explicit_range = bool(resolved_range)
         if time_grain == "day" and not has_explicit_range:
             return QueryPlanPreflight(
                 False,
@@ -244,11 +240,14 @@ class QueryPlan:
                 "按日统计必须先给出明确的绝对日期范围，避免结果超出当前行数预算。",
             )
         estimated_rows = 1
+        configured_bindings = workspace.dimension_bindings if workspace else {}
         ranking_bound = ranking_category_output_bound(question, dimensions)
         for dimension in dimensions:
             if ranking_bound is not None and dimension == "product_category_name":
                 continue
-            if dimension in _TOP_N_DIMENSIONS:
+            if dimension in configured_bindings:
+                estimated_rows *= configured_bindings[dimension].max_cardinality
+            elif dimension in _TOP_N_DIMENSIONS:
                 estimated_rows *= _TOP_N_DIMENSIONS[dimension]
             else:
                 estimated_rows *= _DISPLAY_DIMENSION_CARDINALITY.get(
@@ -257,7 +256,31 @@ class QueryPlan:
         if ranking_bound is not None:
             estimated_rows *= ranking_bound
         if time_grain:
-            estimated_rows *= cls._series_bucket_bound(time_grain, question, state)
+            series_state = state
+            if not resolved_range and workspace and workspace.fact_date_counts:
+                sources = [workspace.fact_date_counts.get(metric.time_field) for metric in metrics]
+                if sources and all(sources):
+                    dates = [day for source in sources for day in source]
+                    series_state = {"time_range": {
+                        "start": min(dates),
+                        "end": (date.fromisoformat(max(dates)) + timedelta(days=1)).isoformat(),
+                        "end_semantics": "exclusive",
+                    }}
+            estimated_rows *= cls._series_bucket_bound(time_grain, question, series_state)
+        if dimensions and workspace and workspace.fact_date_counts and resolved_range:
+            # Each result group requires at least one fact row. Across metrics,
+            # summing unfiltered fact-row bounds also bounds FULL OUTER JOIN
+            # group keys. Never use a count copied from a training label.
+            if resolved_range.get("end_semantics") == "exclusive":
+                bounds = []
+                for metric in metrics:
+                    days = workspace.fact_date_counts.get(metric.time_field)
+                    if days is None:
+                        break
+                    bounds.append(sum(count for day, count in days.items()
+                                      if resolved_range["start"] <= day < resolved_range["end"]))
+                if len(bounds) == len(metrics) and bounds:
+                    estimated_rows = min(estimated_rows, sum(bounds))
         if estimated_rows > max_result_rows:
             labels = "、".join(dimensions) if dimensions else "当前分组"
             return QueryPlanPreflight(
@@ -281,14 +304,14 @@ class QueryPlan:
         selection_metrics = tuple(selection.metrics)
         route_ids = tuple(route.metric_ids or ())
         selection_ids = tuple(metric.metric_id for metric in selection_metrics)
-        metric_ids = route_ids or selection_ids
+        metric_ids = tuple(sorted(route_ids or selection_ids))
         by_id = {metric.metric_id: metric for metric in selection_metrics}
         metrics = tuple(by_id[metric_id] for metric_id in metric_ids if metric_id in by_id)
         if not metrics:
             metrics = selection_metrics
-        dimensions = cls._dimensions(question, metrics, state)
+        dimensions = cls._dimensions(question, metrics, state, workspace=selection.workspace)
         time_grain = cls._time_grain(question)
-        time_range = cls._time_range(state)
+        time_range = extract_absolute_range(question) or cls._time_range(state)
         comparison = cls._comparison(state)
 
         if len(metric_ids) > 1 and not dimensions and time_grain is None:
@@ -304,9 +327,10 @@ class QueryPlan:
         # Dimensions are part of the result contract as well as prompt
         # context.  Without them a model could return only metric columns and
         # still look valid to the result gate for a grouped query.
-        required_columns = list(dimensions) + list(metric_ids)
+        required_columns = list(dimensions)
         if time_grain:
             required_columns.append("time")
+        required_columns.extend(metric_ids)
 
         time_fields = tuple(
             dict.fromkeys(metric.time_field for metric in metrics)
@@ -332,7 +356,7 @@ class QueryPlan:
         top_n = tuple(
             (dimension, limit)
             for dimension, limit in _TOP_N_DIMENSIONS.items()
-            if dimension in dimensions
+            if dimension in dimensions and not (selection.workspace and selection.workspace.dimension_bindings)
         )
         if ranking_bound == _RANKING_CATEGORY_LIMIT:
             top_n = (*top_n, ("product_category_name", _RANKING_CATEGORY_LIMIT))
@@ -377,6 +401,8 @@ class QueryPlan:
         question: str,
         metrics: tuple[MetricDefinition, ...],
         state: Mapping[str, Any] | None = None,
+        *,
+        workspace: WorkspaceProfile | None = None,
     ) -> tuple[str, ...]:
         """Detect grouping dimensions from query shape, not incidental words.
 
@@ -392,12 +418,30 @@ class QueryPlan:
             for dimension in metric.allowed_dimensions
         }
         selected: list[str] = []
-        for alias, dimension in _DIMENSION_ALIASES:
-            if alias in question and dimension not in selected:
+        bindings = workspace.dimension_bindings if workspace else {}
+        aliases = (tuple((alias, dimension) for dimension, binding in bindings.items()
+                         for alias in (*binding.aliases, dimension))
+                   if bindings else _DIMENSION_ALIASES)
+        # A specific "卖家州" must shadow the embedded generic "按州" or
+        # "城市". Keep separately mentioned dimensions; do not invent both.
+        # Shared generic aliases (e.g. 按州) prefer the current fact's allowed
+        # dimension. A more specific unsupported alias is retained so Router
+        # can reject it rather than silently changing the requested shape.
+        matches = sorted((match.start(), -len(alias), dimension not in allowed,
+                          dimension, match.end())
+                         for alias, dimension in aliases
+                         for match in re.finditer(re.escape(alias), question))
+        occupied: list[tuple[int, int]] = []
+        for start, _, _, dimension, end in matches:
+            if any(start < old_end and end > old_start for old_start, old_end in occupied):
+                continue
+            occupied.append((start, end))
+            if dimension not in selected:
                 selected.append(dimension)
-        for pattern, dimension in _GROUP_PATTERNS:
-            if pattern.search(question) and dimension not in selected:
-                selected.append(dimension)
+        if not bindings:
+            for pattern, dimension in _GROUP_PATTERNS:
+                if pattern.search(question) and dimension not in selected:
+                    selected.append(dimension)
         raw_resolved = (state or {}).get("resolved_dimensions")
         if isinstance(raw_resolved, (list, tuple)):
             for dimension in raw_resolved:
@@ -411,13 +455,7 @@ class QueryPlan:
 
     @staticmethod
     def _time_range(state: Mapping[str, Any]) -> dict[str, str] | None:
-        value = state.get("time_range")
-        if not isinstance(value, Mapping):
-            return None
-        start, end = value.get("start"), value.get("end")
-        if isinstance(start, str) and isinstance(end, str) and start and end:
-            return {"start": start[:32], "end": end[:32]}
-        return None
+        return copy_time_range(state.get("time_range"))
 
     @staticmethod
     def _series_bucket_bound(
@@ -429,23 +467,14 @@ class QueryPlan:
         change the eventual SQL filter or prove a candidate SQL is correct.
         Unknown or malformed ranges retain the Catalog-owned global bound.
         """
-        time_range = QueryPlan._time_range(state)
-        if time_range is None:
-            match = _EXPLICIT_DATE_RANGE.search(question)
-            if match:
-                time_range = match.groupdict()
-            else:
-                year = _EXPLICIT_YEAR.search(question)
-                if year:
-                    time_range = {
-                        "start": f"{year.group(0)}-01-01",
-                        "end": f"{year.group(0)}-12-31",
-                    }
+        time_range = extract_absolute_range(question) or QueryPlan._time_range(state)
         if time_range is None:
             return _TIME_GRAIN_CARDINALITY[time_grain]
         try:
             start = date.fromisoformat(time_range["start"])
             end = date.fromisoformat(time_range["end"])
+            if time_range.get("end_semantics") == "exclusive":
+                end -= timedelta(days=1)
         except (KeyError, TypeError, ValueError):
             return _TIME_GRAIN_CARDINALITY[time_grain]
         if end < start:
@@ -455,7 +484,9 @@ class QueryPlan:
         if time_grain == "day":
             return days
         if time_grain == "week":
-            return math.ceil(days / 7)
+            first_monday = start - timedelta(days=start.weekday())
+            last_monday = end - timedelta(days=end.weekday())
+            return (last_monday - first_monday).days // 7 + 1
         if time_grain == "month":
             return (end.year - start.year) * 12 + end.month - start.month + 1
         if time_grain == "quarter":
@@ -473,6 +504,7 @@ class QueryPlan:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "query_plan_version": "query-plan-v2",
             "plan_type": self.plan_type,
             "intent": self.intent,
             "metric_ids": list(self.metric_ids),
@@ -515,7 +547,7 @@ class QueryPlan:
         ]
         if self.time_range:
             lines.append(
-                f"- 已确认时间范围：{self.time_range['start']} 至 {self.time_range['end']}。"
+                f"- 已确认时间范围：{time_range_instruction(self.time_range)}。"
             )
         if self.comparison_baseline:
             lines.append(f"- 已确认比较基线：{self.comparison_baseline}。")

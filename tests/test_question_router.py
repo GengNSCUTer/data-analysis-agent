@@ -173,14 +173,23 @@ def test_router_preflight_blocks_unsupported_output_shapes(
 
 
 def test_high_cardinality_groups_are_admitted_as_top_20(router: QuestionRouter) -> None:
+    from data_analysis_agent.metric_context import OLIST_RUNTIME_WORKSPACE
     from data_analysis_agent.query_plan import QueryPlan
 
+    # seller_city is supported by the current v3 contract, not frozen v2.
+    router = QuestionRouter(CatalogRetriever(CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()))
     for question in ("按客户城市统计 GMV", "按卖家统计 GMV"):
         route = router.admit_sql_request(question, user=_user())
         assert route.should_generate_sql is True
         selection = router.retriever.retrieve(question, _user())
         plan = QueryPlan.from_selection(selection, question, route)
         assert "最高的 20 个分组" in plan.prompt_context()
+
+
+def test_unsupported_v2_seller_city_requires_clarification(router: QuestionRouter) -> None:
+    route = router.admit_sql_request("按卖家城市统计 GMV", user=_user())
+    assert not route.should_generate_sql
+    assert route.reason_code == "dimension_not_supported_by_all_metrics"
 
 
 def test_online_router_uses_execution_cap_separate_from_preview_budget(
@@ -332,7 +341,8 @@ def test_clarification_follow_up_restores_metric_and_adds_explicit_time_range(ro
     assert updated.metric_ids == ("gmv",)
     assert updated.time_range == {
         "start": "2017-01-01",
-        "end": "2017-12-31",
+        "end": "2018-01-01",
+        "end_semantics": "exclusive",
     }
     assert updated.pending_missing == ()
 
@@ -485,13 +495,14 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
 
     assert agent.metadata is not None
     assert agent.metadata["metric_result_columns"] == ["gmv"]
-    assert agent.metadata["required_result_columns"] == ["gmv", "time"]
+    assert agent.metadata["required_result_columns"] == ["time", "gmv"]
     assert agent.metadata["query_plan"]["plan_type"] == "single_metric"
-    assert agent.metadata["query_plan"]["required_result_columns"] == ["gmv", "time"]
+    assert agent.metadata["query_plan"]["required_result_columns"] == ["time", "gmv"]
     assert agent.metadata["result_time_column"] == "order_purchase_timestamp"
     assert "month" in agent.metadata["result_time_column_aliases"]
     assert agent.metadata["requested_start"] == "2017-01-01"
-    assert agent.metadata["requested_end"] == "2017-12-31"
+    assert agent.metadata["requested_end"] == "2018-01-01"
+    assert agent.metadata["requested_end_exclusive"] is True
     assert agent.metadata["catalog_version"] == "olist-catalog-v2"
     assert agent.metadata["dataset_version_id"] == "olist-kaggle-v2-2026-08-03"
     assert agent.metadata["metric_version"] == "0.2-frozen"

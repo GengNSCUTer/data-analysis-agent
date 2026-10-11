@@ -155,6 +155,7 @@ class Catalog:
     currency_symbol: str | None = None
     currency_name: str | None = None
     available_attribution_rule_ids: frozenset[str] = frozenset()
+    workspace: WorkspaceProfile | None = field(default=None, repr=False, compare=False)
 
     @property
     def tables_by_id(self) -> dict[str, CatalogTable]:
@@ -223,6 +224,7 @@ class CatalogSelection:
     joins: tuple[JoinPath, ...]
     trace: RetrievalTrace
     prompt: str
+    workspace: WorkspaceProfile | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -254,6 +256,7 @@ class ResultContract:
         default_factory=lambda: MappingProxyType({})
     )
     attribution_requirements: tuple[AttributionRequirement, ...] = ()
+    requested_end_exclusive: bool = False
 
     @classmethod
     def from_selection(
@@ -321,6 +324,7 @@ class ResultContract:
             result_time_column_aliases=time_aliases,
             requested_start=(time_range or {}).get("start"),
             requested_end=(time_range or {}).get("end"),
+            requested_end_exclusive=(time_range or {}).get("end_semantics") == "exclusive",
             selected_join_ids=selected_join_ids,
             result_column_labels=MappingProxyType(result_column_labels),
             metric_fact_grains=MappingProxyType(
@@ -377,6 +381,7 @@ class ResultContract:
             "result_time_column_aliases": list(self.result_time_column_aliases),
             "requested_start": self.requested_start,
             "requested_end": self.requested_end,
+            "requested_end_exclusive": self.requested_end_exclusive,
             "selected_join_ids": list(self.selected_join_ids),
             "result_column_labels": dict(self.result_column_labels),
             "metric_fact_grains": dict(self.metric_fact_grains),
@@ -407,6 +412,7 @@ class ResultContract:
             "result_time_column_aliases": list(self.result_time_column_aliases),
             "requested_start": self.requested_start,
             "requested_end": self.requested_end,
+            "requested_end_exclusive": self.requested_end_exclusive,
             "selected_join_ids": list(self.selected_join_ids),
             "metric_fact_grains": dict(self.metric_fact_grains),
             "exact_result_columns": self.exact_result_columns,
@@ -516,6 +522,7 @@ class CatalogLoader:
             currency_symbol=self._optional_nonempty(raw.get("currency_symbol"), "currency_symbol"),
             currency_name=self._optional_nonempty(raw.get("currency_name"), "currency_name"),
             available_attribution_rule_ids=self.available_attribution_rule_ids,
+            workspace=self.workspace,
         )
 
     def _parse_table(self, raw: Any, index: int) -> CatalogTable:
@@ -1037,6 +1044,7 @@ class CatalogRetriever:
             joins=selected_joins,
             trace=trace,
             prompt=prompt,
+            workspace=self.catalog.workspace,
         )
 
     def matched_metric_ids(
@@ -1181,9 +1189,13 @@ class CatalogRetriever:
         found: list[tuple[str, tuple[tuple[str, float], ...]]] = []
         for dimension in allowed:
             candidates: list[tuple[float, str]] = []
+            binding = (self.catalog.workspace.dimension_bindings.get(dimension)
+                       if self.catalog.workspace else None)
             for table in tables:
                 for column in table.columns:
-                    if column.name != dimension:
+                    source_matches = ((table.table_id, column.name) in binding.sources
+                                      if binding else column.name == dimension)
+                    if not source_matches:
                         continue
                     score, _ = self._score(
                         question,
@@ -1191,7 +1203,7 @@ class CatalogRetriever:
                         # table (for example, ``GMV`` for order items). They
                         # cannot prove that a user explicitly requested this
                         # particular dimension, such as ``seller_id``.
-                        (dimension, *column.aliases),
+                        (dimension, *binding.aliases) if binding else (dimension, *column.aliases),
                     )
                     if score >= self.min_score:
                         candidates.append((score, table.table_id))
@@ -1514,6 +1526,14 @@ class CatalogRetriever:
                 column = columns[name]
                 visibility = "敏感，仅用于关联/聚合" if column.sensitive else "可用于受控展示/过滤"
                 lines.append(f"  - `{name}` ({column.type})：{column.description}；{visibility}")
+        if self.catalog.workspace:
+            allowed_dimensions = {dimension for metric in metrics for dimension in metric.allowed_dimensions}
+            bindings = self.catalog.workspace.dimension_bindings
+            for dimension in sorted(allowed_dimensions & bindings.keys()):
+                sources = [f"{table}.{column}" for table, column in bindings[dimension].sources
+                           if column in columns_by_table.get(table, ())]
+                if sources:
+                    lines.append(f"- 业务维度 `{dimension}` 的可用物理来源：{', '.join(sources)}；最终列别名使用 `{dimension}`。")
         if joins:
             lines.append("\n### 允许的 Join 路径")
             for join in joins:

@@ -152,6 +152,8 @@
 
 这次实际回放 train/validation 后发现结果列序、TheLook 维度/粒度等输入错配，不能只改字段名或包装格式。具体事实与阶段计划见 [`runtime 候选训练对齐计划`](../../plan/refactor-runtime-candidate-sft-alignment-v1.md)。已经实现 `candidate_sql_generator.py:build_runtime_candidate_request/render_runtime_candidate_prompt`，运行时与离线共用构造器；运行时先记录候选输入 hash，默认 API 仍使用完整 Agent 协议。当前插入该任务，尚未生成新 release 或启动训练，Day 1 的执行链小段仍待学习；本轮不增加复述题。
 
+这一步值得一起读的是 `workspace.py:DimensionBinding`、`query_plan.py:_dimensions/from_selection` 和 `query_time.py:extract_absolute_range`：业务维度名不必等于真实字段名；计划来自问题解析，不能由 Gold 规格补答案。新候选计划把日期明确写成 `start <= time < end`，例如“2017-01-01 至 2017-01-31”按包含结束日转为 `< 2017-02-01`，而“至 2017-01-31，不含结束日”保留 `< 2017-01-31`。旧问题只给起止日、标签却按排除结束日写 SQL 时，换 Prompt 并不能消除监督矛盾；数据重建应先补清问题，保留修改来源，再重新经过实际解析链。
+
 ### 后续小段（尚未讲解）
 
 - 工具执行到结果证据：为什么 SQL 可运行、合同通过、业务正确是不同层次。

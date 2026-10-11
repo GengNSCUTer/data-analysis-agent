@@ -49,3 +49,10 @@ def test_column_order_disagreement_is_not_silently_accepted(retriever, source_sp
     source_spec["required_result_columns"].reverse()
     replay = replay_single_turn("按客户州统计有效订单数", retriever)
     assert compare_source_semantics(replay, source_spec) == ("result_column_order_mismatch",)
+
+
+def test_implicit_top_n_is_not_claimed_as_source_label_alignment(retriever, source_spec):
+    source_spec["dimension"] = "customer_city"
+    source_spec["required_result_columns"] = ["customer_city", "paid_order_count"]
+    replay = replay_single_turn("按客户城市统计有效订单数", retriever)
+    assert compare_source_semantics(replay, source_spec) == ("ranking_not_represented_in_source_spec",)

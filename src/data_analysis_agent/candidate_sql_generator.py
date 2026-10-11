@@ -163,6 +163,18 @@ def build_runtime_candidate_request(
         raise CandidateSqlGenerationError("QueryPlan/ResultContract result columns mismatch")
     if set(query_plan.metric_ids) != set(result_contract.metric_ids):
         raise CandidateSqlGenerationError("QueryPlan/ResultContract metrics mismatch")
+    if query_plan.time_range:
+        from .query_time import copy_time_range
+
+        bounds = copy_time_range(query_plan.time_range)
+        if bounds is None or bounds.get("end_semantics") != "exclusive":
+            raise CandidateSqlGenerationError("candidate time endpoints must be confirmed exclusive bounds")
+        if (result_contract.requested_start != bounds["start"]
+                or result_contract.requested_end != bounds["end"]
+                or not result_contract.requested_end_exclusive):
+            raise CandidateSqlGenerationError("QueryPlan/ResultContract time endpoints mismatch")
+    elif result_contract.requested_start or result_contract.requested_end:
+        raise CandidateSqlGenerationError("QueryPlan/ResultContract time endpoints mismatch")
 
     def encode(value: object) -> str:
         return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

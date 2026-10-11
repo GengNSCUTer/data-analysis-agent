@@ -12,7 +12,7 @@ tags: [Text-to-SQL, SFT, QueryPlan, runtime, alignment]
 
 ![Status: In progress](https://img.shields.io/badge/status-In_progress-yellow)
 
-用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成全量结构回放与共用候选请求入口：对既有 `multi-schema-ecommerce-sql-only-v1-r1` 的 6,000 train / 1,500 validation 执行无模型、无数据库的单轮运行时规则回放，运行时与离线可以调用同一 v2 构造器。发现 Olist 主要有结果列顺序差异，TheLook 还有维度和时间粒度差异，不能直接用新 Prompt 包住旧 Gold 开始训练。
+用户在 Day 1 代码学习中提出复用现有数据，改造训练/验证/测试输入后重新验证。本计划落实该请求。当前已完成共用候选请求入口、必要的运行时合同修复和同一 6,000 train / 1,500 validation 的全量回放。TheLook 已准入行的指标、维度、粒度、时间端点和列集合已对齐；Olist 新发现 3,630 行自然语言未说明结束日排除，而原 Gold 使用排除上界，需在新 release 中补清问题并留下修改来源。列顺序需规范化，非准入行需修正歧义或排除；不能直接用新 Prompt 包住旧 Gold 开始训练。
 
 任务卡：目标是同一服务端候选请求在数据构建、matching Base/Adapter 生成及 opt-in 接入时得到一致文本；输入是既有 train/validation、当前 Catalog/Router/WorkingMemory/QueryPlan；输出是版本化构造器、可追踪的新 release、一次 1.5B SFT 和匹配评测。保持指标口径、权限、数据快照和 SQL-only 目标；不引入 Task B、DPO、新指标、全量 Agent 对话训练或默认 provider 切换。先修已发现的输入错配，再小批、全量、smoke、正式训练，逐步审阅。
 
@@ -58,8 +58,25 @@ TheLook 另外有 train 775 / validation 455 条维度差异，208 / 61 条时�
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
 | TASK-002 | 在 `candidate_sql_generator.py` 新增版本化 CandidateSqlRequest 与纯函数 `build_runtime_candidate_request/render_runtime_candidate_prompt`；接收当前服务端选择、QueryPlan、ResultContract 与问题，排除离线 provenance/答案/摘要，返回稳定 Prompt 和 hash。在 `chat_runtime.py:BudgetedChatHandler.handle_stream` 准入后调用并记录引用，保留默认 API 路径；`replay_single_turn(workspace=...)` 调用同一构造器。后续 opt-in 实际推理仍属独立接入，当前不替换默认模型。 | 是 | 2026-10-11 |
-| TASK-003 | 依据 TASK-001 的 train/validation 差异，调整 `QueryPlan` 与 Catalog/Workspace 的维度解析和安全输出基数：使用当前事实域可用维度与别名，不能把 TheLook product_category 变成 Olist product_category_name；补齐中文季度等粒度表达。修复结果列规范、受控绝对时间及端点表达。保留旧冻结离线模板，用明确版本迁移在线字段。 | 否 | — |
-| TASK-004 | 回放 TASK-001 同一来源一次；对路由拒绝、歧义、指标/维度/时间不一致保留 exclusion。为实际出现的维度混淆、列序、时间端点补 focused tests，验证新构造器的 runtime/offline 输入字节与 hash 一致；无模型调用测试拒绝/澄清分支不可生成候选。 | 否 | — |
+| TASK-003 | 依据 TASK-001 的 train/validation 差异，调整 `QueryPlan` 与 Catalog/Workspace 的维度解析和安全输出基数：使用当前事实域可用维度与别名，不能把 TheLook product_category 变成 Olist product_category_name；补齐中文季度等粒度表达。修复结果列规范、受控绝对时间及端点表达。保留旧冻结离线模板，用明确版本迁移在线字段。 | 是 | 2026-10-11 |
+| TASK-004 | 回放 TASK-001 同一来源；在 safe records 留下路由拒绝、歧义、指标/维度/时间不一致，作为物化时修正/排除依据。为实际出现的维度混淆、列序、时间端点补 focused tests，验证新构造器的 runtime/offline 输入字节与 hash 一致；无模型调用测试拒绝/澄清分支不可生成候选。 | 是 | 2026-10-11 |
+
+TASK-003/004 的最终证据：仓库外 `evals/runtime-candidate-alignment-20261011-fixed-r2/{summary.json,records.jsonl}`，源 train/validation SHA-256 与 DEP-001 一致。`fixed-r1` 是中途诊断，保留但不作为最终统计。新审计使用线上 1,000 行执行上限；先前回放误用 Router 的旧 200 行默认值。日期比较新增端点语义，因此下面的“完整结构一致”不能直接与最初宽松统计比较为提升。
+
+| workspace / split | 总数 | 完整结构及列序一致 | 忽略列序后的结构一致 | 路由未准入 | 时间端点差异 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Olist train | 3000 | 69 | 71 | 27 | 2902 |
+| Olist validation | 750 | 13 | 14 | 8 | 728 |
+| TheLook train | 3000 | 1620 | 2857 | 143 | 0 |
+| TheLook validation | 750 | 460 | 714 | 36 | 0 |
+
+TheLook 已准入行的维度、粒度、列集合差异均为 0；列序差异 train 1,237 / validation 254。非准入为缺粒度 123/36，加 train 20 条保守结果上界超过 1,000 的商品品牌分组。Olist 结果列序差异 2,026/545；非准入为没有明确查询动作 24/4、被判为定义问题 3/4。这些差异计数重叠，不能相加为失败总数；完整 Gold 语义/表列可见性仍在 TASK-005 验证。
+
+运行时新增 `DimensionBinding`，将 TheLook 13 个逻辑维度绑定真实安全列；Catalog 检索及 Prompt 显示同一映射。结果基数及五个事实时间字段的每日未过滤行数由冻结数据库只读聚合导出，保存于 `data/catalog/thelook_runtime_shape_bounds_v1.json`，用于保守预检，不进入模型输入。脚本为 `freeze_thelook_runtime_shape_bounds.py`，不读取问题、标签或 holdout。当前 TheLook 仍仅用于离线 workspace，未成为默认在线数据源。
+
+新计划标记为 `query-plan-v2`，采用“维度、时间、按 metric_id 排序的指标”列序。`query_time.py` 统一问题解析和 WorkingMemory，显式排除结束日时保留上界，否则日期范围按包含结束日转成下一日上界；单年变为下一年 1 月 1 日上界。新增 ResultContract 标记 `requested_end_exclusive`，Runner 传入 Validator；旧未标记端点状态保持原值，继承查询时要求重新确认，不静默改含义。构造器拒绝计划/合同端点不一致或未确认的范围；旧离线评测保留原默认比较行为。
+
+相关回归 250 passed、7 skipped（PostgreSQL 集成未启用）。覆盖 13 维度及注册州别名、重名维度事实域、真实列可见性、unsupported 维度澄清、短窗口基数、周一分桶边界、年/闰日/非法日期、旧状态兼容、季度措辞、真实比较基线、列序和候选端点一致性；无 LLM/GPU/训练，未读取 final test。
 
 ### Implementation Phase 3
 
@@ -67,7 +84,7 @@ TheLook 另外有 train 775 / validation 455 条维度差异，208 / 61 条时�
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-005 | 新增 `scripts/post_training/data/materialize_runtime_candidate_release.py`，先取 train/validation 的 32 条分层小批，经真实规则重建 QueryPlan 与候选输入；独立比较原 QuerySpec，Gold 保留公式并规范顶层列序。核对时间端点、Gold依赖的表列与实际Catalog；运行必要的小批 Policy/reader/ResultContract/Gold 回归。错误不进入训练标签。 | 否 | — |
+| TASK-005 | 新增 `scripts/post_training/data/materialize_runtime_candidate_release.py`，先取 train/validation 的 32 条分层小批。补清有来源证据的结束日/粒度或查询动作歧义，记录原问题 hash、修正原因、新 hash，再经真实规则重建 QueryPlan 与候选输入；独立比较原 QuerySpec，Gold 保留公式并规范顶层列序。核对时间端点、Gold依赖的表列与实际Catalog；运行必要的小批 Policy/reader/ResultContract/Gold 回归。超预算或仍冲突的行排除，不进入训练标签。 | 否 | — |
 | TASK-006 | 小批通过后写新外部 `runtime-candidate-sql-v2-r1/train.jsonl`、`validation.jsonl`、manifest、长度统计与 exclusions，报告 workspace/family/program/风险覆盖及实际减少量。保持旧 split，重算所有输入/目标/父文件 hash。重新使用统一构造器生成 Prompt，不给模型 QuerySpec；不改写旧 6,000/1,500 文件。 | 否 | — |
 
 ### Implementation Phase 4
@@ -103,12 +120,12 @@ TheLook 另外有 train 775 / validation 455 条维度差异，208 / 61 条时�
 
 - **TEST-001**: 当前已通过 6 条 focused tests：问题派生输入不受 source Spec 影响、定义/越权/相对时间不能生成 Prompt、缺失时间和列序错配被识别。
 - **TEST-002**: 候选构造器使用同一参数在 runtime 与离线生成相同文本/hash；禁止离线 provenance、Gold、结果或摘要注入；测试不能靠手工注入正确 Spec 制造一致性。已验证此边界，以及版本/指标/列合同漂移拒绝、路由拒绝、客户端 hash 被服务端覆盖；两组定向测试共 119 passed、7 skipped（数据库集成未启用），Ruff 通过。此证据不证明日期端点或 Gold 标签已对齐。
-- **TEST-003**: 单轮绝对日期、含/不含结束日、单年、季度、Olist/TheLook 重名维度和多指标列序的必要回归；测试验证业务要求而非当前生成代码的固定字符串。
+- **TEST-003**: 单轮绝对日期、含/不含结束日、单年、季度、Olist/TheLook 重名维度和多指标列序回归已完成；当前一组相关回归 250 passed、7 skipped。新的端点合同并不让旧 Olist 问题自动符合 Gold，需要下一阶段修正 train/validation 问法。
 - **TEST-004**: 小批 read-only 执行与标签 mask/长度/hash审计，随后最小 GPU smoke。通过之后只做一次正式训练和匹配 final test，不用终测调整配置。
 
 ## 7. Risks & Assumptions
 
-- **RISK-001**: 当前结构一致统计没有检查日期端点、Catalog 全部依赖或完整 Gold 语义；不能将 3444 条总结构一致直接标为正式训练准入。
+- **RISK-001**: 初始结构统计未检查日期端点。修复后的回放比较了显式端点，但仍未检查 Catalog 全部依赖或完整 Gold 语义；任何结构一致数量都不能直接标为正式训练准入。
 - **RISK-002**: TheLook 的 train/validation 分布差异导致修复后数量和覆盖不一定保持原值；少量不支持请求可 exclusion，大面积排除必须先修共用解析能力并报告。
 - **RISK-003**: 新模型效果可能不提高；对齐解决输入契约问题，并不保证 1.5B 的推理能力提升。
 - **ASSUMPTION-001**: 用户这次授权针对 1.5B SQL-only 小组件继续改造和实验；不扩大到同时训练 2B/4B、DPO 或全量 Agent 模型。

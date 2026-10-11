@@ -22,12 +22,13 @@ from .candidate_sql_generator import (
 from .query_plan import QueryPlan
 from .question_router import QuestionRouter
 from .semantic_catalog import CatalogRetriever, ResultContract
+from .sql_policy import DEFAULT_ANALYST_EXECUTION_LIMIT
 from .working_memory import WorkingMemory
 
 if TYPE_CHECKING:
     from .workspace import WorkspaceProfile
 
-AUDIT_VERSION = "single-turn-runtime-alignment-audit-v1"
+AUDIT_VERSION = "single-turn-runtime-alignment-audit-v2"
 
 
 def replay_single_turn(
@@ -37,7 +38,10 @@ def replay_single_turn(
     user = User(id="alignment-audit", group_memberships=["analyst"])
     memory = WorkingMemory()
     selection = retriever.retrieve(question, user)
-    router = QuestionRouter(retriever)
+    # The online runtime separates its 1,000-row execution cap from the
+    # 200-row UI preview. Replaying with Router's legacy preview default
+    # would incorrectly reject valid workspace groups before generation.
+    router = QuestionRouter(retriever, max_result_rows=DEFAULT_ANALYST_EXECUTION_LIMIT)
     route = router.classify(question, user=user, selection=selection)
     if route.should_generate_sql:
         route = router.admit_sql_request(question, user=user, selection=selection)
@@ -101,12 +105,14 @@ def compare_source_semantics(
     if plan.get("time_grain") != source_time.get("grain"):
         reasons.append("time_grain_mismatch")
     expected_range = (
-        {"start": source_time["start"], "end": source_time["end_exclusive"]}
+        {"start": source_time["start"], "end": source_time["end_exclusive"], "end_semantics": "exclusive"}
         if source_time.get("start")
         else None
     )
     if plan.get("time_range") != expected_range:
         reasons.append("time_range_mismatch")
+    if plan.get("top_n") and plan["top_n"] != spec.get("top_n"):
+        reasons.append("ranking_not_represented_in_source_spec")
     actual_columns = list(plan["required_result_columns"])
     expected_columns = list(spec["required_result_columns"])
     if set(actual_columns) != set(expected_columns):

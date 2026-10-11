@@ -8,13 +8,9 @@ from typing import Any, Mapping
 
 from .question_router import QuestionRoute
 from .result_artifact import ChartReplayRef, ResultArtifact
+from .query_time import copy_time_range, extract_absolute_range, time_range_instruction
 
 
-_DATE_RANGE = re.compile(
-    r"(?P<start>20\d{2}-\d{2}-\d{2})\s*(?:至|到|到|-|~|～)\s*"
-    r"(?P<end>20\d{2}-\d{2}-\d{2})"
-)
-_YEAR = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
 _CLEAR_DIMENSIONS = re.compile(r"不按|不要按|取消分组|不分组|总体|总计")
 
 
@@ -45,13 +41,7 @@ class WorkingMemory:
                 return ()
             return tuple(str(item).strip() for item in raw if str(item).strip())[:limit]
 
-        raw_range = value.get("time_range")
-        time_range = None
-        if isinstance(raw_range, Mapping):
-            start = raw_range.get("start")
-            end = raw_range.get("end")
-            if isinstance(start, str) and isinstance(end, str) and start and end:
-                time_range = {"start": start[:32], "end": end[:32]}
+        time_range = copy_time_range(value.get("time_range"))
 
         def text(key: str, limit: int = 4000) -> str | None:
             item = value.get(key)
@@ -228,7 +218,7 @@ class WorkingMemory:
             lines.append(f"- 已确认指标：{', '.join(self.metric_ids)}")
         if self.time_range:
             lines.append(
-                f"- 已确认时间：{self.time_range['start']} 至 {self.time_range['end']}"
+                f"- 已确认时间：{time_range_instruction(self.time_range)}"
             )
         if self.dimensions:
             lines.append(f"- 已确认维度：{', '.join(self.dimensions)}")
@@ -278,13 +268,7 @@ def _remember_chart(
 
 
 def _extract_time_range(question: str) -> dict[str, str] | None:
-    match = _DATE_RANGE.search(question)
-    if match:
-        return {"start": match.group("start"), "end": match.group("end")}
-    years = _YEAR.findall(question)
-    if len(years) == 1:
-        return {"start": f"{years[0]}-01-01", "end": f"{years[0]}-12-31"}
-    return None
+    return extract_absolute_range(question)
 
 def _extract_comparison(question: str) -> str | None:
     if "同比" in question:
