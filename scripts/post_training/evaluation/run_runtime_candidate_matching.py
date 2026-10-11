@@ -14,8 +14,8 @@ from data_analysis_agent.external_artifacts import ensure_path_outside_repositor
 from data_analysis_agent.post_training_comparison import sha256_file
 from data_analysis_agent.runtime_candidate_matching import (
     DECODE, VERSION, WORKSPACES, completion_record, evaluate_pair, load_generation,
-    load_prepared, prepare_question, project_question, read_json, read_jsonl,
-    require, selected_questions, validate_contract, write_json,
+    load_prepared, prepare_question, read_json, read_jsonl,
+    require, selected_questions, source_asset_refs, validate_contract, write_json,
 )
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
 
@@ -27,7 +27,11 @@ RELEASE = DATA / 'evals/runtime-candidate-sql-v2-r1'
 FINAL_SOURCES = [
     {'workspace': 'olist', 'format': 'olist', 'rows': 750,
      'path': str(DATA / 'evals/olist-v3-balanced-release-v1.1/sft-release-v1.1/final_evaluation_only/in_domain_test.jsonl'),
-     'sha256': '67c1db3f9a3d7a74160306cd1680ea6f3c6be00035d2c95d860bb3d6e1266750'},
+     'sha256': '67c1db3f9a3d7a74160306cd1680ea6f3c6be00035d2c95d860bb3d6e1266750',
+     'questions_path': str(DATA / 'evals/olist-v3-balanced-release-v1.1/surface-20260914-v3_1/question_variants.json'),
+     'questions_sha256': '3603902f707900cbd2e8adce40469f93ad61819d05f3c5f9410e7921645a1b8f',
+     'query_specs_path': str(DATA / 'evals/olist-v3-balanced-release-v1.1/structural-20260914-v3_1/query_specs/in_domain_test.jsonl'),
+     'query_specs_sha256': '869278808bd1cfca6764eefcc7e2ac84e0ba217a78fbd45204373fe18cc5921a'},
     {'workspace': 'thelook', 'format': 'thelook', 'rows': 750,
      'path': str(DATA / 'evals/thelook-cross-schema-final-test-v3-20260915-r3/cases.jsonl'),
      'sha256': 'bd1195c00dd68a884fc55eb8301184ef1492dd070f01fa26f96293ac13acef7c'},
@@ -72,7 +76,8 @@ def freeze_contract(scope: str, output: Path):
          'path': str(RELEASE / 'validation.jsonl'), 'sha256': best['validation_data_sha256']}
         for workspace in ('olist', 'thelook')]
     for source in sources:
-        require(sha256_file(Path(source['path'])) == source['sha256'], 'frozen source drift')
+        for path, expected in source_asset_refs(source):
+            require(sha256_file(path) == expected, 'frozen source drift')
     assets = {str(ROOT / file): value for file, value in manifest['runtime_asset_sha256'].items()}
     for file in ('src/data_analysis_agent/runtime_candidate_matching.py',
                  'scripts/post_training/evaluation/run_runtime_candidate_matching.py',
@@ -88,6 +93,11 @@ def freeze_contract(scope: str, output: Path):
              'execution': {'max_rows': 1000, 'preview_rows': 200, 'timeout_ms': 5000,
                            'host': '/tmp', 'port': 35434, 'timezone': 'UTC'},
              'numeric_tolerances': {'absolute': '0.000001', 'relative': '0.000001'}}
+    if scope == 'protected_final':
+        value['supersedes_contract'] = {
+            'path': str(DATA / 'evals/runtime-candidate-v2-matching-final-20261011-r1/contract.json'),
+            'sha256': 'f68fdeda3aff58e492f50a9935b23b7e52cb12550c8f6b7193e6709ec1ba97a3',
+            'reason': 'archive_format_adapter_only; decoding/models/questions unchanged; no prior generation'}
     output.parent.mkdir(parents=True, exist_ok=True)
     validate_contract_preview(value)
     write_json(output, value)
@@ -102,7 +112,8 @@ def validate_contract_preview(contract):
 def verify_before_completion(contract):
     validate_contract_preview(contract)
     for source in contract['sources']:
-        require(sha256_file(Path(source['path'])) == source['sha256'], 'source changed during stage')
+        for path, expected in source_asset_refs(source):
+            require(sha256_file(path) == expected, 'source changed during stage')
     freeze = contract['best_freeze']
     require(sha256_file(Path(freeze['path'])) == freeze['sha256'], 'best freeze changed during stage')
     best = read_json(Path(freeze['path']))
@@ -221,12 +232,23 @@ def evaluate(contract, contract_hash, inputs, base_dir, adapter_dir, output):
     identities = {r['source_id'] for r in rows}
     gold = {}
     for source in contract['sources']:
+        specs = {}
+        if 'query_specs_path' in source:
+            for record in read_jsonl(Path(source['query_specs_path'])):
+                require(record['seed_id'] not in specs, 'duplicate post-generation Spec identity')
+                specs[record['seed_id']] = record['query_spec']
         for row in read_jsonl(Path(source['path'])):
             if source['format'] == 'runtime' and row.get('workspace_key') != source['workspace']:
                 continue
-            projected = project_question(row, source['workspace'], source['format'])
-            if projected['source_id'] in identities:
-                gold[projected['source_id']] = row
+            if specs:
+                require(row['seed_id'] in specs and row['query_spec_id'] == specs[row['seed_id']]['query_spec_id'],
+                        'post-generation source/Spec binding differs')
+                row = {**row, 'query_spec': specs[row['seed_id']]}
+            key = {'olist': 'seed_id', 'thelook': 'case_id', 'runtime': 'sample_id'}[source['format']]
+            identity = source['workspace'] + ':' + row[key]
+            if identity in identities:
+                require(identity not in gold, 'duplicate post-generation Gold identity')
+                gold[identity] = row
     require(gold.keys() == identities, 'post-generation Gold identities differ')
     report = evaluate_pair(rows, base, adapter, gold,
                            progress=lambda value: print(json.dumps(value), flush=True))

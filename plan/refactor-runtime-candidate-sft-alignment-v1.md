@@ -154,6 +154,10 @@ TASK-008 入口验收通过：新增 `runtime_candidate_matching.py` 与统一 C
 
 最终 smoke 证据为仓库外 `evals/runtime-candidate-v2-matching-validation-smoke-20261011-r3/`；正式合同为 `evals/runtime-candidate-v2-matching-final-20261011-r1/contract.json`，SHA-256 `f68fdeda3aff58e492f50a9935b23b7e52cb12550c8f6b7193e6709ec1ba97a3`。冻结时只计算两个 final 来源的文件 hash，没有读取问题/Spec/Gold 字段或物化正式输入。完整规则及代码入口见 [`v2 matching 合同`](../docs/post-training/data/runtime-candidate-v2-matching-contract-v1.md)。下一小单元物化原两套各 750 条输入、screen 生成 Base/Adapter，再运行后置统一治理与 Gold 对照；不以 smoke 结果修改正式解码。
 
+TASK-008 正式运行任务卡（2026-10-11）：目标是使用上一小单元冻结的合同完成原 Olist750 + TheLook750 的输入物化，并启动一次 matching Base/step2,500 Adapter 生成与自动后置评测。输入为正式合同 `f68fdeda3aff58e492f50a9935b23b7e52cb12550c8f6b7193e6709ec1ba97a3`，输出为共享 inputs、两侧完整 completion、screen 日志/退出状态及最终 safe-report。启动器使用两个独立空闲且 UUID 校验的 GPU，评测只在两侧成功退出、生成标识/hash 核对后执行；重复启动、资产漂移或生成失败均阻止新任务/Gold。保持原问题、模板、解码、best 和固定总分母，不根据 protected 解析结果调整规则，不重采样失败题、不重训、不切换产品 provider。验收为相关启动编排测试、1,500条输入封存、两个 screen 实际开始递增记录，以及后置依赖门可回读；长任务完成后的质量分析另行进行。
+
+TASK-008 正式 prepare 暴露并修复历史存档适配错误：Olist SFT 不含 question/Spec，须按主问法ID从独立 surface 档案取原问题，Spec 只在生成后从独立 structural 档案绑定。未读旧Prompt注入计划、未改题/解析/解码/模型、此前未产生正式候选。r1失败证据保留；新r2合同 SHA-256 `c639a1fd71368e7b2e10ce0af199052a72bb69cb36f6b3ec83ea6e0eea46408c` 记录旧合同和替换原因。已物化1,500条，Olist736 ready/14拒绝，TheLook717 ready/33拒绝；最长2,884，无长度排除，拒绝留原分母。新启动器45项定向（含入口）及70项相关回归通过；实际screen启动情况记录在PROJECT。TASK-008 在完整评测完成前仍未完成。
+
 ## 3. Alternatives
 
 - **ALT-001**: 把 QuerySpec 字段改名为 QueryPlan。拒绝该做法：语义由离线规格注入，绕过真实问题解析，并不能测线上输入适配。

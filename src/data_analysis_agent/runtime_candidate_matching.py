@@ -82,6 +82,25 @@ def project_question(row: Mapping[str, Any], workspace: str, source_format: str)
 def selected_questions(source: Mapping[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if source['format'] == 'runtime':
         rows = [row for row in rows if row.get('workspace_key') == source['workspace']]
+    if source['format'] == 'olist' and 'questions_path' in source:
+        # The historical SFT envelope stores a primary variant ID, not a question.
+        # Recover exactly that text from the frozen question-only surface archive;
+        # never extract the old Prompt or inspect its embedded plan/answer.
+        archive = read_json(Path(source['questions_path']))
+        wanted = {row['primary_variant_id'] for row in rows}
+        variants = {}
+        for variant in archive['cases']:
+            if variant['variant_id'] in wanted:
+                require(variant['variant_id'] not in variants, 'duplicate primary question variant')
+                variants[variant['variant_id']] = variant
+        require(variants.keys() == wanted, 'frozen primary question variant missing')
+        questions = []
+        for row in rows:
+            variant = variants[row['primary_variant_id']]
+            require(variant['seed_id'] == row['seed_id'], 'primary question seed mismatch')
+            questions.append({'seed_id': row['seed_id'], 'split': row['split'],
+                              'question': variant['question']})
+        rows = questions
     projected = [project_question(row, source['workspace'], source['format']) for row in rows]
     projected.sort(key=lambda row: row['source_id'])
     require(len({r['source_id'] for r in projected}) == len(projected), 'duplicate source identity')
@@ -89,6 +108,14 @@ def selected_questions(source: Mapping[str, Any], rows: list[dict[str, Any]]) ->
         projected = projected[:source['rows']]
     require(len(projected) == source['rows'], 'source count differs from frozen contract')
     return projected
+
+
+def source_asset_refs(source: Mapping[str, Any]):
+    """Hash-check sidecars without reading their question/Gold payloads."""
+    yield Path(source['path']), source['sha256']
+    for name in ('questions', 'query_specs'):
+        if name + '_path' in source:
+            yield Path(source[name + '_path']), source[name + '_sha256']
 
 
 def prepare_question(row: Mapping[str, Any], tokenizer: Any, retriever: CatalogRetriever) -> dict[str, Any]:
@@ -126,7 +153,8 @@ def validate_contract(path: Path, expected_sha256: str) -> dict[str, Any]:
     for file, expected in contract['asset_sha256'].items():
         require(sha256_file(Path(file)) == expected, 'frozen code/catalog asset drift')
     for source in contract['sources']:
-        require(sha256_file(Path(source['path'])) == source['sha256'], 'frozen source file drift')
+        for path, expected in source_asset_refs(source):
+            require(sha256_file(path) == expected, 'frozen source file drift')
     model_dir = Path(contract['model_dir'])
     require(sha256_file(model_dir / 'download_manifest.json')
             == best['base_model']['download_manifest_sha256'], 'base manifest drift')

@@ -1004,3 +1004,11 @@ smoke 的平均 train loss 0.215921、4 条 validation loss 0.150052；392 个 L
 新入口30项定向测试通过；共用候选/回放、统一清洗、Gold 比较、SqlPolicy、Plan Guard 和 ResultValidator 另70项回归通过，Ruff、compileall、diff check 通过。正式合同为仓库外 `evals/runtime-candidate-v2-matching-final-20261011-r1/contract.json`，SHA-256 `f68fdeda3aff58e492f50a9935b23b7e52cb12550c8f6b7193e6709ec1ba97a3`。冻结时只计算两个 final 来源的文件 hash，没有读取问题/Spec/Gold 字段、物化正式输入或启动完整生成。下一小单元按此合同处理原 Olist750 + TheLook750，screen 生成 Base/Adapter，完成后统一 Gold 对照。完整规则和代码地图见 [matching 合同](docs/post-training/data/runtime-candidate-v2-matching-contract-v1.md)。
 
 本次事实已通过 lark-doc 追加飞书项目文档 revision 262，并局部回读确认成功。
+
+### 2026-10-11：runtime candidate v2 正式终测输入封存与后台编排
+
+用户确认后进入原 Olist750 + TheLook750 正式 matching。首次 prepare 发现入口误以为历史 Olist SFT 内含 question/Spec，实际问题按主问法ID保存在独立surface档案、Spec在structural档案；程序停止，未产生完整输入或任何正式模型输出。补存档适配及六项回归：prepare只恢复原主问题，拒绝旧Prompt/标签访问；Spec仍在两侧完成核验后读取并核对身份。没有改题、解析器、模型、解码或Gold语义。r1合同/失败日志保留，使用记录supersedes/reason的新r2合同，SHA-256 `c639a1fd71368e7b2e10ce0af199052a72bb69cb36f6b3ec83ea6e0eea46408c`。
+
+仓库外 `evals/runtime-candidate-v2-matching-final-20261011-r2/inputs/inputs.jsonl` 已封存1,500条，SHA-256 `b96a1a268498b1c572071927aea9ae6c36840591e7cd3202deb2ecd80a870bb8`。Olist736 ready/14路由拒绝；TheLook717 ready/33路由拒绝。合计拒绝为12条缺查询动作、2条指标定义问题、33条缺时间粒度，保留总分母。已构造输入1,180–2,884token，没有超长或截断；不据此修protected问题或规则。
+
+新增一次性 `scripts/post_training/launchers/start_runtime_candidate_matching_screen.py`：两个screen独立生成；逻辑CUDA0/物理GPU2给Base，逻辑CUDA1/物理GPU3给best Adapter，均RTX4090且记录UUID。独占launch防重复启动、原子status发布、实际argv/hash回读；Adapter成功后等待Base退出及两侧完整标识/hash核验，再自动调用统一evaluate。生成失败、worker失联或等待超过24小时均阻断Gold，不覆盖输出或补跑失败题。定向入口/启动编排45项、相关回归70项通过，Ruff、compileall、diff check通过。实际启动及首段运行证据随后记录；此时暂无正式质量成绩。

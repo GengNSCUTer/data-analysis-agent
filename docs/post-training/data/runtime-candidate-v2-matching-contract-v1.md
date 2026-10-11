@@ -60,7 +60,7 @@ ResultContract 允许的时间列别名仅在结果 DataFrame 上规范为 `time
 
 报告为 [safe-report.json](/disk2/gengnan/data-analysis-agent-data/evals/runtime-candidate-v2-matching-validation-smoke-20261011-r3/evaluation/safe-report.json)，保存生成/EOS、候选/Gold hash、reader 与合同状态，以及成对结果。两条问题来源是 validation，不是 protected final；这只证明真实模型、治理与判分可运行，不能推出整体质量提高。
 
-正式 [contract.json](/disk2/gengnan/data-analysis-agent-data/evals/runtime-candidate-v2-matching-final-20261011-r1/contract.json) 已冻结，SHA-256 `f68fdeda3aff58e492f50a9935b23b7e52cb12550c8f6b7193e6709ec1ba97a3`。本次仅对两个 final 来源做文件字节 hash 校验，尚未读取其中问题/Spec/Gold 字段、物化正式输入或运行完整终测。下一项按此合同物化和生成 Olist 750 + TheLook 750，两侧完成后统一 evaluate。
+首份 [r1 contract.json](/disk2/gengnan/data-analysis-agent-data/evals/runtime-candidate-v2-matching-final-20261011-r1/contract.json) SHA-256 为 `f68fdeda3aff58e492f50a9935b23b7e52cb12550c8f6b7193e6709ec1ba97a3`，冻结时只计算两个 final 来源的文件字节 hash。随后正式 prepare 因历史 Olist 存档没有内嵌 question 字段而停止，没有产生完整输入或任何模型输出；该合同已由下述 r2 存档格式兼容合同取代。保留 r1 和失败日志，不覆盖原文件。
 
 可用以下命令查看唯一入口。GPU prepare/generate 使用现有 Py3.11 模型环境，CPU evaluate 使用 Py3.12 产品环境；环境名含 qlora 不代表此次启用了量化。
 
@@ -68,3 +68,27 @@ ResultContract 允许的时间列别名仅在结果 DataFrame 上规范为 `time
 PYTHONPATH=src /disk2/gengnan/conda_envs/data-analysis-agent-qlora/bin/python \
   -m scripts.post_training.evaluation.run_runtime_candidate_matching --help
 ```
+
+## 正式运行准备：r2 存档格式兼容
+
+历史 Olist SFT 行保存 `primary_variant_id` 和 `query_spec_id`，问题与 QuerySpec 分别存于独立 sidecar。已补格式适配：prepare 仅按主问法 ID/seed 从冻结 question-only surface 档案恢复原问题，不访问旧 rendered_prompt、training_text、SQL 或 QuerySpec；evaluate 仍在核验两侧生成完成后，才读取独立 Spec 并核对 seed/Spec ID。来源 SFT、问题 sidecar 和 Spec sidecar 的 hash 均入合同。该变更只修存档字段读取，不修改问题、解析器、模型、解码或 Gold 语义，也没有基于模型输出调参。
+
+实际使用 [r2 contract.json](/disk2/gengnan/data-analysis-agent-data/evals/runtime-candidate-v2-matching-final-20261011-r2/contract.json)，SHA-256 `c639a1fd71368e7b2e10ce0af199052a72bb69cb36f6b3ec83ea6e0eea46408c`，其中记录 supersedes/reason。共享输入 [inputs.jsonl](/disk2/gengnan/data-analysis-agent-data/evals/runtime-candidate-v2-matching-final-20261011-r2/inputs/inputs.jsonl) 已生成，SHA-256 `b96a1a268498b1c572071927aea9ae6c36840591e7cd3202deb2ecd80a870bb8`；共1,500条，模型输入长度1,180–2,884，无超长、无截断。
+
+| workspace | 固定总量 | ready | 路由拒绝 |
+| --- | ---: | ---: | ---: |
+| Olist | 750 | 736 | 14 |
+| TheLook | 750 | 717 | 33 |
+
+拒绝为12条缺明确查询动作、2条指标定义问题、33条缺时间粒度。拒绝仍写生成状态记录并留在固定分母，本轮不修问题或解析规则。尚未读取这些正式来源的 Spec/Gold 字段来判分。
+
+[`start_runtime_candidate_matching_screen.py`](../../../scripts/post_training/launchers/start_runtime_candidate_matching_screen.py) 为一次性正式运行启动器：Base 使用逻辑0/物理2 RTX4090，Adapter 使用逻辑1/物理3 RTX4090；启动前检查空闲和UUID。独占 launch 文件防止重复启动，两个 screen 各自保存生成日志/完成标识/退出状态。Adapter worker 成功后等待 Base 完成，核验两侧完整输出，再自动启动 evaluate；任一生成失败、worker 异常或等待超时均阻止 Gold。等待上限24小时，每10秒检查一次，不重采样或续接部分输出。status JSON 原子发布，避免等待进程读到半写入文件。启动器实际 argv 和自身 hash 写 launch.json。
+
+启动器命令如下（只允许一次，不覆盖已有运行）：
+
+```bash
+PYTHONPATH=src /disk2/gengnan/conda_envs/data-analysis-agent-qlora/bin/python \
+  -m scripts.post_training.launchers.start_runtime_candidate_matching_screen start
+```
+
+兼容和启动编排定向测试共45项、相关回归70项通过；包含真实 CLI argv 解析、重复启动、GPU忙、生成失败阻断、先核验两侧再Gold、失联/超时和独立Spec绑定。没有重跑模型 smoke；此前真实GPU smoke的生成、执行和判分组件未修改，新增存档适配由合成边界测试及全量输入物化验证。

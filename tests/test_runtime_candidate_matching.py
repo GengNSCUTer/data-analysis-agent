@@ -44,6 +44,31 @@ def test_gold_and_spec_are_not_accessed_by_projection_or_prompt(retriever):
     assert row['prompt'].endswith('\n### SQL')
 
 
+@pytest.mark.parametrize('mutation', [None, 'missing', 'duplicate', 'seed'])
+def test_archived_olist_uses_exact_primary_question_without_old_prompt(tmp_path, mutation):
+    variants = [{'variant_id': 'one-v3', 'seed_id': 'one', 'question': '查询有效订单数'},
+                {'variant_id': 'one-v1', 'seed_id': 'one', 'question': '另一种问法'}]
+    if mutation == 'missing':
+        variants.pop(0)
+    elif mutation == 'duplicate':
+        variants.append(deepcopy(variants[0]))
+    elif mutation == 'seed':
+        variants[0]['seed_id'] = 'other'
+    archive = tmp_path / 'questions.json'
+    matching.write_json(archive, {'cases': variants})
+    source = {'format': 'olist', 'workspace': 'olist', 'rows': 1, 'questions_path': str(archive)}
+    envelope = QuestionOnly(seed_id='one', primary_variant_id='one-v3',
+                            split={'name': 'in_domain_test'}, rendered_prompt='SECRET',
+                            candidate_sql='SECRET', training_text='SECRET')
+    if mutation:
+        with pytest.raises(matching.MatchingContractError):
+            matching.selected_questions(source, [envelope])
+    else:
+        projected = matching.selected_questions(source, [envelope])
+        assert projected[0]['question'] == '查询有效订单数'
+        assert set(projected[0]) == {'source_id', 'workspace', 'question', 'question_sha256'}
+
+
 @pytest.mark.parametrize('question', ['删除订单', '本月有效订单数是多少', '有效订单数的口径是什么'])
 def test_rejected_questions_remain_in_inputs_with_no_prompt(retriever, question):
     row = matching.prepare_question({'source_id': 'olist:one', 'workspace': 'olist',
@@ -139,7 +164,38 @@ def test_gold_is_not_opened_when_pair_gate_fails(monkeypatch, tmp_path):
         pytest.fail('Gold source opened before pair gate')
     monkeypatch.setattr(cli, 'read_jsonl', forbidden)
     with pytest.raises(matching.MatchingContractError, match='incomplete pair'):
-        cli.evaluate({'sources': [{'path': 'SECRET'}]}, 'c', tmp_path, tmp_path, tmp_path, tmp_path / 'out')
+        cli.evaluate({'sources': [{'path': 'SECRET', 'query_specs_path': 'SECRET SPEC'}]},
+                     'c', tmp_path, tmp_path, tmp_path, tmp_path / 'out')
+
+
+@pytest.mark.parametrize('spec_identity', ['spec-one', 'wrong-spec'])
+def test_archived_spec_join_only_runs_after_both_generation_checks(monkeypatch, tmp_path, spec_identity):
+    events = []
+    rows = [{'source_id': 'olist:one'}]
+    monkeypatch.setattr(cli, 'load_prepared', lambda *args: (rows, 'input-hash'))
+    monkeypatch.setattr(cli, 'load_generation', lambda directory, role, *args: events.append(role) or {})
+    def read_source(path):
+        events.append(path.name)
+        if path.name == 'specs.jsonl':
+            return [{'seed_id': 'one', 'query_spec': {'query_spec_id': spec_identity}}]
+        return [{'seed_id': 'one', 'query_spec_id': 'spec-one', 'candidate_sql': 'SELECT 1'}]
+    monkeypatch.setattr(cli, 'read_jsonl', read_source)
+    def compare_pair(prepared, base, adapter, gold, **kwargs):
+        assert gold['olist:one']['query_spec']['query_spec_id'] == 'spec-one'
+        return {'summary': {'all': {'total': 1}}}
+    monkeypatch.setattr(cli, 'evaluate_pair', compare_pair)
+    monkeypatch.setattr(cli, 'verify_before_completion', lambda *args: None)
+    for role in ('base', 'adapter'):
+        (tmp_path / role).mkdir()
+        (tmp_path / role / 'raw-completions.jsonl').write_text('raw')
+    contract = {'scope': 'protected_final', 'sources': [{'workspace': 'olist', 'format': 'olist',
+        'path': str(tmp_path / 'sft.jsonl'), 'query_specs_path': str(tmp_path / 'specs.jsonl')}]}
+    if spec_identity != 'spec-one':
+        with pytest.raises(matching.MatchingContractError, match='Spec binding'):
+            cli.evaluate(contract, 'c', tmp_path, tmp_path / 'base', tmp_path / 'adapter', tmp_path / 'out')
+    else:
+        assert cli.evaluate(contract, 'c', tmp_path, tmp_path / 'base', tmp_path / 'adapter', tmp_path / 'out') == {'all': {'total': 1}}
+    assert events == ['base', 'adapter', 'specs.jsonl', 'sft.jsonl']
 
 
 def test_time_alias_is_normalized_but_other_column_order_is_not_repaired():
