@@ -106,14 +106,45 @@
 | 在线 QueryPlan | 当前自然语言问题、Catalog 选择、路由和受控状态，经服务端代码整理 | 作为模型上下文的一部分；模型生成候选 SQL |
 | 离线 QuerySpec | 预先设计并验证、锁定版本的结构化样本规格，规定指标、shape、时间和 join program 等 | deterministic Gold renderer 将已验证规格编译为 Gold SQL |
 
-离线 `olist_queryspec.py:render_gold_sql()` 不解析自然语言；需要已经构建好的 QuerySpec。当前多 Schema SQL-only 训练模板 `multi_schema_sql_only_sft.py:render_prompt()` 明确包含 Catalog、QuerySpec、Result Contract 和中文问题。在线使用 QueryPlan 文本与 Agent 工具调用，二者不是同一个对象，也不是完全相同的输入模板；已有离线成绩不能直接证明 Adapter 能替换当前线上模型。
+离线 `olist_queryspec.py:render_gold_sql()` 不解析自然语言；需要已经构建好的 QuerySpec。当前多 Schema SQL-only 训练模板 `multi_schema_sql_only_sft.py:render_multi_schema_prompt()` 明确包含 Catalog、QuerySpec、Result Contract 和中文问题。在线使用 QueryPlan 文本与 Agent 工具调用，二者不是同一个对象，也不是完全相同的输入模板；已有离线成绩不能直接证明 Adapter 能替换当前线上模型。
 
 本次直接运行计划构造和 prompt 断言通过，核对指标、维度、结果列、聚合策略和实际 top_n；没有请求数据库或在线 LLM。这只证明该例子的代码输出，不是模型质量评测。
 
-本段待用户回答：
+2026-10-11 问答：
 
 1. 当前 QueryPlan 是谁生成的？它已经是一条 SQL 吗，候选 SQL 又由谁生成？
 2. 既然离线有 renderer 能生成 Gold SQL，为什么不能说当前用户提交自然语言后，就由这个 renderer 直接生成线上 SQL？
+
+用户回答：
+
+1. “queryPlan由服务端代码生成整理，包括维度，需要的结果列之类的。不是sql，候选sql由模型生成。”
+2. “因为render是基于一个queryspec生成的，他是一个设计好的结构化样本规格，然后render去解析生成，render本身不能理解用户的中文问题。而线上生成sql，模型是需要理解queryplan来生成。二者是有差别的吧，只不过具体差别是什么好像你也没说。”
+
+反馈：两者职责理解正确。renderer 对结构执行的是验证与编译，不承担自然语言理解；线上模型还会读用户问题、Catalog 和工具定义，不是只读 QueryPlan。此前讲解只比较了来源与用途，缺少实际字段和模型输入对照，本轮补充如下。
+
+#### 同一需求的字段、输入和能力差别
+
+为集中比较统计语义，使用“按客户州统计有效订单数”，暂不带“前五”和绘图要求；不把离线 QuerySpec 没有的排行字段伪装成已支持。通过当前代码分别构造在线 QueryPlan 和 Olist v3 QuerySpec，验证指标、维度、结果列一致，并生成 Gold SQL；全部在本地完成，没有查库或调用模型。
+
+| 同一概念 | 在线 QueryPlan | 离线 Olist QuerySpec |
+| --- | --- | --- |
+| 指标 | metric_ids=[paid_order_count] | 相同 |
+| 维度 | dimensions=[customer_state] | dimension=customer_state，result_shape=state_grouped |
+| 查询类别 | plan_type=single_metric 表示单指标 | result_shape=state_grouped 表示按州分组；分类角度不同 |
+| 时间 | time_range=null，time_grain=null | time={mode: all_time, start: null, end_exclusive: null, grain: null} |
+| 组织 SQL 的提示 | execution_strategy=single_metric_aggregation；metric_plans 携带指标事实粒度/来源/过滤 | join_program_id=JP05_customer_geo_order；renderer 使用已实现的指标表达式和程序规则 |
+| 结果列 | required_result_columns=[customer_state, paid_order_count] | 相同 |
+| 溯源 | 在线 run/会话/workspace 另有版本与证据 | QuerySpec 内含 workspace 版本 pin、schema_version 和由内容派生的 query_spec_id |
+
+`plan_type` 不是 `result_shape` 的简单改名，`execution_strategy` 也不是 `join_program_id` 的简单改名。它们表达的业务需求可以重叠，但数据结构和执行消费方不同。
+
+模型输入/输出的实际区别：当前 `render_multi_schema_prompt()` 将 Catalog、QuerySpec、Result Contract 序列化为 JSON，附上中文问题，要求模型只输出 SQL。Gold renderer 生成的 SQL 是监督标签，不会作为答案写进该输入。线上 `CatalogContextEnhancer.enhance_system_prompt()` 将检索出的 Catalog、受控 WorkingMemory 与 QueryPlan.prompt_context() 拼到系统提示词；Agent 同时提供用户消息/历史和工具定义，模型产出 run_sql 工具调用中的 SQL。
+
+因此，离线题目里的指标、结果形态、时间和关联程序由构建者预先决定，并经过数据准入。线上 QueryPlan 要从当前真实问法和受控状态推导，可能澄清、遗漏或只覆盖部分要求；例如前五尚未进入本例 top_n。两边都有指标语义和表列信息，不能把区别误说成“只有离线给 Schema”或“只有线上理解中文”。输入内容的确定程度、表达格式与输出协议都需要对齐；仅凭对象名字不同，不能断言它导致了过去的某项模型退化。
+
+理论上，如果某条线上请求已经被完整解析成 renderer 支持且验证通过的 QuerySpec，就可以直接确定性生成 SQL；不是原理上永远不能。当前实现没有提供一个覆盖任意用户问题的 QueryPlan→QuerySpec 转换器，renderer 也不会自行补出缺失语义，因此不能把它当成现成的线上自然语言入口。
+
+本轮仍停留在第三小段补充理解，没有开始新训练、输入适配改造或下一段执行链。本段补充复述题：离线完整 QuerySpec 的模型评测通过后，为什么仍需验证它在当前线上 QueryPlan 上下文和工具协议下的表现？
 
 ### 后续小段（尚未讲解）
 
