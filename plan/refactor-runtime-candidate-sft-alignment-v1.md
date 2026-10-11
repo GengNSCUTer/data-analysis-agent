@@ -136,6 +136,8 @@ TASK-007 前半段已通过：Trainer 校验固定 manifest SHA-256、train/vali
 
 本单元定向 Trainer/历史输入回归 42 passed，共用候选/物化回归 28 passed，Ruff、compileall、bash -n、diff check 通过；完整训练与 matching 尚未运行，TASK-007 仍未标完成。
 
+TASK-007 正式启动任务卡：复用上一小单元的已冻结参数和通过的 smoke，从原 Base 在独立 screen 启动完整两 epoch。新增明确的正式 launcher，启动前校验 release/smoke/model manifest hash 和 GPU 空闲状态；输出仓库外 launch manifest、日志、checkpoint 与退出状态。保持 batch2×累计2、1,500 条完整 validation、250 步 eval/save、末步额外 eval/save、最小 eval_loss 选择 best；不更换数据/参数、不读 final test、不续训 smoke、不自动启动生成终测。启动验收至少观察实际 optimizer 更新、有限 loss/grad_norm 与首个 checkpoint 的验证/保存，关闭 SSH 不影响 screen。训练结束后的质量分析另属下一小单元。
+
 ## 3. Alternatives
 
 - **ALT-001**: 把 QuerySpec 字段改名为 QueryPlan。拒绝该做法：语义由离线规格注入，绕过真实问题解析，并不能测线上输入适配。
