@@ -337,3 +337,18 @@ Base：
 约束，Policy/数据库/ResultContract 和 Gold denotation 才分别负责安全、可执行性、结果形状
 和业务结果。正式报告只保存 SQL hash、状态、执行证据和 denotation，不保存 raw SQL 或
 结果行。
+
+## 8.8 分层诊断
+
+已新增 `scripts/post_training/evaluation/summarize_runtime_queryplan_aligned.py`，输出仓库外
+`aligned-diagnostic-v1.json`。它只保存 workspace、scenario family、risk tag、状态、
+denotation、hash 和 Base→Adapter 转移，不复制问题、SQL 或结果行。
+
+分层结果显示，Adapter 在所有主要风险桶均通过执行合同；严格 ordered 匹配的主要非满分
+来自返回行顺序不同（30 条 bag-only）和 1 条二层订单聚合公式错误。Base 的 1,005 条 Policy
+拒绝和 238 条 PostgreSQL 错误主要集中在 `time_bucket`、`multi_metric_cte_merge`、
+字段/关系不存在和字段歧义，说明它首先缺少稳定的 Catalog/SQL 结构遵循能力，而不是只在
+最终数值上轻微偏差。
+
+该诊断仍属于 validation-only，不能反向修改训练数据或挑选 checkpoint；protected final
+test 继续保持一次性、隔离的历史合同。
