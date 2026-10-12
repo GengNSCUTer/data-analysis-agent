@@ -1,0 +1,35 @@
+{
+  "contract_id": "result-budget-v2",
+  "status": "frozen-design",
+  "version": 2,
+  "query_modes": ["aggregate", "detail_page", "export"],
+  "budgets": {
+    "llm_context_rows": 8,
+    "llm_context_chars": 1200,
+    "preview_rows": 200,
+    "detail_page_rows_default": 200,
+    "detail_page_rows_hard_cap": 500
+  },
+  "statuses": [
+    "complete",
+    "display_truncated",
+    "detail_page",
+    "execution_truncated",
+    "result_cardinality_exceeded",
+    "export_pending",
+    "export_ready",
+    "needs_clarification"
+  ],
+  "current_online_compatibility": {
+    "global_execution_cap": 1000,
+    "global_cap_is_interim_only": true,
+    "full_export_allowed": false
+  },
+  "performance_fixture": {
+    "workspace_id": "perf-shop",
+    "database": "perf_shop",
+    "schema": "perf",
+    "supported_order_counts": [100000, 1000000],
+    "default_order_count": 100000
+  }
+}
