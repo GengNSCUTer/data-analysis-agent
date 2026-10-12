@@ -300,3 +300,40 @@ ResultContract/ResultValidator -> Gold denotation`，但 smoke 数字不作为�
 reader/ResultContract 状态以及 ordered/bag denotation。主指标为
 `primary_ordered_denotation_match`；旧 QuerySpec Gold 只作为辅助兼容诊断，两个口径不混合、
 不取较高值冒充提升。
+
+## 8.7 正式 Base/Adapter matching 结果
+
+完整生成和后置匹配已完成。正式报告位于仓库外：
+
+`/disk2/gengnan/data-analysis-agent-data/evals/runtime-queryplan-aligned-v1-20261012/matching-full-r1/`
+
+固定分母为 1,500 条，输入和 Gold hash 分别为：
+
+- inputs：`b05b919fa6b845ec1f99c019b2442009897ab1c4536c6e3ca5aa631236e8419a`
+- Gold：`8f6d2714626bdd3ecf598afd4a6d0f98ed9533ce6ba9067ec86b116a3236f9f8`
+
+Adapter-best：
+
+- 1,500/1,500 通过 SQL Policy、reader-only PostgreSQL 和 ResultContract；
+- 1,469/1,500 `ordered_denotation_match`（97.93%）；
+- 30 条为 `bag_denotation_match`，只是返回行顺序不同；
+- 若把 ordered 与 bag 都算作语义匹配，则为 1,499/1,500（99.93%）；
+- 1 条真实 `denotation_mismatch`，属于 Olist 的二层订单聚合 + 多指标周时间序列，候选把
+  “先按订单汇总商品金额，再对订单金额取平均”错误写成了直接 `AVG(item.price)`。
+
+按 workspace，Olist 为 ordered 719/750（95.87%）、bag 30 条、真实 mismatch 1 条；
+TheLook 为 ordered 750/750（100%）。严格 headline 仍使用 ordered 指标，不能把 bag
+匹配混入 headline；bag 结果作为结果集合等价的辅助指标。
+
+Base：
+
+- 1,005 条 Policy rejected；
+- 238 条 PostgreSQL execution error；
+- 126 条 ResultContract rejected；
+- 131 条进入 valid，只有 17 条 ordered match、6 条 bag match；
+- 固定分母 ordered 为 17/1,500（1.13%），ordered-or-bag 为 23/1,500（1.53%）。
+
+`plan_adherent=true` 的 1,500 条不能解释为语义正确：当前 QueryPlan guard 只覆盖结构性
+约束，Policy/数据库/ResultContract 和 Gold denotation 才分别负责安全、可执行性、结果形状
+和业务结果。正式报告只保存 SQL hash、状态、执行证据和 denotation，不保存 raw SQL 或
+结果行。
