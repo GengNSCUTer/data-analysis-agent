@@ -72,6 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--run-label", choices=("base", "adapter"), required=True)
     parser.add_argument("--max-cases", type=int)
+    parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--expected-gpu-uuid")
     parser.add_argument("--physical-nvidia-smi-device", type=int)
     return parser.parse_args()
@@ -89,6 +90,7 @@ def load_model(args: argparse.Namespace):
         local_files_only=True,
         torch_dtype=torch.bfloat16,
         device_map={"": 0},
+        attn_implementation="sdpa",
     )
     adapter_metadata: dict[str, Any] = {"enabled": False}
     if args.run_label == "adapter":
@@ -108,6 +110,8 @@ def main() -> int:
     args = parse_args()
     if args.max_cases is not None and args.max_cases < 1:
         raise GenerationError("--max-cases must be positive")
+    if args.batch_size < 1:
+        raise GenerationError("--batch-size must be positive")
     if args.output.exists():
         raise GenerationError(f"refusing to overwrite {args.output}")
     args.output.mkdir(parents=True)
@@ -126,12 +130,22 @@ def main() -> int:
     total_tokens = 0
     started = datetime.now(timezone.utc)
     with raw_path.open("x", encoding="utf-8") as stream:
-        for row in selected:
-            encoded = tokenizer(row["prompt"], add_special_tokens=False, return_tensors="pt")
-            prompt_tokens = int(encoded["input_ids"].shape[-1])
-            if prompt_tokens > MAX_INPUT_TOKENS:
-                raise GenerationError(f"input exceeds {MAX_INPUT_TOKENS}: {row['source_id']}")
+        for start in range(0, len(selected), args.batch_size):
+            batch_rows = selected[start : start + args.batch_size]
+            encoded = tokenizer(
+                [row["prompt"] for row in batch_rows],
+                add_special_tokens=False,
+                return_tensors="pt",
+                padding=True,
+            )
+            prompt_lengths = encoded["attention_mask"].sum(dim=1).tolist()
+            for row, prompt_tokens in zip(batch_rows, prompt_lengths, strict=True):
+                if prompt_tokens > MAX_INPUT_TOKENS:
+                    raise GenerationError(f"input exceeds {MAX_INPUT_TOKENS}: {row['source_id']}")
+            input_width = int(encoded["input_ids"].shape[-1])
             batch = {name: value.to("cuda:0") for name, value in encoded.items()}
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
             before = perf_counter()
             with torch.inference_mode():
                 output_ids = model.generate(
@@ -143,26 +157,32 @@ def main() -> int:
                     eos_token_id=tokenizer.eos_token_id,
                     use_cache=True,
                 )
-            completion_ids = output_ids[0, prompt_tokens:]
-            completion = tokenizer.decode(completion_ids, skip_special_tokens=True).strip()
-            eos_observed = bool(
-                tokenizer.eos_token_id in completion_ids.detach().cpu().tolist()
-            )
-            item = {
-                "source_id": row["source_id"],
-                "workspace": row["workspace"],
-                "prompt_sha256": row["prompt_sha256"],
-                "raw_completion": completion,
-                "raw_completion_sha256": sha256_text(completion),
-                "generated_tokens": int(completion_ids.shape[-1]),
-                "eos_observed": eos_observed,
-                "elapsed_ms": round((perf_counter() - before) * 1000),
-            }
-            stream.write(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n")
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            elapsed_ms = round((perf_counter() - before) * 1000)
+            for index, row in enumerate(batch_rows):
+                completion_ids = output_ids[index, input_width:].detach().cpu().tolist()
+                eos_id = tokenizer.eos_token_id
+                eos_observed = eos_id is not None and eos_id in completion_ids
+                if eos_observed:
+                    completion_ids = completion_ids[: completion_ids.index(eos_id) + 1]
+                completion = tokenizer.decode(completion_ids, skip_special_tokens=True).strip()
+                item = {
+                    "source_id": row["source_id"],
+                    "workspace": row["workspace"],
+                    "prompt_sha256": row["prompt_sha256"],
+                    "raw_completion": completion,
+                    "raw_completion_sha256": sha256_text(completion),
+                    "generated_tokens": len(completion_ids),
+                    "eos_observed": eos_observed,
+                    "elapsed_ms": elapsed_ms,
+                    "batch_index": start // args.batch_size,
+                }
+                stream.write(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n")
+                count += 1
+                total_tokens += item["generated_tokens"]
             stream.flush()
             os.fsync(stream.fileno())
-            count += 1
-            total_tokens += item["generated_tokens"]
     evidence = {
         "version": VERSION,
         "run_label": args.run_label,
@@ -181,6 +201,7 @@ def main() -> int:
             "seed": SEED,
             "do_sample": False,
             "num_beams": 1,
+            "batch_size": args.batch_size,
         },
         "gpu": {
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
