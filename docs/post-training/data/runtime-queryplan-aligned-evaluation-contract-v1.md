@@ -276,3 +276,27 @@ hash。输入逐条检查无 `QuerySpec`、`query_spec_id`、candidate SQL、Gol
 或历史 execution evidence 泄露；1,500 个 source_id 唯一，两个 workspace 各 750 条，输入
 与 Gold 行序一致，hash 检查通过。Gold renderer 为 Olist/TheLook 各 750 条，SQL hash 共
 1,474 个唯一值。这个 release 才是后续 Base/Adapter aligned generation 的固定分母。
+
+## 8.6 Base/Adapter 生成与匹配入口
+
+已新增 `scripts/post_training/evaluation/generate_runtime_queryplan_aligned.py` 和
+`scripts/post_training/evaluation/evaluate_runtime_queryplan_aligned.py`。生成进程只读取
+`inputs/inputs.jsonl`，拒绝 QuerySpec、candidate SQL、Gold SQL 和 training text 字段；
+使用同一 Base、同一 prompt hash、bf16、greedy/beam=1、EOS、最多 1,024 个新 token。Gold
+和数据库访问均在生成证据中明确为 false。为避免逐条解码过慢，当前固定 batch=4，批内
+左侧 padding，按 EOS 截断后逐条写入并 fsync。
+
+4 条 Base 与 4 条 Adapter 的 batch smoke 已分别在物理 3090（项目逻辑设备 2、3）通过，
+另一个 4 条 Olist matching smoke 已走通统一的
+`unwrap_sql_completion -> QueryPlan guard -> SqlPolicy -> reader-only PostgreSQL ->
+ResultContract/ResultValidator -> Gold denotation`，但 smoke 数字不作为整体质量结论。
+
+完整 1,500 条成对生成已在以下 screen 后台启动，输出不会覆盖此前中断的逐条半成品：
+
+- `runtime-aligned-base-r2-20261012`：物理 GPU 0，输出 `generation-base-full-r2/`
+- `runtime-aligned-adapter-r2-20261012`：物理 GPU 1，输出 `generation-adapter-full-r2/`
+
+完整生成结束后，由 matching 入口使用同一固定分母和主 Gold 计算 `plan_adherent`、Policy/
+reader/ResultContract 状态以及 ordered/bag denotation。主指标为
+`primary_ordered_denotation_match`；旧 QuerySpec Gold 只作为辅助兼容诊断，两个口径不混合、
+不取较高值冒充提升。
