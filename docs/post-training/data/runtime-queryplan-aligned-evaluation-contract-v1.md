@@ -213,3 +213,11 @@ sample_id、QueryPlan/ResultContract/SQL hash、版本、reader 身份、行数�
 第一版小批在时间序列上暴露了旧离线 renderer 的 metrics-first 与 runtime time-first
 列序差异；该问题已修复并由测试锁住，未把失败样本静默计为通过。下一项仍是扩大到按
 scenario family 的小批，补上未冻结能力的拒绝分类，再决定是否物化完整 aligned Gold。
+
+随后按 `scenario_family_id` 做了第二轮 32 条 Olist validation 小批。它用风险标签、
+结果形态和时间粒度做确定性 greedy set-cover，覆盖 32 个不同 family、9 类风险标签，
+并覆盖 day/week/month/quarter/year 及无时间粒度；32/32 再次通过 renderer、Policy、
+reader-only PostgreSQL 和 ResultValidator。形态比例由 family 自然分布决定（19 条时间
+序列、6 条客户州、6 条标量、1 条品类），因此它是 family/risk 准入，不替代上一轮四种
+形态各 4 条的平衡 smoke。证据目录为仓库外
+`/disk2/gengnan/data-analysis-agent-data/evals/runtime-queryplan-gold-admission-20261012-v3/`。

@@ -121,6 +121,63 @@ def select_stratified(rows: list[dict[str, Any]], rows_per_shape: int) -> list[d
     return selected
 
 
+def select_family_stratified(rows: list[dict[str, Any]], max_families: int) -> list[dict[str, Any]]:
+    """Choose one deterministic representative from a risk-aware family set.
+
+    A full validation release has more than one hundred small families.  The
+    pre-GPU gate should cover family/risk semantics without turning into a
+    second full evaluation, so greedy set cover selects at most the requested
+    number while prioritizing unseen risk tags, shapes and time grains.
+    """
+
+    candidates = [
+        row for row in rows
+        if row.get("workspace_key") == "olist"
+        and row.get("split", {}).get("name") == "validation"
+        and row.get("admission_status") == "admitted"
+        and isinstance(row.get("query_plan"), Mapping)
+        and isinstance(row.get("result_contract"), Mapping)
+    ]
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in sorted(candidates, key=lambda item: item["sample_id"]):
+        family = row.get("scenario_family_id")
+        if isinstance(family, str) and family:
+            groups.setdefault(family, []).append(row)
+    if not groups:
+        raise ValueError("validation rows do not contain scenario_family_id")
+    representatives = [group[0] for group in groups.values()]
+    all_risks = {
+        tag for row in representatives for tag in (row.get("risk_tags") or ())
+    }
+    covered_risks: set[str] = set()
+    covered_shapes: set[str] = set()
+    covered_grains: set[str | None] = set()
+    selected: list[dict[str, Any]] = []
+    while representatives and len(selected) < max_families:
+        def score(row: Mapping[str, Any]) -> tuple[int, int, int, str]:
+            shape = shape_of(row["query_plan"])
+            grain = row["query_plan"].get("time_grain")
+            risks = set(row.get("risk_tags") or ())
+            return (
+                len(risks - covered_risks) * 100,
+                int(shape not in covered_shapes) * 10,
+                int(grain not in covered_grains),
+                str(row["scenario_family_id"]),
+            )
+
+        chosen = max(representatives, key=score)
+        selected.append(chosen)
+        representatives.remove(chosen)
+        covered_risks.update(chosen.get("risk_tags") or ())
+        covered_shapes.add(shape_of(chosen["query_plan"]))
+        covered_grains.add(chosen["query_plan"].get("time_grain"))
+    if len(selected) < max_families:
+        # The caller may request more families than exist; the manifest should
+        # report the real count rather than fabricate duplicate structures.
+        return selected
+    return selected
+
+
 def query_plan_from_mapping(raw: Mapping[str, Any]) -> QueryPlan:
     metric_plans = tuple(
         MetricPlan(
@@ -327,6 +384,12 @@ def main() -> None:
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--rows-per-shape", type=int, default=4)
+    parser.add_argument(
+        "--max-families",
+        type=int,
+        default=None,
+        help="select one risk-aware representative per family, capped at this count",
+    )
     args = parser.parse_args()
     if args.rows_per_shape < 1:
         raise SystemExit("--rows-per-shape must be positive")
@@ -334,7 +397,13 @@ def main() -> None:
         raise SystemExit(f"refusing to overwrite existing output: {args.output}")
 
     source_rows = load_rows(args.input)
-    selected = select_stratified(source_rows, args.rows_per_shape)
+    if args.max_families is not None and args.max_families < 1:
+        raise SystemExit("--max-families must be positive")
+    selected = (
+        select_family_stratified(source_rows, args.max_families)
+        if args.max_families is not None
+        else select_stratified(source_rows, args.rows_per_shape)
+    )
     catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
     args.output.mkdir(parents=True)
     manifest = {
@@ -344,8 +413,10 @@ def main() -> None:
         "workspace": "olist",
         "split": "validation",
         "rows_per_shape": args.rows_per_shape,
+        "max_families": args.max_families,
         "selected_rows": len(selected),
         "source_selection_ids": [row["sample_id"] for row in selected],
+        "source_family_ids": [row.get("scenario_family_id") for row in selected],
     }
     (args.output / "selection-manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
