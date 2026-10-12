@@ -18,6 +18,9 @@ from data_analysis_agent.candidate_sql_generator import CandidateSqlGenerationEr
 from data_analysis_agent.plan_sql_guard import sql_plan_mismatch
 from data_analysis_agent.runtime_candidate_matching import execute_sql
 from data_analysis_agent.sql_policy import PolicyViolation
+from scripts.post_training.evaluation.run_olist_medium_gold_denotation_audit import (
+    compare_denotations as _compare_denotations,
+)
 
 
 class EvaluationError(ValueError):
@@ -106,26 +109,9 @@ def load_generation(directory: Path, expected_ids: set[str]) -> dict[str, dict[s
 
 
 def compare_denotations(gold: Any, candidate: Any) -> str:
-    if tuple(map(str, gold.columns)) != tuple(map(str, candidate.columns)):
-        return "column_mismatch"
-    gold_rows = [tuple(row) for row in gold.itertuples(index=False, name=None)]
-    candidate_rows = [tuple(row) for row in candidate.itertuples(index=False, name=None)]
-    if len(gold_rows) != len(candidate_rows):
-        return "row_count_mismatch"
-    if gold_rows == candidate_rows:
-        return "ordered_denotation_match"
+    """Use the repository's tolerance-aware ordered/bag denotation contract."""
 
-    def key(value: Any) -> tuple[str, str]:
-        if value is None:
-            return ("0", "")
-        return (type(value).__name__, str(value))
-
-    try:
-        gold_sorted = sorted(gold_rows, key=lambda row: tuple(key(value) for value in row))
-        candidate_sorted = sorted(candidate_rows, key=lambda row: tuple(key(value) for value in row))
-    except (TypeError, ValueError):
-        return "denotation_mismatch"
-    return "bag_denotation_match" if gold_sorted == candidate_sorted else "denotation_mismatch"
+    return _compare_denotations(gold, candidate)
 
 
 def evaluate_one(
