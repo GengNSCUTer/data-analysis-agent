@@ -261,3 +261,18 @@ TheLook validation 全部 750 条做准入；证据目录为仓库外：
 未截断，低于 1,000 行执行上限和 200 行展示预算；750 个 SQL hash 均唯一。Olist 与
 TheLook 的运行时主 Gold 现在都已具备固定、可审计的 validation 分母，但仍未生成模型候选，
 也未把任何 Gold SQL 写入模型训练输入。
+
+## 8.5 双 workspace aligned release
+
+已用 `scripts/post_training/evaluation/materialize_runtime_queryplan_gold_release.py`
+将两个 validation 分母合并为新的仓库外 release：
+
+`/disk2/gengnan/data-analysis-agent-data/evals/runtime-queryplan-aligned-v1-20261012/`
+
+其中 `inputs/inputs.jsonl` 为 1,500 条模型输入（Olist 750 + TheLook 750），只含真实
+运行时 prompt、问题、QueryPlan、ResultContract、Catalog snapshot、family/risk metadata
+和 token 长度；`gold/gold.jsonl` 单独保存主 Gold SQL、SQL hash、renderer 版本和计划/合同
+hash。输入逐条检查无 `QuerySpec`、`query_spec_id`、candidate SQL、Gold SQL、training text
+或历史 execution evidence 泄露；1,500 个 source_id 唯一，两个 workspace 各 750 条，输入
+与 Gold 行序一致，hash 检查通过。Gold renderer 为 Olist/TheLook 各 750 条，SQL hash 共
+1,474 个唯一值。这个 release 才是后续 Base/Adapter aligned generation 的固定分母。
