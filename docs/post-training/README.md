@@ -12,6 +12,8 @@
 
 [v2 matching 合同](data/runtime-candidate-v2-matching-contract-v1.md) 的 Base/Adapter 生成和 r3 Gold 对照已完成，结果与五项审计见 [r3 实验报告](experiments/runtime-candidate-matching-v2-r3.md)。1,500条固定来源中1,453条ready；Adapter全部EOS、valid，原ordered匹配1,147/1,453，Olist430/736、TheLook717/717。但Olist704条原问题推导的结束日与原Gold上界差一天，不能把306条失败直接归因于模型，也不能把一致子集749/749当作整体100%。438条遵循运行时计划，266条匹配旧Gold却偏离计划；完整SQL结构遮住日期后736/736一致，129条行数差异均多一个桶。Olist时间序列训练1,511条、structural_hard468条，整体不缺这两类；品类分组仅17条，TheLook validation事实域仍偏斜，Olist train/validation共65条风险metadata为空。下一步先明确端点语义的诊断合同；既有主模型及成绩不变，默认在线模型不变。
 
+已冻结下一步的 [Runtime QueryPlan 对齐评测合同](data/runtime-queryplan-aligned-evaluation-contract-v1.md)：QueryPlan Gold 作为主指标，Legacy QuerySpec/Gold 只作兼容性辅助指标；两套 Gold 不合并分数。新合同要求明确 `[start, end)`、独立报告 `plan_adherent`，并保留 route rejected/ambiguous 固定分母。当前只完成合同冻结，没有启动新 GPU 生成、训练或 DPO；下一步先实现并测试 QueryPlan → deterministic Gold SQL renderer。
+
 ## 文档职责
 
 本目录只承载离线 Text-to-SQL 后训练研究和学习材料，不替代产品运行时文档。为避免项目进度、训练原理和实验结果再次混杂：
