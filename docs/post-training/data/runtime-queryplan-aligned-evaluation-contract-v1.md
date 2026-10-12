@@ -221,3 +221,21 @@ reader-only PostgreSQL 和 ResultValidator。形态比例由 family 自然分布
 序列、6 条客户州、6 条标量、1 条品类），因此它是 family/risk 准入，不替代上一轮四种
 形态各 4 条的平衡 smoke。证据目录为仓库外
 `/disk2/gengnan/data-analysis-agent-data/evals/runtime-queryplan-gold-admission-20261012-v3/`。
+
+## 8.3 Olist validation 全量 Gold 准入
+
+在两轮小批通过后，脚本以 `--all-validation` 处理冻结 Olist validation 全部 750 条，
+输出目录为仓库外：
+
+`/disk2/gengnan/data-analysis-agent-data/evals/runtime-queryplan-gold-admission-20261012-v4/`
+
+全量结果为 `750/750 admitted`：时间序列 417、标量 183、客户州分组 142、商品品类
+分组 8；每条都通过 renderer、SqlPolicy、`daa_analytics_reader`、read-only
+`REPEATABLE READ`、ResultValidator。所有结果都未截断，最大返回 92 行，低于 1,000 行
+执行上限和 200 行展示预算；750 条的 `plan_adherent` 全为 true，724 个 SQL hash
+唯一（重复 hash 只表示相同的确定性程序，不是重复样本）。逐条证据保留 sample_id、
+计划/合同/SQL hash、版本、形态、行数、reader 身份和验证状态，未写出结果行。
+
+这一步只证明 Olist 运行时计划可以生成并执行可信的主 Gold；它还没有生成 Base/Adapter
+候选，也没有计算模型准确率。TheLook 必须完成自己的 QueryPlan renderer 和同等级 Gold
+准入后，才可以构建双 workspace 的 aligned GPU 评测分母。

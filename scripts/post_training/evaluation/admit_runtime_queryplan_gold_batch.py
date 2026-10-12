@@ -178,6 +178,20 @@ def select_family_stratified(rows: list[dict[str, Any]], max_families: int) -> l
     return selected
 
 
+def select_all_validation(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the frozen Olist validation admission population unchanged."""
+
+    candidates = [
+        row for row in rows
+        if row.get("workspace_key") == "olist"
+        and row.get("split", {}).get("name") == "validation"
+        and row.get("admission_status") == "admitted"
+        and isinstance(row.get("query_plan"), Mapping)
+        and isinstance(row.get("result_contract"), Mapping)
+    ]
+    return sorted(candidates, key=lambda item: item["sample_id"])
+
+
 def query_plan_from_mapping(raw: Mapping[str, Any]) -> QueryPlan:
     metric_plans = tuple(
         MetricPlan(
@@ -390,6 +404,11 @@ def main() -> None:
         default=None,
         help="select one risk-aware representative per family, capped at this count",
     )
+    parser.add_argument(
+        "--all-validation",
+        action="store_true",
+        help="admit every frozen Olist validation row",
+    )
     args = parser.parse_args()
     if args.rows_per_shape < 1:
         raise SystemExit("--rows-per-shape must be positive")
@@ -399,11 +418,19 @@ def main() -> None:
     source_rows = load_rows(args.input)
     if args.max_families is not None and args.max_families < 1:
         raise SystemExit("--max-families must be positive")
-    selected = (
-        select_family_stratified(source_rows, args.max_families)
-        if args.max_families is not None
-        else select_stratified(source_rows, args.rows_per_shape)
-    )
+    if args.all_validation and args.max_families is not None:
+        raise SystemExit("--all-validation cannot be combined with --max-families")
+    if args.all_validation:
+        selected = select_all_validation(source_rows)
+        selection_mode = "all_validation"
+    elif args.max_families is not None:
+        selected = select_family_stratified(source_rows, args.max_families)
+        selection_mode = "family_greedy_set_cover"
+    else:
+        selected = select_stratified(source_rows, args.rows_per_shape)
+        selection_mode = "balanced_shape_smoke"
+    if not selected:
+        raise SystemExit("selection is empty")
     catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
     args.output.mkdir(parents=True)
     manifest = {
@@ -414,6 +441,7 @@ def main() -> None:
         "split": "validation",
         "rows_per_shape": args.rows_per_shape,
         "max_families": args.max_families,
+        "selection_mode": selection_mode,
         "selected_rows": len(selected),
         "source_selection_ids": [row["sample_id"] for row in selected],
         "source_family_ids": [row.get("scenario_family_id") for row in selected],
