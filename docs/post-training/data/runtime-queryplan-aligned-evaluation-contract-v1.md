@@ -173,6 +173,25 @@ aligned 生成。此前不训练、不做 DPO、不改变生产默认模型。
 ## 8. 当前决策
 
 当前选择：**QueryPlan Gold 是主评测；Legacy QuerySpec Gold 是辅助评测**。
-第一步只冻结本合同和输入审计，不启动 GPU 生成。下一步实现并测试
-`QueryPlan → deterministic Gold SQL` renderer，再用 validation 小批验证，之后
-才决定是否需要重新生成完整 Olist/TheLook 对齐评测。
+
+## 8.1 renderer 实现检查点
+
+已实现 `src/data_analysis_agent/runtime_queryplan_renderer.py`。入口只接受运行时
+`QueryPlan`、`ResultContract`、Catalog 和 Workspace，不读取离线 QuerySpec、训练标签、
+候选 SQL 或历史结果。它复用已审阅的 Olist metric SQL registry 生成内部 CTE，并将
+运行时计划的 hash、ResultContract hash、版本、时间边界、结果列和 `plan_adherent`
+写入新的 runtime artifact；内部桥接用的 `query_spec_id` 不会进入 artifact 或 evidence。
+
+当前 renderer 已覆盖：标量、多指标标量、客户州/商品品类分组、无维度时间序列，以及
+“维度 + 时间粒度”组合。时间边界强制 `[start, end)`；ResultContract 的 metric ID
+顺序可以不同，但结果列顺序必须和 QueryPlan 完全一致。Top-N、比较基线、支付方式等
+尚未有独立确定性 renderer，遇到时 fail closed，不改写成近似查询。
+
+同时修正了既有 Olist renderer 在运行时 workspace 上的版本解析，并补充了维度+时间
+序列的结果列和复合 join key 支持；历史离线 QuerySpec 形状不变。
+
+CPU 定向验证：`tests/test_runtime_queryplan_renderer.py` 与
+`tests/test_olist_queryspec.py` 共 `53 passed`；定向 Ruff 通过。三条运行时样例已
+通过 SqlPolicy（1,000 行执行上限）和稳定 hash 检查。尚未执行 PostgreSQL 小批准入，
+也未启动 GPU 生成；下一项是从实际 aligned validation 输入选取小批，运行 renderer、
+SqlPolicy、reader role、ResultContract/ResultValidator 并保存逐条证据。

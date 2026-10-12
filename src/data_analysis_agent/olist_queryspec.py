@@ -120,6 +120,12 @@ def _workspace_profile_for_pin(pin: WorkspacePin) -> WorkspaceProfile:
 
 
 def _workspace_profile_for_catalog(catalog: Catalog | None) -> WorkspaceProfile:
+    # A runtime Catalog is loaded with the exact WorkspaceProfile that owns
+    # the request.  Preserve that identity instead of inferring a similarly
+    # versioned construction workspace (the v3 fixture uses a different
+    # workspace_id from the online runtime workspace).
+    if catalog is not None and catalog.workspace is not None:
+        return catalog.workspace
     if catalog is not None and (
         catalog.catalog_version == OLIST_V3_WORKSPACE.catalog_version
         and catalog.metric_version == OLIST_V3_WORKSPACE.metric_version
@@ -305,6 +311,8 @@ def _derive_result_columns(metric_ids: Sequence[str], shape: str, dimension: str
     if shape == "category_grouped":
         return ("product_category_name", *metric_ids)
     if shape == "time_series":
+        if dimension is not None:
+            return (dimension, "time", *metric_ids)
         return (*metric_ids, "time")
     return tuple(metric_ids)
 
@@ -397,7 +405,13 @@ def validate_query_spec(spec: QuerySpec, catalog: Catalog | None = None) -> Quer
     if spec.dimension in _ATTRIBUTION_DIMENSIONS:
         raise QuerySpecValidationError("attribution_not_frozen", "dimension requires an unfrozen attribution rule")
     expected_dimension = _DIMENSION_FOR_SHAPE[spec.result_shape]
-    if spec.dimension != expected_dimension:
+    if spec.result_shape == "time_series":
+        if spec.dimension not in {None, "customer_state", "product_category_name"}:
+            raise QuerySpecValidationError(
+                "coverage_shape_not_permitted",
+                "time_series only supports customer_state or product_category_name dimensions",
+            )
+    elif spec.dimension != expected_dimension:
         raise QuerySpecValidationError("coverage_shape_not_permitted", "dimension does not match result shape")
     if spec.attribution_rule_id is not None:
         raise QuerySpecValidationError("attribution_not_frozen", "attribution rules are not frozen in v1")
@@ -409,6 +423,17 @@ def validate_query_spec(spec: QuerySpec, catalog: Catalog | None = None) -> Quer
             )
         if len(spec.metric_ids) != 1:
             raise QuerySpecValidationError("coverage_shape_not_permitted", "category grouping only supports one item metric")
+    if spec.result_shape == "time_series" and spec.dimension == "product_category_name":
+        if any(metric not in _ITEM_METRICS for metric in spec.metric_ids):
+            raise QuerySpecValidationError(
+                "attribution_not_frozen",
+                "category time series for order or review metrics requires an attribution rule",
+            )
+        if len(spec.metric_ids) != 1:
+            raise QuerySpecValidationError(
+                "coverage_shape_not_permitted",
+                "category time series only supports one item metric",
+            )
     families = {METRIC_SQL_REGISTRY[metric].time_family for metric in spec.metric_ids}
     if spec.result_shape == "time_series":
         if len(families) != 1:
@@ -496,7 +521,7 @@ def _dimension_expr(dimension: str | None, alias: str) -> str | None:
 def _metric_cte(metric_id: str, spec: QuerySpec, index: int) -> str:
     definition = METRIC_SQL_REGISTRY[metric_id]
     grouped = spec.result_shape in {"state_grouped", "category_grouped", "time_series"}
-    dimension = spec.dimension if spec.result_shape in {"state_grouped", "category_grouped"} else None
+    dimension = spec.dimension if spec.result_shape in {"state_grouped", "category_grouped", "time_series"} else None
     time_expr = None
     if spec.result_shape == "time_series":
         time_expr = f"date_trunc('{spec.time.grain}', {definition.time_field})"
@@ -581,15 +606,30 @@ def _render_final_select(spec: QuerySpec) -> str:
     if spec.result_shape == "time_series":
         key = "time"
     if spec.result_shape == "time_series":
-        columns = [
-            f"{name}.{metric} AS {metric}"
-            for metric, name in zip(spec.metric_ids, names)
-        ]
-        columns.append(
-            f"{names[0]}.{key} AS {key}"
-            if len(names) == 1
-            else f"COALESCE({names[0]}.{key}, {', '.join(f'{name}.{key}' for name in names[1:])}) AS {key}"
-        )
+        def coalesced_column(column: str) -> str:
+            return (
+                f"{names[0]}.{column} AS {column}"
+                if len(names) == 1
+                else f"COALESCE({names[0]}.{column}, {', '.join(f'{name}.{column}' for name in names[1:])}) AS {column}"
+            )
+
+        if spec.dimension is not None:
+            # The runtime QueryPlan can ask for a breakdown over both a
+            # dimension and time. Keep the contract's stable order:
+            # dimension, time, then metric columns.
+            columns = [coalesced_column(spec.dimension), coalesced_column("time")]
+            columns.extend(
+                f"{name}.{metric} AS {metric}"
+                for metric, name in zip(spec.metric_ids, names)
+            )
+            join_keys = f"({spec.dimension}, time)"
+        else:
+            columns = [
+                f"{name}.{metric} AS {metric}"
+                for metric, name in zip(spec.metric_ids, names)
+            ]
+            columns.append(coalesced_column(key))
+            join_keys = "(time)"
     else:
         if len(names) == 1:
             columns = [f"{names[0]}.{key} AS {key}"]
@@ -601,7 +641,7 @@ def _render_final_select(spec: QuerySpec) -> str:
             columns.append(f"{name}.{metric} AS {metric}")
     sql = f"SELECT {', '.join(columns)} FROM {names[0]}"
     for name in names[1:]:
-        sql += f" FULL OUTER JOIN {name} USING ({key})"
+        sql += f" FULL OUTER JOIN {name} USING {join_keys if spec.result_shape == 'time_series' else f'({key})'}"
     return sql
 
 
