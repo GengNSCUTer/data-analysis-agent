@@ -273,6 +273,24 @@ def test_execution_uses_reader_readonly_and_policy_extra_row_probe(monkeypatch):
     connection.close.assert_called_once()
 
 
+def test_execution_timeout_is_recorded_as_candidate_error_and_does_not_abort_pair(monkeypatch):
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = (OLIST_RUNTIME_WORKSPACE.reader_role, 'on')
+    cursor.execute.side_effect = [None, None, None, None,
+                                  matching.psycopg2.errors.QueryCanceled(
+                                      'canceling statement due to statement timeout')]
+    monkeypatch.setattr(matching.psycopg2, 'connect', MagicMock(return_value=connection))
+    contract = {'required_result_columns': ['paid_order_count'], 'metric_result_columns': ['paid_order_count']}
+
+    evidence, frame = matching.execute_sql(
+        'SELECT COUNT(*) AS paid_order_count FROM analytics.fact_orders;', 'olist', {}, contract)
+
+    assert evidence == {'state': 'postgres_execution_error', 'sqlstate': '57014'}
+    assert frame is None
+    connection.close.assert_called_once()
+
+
 def test_policy_rejects_write_before_connecting(monkeypatch):
     connect = MagicMock()
     monkeypatch.setattr(matching.psycopg2, 'connect', connect)

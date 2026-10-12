@@ -1016,3 +1016,13 @@ smoke 的平均 train loss 0.215921、4 条 validation loss 0.150052；392 个 L
 实际启动验收通过：2026-10-11 23:55（Asia/Shanghai），代码基线 `b82381a`，screen `daa-runtime-v2-base-20261011-r2` / `daa-runtime-v2-adapter-20261011-r2` 已detach；两个worker和generate子进程均存在，两侧首条已写记录，GPU运行正常。外部r2根目录的 `launch.json` 保存argv/GPU/自身hash，`screens-started.json` 记录成功启动；`base-generation.log` / `adapter-generation.log` 每条更新，worker log记录编排。完成时各写 `base-exit.json` / `adapter-exit.json`，后置执行写 `evaluation.log`、`evaluation-exit.json` 与 `evaluation/safe-report.json`。关闭SSH不影响screen。此状态仅为生成运行中，不能据首条或进程存活宣称质量改善；最终结果待生成和Gold全部完成。
 
 实际重复启动检查被拒绝，未产生额外screen或生成进程。本次启动事实已通过lark-doc追加飞书项目文档revision263，并回读确认。
+
+### 2026-10-12：runtime candidate v2 matching 评测修复与完整结果
+
+上一轮 r2 的 Base/Adapter 生成均已完整（各 1,500 / 1,500），但 Gold 后置评测在第 713 条附近遇到 PostgreSQL 5 秒 `statement_timeout`，旧逻辑把 `QueryCanceled` 错判为数据库连接基础设施故障，导致没有安全报告。修复 [`runtime_candidate_matching.py`](src/data_analysis_agent/runtime_candidate_matching.py) 后，`QueryCanceled` / SQLSTATE `57014` 作为单条候选的 `postgres_execution_error` 记录并关闭连接继续；普通连接/接口错误、权限错误和 Gold 执行失败仍然阻断。新增超时回归测试，runtime matching 定向测试 46 passed，Ruff 通过。
+
+为保留生成证据，新增 r3 后置合同并显式记录 `generation_contract_sha256`，不重新生成模型输出。r3 screen `daa-runtime-v2-eval-r3` 使用 r2 的 inputs、Base raw completion 和 Adapter raw completion，完成 `1,500 / 1,500` 条 Gold 对照。报告位于仓库外 `evals/runtime-candidate-v2-matching-final-20261011-r3/evaluation/safe-report.json`，修复与结果详见 [`runtime-candidate-matching-v2-r3.md`](docs/post-training/experiments/runtime-candidate-matching-v2-r3.md)。
+
+固定 1,500 条分母中，Olist 750 条（736 ready、14 route rejected），TheLook 750 条（717 ready、33 route rejected）。Adapter 在 1,453 条 ready 输入上全部 EOS、全部通过 SQL Policy、reader-only 执行和 ResultContract；Gold ordered denotation 匹配为 **1,147 / 1,453（78.9%）**。其中 Olist **430 / 736（58.4%）**，剩余 177 条 denotation mismatch、129 条 row_count mismatch；TheLook **717 / 717（100%）**。Base 只有 1,041 条 EOS，412 条 length-stopped，最终 ordered match 为 41 条（另有 13 条仅 bag match）。
+
+这轮结果说明 Adapter 对输出边界、可执行性和受控结果合同有明显改善，TheLook 这组固定测试也全部匹配；但 Olist 的 306 条语义/粒度失败表明仍不能把“SQL 能执行”当作业务正确。Olist 的主要薄弱点集中在购买/评论时间序列、day/week/month/year 桶和 structural-hard 场景，后续应优先围绕时间边界、聚合 grain 和训练覆盖诊断。完整报告不保存问题、SQL、结果行或错误原文，因此不能据此宣称自由问题或线上泛化准确率。本次事实已待同步飞书项目文档。

@@ -48,6 +48,9 @@ def parse_args(argv=None):
     freeze = commands.add_parser('freeze')
     freeze.add_argument('--scope', choices=('protected_final', 'validation_smoke'), required=True)
     freeze.add_argument('--output', type=Path, required=True)
+    freeze.add_argument('--supersedes-contract', type=Path)
+    freeze.add_argument('--generation-contract', type=Path,
+                        help='Reuse completed preparation/generation markers from this frozen contract.')
     for name in ('prepare', 'generate', 'evaluate'):
         child = commands.add_parser(name)
         child.add_argument('--contract', type=Path, required=True)
@@ -65,7 +68,8 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def freeze_contract(scope: str, output: Path):
+def freeze_contract(scope: str, output: Path, supersedes_contract: Path | None = None,
+                    generation_contract: Path | None = None):
     ensure_path_outside_repository(output, ROOT)
     require(sha256_file(BEST) == BEST_SHA, 'preselected best freeze drift')
     best = read_json(BEST)
@@ -93,11 +97,19 @@ def freeze_contract(scope: str, output: Path):
              'execution': {'max_rows': 1000, 'preview_rows': 200, 'timeout_ms': 5000,
                            'host': '/tmp', 'port': 35434, 'timezone': 'UTC'},
              'numeric_tolerances': {'absolute': '0.000001', 'relative': '0.000001'}}
-    if scope == 'protected_final':
+    if scope == 'protected_final' and supersedes_contract is None:
+        supersedes_contract = DATA / 'evals/runtime-candidate-v2-matching-final-20261011-r1/contract.json'
+    if supersedes_contract is not None:
+        supersedes_contract = ensure_path_outside_repository(supersedes_contract, ROOT)
         value['supersedes_contract'] = {
-            'path': str(DATA / 'evals/runtime-candidate-v2-matching-final-20261011-r1/contract.json'),
-            'sha256': 'f68fdeda3aff58e492f50a9935b23b7e52cb12550c8f6b7193e6709ec1ba97a3',
-            'reason': 'archive_format_adapter_only; decoding/models/questions unchanged; no prior generation'}
+            'path': str(supersedes_contract),
+            'sha256': sha256_file(supersedes_contract),
+            'reason': 'post-generation evaluation handling update; generation artifacts remain unchanged'}
+    if generation_contract is not None:
+        generation_contract = ensure_path_outside_repository(generation_contract, ROOT)
+        generation_sha256 = sha256_file(generation_contract)
+        value['generation_contract'] = {'path': str(generation_contract), 'sha256': generation_sha256}
+        value['generation_contract_sha256'] = generation_sha256
     output.parent.mkdir(parents=True, exist_ok=True)
     validate_contract_preview(value)
     write_json(output, value)
@@ -256,6 +268,7 @@ def evaluate(contract, contract_hash, inputs, base_dir, adapter_dir, output):
                   input_sha256=input_hash,
                   base_raw_sha256=sha256_file(base_dir / 'raw-completions.jsonl'),
                   adapter_raw_sha256=sha256_file(adapter_dir / 'raw-completions.jsonl'),
+                  generation_contract_sha256=contract.get('generation_contract_sha256', contract_hash),
                   gold_access_after_pair_frozen=True, raw_question_or_sql_saved=False)
     verify_before_completion(contract)
     output = fresh_directory(output)
@@ -268,7 +281,7 @@ def main(argv=None):
     os.environ.setdefault('NCCL_P2P_DISABLE', '1')
     os.environ.setdefault('NCCL_IB_DISABLE', '1')
     if args.command == 'freeze':
-        result = freeze_contract(args.scope, args.output)
+        result = freeze_contract(args.scope, args.output, args.supersedes_contract, args.generation_contract)
     else:
         ensure_path_outside_repository(args.contract, ROOT)
         contract = validate_contract(args.contract, args.expected_contract_sha256)

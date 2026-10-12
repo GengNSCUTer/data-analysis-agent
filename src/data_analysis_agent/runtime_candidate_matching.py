@@ -142,6 +142,16 @@ def validate_contract(path: Path, expected_sha256: str) -> dict[str, Any]:
     require(contract.get('version') == VERSION and contract.get('decoding') == DECODE
             and contract.get('prompt_version') == RUNTIME_CANDIDATE_SQL_PROMPT_VERSION
             and contract.get('scope') in {'protected_final', 'validation_smoke'}, 'protocol drift')
+    generation_contract = contract.get('generation_contract')
+    if generation_contract is not None:
+        require(isinstance(generation_contract, Mapping)
+                and isinstance(generation_contract.get('path'), str)
+                and isinstance(generation_contract.get('sha256'), str),
+                'invalid generation contract provenance')
+        require(sha256_file(Path(generation_contract['path'])) == generation_contract['sha256'],
+                'generation contract provenance drift')
+        require(contract.get('generation_contract_sha256') == generation_contract['sha256'],
+                'generation contract hash binding drift')
     freeze_path = Path(contract['best_freeze']['path'])
     require(sha256_file(freeze_path) == contract['best_freeze']['sha256'], 'best freeze drift')
     best = read_json(freeze_path)
@@ -171,7 +181,8 @@ def validate_contract(path: Path, expected_sha256: str) -> dict[str, Any]:
 def load_prepared(directory: Path, contract: Mapping[str, Any], contract_hash: str) -> tuple[list[dict[str, Any]], str]:
     marker = read_json(directory / 'prepared.json')
     path = directory / 'inputs.jsonl'
-    require(marker.get('contract_sha256') == contract_hash and marker.get('status') == 'complete'
+    generation_contract_hash = contract.get('generation_contract_sha256', contract_hash)
+    require(marker.get('contract_sha256') == generation_contract_hash and marker.get('status') == 'complete'
             and marker.get('input_sha256') == sha256_file(path), 'prepared inputs not frozen')
     rows = read_jsonl(path)
     expected = sum(source['rows'] for source in contract['sources'])
@@ -202,8 +213,9 @@ def load_generation(directory: Path, role: str, rows: list[dict[str, Any]],
     marker = read_json(directory / 'generation.json')
     raw_path = directory / 'raw-completions.jsonl'
     best = read_json(Path(contract['best_freeze']['path']))
+    generation_contract_hash = contract.get('generation_contract_sha256', contract_hash)
     require(marker.get('status') == 'complete' and marker.get('role') == role
-            and marker.get('contract_sha256') == contract_hash and marker.get('input_sha256') == input_hash
+            and marker.get('contract_sha256') == generation_contract_hash and marker.get('input_sha256') == input_hash
             and marker.get('raw_sha256') == sha256_file(raw_path)
             and marker.get('decoding') == DECODE, 'generation not completed or matching')
     require(marker.get('adapter_sha256') == (best['adapter_model_sha256'] if role == 'adapter' else None),
@@ -275,6 +287,14 @@ def execute_sql(sql: str, workspace: str, plan: Mapping[str, Any], contract: Map
                                                 policy_limit_applied=decision.policy_limit_applied)
             frame = pd.DataFrame(values, columns=columns)
     except psycopg2.Error as exc:
+        # A candidate query exceeding the bounded execution budget is a
+        # candidate-level outcome.  It must not abort the pair evaluation:
+        # the next candidate is executed on a fresh connection.  Check this
+        # before OperationalError/InterfaceError because psycopg2 may expose
+        # a cancelled statement through either the SQLSTATE or its exception
+        # class, depending on where the timeout is observed.
+        if isinstance(exc, psycopg2.errors.QueryCanceledError) or exc.pgcode == '57014':
+            return {'state': 'postgres_execution_error', 'sqlstate': '57014'}, None
         if isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError)) or exc.pgcode == '42501':
             raise MatchingContractError('database connection/reader infrastructure failure') from exc
         return {'state': 'postgres_execution_error', 'sqlstate': exc.pgcode}, None
