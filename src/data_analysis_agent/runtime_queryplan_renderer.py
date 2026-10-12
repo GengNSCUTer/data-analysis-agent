@@ -22,6 +22,8 @@ import re
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from sqlglot import parse_one
+
 from .olist_queryspec import (
     QuerySpec,
     QuerySpecValidationError,
@@ -321,6 +323,27 @@ def _runtime_time(plan: QueryPlan, contract: ResultContract) -> QueryTime:
     return QueryTime("series", start, end, plan.time_grain)
 
 
+def _runtime_projection_sql(sql: str, required_columns: tuple[str, ...]) -> str:
+    """Reorder the legacy no-dimension series projection to runtime order.
+
+    The reviewed offline renderer historically emitted ``metric..., time``.
+    The online QueryPlan contract emits ``time, metric...``.  SQLGlot lets us
+    change only the outer projection while leaving every CTE and predicate
+    byte-for-byte semantically intact.
+    """
+
+    statement = parse_one(sql, read="postgres")
+    expressions = list(statement.expressions)
+    by_alias = {expression.alias_or_name: expression for expression in expressions}
+    if set(by_alias) != set(required_columns):
+        raise _error(
+            "result_columns_do_not_match_contract",
+            "deterministic renderer projection does not match runtime columns",
+        )
+    statement.set("expressions", [by_alias[column] for column in required_columns])
+    return statement.sql(dialect="postgres") + ";"
+
+
 def render_runtime_queryplan_gold_sql(
     query_plan: QueryPlan,
     result_contract: ResultContract,
@@ -396,13 +419,18 @@ def render_runtime_queryplan_gold_sql(
         )
 
     try:
+        internal_required_columns = tuple(query_plan.required_result_columns)
+        if shape == "time_series" and not query_plan.dimensions:
+            # The legacy offline contract is metrics-first; the runtime
+            # contract is time-first. Reorder only the final projection below.
+            internal_required_columns = (*metric_ids, "time")
         spec = QuerySpec.create(
             metric_ids=metric_ids,
             result_shape=shape,
             dimension=query_plan.dimensions[0] if query_plan.dimensions else None,
             time=query_time,
             workspace=WorkspacePin.current(active_workspace),
-            required_result_columns=query_plan.required_result_columns,
+            required_result_columns=internal_required_columns,
         )
         internal_artifact = render_gold_sql(spec, catalog)
     except QuerySpecValidationError as exc:
@@ -410,7 +438,10 @@ def render_runtime_queryplan_gold_sql(
 
     plan_sha = _canonical_sha256(query_plan.as_dict())
     contract_sha = _canonical_sha256(result_contract.as_evidence())
-    sql_sha = hashlib.sha256(internal_artifact.sql.encode("utf-8")).hexdigest()
+    sql = internal_artifact.sql
+    if shape == "time_series" and not query_plan.dimensions:
+        sql = _runtime_projection_sql(sql, tuple(query_plan.required_result_columns))
+    sql_sha = hashlib.sha256(sql.encode("utf-8")).hexdigest()
     evidence = MappingProxyType(
         {
             "source": "runtime_query_plan",
@@ -439,7 +470,7 @@ def render_runtime_queryplan_gold_sql(
         }
     )
     return RuntimeGoldSqlArtifact(
-        sql=internal_artifact.sql,
+        sql=sql,
         sql_sha256=sql_sha,
         query_plan_sha256=plan_sha,
         result_contract_sha256=contract_sha,

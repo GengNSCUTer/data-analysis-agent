@@ -191,7 +191,25 @@ aligned 生成。此前不训练、不做 DPO、不改变生产默认模型。
 序列的结果列和复合 join key 支持；历史离线 QuerySpec 形状不变。
 
 CPU 定向验证：`tests/test_runtime_queryplan_renderer.py` 与
-`tests/test_olist_queryspec.py` 共 `53 passed`；定向 Ruff 通过。三条运行时样例已
+`tests/test_olist_queryspec.py` 共 `54 passed`；定向 Ruff 通过。三条运行时样例已
 通过 SqlPolicy（1,000 行执行上限）和稳定 hash 检查。尚未执行 PostgreSQL 小批准入，
 也未启动 GPU 生成；下一项是从实际 aligned validation 输入选取小批，运行 renderer、
 SqlPolicy、reader role、ResultContract/ResultValidator 并保存逐条证据。
+
+## 8.2 Olist validation 小批准入
+
+已从冻结的 `runtime-candidate-sql-v2-r1/validation.jsonl` 按四种结果形态各选 4 条，
+共 16 条 Olist validation 输入；选择清单和逐条证据位于仓库外：
+
+`/disk2/gengnan/data-analysis-agent-data/evals/runtime-queryplan-gold-admission-20261012-v2/`
+
+16/16 通过 runtime renderer、SqlPolicy、`daa_analytics_reader` 的 PostgreSQL
+read-only / `REPEATABLE READ` 执行和 ResultValidator；标量、客户州分组、商品品类分组、
+时间序列各 4/4。全部未达到 1,000 行执行上限，也未超过 200 行展示预算。报告只保留
+sample_id、QueryPlan/ResultContract/SQL hash、版本、reader 身份、行数和验证状态，不保留
+原始结果行。时间序列额外验证了 day/week/month/quarter/year 中的四种粒度和 `[start,end)`
+谓词；其中无维度时间序列的 runtime `time, metric...` 列序通过最终投影重排与验证。
+
+第一版小批在时间序列上暴露了旧离线 renderer 的 metrics-first 与 runtime time-first
+列序差异；该问题已修复并由测试锁住，未把失败样本静默计为通过。下一项仍是扩大到按
+scenario family 的小批，补上未冻结能力的拒绝分类，再决定是否物化完整 aligned Gold。

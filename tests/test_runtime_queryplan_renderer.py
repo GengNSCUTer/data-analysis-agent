@@ -82,6 +82,18 @@ def test_runtime_dimension_and_time_series_gold_preserves_contract_order(retriev
     assert ">= TIMESTAMP '2017-01-01'" in artifact.sql
 
 
+def test_runtime_time_series_uses_time_first_projection(retriever):
+    plan, contract = _runtime_parts(retriever, "2017年按月统计 GMV 和有效订单数")
+    artifact = render_runtime_queryplan_gold_sql(
+        plan, contract, retriever.catalog, workspace=OLIST_RUNTIME_WORKSPACE
+    )
+    assert plan.required_result_columns == ("time", "gmv", "paid_order_count")
+    assert artifact.sql.rsplit("SELECT ", 1)[-1].startswith(
+        "COALESCE(m01_gmv.time, m02_paid_order_count.time) AS time, "
+        "m01_gmv.gmv AS gmv"
+    )
+
+
 def test_runtime_renderer_allows_result_contract_metric_order_difference(retriever):
     plan, contract = _runtime_parts(retriever, "概览 GMV 和有效订单数")
     reordered = replace(
