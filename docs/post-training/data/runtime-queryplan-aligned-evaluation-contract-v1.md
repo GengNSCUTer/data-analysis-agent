@@ -239,3 +239,25 @@ reader-only PostgreSQL 和 ResultValidator。形态比例由 family 自然分布
 这一步只证明 Olist 运行时计划可以生成并执行可信的主 Gold；它还没有生成 Base/Adapter
 候选，也没有计算模型准确率。TheLook 必须完成自己的 QueryPlan renderer 和同等级 Gold
 准入后，才可以构建双 workspace 的 aligned GPU 评测分母。
+
+## 8.4 TheLook validation 全量 Gold 准入
+
+已新增 `src/data_analysis_agent/runtime_thelook_queryplan_renderer.py`，入口和 Olist
+renderer 相同，只接受 TheLook 的运行时 QueryPlan、ResultContract、Catalog 和 Workspace，
+复用 TheLook v2 已审阅的 21 项指标公式；TheLook 的 `time, metric...` runtime 列序也会
+经过最终投影重排，时间谓词仍强制 `[start,end)`。TheLook 小批（8 种形态各 4 条，32/32）
+和 family 小批（5 个 family，5/5）均通过。
+
+随后使用独立脚本
+`scripts/post_training/evaluation/admit_runtime_thelook_queryplan_gold_batch.py` 对冻结
+TheLook validation 全部 750 条做准入；证据目录为仓库外：
+
+`/disk2/gengnan/data-analysis-agent-data/evals/runtime-thelook-queryplan-gold-admission-20261012-v3/`
+
+结果为 `750/750 admitted`：时间序列 290、事件浏览器/事件流量来源/事件类型分组各 65、
+注册用户国家 100、注册用户州 65、注册流量来源 95、标量 5。5 个 scenario family、5 类
+风险标签和 day/week/month/quarter/year 均有覆盖；全部通过 TheLook renderer、Policy、
+`daa_thelook_reader` 的 read-only `REPEATABLE READ`、ResultValidator，最大结果 125 行，
+未截断，低于 1,000 行执行上限和 200 行展示预算；750 个 SQL hash 均唯一。Olist 与
+TheLook 的运行时主 Gold 现在都已具备固定、可审计的 validation 分母，但仍未生成模型候选，
+也未把任何 Gold SQL 写入模型训练输入。
