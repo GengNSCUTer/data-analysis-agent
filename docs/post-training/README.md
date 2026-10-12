@@ -2,13 +2,15 @@
 
 这是后训练文档的规范入口。根目录中的旧路径保留为兼容跳转页；新的文档、链接和学习记录应从本目录进入。目录生命周期和删除规则见 [`../architecture/documentation-map-v1.md`](../architecture/documentation-map-v1.md)。
 
-## 当前基线（2026-10-11）
+## 当前基线（2026-10-12）
 
 当前产品运行 Olist v3 Catalog，默认在线模型仍是 SiliconFlow；本地 Adapter 尚未接入。最新主实验为 Qwen2.5-Coder-1.5B Base 的 bf16 LoRA SQL-only SFT，训练/validation 合计 `6,000/1,500`，其中 Olist 与 TheLook 各 `3,000/750`。`adapter_best` 在两套各 750 条 final test 上的 ordered Gold 匹配分别为 `403/750` 和 `396/750`。两个 Schema 已进入训练，这是已见 Schema 留出评测，不能称为未见 Schema 泛化。DPO 状态为 `stop_no_dpo`，未训练。
 
 当前事实优先看 [`experiments/project-v1-model-card.md`](experiments/project-v1-model-card.md) 和 [`experiments/project-v1-model-baseline.md`](experiments/project-v1-model-baseline.md)。下文保留各轮阶段说明，其中“尚未训练”“v2 默认运行时”“TheLook 未见 Schema”等描述只适用于其历史实验，不作为最新状态。
 
-最新推进项是 [训练与实际候选输入对齐](../../plan/refactor-runtime-candidate-sft-alignment-v1.md)，正式 `runtime-candidate-sql-v2-r1` 数据已在仓库外生成：train/validation `5,980/1,500`，其中 Olist `3,000/750`、TheLook `2,980/750`；20 条 TheLook 品牌分组保守预算拒绝，不填数。所有准入 Gold 通过实际 Catalog/QueryPlan/Policy/reader/ResultValidator 与父 Gold denotation 对照，长度冻结为 4,096、未截断。QuerySpec 仅作离线审计，不进入新模型输入。Trainer v2 兼容、全量 CPU 输入/标签检查与 8 train / 4 validation 的 2 step GPU smoke 已通过，micro-batch=2、累积=2。2026-10-11 22:17:59（Asia/Shanghai）完整两 epoch 正常结束，2,990 步，validation-best 在 step 2,500，eval_loss=0.0000192972；best/final 与各自 checkpoint 的权重/hash、fp32 AdamW state 和两个 workspace 的独立 fresh reload 验收通过，详见 [训练结束验收](experiments/runtime-candidate-sft-v2-r1.md)。[v2 matching 入口和合同](data/runtime-candidate-v2-matching-contract-v1.md) 及真实 validation GPU/Gold smoke通过；修复旧Olist存档字段适配并冻结r2合同，正式1,500条输入封存，45项入口/编排及70项相关回归通过。23:55在两个4090 screen启动Base/Adapter，分别生成两套各750条，完成后自动统一Gold对照。Olist14、TheLook33条路由拒绝保留固定分母，无超长/截断；新实验尚无正式成绩，既有主模型及成绩不变。原验证集事实域偏斜、Olist65条空风险metadata已明确报告，不将输入迁移写成全面覆盖扩展。
+最新推进项是 [训练与实际候选输入对齐](../../plan/refactor-runtime-candidate-sft-alignment-v1.md)，正式 `runtime-candidate-sql-v2-r1` 数据 train/validation 为 `5,980/1,500`：Olist `3,000/750`、TheLook `2,980/750`；20 条 TheLook 品牌分组预算拒绝，不填数。所有准入 Gold 经真实 Catalog/QueryPlan/Policy/reader/ResultValidator 与父 Gold 对照，输入上限4,096、未截断，QuerySpec 不进入模型输入。两 epoch 训练已正常结束，共2,990步，validation-best 为 step2,500、eval_loss=0.0000192972；权重/hash、fp32 AdamW state和独立fresh reload验收见 [训练结束报告](experiments/runtime-candidate-sft-v2-r1.md)。
+
+[v2 matching 合同](data/runtime-candidate-v2-matching-contract-v1.md) 的 Base/Adapter 生成和 r3 Gold 对照已完成，结果与五项审计见 [r3 实验报告](experiments/runtime-candidate-matching-v2-r3.md)。1,500条固定来源中1,453条ready；Adapter全部EOS、valid，原ordered匹配1,147/1,453，Olist430/736、TheLook717/717。但Olist704条原问题推导的结束日与原Gold上界差一天，不能把306条失败直接归因于模型，也不能把一致子集749/749当作整体100%。438条遵循运行时计划，266条匹配旧Gold却偏离计划；完整SQL结构遮住日期后736/736一致，129条行数差异均多一个桶。Olist时间序列训练1,511条、structural_hard468条，整体不缺这两类；品类分组仅17条，TheLook validation事实域仍偏斜，Olist train/validation共65条风险metadata为空。下一步先明确端点语义的诊断合同；既有主模型及成绩不变，默认在线模型不变。
 
 ## 文档职责
 

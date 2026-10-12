@@ -1025,4 +1025,8 @@ smoke 的平均 train loss 0.215921、4 条 validation loss 0.150052；392 个 L
 
 固定 1,500 条分母中，Olist 750 条（736 ready、14 route rejected），TheLook 750 条（717 ready、33 route rejected）。Adapter 在 1,453 条 ready 输入上全部 EOS、全部通过 SQL Policy、reader-only 执行和 ResultContract；Gold ordered denotation 匹配为 **1,147 / 1,453（78.9%）**。其中 Olist **430 / 736（58.4%）**，剩余 177 条 denotation mismatch、129 条 row_count mismatch；TheLook **717 / 717（100%）**。Base 只有 1,041 条 EOS，412 条 length-stopped，最终 ordered match 为 41 条（另有 13 条仅 bag match）。
 
-这轮结果说明 Adapter 对输出边界、可执行性和受控结果合同有明显改善，TheLook 这组固定测试也全部匹配；但 Olist 的 306 条语义/粒度失败表明仍不能把“SQL 能执行”当作业务正确。Olist 的主要薄弱点集中在购买/评论时间序列、day/week/month/year 桶和 structural-hard 场景，后续应优先围绕时间边界、聚合 grain 和训练覆盖诊断。完整报告不保存问题、SQL、结果行或错误原文，因此不能据此宣称自由问题或线上泛化准确率。本次事实已待同步飞书项目文档。
+五项只读审计发现，Olist 704 条带时间范围的原始问题都存在 `time_range_mismatch`：运行时解析器因问题没有显式写“不含结束日”，把结束日加了一天；原 QuerySpec/Gold 却已经把原日期作为 `end_exclusive`。其中 Adapter 采用 Gold 边界的 266 条全部匹配；采用运行时边界的 438 条中 132 条结果仍匹配，剩余 177 条 denotation mismatch 与 129 条 row_count mismatch 不能直接归因于模型结构错误。Olist 端点一致的 32 条和 TheLook 端点一致的 717 条全部匹配，source-semantics-consistent 子集为 749/749，但不能替代固定分母成绩。另一个风险是 266 条虽然匹配旧 Gold，却偏离了输入中的 QueryPlan 时间上界；现有 Guard 未精确校验时间谓词，ResultContract valid 不等于遵循计划。
+
+Olist 388 条、TheLook 222 条时间序列的 DATE_TRUNC 粒度均符合请求；Olist 736 条候选在统一 Gold 最终列序、遮住日期字面量后，完整 PostgreSQL AST 736/736 一致。129 条行数差异全部恰好多一行（日43、周14、月36、季度27、年9），与结束日多纳入一个时间桶一致；未发现遗漏状态过滤、重复 JOIN 或错误聚合层级。Olist train/validation/test 的时间序列是1,511/417/388，structural_hard 主桶468/118/119，19项指标全部覆盖，family455/113/285且三对split交集均为零；没有证据支持整体时间序列训练不足。实际薄弱项是品类分组仅17/8/11，低曝光的商品/评论 scalar 程序，以及 TheLook validation 只覆盖事件/会话/注册三个指标的事实域偏斜。训练2,902条、验证728条时间样本都已显式补清排除结束日，与保持原问法的protected评测不同。
+
+本轮只读诊断没有更改来源、输入、生成、Gold或checkpoint。详细方法、分布与限制见上述实验报告，聚合hash证据在仓库外 `evals/runtime-candidate-v2-matching-final-20261011-r3/evaluation/diagnostic-audit-20261012.json`。下一项应先冻结时间语义一致的诊断合同，明确评估原标签还是实际QueryPlan编译；原76.5%固定分母结果保留并标注704条历史端点不一致，不作为干净语义准确率，不将306条受保护失败题回流SFT/DPO。
