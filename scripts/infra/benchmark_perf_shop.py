@@ -152,7 +152,7 @@ def _serialized_sizes(columns: list[str], rows: list[tuple[Any, ...]]) -> tuple[
     """Estimate transport sizes without putting the payload in model context."""
 
     json_payload = json.dumps(
-        [dict(zip(columns, row, strict=False)) for row in rows],
+        [dict(zip(columns, row)) for row in rows],
         default=str,
         ensure_ascii=False,
         separators=(",", ":"),
