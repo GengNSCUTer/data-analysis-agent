@@ -76,6 +76,7 @@
 - [`architecture/product-request-architecture-v1.md`](architecture/product-request-architecture-v1.md)：当前请求、SQL 治理、会话结果和本地模型的位置。
 - [`architecture/execution-row-cap-v1.md`](architecture/execution-row-cap-v1.md)：1,000 行执行上限下，完整与截断如何告知用户。
 - [`architecture/result-budget-v2.md`](architecture/result-budget-v2.md)：冻结 aggregate、detail_page、export 三种查询模式，以及数据库、模型上下文、前端预览和导出预算的分层设计。
+- [`architecture/result-budget-v2-performance-baseline.md`](architecture/result-budget-v2-performance-baseline.md)：100,000/1,000,000 订单 `perf_shop` 的聚合、分页、高基数分组、CSV 体积与 `EXPLAIN` 基线。
 - [`interview-qa-v1.md`](interview-qa-v1.md)：SFT、LoRA、AdamW、DPO、泄漏和 Gold denotation 的简答。
 - [`post-training/experiments/project-v1-model-card.md`](post-training/experiments/project-v1-model-card.md)：一页模型实验卡，数字回链到主模型基线。
 

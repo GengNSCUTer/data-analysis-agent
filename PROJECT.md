@@ -1054,3 +1054,9 @@ Olist 388 条、TheLook 222 条时间序列的 DATE_TRUNC 粒度均符合请求�
 新增独立 synthetic `perf_shop` workspace，不进入 Olist/TheLook Catalog，也不接入默认在线路由。构建入口为 [`scripts/infra/build_perf_shop.sh`](scripts/infra/build_perf_shop.sh)，使用确定性 `generate_series` 生成 100,000 或 1,000,000 条订单及两倍明细，独立 `perf` schema 和只读 `perf_shop_reader` 角色；manifest/schema 位于仓库外 `data-analysis-agent-data/perf/perf-shop-v1-{100000,1000000}/`。1,000,000 订单 smoke 的 aggregate、36 行月序列、200 行明细、keyset 下一页和 100,000 组高基数分组均成功；当前记录在 `perf-shop-v1-1000000/benchmark.json`，总耗时约 683ms，`EXPLAIN` 估算高基数分组约 100,945 行、总成本 68,814。该结果只证明性能/结果预算夹具可运行，不代表模型语义准确率。
 
 下一步是基于夹具测量 `EXPLAIN` 成本、分页、结果字节数和异步导出边界，再实现 QueryPlan 的分层预算字段；不会先把全局 1,000 改成更大的固定值，也不会为了性能测试再引入第三个业务数据集。相关合同 manifest 为 [`data/manifest/result-budget-v2.json`](data/manifest/result-budget-v2.json)，定向回归为 `tests/test_result_budget_contract.py`。
+
+### 2026-10-13：perf_shop 结果预算基线完成
+
+同一 `benchmark_perf_shop.py` 在 100,000 和 1,000,000 订单规模复测，证据分别位于仓库外 `perf/perf-shop-v1-100000/benchmark-v2.json` 与 `perf/perf-shop-v1-1000000/benchmark-v2.json`。1,000,000 订单下标量聚合返回 1 行、月序列 36 行、明细页 200 行并通过 sentinel 确认仍有下一页；高基数客户分组返回 100,000 行、CSV 约 889 KB，导出模拟约 346 ms。`EXPLAIN` 估算标量 1 行/成本 15,468.57，高基数分组约 100,282 行/成本 68,759.2。
+
+这组结果支持“扫描规模、业务结果基数、前端预览和模型上下文必须拆开”的设计，但不直接给出生产阈值，也不证明任意 Olist/TheLook Join 都具有相同性能。新增 [`result-budget-v2-performance-baseline.md`](docs/architecture/result-budget-v2-performance-baseline.md)；下一步仍先把 `query_mode`/预算以服务器字段接入 QueryPlan 与 ResultContract，再决定哪些聚合可完整返回。
