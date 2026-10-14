@@ -31,12 +31,12 @@ def test_result_budget_manifest_freezes_separate_modes_and_budgets() -> None:
     assert manifest["budgets"]["llm_context_rows"] == 8
     assert manifest["budgets"]["preview_rows"] == 200
     assert manifest["budgets"]["detail_page_rows_hard_cap"] == 500
-    assert manifest["current_online_compatibility"]["global_execution_cap"] == 1000
-    assert manifest["current_online_compatibility"]["global_cap_is_interim_only"] is True
+    assert manifest["current_online_compatibility"]["legacy_execution_cap"] == 1000
+    assert manifest["budgets"]["aggregate_execution_max_rows"] == 100_000
     actual = ResultBudget.aggregate()
     for key in ("preview_rows", "llm_context_rows", "llm_context_chars"):
         assert getattr(actual, key) == manifest["budgets"][key]
-    assert actual.execution_max_rows == manifest["current_online_compatibility"]["global_execution_cap"]
+    assert actual.execution_max_rows == manifest["current_online_compatibility"]["legacy_execution_cap"]
 
 
 def test_perf_shop_fixture_is_isolated_from_business_workspaces() -> None:
@@ -117,7 +117,7 @@ def test_partial_mutated_or_drifted_metadata_is_rejected(mutation):
         validate_runtime_result_budget(metadata, expected=ResultBudget.aggregate())
 
 
-@pytest.mark.parametrize("failure", ["page", "export", "missing_pair", "validator_drift"])
+@pytest.mark.parametrize("failure", ["page", "export", "missing_pair", "ceiling_drift"])
 def test_runner_stops_before_policy_and_reader_and_audits_budget_rejection(monkeypatch, failure):
     from data_analysis_agent import postgres_runner
 
@@ -131,8 +131,8 @@ def test_runner_stops_before_policy_and_reader_and_audits_budget_rejection(monke
     metadata = budget_metadata(budget)
     if failure == "missing_pair":
         metadata.pop("query_plan")
-    if failure == "validator_drift":
-        runner.result_validator.display_row_budget = 100
+    if failure == "ceiling_drift":
+        metadata = budget_metadata(ResultBudget.aggregate(execution_max_rows=200_000))
     context = ToolContext(
         user=User(id="budget-test", group_memberships=["analyst"]),
         conversation_id="budget-test", request_id="budget-test",

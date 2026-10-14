@@ -131,7 +131,10 @@ class SqlPolicy:
         self.sql_dialect = workspace.sql_dialect if workspace else "postgres"
         self.all_columns = frozenset().union(*self.analytics_columns.values())
 
-    def evaluate(self, sql: str, role: str = "analyst") -> PolicyDecision:
+    def evaluate(
+        self, sql: str, role: str = "analyst", *, result_limit: int | None = None,
+        complete_result: bool = False, top_n: int | None = None,
+    ) -> PolicyDecision:
         if role not in self.limits:
             raise PolicyViolation(f"unsupported role: {role}")
         if not sql.strip():
@@ -246,7 +249,15 @@ class SqlPolicy:
             if function_name in FORBIDDEN_FUNCTIONS:
                 raise PolicyViolation(f"function is not allowed: {function_name}")
 
-        maximum = self.limits[role]
+        maximum = result_limit if result_limit is not None else self.limits[role]
+        if complete_result:
+            # An incidental model LIMIT/OFFSET is presentation pagination, not
+            # business semantics. Complete aggregates are bounded by the plan;
+            # explicit rankings instead use the server-confirmed Top-N.
+            statement.set("offset", None)
+            statement.set("limit", None)
+            if top_n is not None:
+                statement = statement.limit(top_n)
         limit_expression = statement.args.get("limit")
         if limit_expression is None:
             statement = statement.limit(maximum)

@@ -61,7 +61,7 @@ async def test_runner_executes_allowed_query_and_audits_policy_rejection() -> No
     runner = SecurePostgresRunner()
     context = make_context(user_id)
     envelope = ResultBudget.aggregate().as_metadata()
-    context.metadata.update({**envelope, "query_plan": envelope})
+    context.metadata.update({**envelope, "query_plan": {**envelope, "top_n": {"customer_state": 5}}})
 
     dataframe = await runner.run_sql(
         RunSqlToolArgs(

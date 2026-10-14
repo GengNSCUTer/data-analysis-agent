@@ -769,6 +769,58 @@ def test_embeddable_copilot_shell_is_mobile_safe(page) -> None:
     assert not console_errors
 
 
+@pytest.mark.parametrize("width", [1440, 390])
+def test_result_browser_pages_without_new_sql_or_model_calls(page, width) -> None:
+    from urllib.parse import parse_qs, urlparse
+
+    browser_page, console_errors = page
+    browser_page.set_viewport_size({"width": width, "height": 960})
+    _login(browser_page)
+    browser_page.add_init_script("localStorage.setItem('data-analysis-agent-embeddable-conversation-v1', 'paging-test')")
+    cursors = []
+
+    def result_response(route):
+        path = urlparse(route.request.url)
+        if path.path.endswith("/rows"):
+            cursor = int(parse_qs(path.query)["cursor"][0])
+            cursors.append(cursor)
+            end = min(405, cursor + 200)
+            payload = {
+                "columns": ["city", "orders"], "rows": [{"city": "城市" + str(n), "orders": n} for n in range(cursor, end)],
+                "cursor": cursor, "page_rows": end - cursor, "total_rows": 405,
+                "has_next_page": end < 405, "next_cursor": end if end < 405 else None,
+                "previous_cursor": max(0, cursor - 200) if cursor else None,
+            }
+            payload["rows"][0]["city"] = "<img src=x onerror=alert(1)>"
+        else:
+            payload = {"messages": [], "charts": [], "trusted_result_artifact": {"artifact_id": "paging-artifact"}}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
+
+    browser_page.route("**/api/project/conversations/paging-test**", result_response)
+    browser_page.goto(f"{BASE_URL}/embedded-copilot", wait_until="networkidle")
+    browser_page.evaluate("document.querySelector('vanna-chat').setConversationId('paging-test')")
+    browser_page.locator(".more-menu summary").click()
+    browser_page.locator("#browse-result").click()
+    browser_page.wait_for_function("() => document.querySelector('#result-page-status').textContent.includes('1–200')", timeout=5000)
+    assert browser_page.locator("#result-page-table tbody tr").count() == 200
+    assert browser_page.locator("#result-page-table img").count() == 0
+    assert browser_page.locator("#result-page-prev").is_disabled()
+    browser_page.locator("#result-page-next").click()
+    browser_page.wait_for_function("() => document.querySelector('#result-page-status').textContent.includes('201–400')")
+    browser_page.locator("#result-page-next").click()
+    browser_page.wait_for_function("() => document.querySelector('#result-page-status').textContent.includes('401–405')")
+    assert browser_page.locator("#result-page-table tbody tr").count() == 5
+    assert browser_page.locator("#result-page-next").is_disabled()
+    browser_page.locator("#result-page-prev").click()
+    browser_page.wait_for_function("() => document.querySelector('#result-page-status').textContent.includes('201–400')")
+    assert cursors == [0, 200, 400, 200]
+    dialog = browser_page.locator("#result-browser").bounding_box()
+    assert dialog["x"] >= 0 and dialog["x"] + dialog["width"] <= width
+    browser_page.locator("#result-page-close").click()
+    assert browser_page.locator("#result-browser").is_hidden()
+    assert not console_errors
+
+
 def test_mobile_window_is_adaptive_without_horizontal_overflow(page) -> None:
     browser_page, console_errors = page
     browser_page.set_viewport_size({"width": 390, "height": 844})

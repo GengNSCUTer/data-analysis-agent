@@ -381,6 +381,7 @@ class QuestionRouter:
         retriever: CatalogRetriever,
         *,
         max_result_rows: int = DEFAULT_ANALYST_RESULT_LIMIT,
+        full_results: bool = False,
     ):
         if max_result_rows <= 0:
             raise ValueError("max_result_rows must be positive")
@@ -389,6 +390,7 @@ class QuestionRouter:
         # deliberately kept in ResultValidator/RunSqlTool and is not used to
         # reject a safe grouped query.
         self.max_result_rows = max_result_rows
+        self.full_results = full_results
 
     def classify(
         self,
@@ -751,6 +753,7 @@ class QuestionRouter:
             state,
             max_result_rows=self.max_result_rows,
             workspace=workspace,
+            full_results=self.full_results,
         )
         if not preflight.allowed:
             return QuestionRoute(

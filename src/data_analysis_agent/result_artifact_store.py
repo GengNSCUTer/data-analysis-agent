@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 from hashlib import sha256
 import json
+from itertools import islice
 import os
 from pathlib import Path
 import tempfile
@@ -42,7 +43,10 @@ class ResultArtifactStore:
         ) as handle:
             writer = csv.DictWriter(handle, fieldnames=names, extrasaction="ignore")
             writer.writeheader()
-            for row in rows:
+            page_offsets = []
+            for index, row in enumerate(rows):
+                if index % 200 == 0:
+                    page_offsets.append(handle.tell())
                 writer.writerow({name: _csv_value(row.get(name)) for name in names})
             temp_name = handle.name
         os.replace(temp_name, path)
@@ -59,6 +63,8 @@ class ResultArtifactStore:
             "csv_sha256": digest,
             "csv_bytes": size,
             "csv_ref": "result.csv",
+            "page_index_stride": 200,
+            "page_offsets": page_offsets,
             "plotly_ref": None,
         }
         self._write_json_atomic(scope / "manifest.json", manifest)
@@ -183,6 +189,48 @@ class ResultArtifactStore:
             artifact_id=artifact_id, user_id=user_id, workspace_id=workspace_id
         )
         return self._scope(user_id, workspace_id, artifact_id) / "result.csv"
+
+    def read_csv_page(
+        self, *, artifact_id: str, user_id: str, workspace_id: str,
+        cursor: int = 0, page_size: int = 200,
+    ) -> dict[str, Any]:
+        """Read a stable page from an immutable verified result, never rerun SQL.
+
+        The cursor is a row position in this artifact, not OFFSET in a live
+        database. A sparse byte index avoids rereading deep preceding pages.
+        """
+        if cursor < 0 or not 1 <= page_size <= 500:
+            raise ValueError("cursor must be nonnegative and page size must be 1..500")
+        manifest = self.verify_manifest(
+            artifact_id=artifact_id, user_id=user_id, workspace_id=workspace_id,
+        )
+        total = manifest["row_count"]
+        rows = []
+        if cursor < total:
+            path = self._scope(user_id, workspace_id, artifact_id) / "result.csv"
+            with path.open(encoding="utf-8", newline="") as handle:
+                offsets = manifest.get("page_offsets")
+                block = cursor // 200
+                if offsets:
+                    handle.seek(offsets[block])
+                    reader = csv.DictReader(handle, fieldnames=manifest["columns"])
+                    skip = cursor % 200
+                else:
+                    # Old artifacts have at most the old bounded result size.
+                    reader = csv.DictReader(handle)
+                    skip = cursor
+                rows = list(islice(reader, skip, skip + page_size))
+        next_cursor = cursor + len(rows)
+        return {
+            "query_mode": "detail_page", "result_status": "detail_page",
+            "artifact_id": artifact_id, "columns": manifest["columns"], "rows": rows,
+            "total_rows": total, "cursor": cursor, "page_rows": len(rows),
+            "page_size": page_size, "has_next_page": next_cursor < total,
+            "next_cursor": next_cursor if next_cursor < total else None,
+            "previous_cursor": max(0, cursor - page_size) if cursor > 0 else None,
+            "dataset_version": manifest["dataset_version"],
+            "metric_version": manifest["metric_version"],
+        }
 
     @staticmethod
     def _verify_file(

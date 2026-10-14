@@ -35,6 +35,7 @@
 - 受保护 holdout 不得作为训练、验证、in-domain test、few-shot 或合成种子。切分时按 `family_id`/程序族隔离，日期、措辞、别名等表面变体不得跨 split。
 - Gold SQL 的业务公式来自冻结 Catalog/指标合同和 deterministic renderer；模型候选仍必须经过 SqlPolicy、reader role、ResultContract/ResultValidator，不能以训练数据绕过运行时治理。
 - 后训练的 `adapter_best` 只能由训练期 validation 的预先冻结指标选择；protected final test 只评测这个预选 adapter 一次。`adapter_final` 仅保留作训练末步诊断，不能作为默认评测目标或在看到 final test 后替换 headline 模型。若历史实验没有可回读的 validation-best checkpoint，则只能标为历史诊断，不补选、不重跑 final test。
+- 默认不新增 hash、冻结 contract、baseline 或 gate。只有能明确说出一个具体失败场景，并说明 Git、版本号、主键、事务、唯一约束、类型和普通测试为什么不足时，才允许加入。同时保留安全边界：不删除已有安全措施；认证、数据安全、不可逆操作和正式发布等高风险环节，仍然按照项目要求处理
 
 ## 5. 项目架构边界
 
@@ -72,7 +73,7 @@
 - 每条训练行必须能追溯到 QuerySpec、Gold SQL、Prompt 版本、workspace 快照、split 和长度统计。
 - 不静默截断 Prompt 或 SQL；超长样本进入脱敏 exclusion manifest，除非合同明确允许并记录原因。
 - 中等规模数据必须同时报告行数、QuerySpec 数、family 数、程序族覆盖和每个 split 的哈希；行数不能替代独立语义能力。
-- 对后续新生成或新准入的数据，数据库执行上限固定为 1,000 行，UI 预览预算固定为 200 行：201--999 行是完整执行且只标记 `display_truncated=true`。策略把语句收到 1,000 行时内部多读一行判断是否还有数据，该行不进入结果、摘要、图表、下载或模型上下文；多读到则标执行截断，正好 1,000 行且没有多余行则视为完整。模型自己写了不超过上限的 `LIMIT` 时按该上限返回，不把满限当成执行截断。未做多读判断的调用方仍可把“达到 1,000 行”保守标为可能截断。受保护历史评测若已冻结不同的完整-denotation 行数合同，保持其原合同，不迁移或重写。
+- 在线 aggregate 按服务端 QueryPlan 的维度/时间/明确 Top-N 派生结果行数预算，并服从进程行数、字节和超时兜底；不把全局 1,000 行当作业务完整性合同。资源 LIMIT 多读一行判断是否溢出，探测行不进入结果、工件或模型。聚合超界不返回部分统计；模型附加的顶层 LIMIT/OFFSET 不代替用户明确 Top-N。UI 初始预览固定 200，模型摘要最多 8 行/1,200 字符；分页与完整 CSV 读取同一已验证工件并检查用户/workspace/version。冻结离线数据和历史完整-denotation 合同保持原行数与协议，不随在线预算修改而重写。
 - 自动生成的大批量样本使用确定性 renderer 和全量确定性契约检查；对高风险指标/粒度做分层人工或模型辅助抽样，不为低风险重复样本逐条制造昂贵人工流程。
 - Olist SQL-only 扩展必须按闸门推进：先冻结新增指标合同，再冻结 family/program 配额，再冻结受控中文 surface contract；只有小批 QuerySpec/Gold 准入、语义身份和 split 审计通过后，才允许物化完整 train/validation/test。中文改写不增加 family 计数，日期窗口不替代独立程序覆盖。
 

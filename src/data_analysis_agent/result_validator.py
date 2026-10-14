@@ -201,6 +201,7 @@ class ResultValidator:
         requested_end_exclusive: bool = False,
         limit_applied: bool = False,
         execution_truncated: bool | None = None,
+        complete_required: bool = False,
         join_multiplicity: Mapping[str, int] | None = None,
         exact_columns: bool = False,
         metric_value_constraints: Mapping[str, Mapping[str, float | bool]] | None = None,
@@ -318,6 +319,12 @@ class ResultValidator:
             else execution_truncated
         )
         if reached_cap:
+            if complete_required:
+                return ResultValidation(
+                    "needs_clarification",
+                    "聚合分组超过本次结果合同，未将截取的分组当作完整统计。请减少维度、缩小时间范围或明确 Top-N。",
+                    len(frame), columns, truncated=True,
+                )
             if execution_truncated is True:
                 shape_notes.append(
                     f"结果超过执行上限 {self.max_rows} 行，已只返回前 {self.max_rows} 行。"

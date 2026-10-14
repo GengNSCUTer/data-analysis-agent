@@ -168,12 +168,13 @@
 例如“按客户州统计有效订单数”，底层可能读取十万条订单，但只返回几十行州统计。
 `execution_max_rows` 数的是返回行，不是读过的事实行；`preview_rows` 控制浏览器一次
 看到多少行；`llm_context_rows` 控制模型摘要取多少行。这几个数字不能互相代替。
-本轮 aggregate 的完整结果基数仍暂时等于 1,000，拆字段是后续改行为的前提，不代表已经放开限制。
+在线 aggregate 已按结果形态派生基数；例如一年按日 × 27 州最多 9,855 组。
+进程兜底默认 100,000 行/32 MiB，不能代替每个业务请求的基数合同；旧离线合同保持原值。
 
 本次亲自阅读三个位置即可：
 
 1. `src/data_analysis_agent/result_budget.py:ResultBudget.aggregate()`：从服务端配置生成
-   一份不可变预算。例如执行 1,000、预览 200、摘要 8 行/1,200 字符。
+   一份不可变预算。在线资源兜底为 100,000，计划再收紧到业务基数；预览 200、摘要 8 行/1,200 字符。
 2. `src/data_analysis_agent/chat_runtime.py:BudgetedChatHandler.handle_stream()`：浏览器
    传来的模式/预算/计划先删掉；已准入的指标请求得到服务端预算，同一份传给
    QueryPlan 和 ResultContract。问题和 Catalog 负责业务含义，预算负责执行资源。
@@ -193,5 +194,28 @@ ResultValidator 用代码检查列、类型、范围和完整性等合同，比�
 直接 `AVG(price)` 是平均商品行价格。识别这类错误需要核对 Catalog、SQL 的聚合粒度
 以及独立 Gold 结果，不能只看列名叫 AOV 或结果为正数。
 
-当前仍不因实现完成而宣称学习段完成；下一小段围绕 aggregate 的完整返回与 Top-N
-继续读代码。分页和异步导出到各自小单元再讲，先掌握预算的来源与核对位置。
+实现不等于已经学完；结果预算专题已收尾，接着原 Day 1 的工具执行到可信结果小段。
+
+### Day 1 继续：一次 SQL 调用怎样变成可引用的结果
+
+这段只阅读三处：`trusted_sql_tool.py:TrustedRunSqlTool.execute()`、
+`postgres_runner.py:SecurePostgresRunner._run_sql_sync()`、
+`result_validator.py:ResultValidator.validate()`。先看调用关系和返回值，不用逐行通读文件。
+
+模型提出 `run_sql(sql=...)` 工具调用。TrustedRunSqlTool 接收调用，Runner 先过 AST
+策略，再用 PostgreSQL 只读角色执行；ResultValidator 对结果列、时间、值域及完整性
+做确定性检查。通过后完整结果保存为 ResultArtifact，初始表格只拿 200 行，模型只拿
+最多 8 行/1,200 字符摘要。用户浏览下一页或下载 CSV 都读这个工件，不再调用模型，
+也不重新查数据库，因此它们引用的是同一次已经验证的结果。
+
+要区分三层：SQL 能运行，只证明数据库接受语句；合同通过，证明返回结果符合可检查的
+结构与约束；业务正确，还要证明筛选、Join 和聚合粒度符合指标定义。例如把
+`AVG(price)` 错当客单价，即便列别名叫 `average_order_value` 且数值为正，也不能
+仅凭 ResultValidator 证明正确，需要核对“先按订单求金额、再对订单平均”的口径。
+
+接下来用户阅读代码后复述两点：
+
+1. 5,000 行完整结果只展示 200 行，与执行只拿到前 200 行，为什么不同？
+2. SQL 能执行、列名也正确，为什么仍可能把客单价算错？哪一层能提供哪些证据？
+
+尚未完成闭卷链路复述，Day 1 不标记完成；此后不再自动插入新训练或完整评测。

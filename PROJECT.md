@@ -1092,3 +1092,36 @@ Catalog 指标 aggregate，默认仍执行 1,000 行/5,000ms、前端预览 200 
 
 本轮事实已用 lark-doc 同步飞书项目文档 revision 269，并局部回读确认；同时定向修正
 上一条性能基线记录对已有 CSV 下载能力的过时描述。
+
+## 2026-10-14｜结果预算收尾，回到四周学习计划
+
+在线完整 aggregate 不再统一卡在 1,000 行。Router/QueryPlan 按维度基数、时间桶、
+明确 Top-N 派生本次预算；进程兜底默认 100,000 行、32 MiB 估算 JSON 字节、5,000ms。
+SqlPolicy 保留 AST/表列/敏感投影检查，替换模型附加的顶层 LIMIT/OFFSET；明确 Top-N
+由服务端计划决定。Runner 使用 PostgreSQL named cursor，每批最多 1,000 行，
+资源 LIMIT 多读一行判断真实溢出；完整聚合超界返回 needs_clarification，不把部分结果
+当作正常统计。冻结历史离线协议与数据不迁移。
+
+完整验证结果保存在 CSV 工件，新增每 200 行的稀疏索引及鉴权 rows 接口；网页
+“更多 → 分页查看完整结果”显示行范围/总行数，支持上一页和下一页，默认 200、接口最多
+500 行。分页和现有审计 CSV 下载都读取同一验证工件，不重新执行 SQL、不调用模型。
+保持初始 Presenter 200 行、模型摘要最多 8 行/1,200 字符，权限/版本/完整性隔离不变。
+
+百万订单 perf_shop 的生产 Runner 六场景通过：汇总 1 行、日统计 1,095 行、候选自带
+LIMIT 1000 的分组完整返回 100,000 行、明确 Top-5 返回 5 行、基数或字节超界拒绝。
+10 万行结果 CSV 为 988,920 字节，估算 JSON 为 4,188,897 字节，摘要仅 338 字符；
+完整分组含工件保存和首尾页核验约 2.14 秒。单次本机测量不代表并发 SLA 或模型准确率。
+性能夹具使用真实只读登录、内存审计；产品审计/下载另由真实 PostgreSQL 路由测试覆盖。
+原始证据位于仓库外 `perf/perf-shop-v1-1000000/runtime-v2-final.json`，
+可复跑脚本为 `scripts/infra/benchmark_perf_shop_runtime.py`。
+
+验收为 212 项 Python 定向回归通过，包含 SQL/结果合同/历史候选协议/工件/真实 PostgreSQL/认证下载与隔离；
+桌面和手机的新增浏览器分页 2 项通过，当前壳移动端布局另 1 项通过。定向 Ruff 与
+diff check 通过。旧常驻页面综合浏览器套件的菜单与旧宽度断言不作为本轮通过证据，
+本轮用隔离服务测试实际新增页面，未改动无关 UI 基线或停止用户常驻服务。
+
+合同与 manifest 已更新为 implemented，AGENTS 只记录稳定在线/离线边界，未记录进度。
+飞书项目文档已同步至 revision 271。未创建任意原始敏感明细 SQL、异步导出平台、
+EXPLAIN 成本门，未启动新模型训练/终测。本专题结束，按照
+`plan/process-agent-internship-improvement-v1.md` 回到 Day 1 的工具执行、结果校验和
+可信依据；学习记入 `docs/learning/agent-project-walkthrough-v1.md`，不自动标记学完。

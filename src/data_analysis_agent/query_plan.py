@@ -80,6 +80,30 @@ _TOP_N_DIMENSIONS: dict[str, int] = {
 }
 _RANKING_CATEGORY_LIMIT = 20
 _NON_DISPLAYABLE_DIMENSIONS = frozenset({"seller_id"})
+_FULL_DIMENSION_CARDINALITY = {"customer_city": 4_119, "seller_city": 612}
+_EXPLICIT_TOP_N = re.compile(r"(?:前|top\s*)(\d+|[零〇一二两三四五六七八九十百千万]+)", re.IGNORECASE)
+
+
+def requested_top_n(question: str) -> int | None:
+    match = _EXPLICIT_TOP_N.search(question)
+    if match is None:
+        return None
+    text = match.group(1)
+    if text.isdigit():
+        return int(text)
+    digits = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    units = {"十": 10, "百": 100, "千": 1_000}
+    total, section, digit = 0, 0, 0
+    for character in text:
+        if character == "万":
+            total += (section + digit or 1) * 10_000
+            section, digit = 0, 0
+        elif character in units:
+            section += (digit or 1) * units[character]
+            digit = 0
+        else:
+            digit = digits[character]
+    return total + section + digit
 
 # These are server-owned display-cardinality bounds, not database statistics
 # inferred at request time.  A new workspace must explicitly declare/replace
@@ -210,6 +234,7 @@ class QueryPlan:
         *,
         max_result_rows: int = DEFAULT_ANALYST_RESULT_LIMIT,
         workspace: WorkspaceProfile | None = None,
+        full_results: bool = False,
     ) -> QueryPlanPreflight:
         """Reject query shapes the configured execution contract cannot bound.
 
@@ -249,6 +274,8 @@ class QueryPlan:
                 continue
             if dimension in configured_bindings:
                 estimated_rows *= configured_bindings[dimension].max_cardinality
+            elif full_results and dimension in _FULL_DIMENSION_CARDINALITY:
+                estimated_rows *= _FULL_DIMENSION_CARDINALITY[dimension]
             elif dimension in _TOP_N_DIMENSIONS:
                 estimated_rows *= _TOP_N_DIMENSIONS[dimension]
             else:
@@ -257,6 +284,11 @@ class QueryPlan:
                 )
         if ranking_bound is not None:
             estimated_rows *= ranking_bound
+        top_n_request = requested_top_n(question)
+        if full_results and top_n_request is not None and len(dimensions) == 1 and not time_grain:
+            if top_n_request <= 0:
+                return QueryPlanPreflight(False, "invalid_top_n", "Top-N 必须是正整数。")
+            estimated_rows = min(estimated_rows, top_n_request)
         if time_grain:
             series_state = state
             if not resolved_range and workspace and workspace.fact_date_counts:
@@ -360,9 +392,13 @@ class QueryPlan:
         top_n = tuple(
             (dimension, limit)
             for dimension, limit in _TOP_N_DIMENSIONS.items()
-            if dimension in dimensions and not (selection.workspace and selection.workspace.dimension_bindings)
+            if dimension in dimensions and result_budget is None
+            and not (selection.workspace and selection.workspace.dimension_bindings)
         )
-        if ranking_bound == _RANKING_CATEGORY_LIMIT:
+        top_n_request = requested_top_n(question)
+        if result_budget is not None and top_n_request and len(dimensions) == 1 and not time_grain:
+            top_n = ((dimensions[0], top_n_request),)
+        if ranking_bound == _RANKING_CATEGORY_LIMIT and (result_budget is None or top_n_request is None):
             top_n = (*top_n, ("product_category_name", _RANKING_CATEGORY_LIMIT))
         attribution_requirements = tuple(
             AttributionRequirement(
@@ -376,6 +412,15 @@ class QueryPlan:
             for dimension in dimensions
             if (policy := metric.dimension_policies.get(dimension)) is not None
         )
+
+        if result_budget is not None:
+            bound = cls.preflight(
+                metrics, question, state, max_result_rows=result_budget.execution_max_rows,
+                workspace=selection.workspace, full_results=True,
+            )
+            if not bound.allowed:
+                raise ValueError(bound.clarification)
+            result_budget = result_budget.for_result_rows(bound.estimated_max_rows)
 
         return cls(
             plan_type=plan_type,

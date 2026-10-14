@@ -161,6 +161,7 @@
           <div class="more-panel">
             <button class="action" id="evidence-toggle" type="button" aria-expanded="false">查看依据</button>
             <button class="action" id="download-result" type="button">下载完整结果</button>
+            <button class="action" id="browse-result" type="button">分页查看完整结果</button>
             <button class="action" id="save-analysis" type="button">保存本次分析</button>
             <button class="action" id="clear-analysis" type="button">清空分析上下文</button>
             <button class="action" id="admin-toggle" type="button" aria-pressed="false">管理</button>
@@ -265,6 +266,15 @@
         <button class="action primary" id="login-submit" type="submit">登录</button>
       </form>
     </div>
+    <dialog id="result-browser" style="width:min(900px,calc(100vw - 32px));max-height:80vh;border:1px solid #dbe1e8;border-radius:12px;padding:16px">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <strong>已验证结果</strong><span id="result-page-status" role="status"></span>
+        <button class="action" id="result-page-prev" type="button">上一页</button>
+        <button class="action" id="result-page-next" type="button">下一页</button>
+        <button class="action" id="result-page-close" type="button">关闭</button>
+      </div>
+      <div id="result-page-table" style="overflow:auto;max-height:65vh;margin-top:12px"></div>
+    </dialog>
     <script>
       const chat = document.querySelector("vanna-chat");
       const conversationStorageKey = "data-analysis-agent-embeddable-conversation-v1";
@@ -275,6 +285,13 @@
       const clearAnalysis = document.querySelector("#clear-analysis");
       const saveAnalysis = document.querySelector("#save-analysis");
       const downloadResult = document.querySelector("#download-result");
+      const resultBrowser = document.querySelector("#result-browser");
+      const pageStatus = document.querySelector("#result-page-status");
+      const pageTable = document.querySelector("#result-page-table");
+      const pagePrev = document.querySelector("#result-page-prev");
+      const pageNext = document.querySelector("#result-page-next");
+      let resultPageScope = null;
+      let resultPage = null;
       const logout = document.querySelector("#logout");
       const loginGate = document.querySelector("#login-gate");
       const loginForm = document.querySelector("#login-form");
@@ -477,6 +494,64 @@
           diagnostics.textContent = "运行计数暂时读不到。";
         }
       }
+      async function loadResultPage(cursor) {
+        pagePrev.disabled = pageNext.disabled = true;
+        pageStatus.textContent = "正在读取…";
+        try {
+          const scope = resultPageScope;
+          const response = await fetch(
+            `/api/project/conversations/${encodeURIComponent(scope.conversationId)}/artifacts/${encodeURIComponent(scope.artifactId)}/rows?cursor=${cursor}&page_size=200`,
+            withAuth()
+          );
+          if (!response.ok) throw new Error("结果不可读取，请确认会话、登录状态或数据版本。");
+          const body = await response.json();
+          resultPage = body;
+          const table = document.createElement("table");
+          table.style.cssText = "width:100%;border-collapse:collapse;font-size:13px";
+          const head = table.createTHead().insertRow();
+          for (const column of body.columns) {
+            const cell = document.createElement("th");
+            cell.textContent = column;
+            cell.style.cssText = "text-align:left;padding:8px;border-bottom:1px solid #ddd";
+            head.append(cell);
+          }
+          const tbody = table.createTBody();
+          for (const row of body.rows) {
+            const tr = tbody.insertRow();
+            for (const column of body.columns) {
+              const cell = tr.insertCell();
+              cell.textContent = row[column] ?? "";
+              cell.style.cssText = "padding:8px;border-bottom:1px solid #eee;white-space:nowrap";
+            }
+          }
+          pageTable.replaceChildren(table);
+          pageStatus.textContent = `第 ${body.page_rows ? body.cursor + 1 : 0}–${body.cursor + body.page_rows} 行 / 共 ${body.total_rows} 行`;
+          pagePrev.disabled = body.previous_cursor === null;
+          pageNext.disabled = !body.has_next_page;
+        } catch (error) {
+          pageTable.replaceChildren();
+          pageStatus.textContent = error.message || "结果读取失败。";
+        }
+      }
+      document.querySelector("#browse-result").addEventListener("click", async () => {
+        const conversationId = currentConversationId();
+        if (!conversationId) return showAnalysisNotice("当前没有已验证的查询结果。");
+        try {
+          const response = await fetch(`/api/project/conversations/${encodeURIComponent(conversationId)}`, withAuth());
+          const body = await response.json();
+          const artifact = body.trusted_result_artifact;
+          if (!response.ok || !artifact?.artifact_id) return showAnalysisNotice("当前没有已验证的查询结果。");
+          resultPageScope = { conversationId, artifactId: artifact.artifact_id };
+          resultBrowser.showModal();
+          await loadResultPage(0);
+        } catch (_) {
+          showAnalysisNotice("结果暂时读不到，请稍后再试。");
+        }
+      });
+      pagePrev.addEventListener("click", () => loadResultPage(resultPage.previous_cursor));
+      pageNext.addEventListener("click", () => loadResultPage(resultPage.next_cursor));
+      document.querySelector("#result-page-close").addEventListener("click", () => resultBrowser.close());
+
       downloadResult.addEventListener("click", async () => {
         const conversationId = currentConversationId();
         if (!conversationId) {

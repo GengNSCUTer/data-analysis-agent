@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import secrets
 from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict
@@ -196,7 +197,8 @@ def create_app() -> FastAPI:
     )
     question_router = QuestionRouter(
         catalog_retriever,
-        max_result_rows=settings.max_rows,
+        max_result_rows=settings.max_aggregate_rows,
+        full_results=True,
     )
     # A process-local fallback keeps this public demo usable without adding a
     # secret to source control. Restarts invalidate old cookies by design.
@@ -328,8 +330,9 @@ def create_app() -> FastAPI:
             workspace=OLIST_RUNTIME_WORKSPACE,
             result_artifact_store=result_artifact_store,
             result_budget=ResultBudget.aggregate(
-                execution_max_rows=settings.max_rows,
+                execution_max_rows=settings.max_aggregate_rows,
                 statement_timeout_ms=settings.statement_timeout_ms,
+                result_max_bytes=settings.max_result_bytes,
             ),
             catalog_grounder=ConstrainedCatalogGrounder(
                 question_router.retriever.catalog,
@@ -526,6 +529,32 @@ def create_app() -> FastAPI:
         except (FileNotFoundError, PermissionError, ResultArtifactIntegrityError, ValueError):
             return JSONResponse({"detail": "artifact not found"}, status_code=404)
         return JSONResponse(manifest)
+
+    @app.get("/api/project/conversations/{conversation_id}/artifacts/{artifact_id}/rows")
+    async def result_artifact_rows(
+        conversation_id: str, artifact_id: str, request: Request,
+        cursor: int = Query(default=0, ge=0), page_size: int = Query(default=200, ge=1, le=500),
+    ):
+        user = await role_resolver.resolve_user(_request_user_context(request))
+        try:
+            conversation = await conversation_store.get_conversation(conversation_id, user)
+        except InvalidConversationId as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        artifact = current_result_artifact(conversation, OLIST_RUNTIME_WORKSPACE) if conversation else None
+        if artifact is None or artifact.artifact_id != artifact_id:
+            return JSONResponse({"detail": "artifact not found"}, status_code=404)
+        try:
+            page = await asyncio.to_thread(
+                result_artifact_store.read_csv_page,
+                artifact_id=artifact_id, user_id=user.id,
+                workspace_id=OLIST_RUNTIME_WORKSPACE.workspace_id,
+                cursor=cursor, page_size=page_size,
+            )
+        except FileNotFoundError:
+            return JSONResponse({"detail": "artifact not found"}, status_code=404)
+        except ResultArtifactIntegrityError:
+            return JSONResponse({"detail": "artifact integrity check failed"}, status_code=409)
+        return JSONResponse(page)
 
     user_memory = UserMemoryStore(settings)
     runtime_diagnostics = RuntimeDiagnostics(settings)

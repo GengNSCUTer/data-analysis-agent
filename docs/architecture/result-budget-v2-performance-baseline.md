@@ -6,6 +6,37 @@ date: 2026-10-13
 
 # Result Budget v2 Performance Baseline
 
+## Production runner closure — 2026-10-14
+
+The earlier measurements below used direct SQL. This final check additionally
+uses `SecurePostgresRunner`, its AST policy, a real readonly login, named cursor,
+byte/time limits, ResultValidator and bounded model summary on the existing
+1,000,000-order fixture. It does not rebuild business databases or call a model.
+The fixture has no app metadata tables; audit records are captured in memory.
+Real application audit, login and export behavior are covered separately by the
+PostgreSQL integration and authenticated route tests.
+
+| Check | Output | Elapsed (single local run) |
+| --- | ---: | ---: |
+| Count all 1m orders | 1 complete row | 110 ms |
+| Daily aggregation | 1,095 complete rows; preview truncated only | 396 ms |
+| Group by customer; candidate has LIMIT 1000 | 100,000 complete rows | 2,140 ms, including CSV save and first/last page reads |
+| Server-declared Top-5 | 5 complete rows | 13 ms |
+| Groups exceed request bound of 1000 | needs_clarification; no partial frame | 25 ms |
+| Payload exceeds test byte budget of 1024 | needs_clarification; no partial frame | 16 ms |
+
+The 100k-group result uses 4,188,897 estimated JSON bytes and a 988,920-byte CSV.
+Its summary is 338 characters; first/last pages are 200 rows, ending at customer
+100000. SHA-256 is
+`3caf5d4b95fa49e9e4ba85111c20ea7147dad40da97cc174f351ec116cdb1890`.
+Sparse row offsets avoid parsing all preceding CSV rows on deep pages; file
+integrity verification still reads the complete file.
+
+Reproduce with `scripts/infra/benchmark_perf_shop_runtime.py --output <external-json>`
+under the runtime Conda environment. Full measured evidence:
+`/disk2/gengnan/data-analysis-agent-data/perf/perf-shop-v1-1000000/runtime-v2-final.json`.
+These timings are neither a concurrency benchmark nor a production SLA.
+
 ## Test scope
 
 This is a database and transport benchmark for the synthetic `perf_shop`

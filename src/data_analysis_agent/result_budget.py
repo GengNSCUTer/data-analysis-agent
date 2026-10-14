@@ -1,12 +1,12 @@
 """Server-owned execution envelopes, separate from SQL semantic inputs.
 
-Only aggregate execution is enabled in this migration step. The other modes
-can be represented and audited, but cannot fall through to ordinary run_sql.
+SQL execution returns complete aggregates. Pages and CSV downloads read an
+existing validated artifact and cannot fall through to ordinary run_sql.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Literal, Mapping
 
 
@@ -22,9 +22,8 @@ class ResultBudgetError(ValueError):
 class ResultBudget:
     """Immutable per-request budget; counts never describe fact scan rows.
 
-    aggregate_result_rows is still the interim execution cap in this step.
-    It is not a measured production cardinality threshold. detail_page/export
-    require their own execution paths before they can be enabled.
+    aggregate_result_rows is the plan's output cardinality bound, independent
+    of the process ceiling. detail_page/export are artifact delivery modes.
     """
 
     query_mode: QueryMode = "aggregate"
@@ -37,6 +36,7 @@ class ResultBudget:
     preview_rows: int = 200
     llm_context_rows: int = 8
     llm_context_chars: int = 1_200
+    result_max_bytes: int = 32 * 1024 * 1024
 
     def __post_init__(self) -> None:
         if self.contract_id != RESULT_BUDGET_CONTRACT_ID:
@@ -47,6 +47,7 @@ class ResultBudget:
             "execution_max_rows", "statement_timeout_ms", "preview_rows",
             "llm_context_rows", "llm_context_chars", "aggregate_result_rows",
             "detail_page_rows", "export_max_bytes",
+            "result_max_bytes",
         ):
             value = getattr(self, name)
             if value is None and name in (
@@ -72,14 +73,20 @@ class ResultBudget:
 
     @classmethod
     def aggregate(
-        cls, *, execution_max_rows: int = 1_000, statement_timeout_ms: int = 5_000
+        cls, *, execution_max_rows: int = 1_000, statement_timeout_ms: int = 5_000,
+        result_max_bytes: int = 32 * 1024 * 1024,
     ) -> "ResultBudget":
         return cls(
             execution_max_rows=execution_max_rows,
             aggregate_result_rows=execution_max_rows,
             statement_timeout_ms=statement_timeout_ms,
             preview_rows=min(200, execution_max_rows),
+            result_max_bytes=result_max_bytes,
         )
+
+    def for_result_rows(self, rows: int) -> "ResultBudget":
+        """Derive output cardinality without changing the process resource ceiling."""
+        return replace(self, aggregate_result_rows=max(1, rows))
 
     def as_metadata(self) -> dict[str, Any]:
         budget = asdict(self)
@@ -114,8 +121,7 @@ def validate_runtime_result_budget(
 
     Old offline callers omit both envelopes. A half-present or mutated envelope
     must fail rather than silently falling back to the old execution contract.
-    Budget identity is exact during this metadata-only migration: advertise no
-    lower/higher limit that the current execution path does not actually use.
+    Per-request budgets may be smaller than the process resource ceilings.
     """
     plan = metadata.get("query_plan")
     plan = plan if isinstance(plan, Mapping) else {}
@@ -129,6 +135,10 @@ def validate_runtime_result_budget(
     plan_budget = ResultBudget.from_metadata(plan)
     contract_budget = ResultBudget.from_metadata(metadata)
     validate_matching_result_budgets(plan_budget, contract_budget)
-    if contract_budget != expected:
+    if (
+        contract_budget.execution_max_rows > expected.execution_max_rows
+        or contract_budget.statement_timeout_ms > expected.statement_timeout_ms
+        or contract_budget.result_max_bytes > expected.result_max_bytes
+    ):
         raise ResultBudgetError("result budget differs from server execution settings")
     return contract_budget

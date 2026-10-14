@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, replace
 import os
+import json
+import uuid
 from time import perf_counter
 from typing import Any
 
@@ -19,6 +21,7 @@ from vanna.core.tool import ToolContext
 from .sql_policy import DEFAULT_ANALYST_EXECUTION_LIMIT, PolicyViolation, SqlPolicy
 from .result_validator import (
     ResultValidationError,
+    ResultValidation,
     ResultValidator,
     build_result_summary,
 )
@@ -53,6 +56,24 @@ def cap_probed_rows(
     return rows, False
 
 
+def read_bounded_rows(cursor, *, probe_count: int, max_bytes: int, deadline: float):
+    """Fetch batches from a server cursor; bound retained payload and total time."""
+    rows: list[dict[str, Any]] = []
+    size = 2  # JSON array brackets; bytes are a transport budget, not RSS.
+    while len(rows) < probe_count:
+        batch = cursor.fetchmany(min(1_000, probe_count - len(rows)))
+        if not batch:
+            break
+        for source in batch:
+            row = dict(source)
+            size += len(json.dumps(row, default=str, ensure_ascii=False).encode("utf-8")) + 1
+            if size > max_bytes or perf_counter() > deadline:
+                reason = "结果超过字节预算，请缩小分组或时间范围。" if size > max_bytes else "结果读取超过时间预算，请缩小查询范围。"
+                raise ResultValidationError(ResultValidation("needs_clarification", reason, len(rows), tuple(row)))
+            rows.append(row)
+    return rows, size
+
+
 @dataclass(frozen=True)
 class PostgresConnectionSettings:
     database: str = "data_analysis_agent"
@@ -62,6 +83,8 @@ class PostgresConnectionSettings:
     writer_user: str = "daa_app_writer"
     statement_timeout_ms: int = 5_000
     max_rows: int = DEFAULT_ANALYST_EXECUTION_LIMIT
+    max_aggregate_rows: int = 100_000
+    max_result_bytes: int = 32 * 1024 * 1024
 
     @classmethod
     def from_environment(cls) -> "PostgresConnectionSettings":
@@ -75,6 +98,8 @@ class PostgresConnectionSettings:
                 os.getenv("DATA_ANALYSIS_STATEMENT_TIMEOUT_MS", str(cls.statement_timeout_ms))
             ),
             max_rows=int(os.getenv("DATA_ANALYSIS_MAX_ROWS", str(cls.max_rows))),
+            max_aggregate_rows=int(os.getenv("DATA_ANALYSIS_MAX_AGGREGATE_ROWS", str(cls.max_aggregate_rows))),
+            max_result_bytes=int(os.getenv("DATA_ANALYSIS_MAX_RESULT_BYTES", str(cls.max_result_bytes))),
         )
 
 
@@ -213,16 +238,12 @@ class SecurePostgresRunner(SqlRunner):
                 result_budget = validate_runtime_result_budget(
                     context.metadata,
                     expected=ResultBudget.aggregate(
-                        execution_max_rows=self.settings.max_rows,
+                        execution_max_rows=self.settings.max_aggregate_rows,
                         statement_timeout_ms=self.settings.statement_timeout_ms,
+                        result_max_bytes=self.settings.max_result_bytes,
                     ),
                 )
                 if result_budget is not None:
-                    if (
-                        self.result_validator.max_rows != result_budget.execution_max_rows
-                        or self.result_validator.display_row_budget != result_budget.preview_rows
-                    ):
-                        raise ResultBudgetError("result budget differs from server validator settings")
                     context.metadata["result_budget_check"] = {
                         "contract_id": result_budget.contract_id,
                         "query_mode": result_budget.query_mode,
@@ -233,7 +254,16 @@ class SecurePostgresRunner(SqlRunner):
                     "state": "rejected", "reason": str(exc),
                 }
                 raise PolicyViolation(f"result_budget:{exc}") from exc
-            decision = self.policy.evaluate(args.sql, role=role)
+            plan = context.metadata.get("query_plan") or {}
+            top_n_values = list((plan.get("top_n") or {}).values())
+            if result_budget is not None:
+                decision = self.policy.evaluate(
+                    args.sql, role=role, result_limit=result_budget.aggregate_result_rows,
+                    complete_result=True,
+                    top_n=min(top_n_values) if top_n_values else None,
+                )
+            else:
+                decision = self.policy.evaluate(args.sql, role=role)
         except PolicyViolation as exc:
             self._record_timing(context, "sql_policy", started_at)
             self.audit.record(
@@ -253,15 +283,26 @@ class SecurePostgresRunner(SqlRunner):
             )
             try:
                 connection.set_session(readonly=True, autocommit=False)
-                with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-                    cursor.execute("SET LOCAL statement_timeout = %s", (self.settings.statement_timeout_ms,))
+                timeout = result_budget.statement_timeout_ms if result_budget else self.settings.statement_timeout_ms
+                with connection.cursor() as control:
+                    control.execute("SET LOCAL statement_timeout = %s", (timeout,))
+                with connection.cursor(
+                    name="daa_" + uuid.uuid4().hex,
+                    cursor_factory=psycopg2.extras.RealDictCursor,
+                ) as cursor:
                     probe_sql, probe_count = execution_probe(
                         decision.final_sql,
                         decision.row_limit,
                         policy_limit_applied=decision.policy_limit_applied,
                     )
+                    deadline = perf_counter() + timeout / 1_000
                     cursor.execute(probe_sql)
-                    fetched = [dict(row) for row in cursor.fetchmany(probe_count)]
+                    fetched, result_bytes = read_bounded_rows(
+                        cursor, probe_count=probe_count,
+                        max_bytes=result_budget.result_max_bytes if result_budget else self.settings.max_result_bytes,
+                        deadline=deadline,
+                    )
+                    context.metadata["result_bytes"] = result_bytes
                     rows, execution_truncated = cap_probed_rows(
                         fetched,
                         decision.row_limit,
@@ -269,6 +310,15 @@ class SecurePostgresRunner(SqlRunner):
                     )
             finally:
                 connection.close()
+        except ResultValidationError as exc:
+            context.metadata["result_validation"] = exc.validation.as_dict()
+            self.audit.record(
+                context, role, args.sql, status="execution_error", final_sql=decision.final_sql,
+                reason="result_budget:" + exc.validation.reason,
+                elapsed_ms=int((perf_counter() - started_at) * 1000),
+                row_count=exc.validation.row_count,
+            )
+            raise
         except Exception as exc:
             self._record_timing(context, "postgres_sql", started_at)
             safe_error = sanitize_sql_error(exc)
@@ -283,11 +333,17 @@ class SecurePostgresRunner(SqlRunner):
             raise SafeSqlExecutionError(safe_error) from exc
 
         if self.result_validator is not None:
+            validator = (
+                ResultValidator(
+                    max_rows=result_budget.aggregate_result_rows,
+                    display_row_budget=min(result_budget.preview_rows, result_budget.aggregate_result_rows),
+                ) if result_budget else self.result_validator
+            )
             time_bucket_grain = context.metadata.get("result_time_grain")
             query_plan = context.metadata.get("query_plan")
             if time_bucket_grain is None and isinstance(query_plan, dict):
                 time_bucket_grain = query_plan.get("time_grain")
-            validation = self.result_validator.validate(
+            validation = validator.validate(
                 pd.DataFrame(rows),
                 required_columns=context.metadata.get("required_result_columns", ()),
                 required_column_aliases=context.metadata.get(
@@ -305,6 +361,7 @@ class SecurePostgresRunner(SqlRunner):
                 # smaller LIMIT is not evidence of a policy truncation.
                 limit_applied=False,
                 execution_truncated=execution_truncated,
+                complete_required=result_budget is not None,
                 join_multiplicity=context.metadata.get("join_multiplicity"),
                 exact_columns=bool(context.metadata.get("exact_result_columns", False)),
                 metric_value_constraints=context.metadata.get(
@@ -312,8 +369,13 @@ class SecurePostgresRunner(SqlRunner):
                 ),
             )
             context.metadata["result_validation"] = validation.as_dict()
-            context.metadata["display_result_row_budget"] = self.result_validator.display_row_budget
-            context.metadata["execution_row_limit"] = self.result_validator.max_rows
+            context.metadata["display_result_row_budget"] = result_budget.preview_rows if result_budget else validator.display_row_budget
+            context.metadata["execution_row_limit"] = validator.max_rows
+            if result_budget:
+                context.metadata["result_status"] = (
+                    "result_cardinality_exceeded" if execution_truncated else
+                    "display_truncated" if len(rows) > result_budget.preview_rows else "complete"
+                )
             if not validation.safe_to_display:
                 self._record_timing(context, "postgres_sql", started_at)
                 self.audit.record(
@@ -357,8 +419,8 @@ class SecurePostgresRunner(SqlRunner):
                     "required_result_column_aliases", {}
                 ),
                 column_labels=context.metadata.get("result_column_labels", {}),
-                max_rows=8,
-                max_chars=1_200,
+                max_rows=result_budget.llm_context_rows if result_budget else 8,
+                max_chars=result_budget.llm_context_chars if result_budget else 1_200,
             )
             context.metadata["validated_result_summary"] = result_summary
             usage = context.metadata.get("budget_usage")
