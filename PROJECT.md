@@ -1144,3 +1144,20 @@ EXPLAIN 成本门，未启动新模型训练/终测。本专题结束，按照
 `evals/semantic-intent-phase01-20261014/`。现有 32013 产品服务加载新入口，页面路径不变。
 本轮未启动训练；继续原四周 Day 1 的模块学习，问答记入 agent-project-walkthrough。
 飞书项目文档已用 lark-doc 追加同步至 revision 272，并回读确认。
+
+## 2026-10-14｜Phase 2/3：语义范围修复与在线验收
+
+针对 Phase 0/1 暴露的两类问题做了小范围修复：明确按州分析时，语义提示和回归合同要求
+只生成 `customer_state` 分组，不再擅自增加 `customer_city`；“只看圣保罗州的订单”
+按 Catalog 默认客户地域编译为 `customer_state=SP`，只有用户明确提到卖家才选择卖家维度。
+新增结构化期望检查，把“JSON 能解析”与“指标/维度/筛选/是否应查库”分开统计。
+
+Phase 2 的 8 条真实语义回归全部通过，包括两个原问法的改写、明确城市、明确卖家州、
+比较缺少时间基线和不支持利润。Phase 3 的两个真实认证 SSE + PostgreSQL scope probe
+均通过：每条一次 SQL、ResultContract 满足、ResultArtifact 可回读；服务端 32013 重启后
+页面返回 200。语义解释器对 provider 异常只重试一次，最终失败不进入 SQL。
+
+本轮定向回归 `246 passed, 8 skipped`，Ruff 与 diff check 通过。证据位于仓库外
+`/disk2/gengnan/data-analysis-agent-data/evals/semantic-intent-phase23-20261014/`，
+任务卡为 `plan/feature-semantic-intent-phase23.md`。这些结果只说明语义范围和在线接线
+符合合同，不是 SQL 业务准确率、吞吐或生产 SLA；下一步回到四周计划继续 Day 1 小单元学习。

@@ -24,6 +24,27 @@ from data_analysis_agent.semantic_intent import (
 )
 
 
+def check_expectations(case: dict, row: dict) -> dict:
+    """Score specified semantics, separately from JSON/plan validity."""
+    expected = case.get("expected")
+    if expected is None:
+        return {"checked": False}
+    mismatches = {}
+    for key, value in expected.get("intent", {}).items():
+        actual = row.get("intent", {}).get(key)
+        if actual != value:
+            mismatches["intent." + key] = {"expected": value, "actual": actual}
+    for key, value in expected.get("route", {}).items():
+        actual = row.get("route", {}).get(key)
+        if actual != value:
+            mismatches["route." + key] = {"expected": value, "actual": actual}
+    return {
+        "checked": True,
+        "passed": row.get("status") == "parsed" and not mismatches,
+        "mismatches": mismatches,
+    }
+
+
 def run(cases_path: Path) -> dict[str, object]:
     document = yaml.safe_load(cases_path.read_text(encoding="utf-8"))
     router = QuestionRouter(
@@ -76,7 +97,7 @@ def run(cases_path: Path) -> dict[str, object]:
     }
 
 
-async def run_live(cases_path: Path) -> dict[str, object]:
+async def run_live(cases_path: Path, *, concurrency: int = 1) -> dict[str, object]:
     from dotenv import load_dotenv
     from vanna.core.llm import LlmMessage, LlmRequest
     from vanna.integrations.openai import OpenAILlmService
@@ -115,7 +136,9 @@ async def run_live(cases_path: Path) -> dict[str, object]:
 
     interpreter = SemanticIntentInterpreter(catalog, complete)
     cases = yaml.safe_load(cases_path.read_text(encoding="utf-8"))["cases"]
-    semaphore = asyncio.Semaphore(3)
+    if concurrency < 1:
+        raise ValueError("concurrency must be positive")
+    semaphore = asyncio.Semaphore(concurrency)
 
     async def evaluate(case: dict) -> dict:
         async with semaphore:
@@ -176,6 +199,7 @@ async def run_live(cases_path: Path) -> dict[str, object]:
                 row.update({"status": "interpretation_failed", "reason": str(exc)})
             except ValueError as exc:
                 row.update({"status": "plan_failed", "reason": str(exc)})
+            row["semantic_check"] = check_expectations(case, row)
             row["elapsed_ms"] = round((perf_counter() - started) * 1000)
             print(f"{row['id']}: {row['status']}", flush=True)
             return row
@@ -188,6 +212,10 @@ async def run_live(cases_path: Path) -> dict[str, object]:
         "parsed": sum(row["status"] == "parsed" for row in rows),
         "database_admitted": sum(
             row.get("route", {}).get("should_generate_sql", False) for row in rows
+        ),
+        "semantic_checked": sum(row["semantic_check"]["checked"] for row in rows),
+        "semantic_passed": sum(
+            row["semantic_check"].get("passed", False) for row in rows
         ),
         "rows": rows,
         "limitations": "Intent and plan validation only; no SQL execution or answer quality score.",
@@ -211,8 +239,18 @@ def main() -> None:
         action="store_true",
         help="Call the configured provider, never execute SQL.",
     )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Concurrent semantic calls; default is one to match interactive traffic.",
+    )
     args = parser.parse_args()
-    result = asyncio.run(run_live(args.cases)) if args.live else run(args.cases)
+    result = (
+        asyncio.run(run_live(args.cases, concurrency=args.concurrency))
+        if args.live
+        else run(args.cases)
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

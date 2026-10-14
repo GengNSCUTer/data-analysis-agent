@@ -1,0 +1,58 @@
+baseline_id: semantic-intent-regressions-v1
+catalog_version: olist-catalog-v3
+description: Explicit grouping, default geography, and contrasting queries. Checks semantics, not merely valid JSON.
+cases:
+  - id: state-only-original
+    question: 各个州哪些地方卖得好
+    expected_intent: data_query
+    expected:
+      intent: {request_kind: data_query, dimensions: [customer_state], filters: []}
+      route: {should_generate_sql: true}
+  - id: state-only-paraphrase
+    question: 想看看各州的销售表现，哪些地方更好一些
+    expected_intent: data_query
+    expected:
+      intent: {request_kind: data_query, dimensions: [customer_state], filters: []}
+      route: {should_generate_sql: true}
+  - id: filter-original
+    question: 只看圣保罗州的订单
+    expected_intent: data_query
+    expected:
+      intent:
+        request_kind: data_query
+        metric_ids: [paid_order_count]
+        dimensions: []
+        filters: [{dimension: customer_state, value: SP}]
+      route: {should_generate_sql: true}
+  - id: filter-paraphrase
+    question: 我只想知道SP州有多少有效订单
+    expected_intent: data_query
+    expected:
+      intent:
+        request_kind: data_query
+        metric_ids: [paid_order_count]
+        dimensions: []
+        filters: [{dimension: customer_state, value: SP}]
+      route: {should_generate_sql: true}
+  - id: explicit-city
+    question: 2017年，按各州里的客户城市拆分销售额
+    expected_intent: data_query
+    expected:
+      intent: {request_kind: data_query, dimensions: [customer_state, customer_city]}
+  - id: explicit-seller
+    question: 按卖家所在州比较销售额
+    expected_intent: data_query
+    expected:
+      intent: {request_kind: data_query, dimensions: [seller_state], filters: []}
+      route: {should_generate_sql: true}
+  - id: comparison-needs-period
+    question: 哪个州的销售额增长最快
+    expected_intent: clarification
+    expected:
+      intent: {request_kind: clarification}
+      route: {should_generate_sql: false}
+  - id: unavailable-profit
+    question: 我们今年的净利润有多少
+    expected_intent: clarification
+    expected:
+      route: {should_generate_sql: false}

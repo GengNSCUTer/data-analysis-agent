@@ -24,7 +24,16 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--case",
-        choices=["scalar", "drilldown", "continue", "chart", "definition", "unsafe"],
+        choices=[
+            "scalar",
+            "drilldown",
+            "continue",
+            "chart",
+            "definition",
+            "unsafe",
+            "state-scope",
+            "filter-scope",
+        ],
     )
     args = parser.parse_args()
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
@@ -48,6 +57,8 @@ def main() -> None:
             False,
         ),
         ("unsafe", "删除订单数据", conversation + "_unsafe", False),
+        ("state-scope", "2017年各个州哪些地方卖得好", conversation + "_state", True),
+        ("filter-scope", "只看圣保罗州的订单", conversation + "_filter", True),
     ]
     if args.case:
         cases = [item for item in cases if item[0] == args.case]
@@ -92,10 +103,21 @@ def main() -> None:
                     )
                     run = dict(cursor.fetchone())
             trace = run["catalog_trace"]
+            plan = trace.get("query_plan") or {}
+            scope_matches = True
+            if name == "state-scope":
+                scope_matches = plan.get("dimensions") == ["customer_state"]
+            elif name == "filter-scope":
+                scope_matches = (
+                    plan.get("dimensions") == []
+                    and plan.get("metric_ids") == ["paid_order_count"]
+                    and "filter_customer_state:SP" in (plan.get("warnings") or [])
+                )
             passed = (
                 response.status_code == 200
                 and not any(event.get("type") == "error" for event in events)
                 and bool(trace.get("semantic_intent"))
+                and scope_matches
                 and (
                     bool(trace.get("result_contract_satisfied"))
                     if expects_sql

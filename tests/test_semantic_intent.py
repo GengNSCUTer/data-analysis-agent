@@ -309,12 +309,38 @@ def test_chart_reads_typed_request_without_chinese_keyword_gate(
 
 @pytest.mark.asyncio
 async def test_interpreter_failure_is_not_an_executable_intent():
+    calls = 0
+
     async def unavailable(prompt, user):
+        nonlocal calls
+        calls += 1
         raise OSError("provider unavailable")
 
-    interpreter = SemanticIntentInterpreter(CatalogLoader().load(), unavailable)
+    interpreter = SemanticIntentInterpreter(
+        CatalogLoader().load(), unavailable, retry_delay_seconds=0
+    )
     with pytest.raises(SemanticIntentError, match="semantic_service_unavailable"):
         await interpreter.interpret("销售额多少", User(id="u"))
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_interpreter_retries_once_then_accepts_valid_json():
+    calls = 0
+
+    async def flaky(prompt, user):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError("transient")
+        return '{"request_kind":"data_query","metric_ids":["gmv"],"confidence":0.8}'
+
+    interpreter = SemanticIntentInterpreter(
+        CatalogLoader().load(), flaky, retry_delay_seconds=0
+    )
+    intent = await interpreter.interpret("销售额多少", User(id="u"))
+    assert intent.metric_ids == ("gmv",)
+    assert calls == 2
 
 
 def test_interpreter_does_not_copy_untrusted_prose_into_query_scope():
@@ -364,6 +390,54 @@ def test_unimplemented_or_ambiguous_scope_does_not_become_sql(payload, reason):
     assert not route.should_generate_sql
     assert route.reason_code == reason
     assert plan is None
+
+
+def test_few_shot_examples_do_not_reference_role_hidden_metrics():
+    catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
+    catalog = replace(
+        catalog,
+        metrics=tuple(
+            replace(metric, role_visibility=frozenset({"admin"}))
+            for metric in catalog.metrics
+        ),
+    )
+    interpreter = SemanticIntentInterpreter(catalog, None)
+    prompt = interpreter.prompt("各州销售", User(id="u", group_memberships=["analyst"]))
+    examples_line = prompt.split("参考理解（展示语义，不要求用户模仿句式）：\n")[
+        1
+    ].splitlines()[0]
+    assert json.loads(examples_line) == []
+
+
+def test_eval_semantic_checks_distinguish_valid_json_from_wrong_scope():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).parents[1] / "scripts" / "evals" / "run_semantic_router_baseline.py"
+    spec = importlib.util.spec_from_file_location("semantic_baseline", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    check_expectations = module.check_expectations
+
+    case = {
+        "expected": {
+            "intent": {"dimensions": ["customer_state"]},
+            "route": {"should_generate_sql": True},
+        }
+    }
+    row = {
+        "status": "parsed",
+        "intent": {"dimensions": ["customer_state", "customer_city"]},
+        "route": {"should_generate_sql": True},
+    }
+    result = check_expectations(case, row)
+    assert not result["passed"]
+    assert "intent.dimensions" in result["mismatches"]
+    row["intent"]["dimensions"] = ["customer_state"]
+    assert check_expectations(case, row)["passed"]
+    row["status"] = "interpretation_failed"
+    assert not check_expectations(case, row)["passed"]
 
 
 @pytest.mark.asyncio

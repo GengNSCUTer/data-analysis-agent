@@ -51,6 +51,7 @@ SSE 是这一 HTTP 请求内逐块返回的传输方式，并不代表每个数�
 2018 年窗口，无数据时返回真实空结果。图表类型来自结构化意图，服务端检查轴、指标
 和结果后绘图，不再要求用户必须说“折线图”，也不让模型再调用一次绘图工具。
 阶段验收与残余能力限制见 [`Phase 0/1 记录`](../../plan/feature-semantic-intent-phase01.md)。
+Phase 2/3 的范围回归、scope probe 与服务验收见 [`Phase 2/3 记录`](../../plan/feature-semantic-intent-phase23.md)。
 
 ## Day 1 实际请求追踪：2026-10-10
 

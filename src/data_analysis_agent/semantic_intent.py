@@ -73,7 +73,10 @@ class SemanticIntent(BaseModel):
         "unsafe_or_unauthorized",
     ]
     metric_ids: tuple[str, ...] = ()
-    dimensions: tuple[str, ...] = ()
+    dimensions: tuple[str, ...] = Field(
+        default=(),
+        description="用户实际要求的分组层级；只按州时不添加城市，筛选条件不算分组。",
+    )
     time_grain: Literal["day", "week", "month", "quarter", "year"] | None = None
     time_range: DateRange | None = None
     relative_time: RelativeTime | None = None
@@ -81,7 +84,11 @@ class SemanticIntent(BaseModel):
     filters: tuple[IntentFilter, ...] = ()
     chart_request: str | None = Field(default=None, max_length=80)
     top_n: int | None = Field(default=None, ge=1, le=100_000)
-    clarification: str | None = Field(default=None, max_length=240)
+    clarification: str | None = Field(
+        default=None,
+        max_length=240,
+        description="仅当缺失信息无法由已确认上下文、Catalog口径或明确默认值解决时，问一个具体问题。",
+    )
     assumptions: tuple[str, ...] = ()
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
@@ -177,12 +184,14 @@ class SemanticIntentInterpreter:
         *,
         max_metrics: int = 4,
         timeout_seconds: float = 40.0,
+        retry_delay_seconds: float = 0.15,
         today: Callable[[], date] | None = None,
     ) -> None:
         self.catalog = catalog
         self.complete = complete
         self.max_metrics = max_metrics
         self.timeout_seconds = timeout_seconds
+        self.retry_delay_seconds = retry_delay_seconds
         self.today = today or (lambda: datetime.now(ZoneInfo("Asia/Shanghai")).date())
 
     def prompt(
@@ -218,6 +227,47 @@ class SemanticIntentInterpreter:
         context["has_trusted_result"] = bool(
             (state or {}).get("previous_result_summary")
         )
+        examples = [
+            {
+                "question": "各个州哪些地方卖得好",
+                "intent": {
+                    "request_kind": "data_query",
+                    "metric_ids": ["gmv"],
+                    "dimensions": ["customer_state"],
+                    "assumptions": ["按客户州比较商品成交额"],
+                },
+            },
+            {
+                "question": "只看圣保罗州的订单",
+                "intent": {
+                    "request_kind": "data_query",
+                    "metric_ids": ["paid_order_count"],
+                    "dimensions": [],
+                    "filters": [{"dimension": "customer_state", "value": "SP"}],
+                    "assumptions": ["按客户所在州筛选有效订单"],
+                },
+            },
+            {
+                "question": "按各州的客户城市看销售额",
+                "intent": {
+                    "request_kind": "data_query",
+                    "metric_ids": ["gmv"],
+                    "dimensions": ["customer_state", "customer_city"],
+                },
+            },
+        ]
+        visible_ids = {item["id"] for item in metrics}
+        visible_dimensions = {dim for item in metrics for dim in item["dimensions"]}
+        examples = [
+            item
+            for item in examples
+            if set(item["intent"]["metric_ids"]) <= visible_ids
+            and set(item["intent"]["dimensions"]) <= visible_dimensions
+            and all(
+                f["dimension"] in visible_dimensions
+                for f in item["intent"].get("filters", [])
+            )
+        ]
         return "\n".join(
             [
                 "理解数据分析请求，只输出下面 schema 的 JSON；不生成 SQL、不调用工具、不决定权限。",
@@ -230,6 +280,8 @@ class SemanticIntentInterpreter:
                 "趋势默认按月；只有用户明确说'最近'且没指定时长，才默认最近30天并说明 assumptions。",
                 "用户没有时间词时一律全部时间(time_range=null,relative_time=null)，不要自作主张最近30天或12个月。",
                 "按州默认客户州；买家/卖家明确点名时照做。不要仅因用户没说客户二字就追问。",
+                "地点粒度服从用户实际指明的层级：明确按州就只选customer_state；'哪些地方'是指代已说的州，不额外添加customer_city。明确要求按城市或州内城市时才选择城市。",
+                "地域筛选同样默认客户所在地：只看SP州、圣保罗州订单直接使用customer_state=SP，并在assumptions说明；只有明确说卖家时才按卖家理解，不追问已有默认口径。",
                 "增长/下降/增长最快若没有时间或基线，问需要比较哪个期间，不得退化为金额排名。",
                 "继续若没有新增范围/维度/重查指令，应result_followup，不重复查库。",
                 "如果要问clarification必须request_kind=clarification，不得一面追问一面data_query。",
@@ -252,6 +304,8 @@ class SemanticIntentInterpreter:
                 "当前可编译的额外筛选只有customer_state=州代码；其他筛选不要忽略，最小澄清。",
                 "comparison_baseline可描述要比较的基线，不必要求用户说同比/环比。",
                 "chart_request写用户要求的图类型，不要求用户必须说'图表'。",
+                "参考理解（展示语义，不要求用户模仿句式）：",
+                json.dumps(examples, ensure_ascii=False),
                 f"当前服务日期/时区：{self.today().isoformat()} Asia/Shanghai",
                 "Catalog: " + json.dumps(metrics, ensure_ascii=False),
                 "受控状态: " + json.dumps(context, ensure_ascii=False),
@@ -267,13 +321,20 @@ class SemanticIntentInterpreter:
         user: User,
         state: Mapping[str, object] | None = None,
     ) -> SemanticIntent:
-        try:
-            text = await asyncio.wait_for(
-                self.complete(self.prompt(question, user, state), user),
-                timeout=self.timeout_seconds,
-            )
-        except Exception as exc:
-            raise SemanticIntentError("semantic_service_unavailable") from exc
+        prompt = self.prompt(question, user, state)
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                text = await asyncio.wait_for(
+                    self.complete(prompt, user), timeout=self.timeout_seconds
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt == 0 and self.retry_delay_seconds:
+                    await asyncio.sleep(self.retry_delay_seconds)
+        else:
+            raise SemanticIntentError("semantic_service_unavailable") from last_error
         return parse_semantic_intent(
             text,
             self.catalog,

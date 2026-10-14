@@ -239,3 +239,17 @@ Catalog/权限/能力下能否执行。自然语言理解失败提示重试，�
 `parse_semantic_intent()`：前者记录理解提案，后者校验真实可见指标、维度和日期。
 先复述“为什么合法 JSON 仍不等于可执行 SQL”，再进入 Handler 的传递过程。
 本轮实现不等于 Day 1 已学完；继续沿原四周计划学习，不启动新后训练。
+
+### 2026-10-14｜Phase 2/3 修复复盘
+
+模型返回合法 JSON 仍可能有业务范围错误，所以新增 `semantic_check`：它逐字段比较
+期望的指标、分组、筛选和是否应查库；`status=parsed` 只能说明结构合法。真实回归中，
+“各个州哪些地方卖得好”要求的只有 `customer_state`，而明确说“按州里的客户城市”
+才允许 `[customer_state, customer_city]`。筛选 `customer_state=SP` 不是分组，最终计划
+必须保留空 dimensions 和 `filter_customer_state:SP` 警告。
+
+`SemanticIntentInterpreter` 对 provider 异常只尝试第二次。两次都失败会抛出
+`semantic_service_unavailable`，Handler 不会构造 QueryPlan，也不会调用 SQL；重试不是
+语义纠错，也不能把失败计为通过。Phase 2/3 的 8 条真实回归和两个 PostgreSQL scope
+probe 通过后，服务重新加载在 32013。下一次继续阅读 `SemanticIntent` → `parse_semantic_intent`
+→ `route_semantic_intent` 的数据流，再回答“为什么 Catalog 校验仍不能证明 SQL 业务口径正确”。
