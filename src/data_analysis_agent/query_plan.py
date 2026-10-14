@@ -256,11 +256,14 @@ class QueryPlan:
                 "dimension_not_displayable",
                 "卖家原始编号不能出现在结果中。请改为按卖家城市或卖家州查看排名最高的分组。",
             )
-        time_grain = cls._time_grain(question)
         state = conversation_state or {}
-        resolved_range = extract_absolute_range(question) or cls._time_range(state)
+        semantic = state.get("semantic_intent")
+        time_grain = semantic.get("time_grain") if isinstance(semantic, Mapping) else cls._time_grain(question)
+        resolved_range = cls._time_range(state) if isinstance(semantic, Mapping) else (
+            extract_absolute_range(question) or cls._time_range(state)
+        )
         has_explicit_range = bool(resolved_range)
-        if time_grain == "day" and not has_explicit_range:
+        if time_grain == "day" and not has_explicit_range and not isinstance(semantic, Mapping):
             return QueryPlanPreflight(
                 False,
                 "daily_series_requires_explicit_range",
@@ -268,7 +271,7 @@ class QueryPlan:
             )
         estimated_rows = 1
         configured_bindings = workspace.dimension_bindings if workspace else {}
-        ranking_bound = ranking_category_output_bound(question, dimensions)
+        ranking_bound = None if isinstance(semantic, Mapping) else ranking_category_output_bound(question, dimensions)
         for dimension in dimensions:
             if ranking_bound is not None and dimension == "product_category_name":
                 continue
@@ -284,7 +287,7 @@ class QueryPlan:
                 )
         if ranking_bound is not None:
             estimated_rows *= ranking_bound
-        top_n_request = requested_top_n(question)
+        top_n_request = semantic.get("top_n") if isinstance(semantic, Mapping) else requested_top_n(question)
         if full_results and top_n_request is not None and len(dimensions) == 1 and not time_grain:
             if top_n_request <= 0:
                 return QueryPlanPreflight(False, "invalid_top_n", "Top-N 必须是正整数。")
@@ -346,8 +349,11 @@ class QueryPlan:
         if not metrics:
             metrics = selection_metrics
         dimensions = cls._dimensions(question, metrics, state, workspace=selection.workspace)
-        time_grain = cls._time_grain(question)
-        time_range = extract_absolute_range(question) or cls._time_range(state)
+        semantic = state.get("semantic_intent")
+        time_grain = semantic.get("time_grain") if isinstance(semantic, Mapping) else cls._time_grain(question)
+        time_range = cls._time_range(state) if isinstance(semantic, Mapping) else (
+            extract_absolute_range(question) or cls._time_range(state)
+        )
         comparison = cls._comparison(state)
 
         if len(metric_ids) > 1 and not dimensions and time_grain is None:
@@ -383,10 +389,14 @@ class QueryPlan:
         )
         if unsupported_dimensions:
             warnings.append("dimension_not_supported_by_all_metrics")
-        state_code = customer_state_filter(question)
+        state_code = (
+            next((item["value"] for item in semantic.get("filters", ())
+                  if item.get("dimension") == "customer_state"), None)
+            if isinstance(semantic, Mapping) else customer_state_filter(question)
+        )
         if state_code:
             warnings.append(f"filter_customer_state:{state_code}")
-        ranking_bound = ranking_category_output_bound(question, dimensions)
+        ranking_bound = None if isinstance(semantic, Mapping) else ranking_category_output_bound(question, dimensions)
         if ranking_bound == 1:
             warnings.append("ranking_category_best_per_group")
         top_n = tuple(
@@ -395,7 +405,7 @@ class QueryPlan:
             if dimension in dimensions and result_budget is None
             and not (selection.workspace and selection.workspace.dimension_bindings)
         )
-        top_n_request = requested_top_n(question)
+        top_n_request = semantic.get("top_n") if isinstance(semantic, Mapping) else requested_top_n(question)
         if result_budget is not None and top_n_request and len(dimensions) == 1 and not time_grain:
             top_n = ((dimensions[0], top_n_request),)
         if ranking_bound == _RANKING_CATEGORY_LIMIT and (result_budget is None or top_n_request is None):
@@ -467,6 +477,11 @@ class QueryPlan:
             for metric in metrics
             for dimension in metric.allowed_dimensions
         }
+        semantic = (state or {}).get("semantic_intent")
+        if isinstance(semantic, Mapping):
+            # A validated semantic proposal is authoritative for shape.
+            # Do not union it with stale aliases or infer grouping from filters.
+            return tuple(semantic.get("dimensions", ()))
         selected: list[str] = []
         bindings = workspace.dimension_bindings if workspace else {}
         aliases = (tuple((alias, dimension) for dimension, binding in bindings.items()
@@ -517,7 +532,9 @@ class QueryPlan:
         change the eventual SQL filter or prove a candidate SQL is correct.
         Unknown or malformed ranges retain the Catalog-owned global bound.
         """
-        time_range = extract_absolute_range(question) or QueryPlan._time_range(state)
+        time_range = QueryPlan._time_range(state) if isinstance(state.get("semantic_intent"), Mapping) else (
+            extract_absolute_range(question) or QueryPlan._time_range(state)
+        )
         if time_range is None:
             return _TIME_GRAIN_CARDINALITY[time_grain]
         try:

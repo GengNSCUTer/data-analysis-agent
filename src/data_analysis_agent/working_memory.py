@@ -23,6 +23,7 @@ class WorkingMemory:
     dimensions: tuple[str, ...] = ()
     filters: tuple[str, ...] = ()
     comparison_baseline: str | None = None
+    time_grain: str | None = None
     previous_result_summary: str | None = None
     previous_result_artifact: ResultArtifact | None = None
     chart_history: tuple[ChartReplayRef, ...] = ()
@@ -53,6 +54,9 @@ class WorkingMemory:
             dimensions=strings("dimensions"),
             filters=strings("filters"),
             comparison_baseline=text("comparison_baseline", 120),
+            time_grain=value.get("time_grain") if value.get("time_grain") in {
+                "day", "week", "month", "quarter", "year"
+            } else None,
             previous_result_summary=text("previous_result_summary", 1_200),
             previous_result_artifact=ResultArtifact.from_mapping(
                 value.get("previous_result_artifact")
@@ -69,6 +73,7 @@ class WorkingMemory:
             "dimensions": list(self.dimensions),
             "filters": list(self.filters),
             "comparison_baseline": self.comparison_baseline,
+            "time_grain": self.time_grain,
             "previous_result_summary": self.previous_result_summary,
             "previous_result_artifact": (
                 self.previous_result_artifact.as_dict()
@@ -112,6 +117,7 @@ class WorkingMemory:
             dimensions=self.dimensions,
             filters=self.filters,
             comparison_baseline=comparison,
+            time_grain=self.time_grain,
             previous_result_summary=self.previous_result_summary,
             previous_result_artifact=self.previous_result_artifact,
             chart_history=self.chart_history,
@@ -133,6 +139,7 @@ class WorkingMemory:
             dimensions=self.dimensions,
             filters=self.filters,
             comparison_baseline=self.comparison_baseline,
+            time_grain=self.time_grain,
             previous_result_summary=value,
             previous_result_artifact=self.previous_result_artifact,
             chart_history=self.chart_history,
@@ -150,6 +157,7 @@ class WorkingMemory:
             dimensions=self.dimensions,
             filters=self.filters,
             comparison_baseline=self.comparison_baseline,
+            time_grain=self.time_grain,
             previous_result_summary=artifact.summary,
             previous_result_artifact=artifact,
             chart_history=_remember_chart(self.chart_history, artifact),
@@ -190,6 +198,7 @@ class WorkingMemory:
             dimensions=next_dimensions,
             filters=self.filters,
             comparison_baseline=self.comparison_baseline,
+            time_grain=self.time_grain,
             previous_result_summary=self.previous_result_summary,
             previous_result_artifact=self.previous_result_artifact,
             chart_history=self.chart_history,

@@ -1,10 +1,9 @@
 """Server-owned contracts for charts built from trusted SQL result artifacts.
 
-The language model generates at most one candidate SQL statement.  It does not
-choose chart semantics: this module derives a deterministic contract from the
-already server-owned :class:`QueryPlan` and :class:`ResultContract`, then the
-server renders only the current validated result artifact without display-time
-aggregation.
+The semantic interpreter proposes the requested chart type. This module checks
+that proposal against the server-owned QueryPlan and ResultContract. The server
+then renders only the validated result artifact, without a second model tool
+call or display-time aggregation. Frozen legacy callers retain lexical requests.
 """
 
 from __future__ import annotations
@@ -96,10 +95,28 @@ class ChartContract:
         question: str,
         query_plan: QueryPlan,
         result_contract: ResultContract,
+        *,
+        semantic_intent: Mapping[str, Any] | None = None,
     ) -> "ChartContract":
         """Derive chart structure without trusting model tool arguments."""
 
-        requested = bool(_VISUALIZATION_REQUEST.search(question))
+        semantic_type = None
+        if semantic_intent is not None:
+            raw_type = semantic_intent.get("chart_request")
+            names = {
+                "line chart": "line", "折线图": "line", "曲线图": "line",
+                "bar chart": "bar", "柱状图": "bar",
+                "horizontal bar chart": "horizontal_bar", "横向条形图": "horizontal_bar",
+                "条形图": "horizontal_bar", "area chart": "area", "面积图": "area",
+                "donut chart": "donut", "环形图": "donut", "饼图": "donut",
+                "图表": "auto", "可视化": "auto",
+            }
+            raw_type = raw_type.strip().casefold() if isinstance(raw_type, str) else None
+            semantic_type = names.get(raw_type, raw_type)
+        requested = (
+            semantic_type is not None if semantic_intent is not None
+            else bool(_VISUALIZATION_REQUEST.search(question))
+        )
         allowed = tuple(dict.fromkeys(query_plan.required_result_columns))
         if not requested:
             return cls(
@@ -118,12 +135,14 @@ class ChartContract:
         unsupported = next(
             (name for pattern, name in _UNSUPPORTED_REQUESTS if pattern.search(question)),
             None,
+        ) if semantic_intent is None else (
+            semantic_type if semantic_type not in {*_CHART_TYPES, "auto"} else None
         )
         if unsupported:
             return cls._blocked(
                 "unsupported",
                 allowed,
-                f"当前受控图表仅支持柱状图和折线图；不能把你请求的{unsupported}静默替换为其他图表。",
+                f"当前支持柱状图、横向条形图、折线图、面积图和环形图；不能把你请求的{unsupported}静默替换为其他图表。",
             )
 
         explicit_types = tuple(
@@ -136,6 +155,8 @@ class ChartContract:
                 ("donut", _DONUT_REQUEST),
             )
             if pattern.search(question)
+        ) if semantic_intent is None else (
+            (semantic_type,) if semantic_type in _CHART_TYPES else ()
         )
         if len(explicit_types) > 1:
             return cls._blocked(

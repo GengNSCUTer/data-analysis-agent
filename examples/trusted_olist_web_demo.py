@@ -40,7 +40,7 @@ from data_analysis_agent.budget import (
     BudgetSafetyMiddleware,
     RequestBudget,
 )
-from data_analysis_agent.catalog_grounding import ConstrainedCatalogGrounder
+from data_analysis_agent.semantic_intent import SemanticIntentInterpreter
 from data_analysis_agent.chat_runtime import BudgetedChatHandler
 from data_analysis_agent.context_builder import ContextBudgetFilter
 from data_analysis_agent.history_summary import build_llm_summary_provider
@@ -306,7 +306,7 @@ def create_app() -> FastAPI:
         return await call_next(request)
 
     app.mount("/static", StaticFiles(directory=WEB_COMPONENT_DIST), name="static")
-    async def complete_catalog_grounding(prompt: str, user) -> str:
+    async def complete_semantic_intent(prompt: str, user) -> str:
         response = await agent._send_llm_request(
             LlmRequest(
                 messages=[LlmMessage(role="user", content=prompt)],
@@ -314,8 +314,9 @@ def create_app() -> FastAPI:
                 tools=None,
                 stream=False,
                 temperature=0.0,
-                max_tokens=300,
-                system_prompt="你是指标对齐器。只输出 JSON，不解释，不写 SQL。",
+                max_tokens=800,
+                system_prompt="你是数据分析语义理解器。只输出符合要求的 JSON，不生成 SQL，不执行工具。",
+                metadata={"purpose": "semantic_intent"},
             )
         )
         return (response.content or "").strip()
@@ -334,9 +335,9 @@ def create_app() -> FastAPI:
                 statement_timeout_ms=settings.statement_timeout_ms,
                 result_max_bytes=settings.max_result_bytes,
             ),
-            catalog_grounder=ConstrainedCatalogGrounder(
+            semantic_interpreter=SemanticIntentInterpreter(
                 question_router.retriever.catalog,
-                complete_catalog_grounding,
+                complete_semantic_intent,
             ),
         ),
         config={"cdn_url": "/static/vanna-components.js"},

@@ -39,6 +39,7 @@
 
 ## 5. 项目架构边界
 
+- 在线自然语言理解由结构化语义解释器完成，不用固定关键词、句式正则或旧 classify/admit 决定用户是否允许发起分析。模型提出指标、维度、时间和图表意图，服务端校验 Catalog、身份、归属和资源能力后生成 QueryPlan；解析失败不退回旧语言闸门。历史离线协议可保留原路由以复现实验，SQL 策略和数据库权限不得随语言入口放宽。
 - 产品运行时是 Python 3.12、FastAPI、Vanna、PostgreSQL、SQLAlchemy/Alembic、`sqlglot` 和原生 `<vanna-chat>`；不另建独立前端，不引入没有实际需求的 Redis、多 Agent、MCP 或任意 Python 执行。
 - 新的候选 SQL SFT、matching 评测和后续 opt-in 运行时接入必须共用 `candidate_sql_generator.py` 的版本化请求构造器与 renderer（Catalog + 实际问题派生的 QueryPlan + ResultContract），目标仅为 PostgreSQL SQL 加 EOS；不得把离线 QuerySpec 改名后作为运行时计划输入，不得退化为 SQLite Schema-only 模板。历史 `olist-candidate-sql-v1` 和 `multi-schema-sql-only-v1` 的冻结数据/结果保留原协议，不覆盖迁移。
 - `QuerySpec` 是离线、版本锁定的结构化施工图，不是自然语言解析结果，也不是 SQL 字符串；renderer 只编译已验证结构，不解析问题、不执行 SQL、不调用 LLM。

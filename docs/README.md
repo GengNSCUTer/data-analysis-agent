@@ -74,6 +74,7 @@
 - [`local-postgres.md`](local-postgres.md)：本机 PostgreSQL 服务与连接约定。
 - [`demo-script.md`](demo-script.md)：W4-04 演示脚本，同时是当前产品的全量功能测试说明。
 - [`architecture/product-request-architecture-v1.md`](architecture/product-request-architecture-v1.md)：当前请求、SQL 治理、会话结果和本地模型的位置。
+- [`自然语言入口 Phase 0/1`](../plan/feature-semantic-intent-phase01.md)：旧路由基线、结构化意图实现、真实请求验收及当前能力边界。
 - [`architecture/execution-row-cap-v1.md`](architecture/execution-row-cap-v1.md)：1,000 行执行上限下，完整与截断如何告知用户。
 - [`architecture/result-budget-v2.md`](architecture/result-budget-v2.md)：aggregate、detail_page、export 的分层预算设计，以及当前已接入的在线计划/合同字段、执行前校验和未启用能力边界。
 - [`architecture/result-budget-v2-performance-baseline.md`](architecture/result-budget-v2-performance-baseline.md)：100,000/1,000,000 订单 `perf_shop` 的聚合、分页、高基数分组、CSV 体积与 `EXPLAIN` 基线。

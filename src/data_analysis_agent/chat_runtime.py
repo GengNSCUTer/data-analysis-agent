@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 import inspect
+import json
 import re
 from time import perf_counter
 
@@ -20,6 +22,7 @@ from .question_router import (
     _is_clarification_continuation,
     expand_retrieval_question,
     is_result_refinement,
+    QuestionRoute,
 )
 from .budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
 from .chart_contract import ChartContract, ChartContractError
@@ -32,6 +35,13 @@ from .result_artifact_store import ResultArtifactIntegrityError, ResultArtifactS
 from .result_budget import ResultBudget
 from .run_recorder import PostgresRunRecorder
 from .semantic_catalog import ResultContract
+from .semantic_intent import (
+    SemanticIntent,
+    SemanticIntentError,
+    SemanticIntentInterpreter,
+    route_semantic_intent,
+    select_intent_catalog,
+)
 from .working_memory import WorkingMemory
 from .workspace import WorkspaceProfile
 from .visualization import build_server_chart_component
@@ -89,6 +99,7 @@ class BudgetedChatHandler(ChatHandler):
         workspace: WorkspaceProfile | None = None,
         result_artifact_store: ResultArtifactStore | None = None,
         catalog_grounder: ConstrainedCatalogGrounder | None = None,
+        semantic_interpreter: SemanticIntentInterpreter | None = None,
         result_budget: ResultBudget | None = None,
     ):
         super().__init__(agent)
@@ -98,6 +109,7 @@ class BudgetedChatHandler(ChatHandler):
         self.workspace = workspace or OLIST_WORKSPACE
         self.result_artifact_store = result_artifact_store
         self.catalog_grounder = catalog_grounder
+        self.semantic_interpreter = semantic_interpreter
         self.result_budget = result_budget or ResultBudget.aggregate()
         if self.result_budget.query_mode != "aggregate":
             raise ValueError("only aggregate execution is enabled in the chat runtime")
@@ -122,7 +134,7 @@ class BudgetedChatHandler(ChatHandler):
             # These execution facts belong to the server, never the browser.
             **{
                 key: value for key, value in request.request_context.metadata.items()
-                if key not in {"query_plan", "query_mode", "result_budget", "result_budget_check"}
+                if key not in {"query_plan", "query_mode", "result_budget", "result_budget_check", "semantic_intent"}
             },
             "budget_usage": BudgetUsage(self.budget),
         }
@@ -204,16 +216,44 @@ class BudgetedChatHandler(ChatHandler):
             }:
                 route_started_at = perf_counter()
                 route_state = memory.as_dict()
+                semantic_intent: SemanticIntent | None = None
+                effective_question = request.message.strip()
+                if self.semantic_interpreter is not None:
+                    try:
+                        semantic_intent = await self._interpret_semantic_intent(
+                            request.message, user, route_state
+                        )
+                    except SemanticIntentError as exc:
+                        usage.record_catalog({"semantic_intent_error": str(exc)})
+                        semantic_intent = None
+                    if semantic_intent is not None:
+                        route_state = {
+                            **route_state,
+                            "time_range": semantic_intent.time_range.model_dump() if semantic_intent.time_range else None,
+                            "comparison_baseline": semantic_intent.comparison_baseline,
+                            "semantic_intent": semantic_intent.as_dict(),
+                        }
+                        usage.record_catalog({"semantic_intent": semantic_intent.as_dict()})
+                        request.request_context.metadata["semantic_intent"] = semantic_intent.as_dict()
                 # A new question that already names a metric must not be
                 # searched together with the previous clarification text.
                 # Otherwise "本月 GMV" stays attached to a later order-count
                 # question and the result contract demands both columns.
-                retrieval_question = request.message.strip()
-                selection = self.question_router.retriever.retrieve(
-                    retrieval_question, user
-                )
+                retrieval_question = effective_question
+                if semantic_intent is not None:
+                    selection = select_intent_catalog(
+                        semantic_intent,
+                        self.question_router.retriever,
+                        user,
+                        question=request.message,
+                    )
+                else:
+                    selection = self.question_router.retriever.retrieve(
+                        retrieval_question, user
+                    )
                 if (
-                    not selection.trace.selected_metrics
+                    self.semantic_interpreter is None
+                    and not selection.trace.selected_metrics
                     and memory.pending_question
                 ):
                     retrieval_question = memory.retrieval_context(request.message)
@@ -226,14 +266,15 @@ class BudgetedChatHandler(ChatHandler):
                     retrieval_question,
                     route_state,
                     has_metric_match=has_metric_match,
-                )
+                ) if self.semantic_interpreter is None else retrieval_question
                 if expanded_question != retrieval_question:
                     retrieval_question = expanded_question
                     selection = self.question_router.retriever.retrieve(
                         retrieval_question, user
                     )
                 if (
-                    is_result_refinement(
+                    self.semantic_interpreter is None
+                    and is_result_refinement(
                         request.message,
                         route_state,
                         has_metric_match=has_metric_match,
@@ -249,16 +290,30 @@ class BudgetedChatHandler(ChatHandler):
                     }
                 usage.set_catalog_context(retrieval_question, memory.as_dict())
                 usage.record_catalog(selection.trace.as_dict())
-                route = self.question_router.classify(
-                    request.message,
-                    user=user,
-                    selection=selection,
-                    conversation_state=route_state,
-                )
+                if semantic_intent is not None:
+                    route = route_semantic_intent(
+                        semantic_intent,
+                        self.question_router,
+                        selection,
+                        route_state,
+                    )
+                elif self.semantic_interpreter is not None:
+                    route = QuestionRoute(
+                        "clarification_required", ("semantic_service",), (),
+                        "这次没能可靠理解你的问题，请稍后重试。", "semantic_interpretation_failed",
+                    )
+                else:
+                    route = self.question_router.classify(
+                        request.message,
+                        user=user,
+                        selection=selection,
+                        conversation_state=route_state,
+                    )
                 resolved_dimensions: tuple[str, ...] = ()
                 if route.should_generate_sql:
                     if (
-                        not selection.trace.selected_metrics
+                        semantic_intent is None
+                        and not selection.trace.selected_metrics
                         and self.catalog_grounder is not None
                         and not _is_clarification_continuation(route_state)
                     ):
@@ -286,38 +341,59 @@ class BudgetedChatHandler(ChatHandler):
                                 usage.record_catalog(
                                     {"catalog_grounding": grounded.as_dict()}
                                 )
-                    route = self.question_router.admit_sql_request(
-                        request.message,
+                    admitted_route = route if semantic_intent is not None else self.question_router.admit_sql_request(
+                        retrieval_question,
                         user=user,
                         selection=selection,
                         conversation_state=route_state,
                     )
-                updated_memory = memory.apply(request.message, route)
+                    route = admitted_route
+                if self.semantic_interpreter is not None:
+                    # Semantic turns must not reinterpret language through the
+                    # legacy time/comparison regexes in WorkingMemory.apply().
+                    pending = route.state == "clarification_required"
+                    updated_memory = replace(
+                        memory,
+                        pending_question=request.message.strip()[: memory._MAX_TEXT] if pending else None,
+                        pending_missing=route.missing if pending else (),
+                    )
+                else:
+                    updated_memory = memory.apply(request.message, route)
+                if semantic_intent is not None and route.should_generate_sql:
+                    updated_memory = replace(
+                        updated_memory, metric_ids=semantic_intent.metric_ids,
+                        dimensions=semantic_intent.dimensions,
+                        time_range=route_state["time_range"],
+                        filters=tuple(f"{item.dimension}={item.value}" for item in semantic_intent.filters),
+                        comparison_baseline=semantic_intent.comparison_baseline,
+                        time_grain=semantic_intent.time_grain,
+                    )
                 query_plan = None
                 if route.should_generate_sql:
                     plan_state = updated_memory.as_dict()
+                    if semantic_intent is not None:
+                        plan_state["semantic_intent"] = semantic_intent.as_dict()
                     if resolved_dimensions:
                         plan_state["resolved_dimensions"] = list(resolved_dimensions)
                     query_plan = QueryPlan.from_selection(
                         selection,
-                        request.message,
+                        retrieval_question,
                         route,
                         plan_state,
                         result_budget=self.result_budget,
                     )
-                    # QueryPlan, not assistant prose or client metadata, owns
-                    # the resolved grouping for this turn.  Persist it only as
-                    # observable conversation state; future SQL generation
-                    # does not silently inherit it.
-                    updated_memory = updated_memory.with_query_plan_dimensions(
-                        request.message, query_plan.dimensions
-                    )
+                    # Legacy offline callers retain lexical memory behavior.
+                    # Online semantic turns persist their validated full scope.
+                    if semantic_intent is None:
+                        updated_memory = updated_memory.with_query_plan_dimensions(
+                            request.message, query_plan.dimensions
+                        )
                     usage.set_query_plan(
                         query_plan.as_dict(), query_plan.prompt_context()
                     )
                 result_contract = ResultContract.from_selection(
                     selection,
-                    request.message,
+                    retrieval_question,
                     updated_memory.time_range,
                     catalog=self.question_router.retriever.catalog,
                     required_result_columns=(
@@ -330,7 +406,8 @@ class BudgetedChatHandler(ChatHandler):
                 )
                 chart_contract = (
                     ChartContract.from_query_plan(
-                        request.message, query_plan, result_contract
+                        retrieval_question, query_plan, result_contract,
+                        semantic_intent=semantic_intent.as_dict() if semantic_intent else None,
                     )
                     if query_plan is not None
                     else None
@@ -344,6 +421,13 @@ class BudgetedChatHandler(ChatHandler):
                 catalog_context = selection.prompt
                 if query_plan is not None:
                     catalog_context += query_plan.prompt_context()
+                if semantic_intent is not None:
+                    intent_context = "\n### 本轮语义理解与假设\n" + json.dumps(
+                        semantic_intent.as_dict(), ensure_ascii=False
+                    )
+                    catalog_context += intent_context
+                    if query_plan is not None:
+                        usage.set_query_plan(query_plan.as_dict(), query_plan.prompt_context() + intent_context)
                 if chart_contract is not None:
                     request.request_context.metadata["chart_contract"] = (
                         chart_contract.as_tool_metadata()
@@ -429,6 +513,12 @@ class BudgetedChatHandler(ChatHandler):
                         title = "图表请求未执行"
                     yield self._budget_chunk(conversation_id, request_id, title, detail)
                     return
+
+                if route.should_generate_sql and semantic_intent is not None and semantic_intent.assumptions:
+                    yield self._text_chunk(
+                        conversation_id, request_id,
+                        "本次采用的理解：" + "；".join(semantic_intent.assumptions),
+                    )
 
                 if not route.should_generate_sql:
                     detail = route.direct_answer or route.clarification or "当前请求无法在受控数据范围内回答。"
@@ -723,6 +813,15 @@ class BudgetedChatHandler(ChatHandler):
             return await self.catalog_grounder.ground(question, user)
         except Exception:
             return None
+
+    async def _interpret_semantic_intent(
+        self, question: str, user, state: dict[str, object]
+    ) -> SemanticIntent | None:
+        """Interpret the online turn before planning; errors never grant SQL."""
+
+        if self.semantic_interpreter is None:
+            return None
+        return await self.semantic_interpreter.interpret(question, user, state)
 
     async def _persist_result_artifact(
         self, conversation_id: str, user, request_id: str, usage: BudgetUsage

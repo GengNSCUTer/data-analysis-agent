@@ -281,7 +281,8 @@ class ResultContract:
         # "2018年" is a filter year; it must not demand a `time` result column.
         from .query_plan import QueryPlan
 
-        temporal_request = QueryPlan._time_grain(question) is not None
+        temporal_request = ("time" in required_result_columns if required_result_columns is not None
+                            else QueryPlan._time_grain(question) is not None)
         result_time_column = time_fields[0] if temporal_request and len(time_fields) == 1 else None
         time_aliases = (
             tuple(dict.fromkeys(("time", "analysis_time", "date", "day", "week", "month", "quarter", "year", *time_fields)))
@@ -908,7 +909,10 @@ class CatalogRetriever:
         self.max_prompt_chars = max_prompt_chars
         self.min_score = min_score
 
-    def retrieve(self, question: str, user: User | None = None) -> CatalogSelection:
+    def retrieve(
+        self, question: str, user: User | None = None, *,
+        metric_ids: tuple[str, ...] | None = None,
+    ) -> CatalogSelection:
         if not isinstance(question, str) or not question.strip():
             raise ValueError("question must be a non-empty string")
         role = _role_for_user(user)
@@ -916,6 +920,14 @@ class CatalogRetriever:
         visible_tables = [table for table in self.catalog.tables if role in table.role_visibility]
         visible_metrics = [metric for metric in self.catalog.metrics if role in metric.role_visibility]
         metric_ranked = self._rank_metrics(normalized, visible_metrics)
+        if metric_ids is not None:
+            # Structured intent already resolved metric identity. Do not let
+            # lexical scoring add a different metric or silently replace one.
+            visible_by_id = {metric.metric_id: metric for metric in visible_metrics}
+            if any(item not in visible_by_id for item in metric_ids):
+                raise CatalogValidationError("unknown or invisible selected metric")
+            metric_ranked = [(visible_by_id[item], self.min_score, ("semantic_intent",))
+                             for item in metric_ids]
         # Add metrics greedily only when their source objects still fit the
         # configured limits. A metric whose required tables or joins would be
         # truncated is omitted, rather than giving the model an incomplete
@@ -945,8 +957,16 @@ class CatalogRetriever:
         # A requested dimension may be separated from the metric fact by one or
         # more bridge tables.  Close the selected set over the shortest legal
         # Catalog graph paths before considering optional ranked tables.
+        dimension_question = question
+        if metric_ids is not None and self.catalog.workspace:
+            # Explicit IDs are grouping requests, not incidental words.
+            dimension_question += " " + " ".join(
+                binding.aliases[0] if binding.aliases else dimension
+                for dimension, binding in self.catalog.workspace.dimension_bindings.items()
+                if dimension in normalized.split()
+            )
         requested_dimensions = self._required_dimension_candidates(
-            question, selected_metrics, visible_tables
+            dimension_question, selected_metrics, visible_tables
         )
         visible_ids = {table.table_id for table in visible_tables}
         for _dimension, candidates in requested_dimensions:

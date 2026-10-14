@@ -1,0 +1,119 @@
+baseline_id: semantic-router-baseline-v1
+catalog_version: olist-catalog-v3
+description: Natural Chinese utterances used to measure the pre-interpreter online routing boundary.
+cases:
+  - id: recent-business
+    question: 最近生意怎么样
+    expected_intent: data_query
+  - id: order-trend
+    question: 看一下订单趋势
+    expected_intent: data_query
+  - id: state-sales
+    question: 各个州哪些地方卖得好
+    expected_intent: data_query
+  - id: continue-by-state
+    question: 把刚才的结果按州拆开
+    expected_intent: data_query
+    state:
+      metric_ids: [gmv]
+      dimensions: []
+      time_range: {start: '2017-01-01', end: '2018-01-01', end_semantics: exclusive}
+      previous_result_summary: 已验证2017年商品成交额总计结果。
+  - id: recent-state-performance
+    question: 最近各州的销售情况怎么样
+    expected_intent: data_query
+  - id: monthly-sales
+    question: 统计一下本月销售
+    expected_intent: data_query
+  - id: previous-month
+    question: 上个月和前一个月相比怎么样
+    expected_intent: data_query
+    state: {metric_ids: [gmv], previous_result_summary: 已验证商品成交额结果。}
+  - id: anomaly
+    question: 帮我看看最近有没有异常
+    expected_intent: data_analysis
+  - id: advice
+    question: 给我一些提升建议
+    expected_intent: general_business
+  - id: metric-definition
+    question: 这个销售额指标的口径是什么
+    expected_intent: catalog_definition
+  - id: category-ranking
+    question: 哪些商品卖得最好
+    expected_intent: data_query
+  - id: payment-breakdown
+    question: 按支付方式看看收入分布
+    expected_intent: data_query
+  - id: delivery-performance
+    question: 最近履约表现如何
+    expected_intent: data_query
+  - id: current-orders
+    question: 当前数据里有多少订单
+    expected_intent: data_query
+  - id: change-dimension
+    question: 换成按品类看
+    expected_intent: data_query
+    state:
+      metric_ids: [gmv]
+      dimensions: [customer_state]
+      time_range: {start: '2017-01-01', end: '2018-01-01', end_semantics: exclusive}
+      previous_result_summary: 已验证2017年各州商品成交额结果。
+  - id: filter-state
+    question: 只看圣保罗州的订单
+    expected_intent: data_query
+  - id: broad-overview
+    question: 先给我一个经营概览
+    expected_intent: data_query
+  - id: compare-states
+    question: 哪个州的销售额增长最快
+    expected_intent: data_analysis
+  - id: generic-question
+    question: 电商分析通常关注什么
+    expected_intent: general_business
+  - id: unsafe-write
+    question: 删除订单数据
+    expected_intent: unsafe_or_unauthorized
+  - id: bare-metric
+    question: 我想看看销售额
+    expected_intent: data_query
+  - id: natural-fulfilment
+    question: 买家一般等多久能收到货
+    expected_intent: data_query
+  - id: relative-days
+    question: 最近7天有效订单有多少
+    expected_intent: data_query
+  - id: delivery-rate
+    question: 最终成功送达的比例有多高
+    expected_intent: data_query
+  - id: satisfaction
+    question: 客户对我们满意吗，想看好评占比
+    expected_intent: data_query
+  - id: unsupported-profit
+    question: 今年净利润赚了多少
+    expected_intent: clarification
+  - id: explain-result
+    question: 这个结果说明了什么
+    expected_intent: result_followup
+    state: {metric_ids: [gmv], previous_result_summary: 已验证各州商品成交额排名结果。}
+  - id: plain-continue
+    question: 继续
+    expected_intent: result_followup
+    state: {metric_ids: [gmv], previous_result_summary: 已验证各州商品成交额排名结果。}
+  - id: answer-pending
+    question: 销售额，按月就好
+    expected_intent: data_query
+    state: {pending_question: 看一下2017年的订单或销售走势, pending_missing: [metric]}
+  - id: clear-group
+    question: 不用分州了，给我总数
+    expected_intent: data_query
+    state:
+      metric_ids: [paid_order_count]
+      dimensions: [customer_state]
+      time_range: {start: '2017-01-01', end: '2018-01-01', end_semantics: exclusive}
+      previous_result_summary: 已验证2017年各州有效订单数结果。
+  - id: natural-chart
+    question: 2017年各月销售额，画条曲线
+    expected_intent: data_query
+  - id: top-five
+    question: 销售额最高的五个州是哪几个
+    expected_intent: data_query

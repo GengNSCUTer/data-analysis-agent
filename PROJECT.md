@@ -1125,3 +1125,22 @@ diff check 通过。旧常驻页面综合浏览器套件的菜单与旧宽度断
 EXPLAIN 成本门，未启动新模型训练/终测。本专题结束，按照
 `plan/process-agent-internship-improvement-v1.md` 回到 Day 1 的工具执行、结果校验和
 可信依据；学习记入 `docs/learning/agent-project-walkthrough-v1.md`，不自动标记学完。
+
+## 2026-10-14｜自然语言入口 Phase 0 / Phase 1
+
+默认在线入口已用 LLM 结构化 SemanticIntent 替代固定句式的 classify/admit。模型理解
+请求类型、指标、维度、时间、筛选和图表要求，服务器校验 Catalog/归属/角色/资源能力
+后生成同一份 QueryPlan 与结果合同；不从历史摘要提取 SQL 条件。WorkingMemory 不再
+用旧正则重解读这类在线请求，解析失败也不回退旧关键词。SQL 安全和 reader 权限保持。
+
+32 条自然问法旧基线仅 6 条准入，新入口真实模型调用 32 条解析成功、20 条查询准入；
+不是 SQL 正确率。真实认证、SSE、数据库、模型六场景通过，覆盖查销售额、按州追问、
+继续不查库、画曲线、口径解释和写库拒绝。243 项 Python 定向回归通过，8 项数据库
+测试跳过；真实 HTTP smoke 单独验证数据库。定向 Ruff 和 diff check 通过。
+
+语义调用中位延迟约 3.73 秒；仍有过度澄清/多选城市维度。指标继续受 Catalog 定义
+约束，额外筛选仅编译单客户州，不宣称任意分析/增长率/归因能力已完成。
+详见 `plan/feature-semantic-intent-phase01.md`；证据保存于仓库外
+`evals/semantic-intent-phase01-20261014/`。现有 32013 产品服务加载新入口，页面路径不变。
+本轮未启动训练；继续原四周 Day 1 的模块学习，问答记入 agent-project-walkthrough。
+飞书项目文档已用 lark-doc 追加同步至 revision 272，并回读确认。

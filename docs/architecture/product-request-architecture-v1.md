@@ -1,7 +1,7 @@
 # 产品请求架构 v1
 
 > **状态：** 当前在线路径。本地 Adapter 不在这条路径上。  
-> **日期：** 2026-10-10（按当前代码校正顺序，并补充 Day 1 实际请求证据）
+> **日期：** 2026-10-14（在线语义入口与分层结果预算已更新；下文 Day 1 请求保留历史证据）
 
 页面是 `http://127.0.0.1:32013/embedded-copilot`。默认回答模型是 SiliconFlow 上的在线模型。`adapter_best` 只存在于离线评测。
 
@@ -9,12 +9,10 @@
 flowchart TD
   page["浏览器 /embedded-copilot"] --> chat["POST /api/vanna/v2/chat_sse"]
   chat --> auth["解析本地账号会话或嵌入令牌；加载所属会话"]
-  auth --> catalog["当前问题的 Catalog 检索"]
-  catalog --> router["QuestionRouter.classify：判断请求类型"]
-  router -->|拒绝、澄清、定义或结果解释| direct["受控回答；不执行 SQL"]
-  router -->|需要查库| admit["admit_sql_request：指标、分组、时间、范围"]
-  admit -->|条件不足| direct
-  admit -->|准入| plan["生成 QueryPlan、ResultContract、ChartContract"]
+  auth --> semantic["LLM 理解问题与受控 WorkingMemory，返回 SemanticIntent"]
+  semantic --> validate["服务端校验 Catalog、维度归属、时间与资源能力"]
+  validate -->|澄清、定义、拒绝或已有结果解释| direct["对应分支回答；不执行 SQL"]
+  validate -->|需要新查询且可执行| plan["生成 QueryPlan、ResultContract、ChartContract"]
   plan --> llm["在线模型生成 run_sql 工具调用中的候选 SQL"]
   llm --> guard["计划与 SQL 对照"]
   guard --> policy["SqlPolicy"]
@@ -26,7 +24,7 @@ flowchart TD
 
 身份由服务端解析。请求体里的 `user_id` 和角色不作为身份或授权依据；产品身份解析器也不接受旧演示角色 cookie。
 
-会话存在 `app.conversations`，带 `workspace_id` 与 `state_version`。「清空分析上下文」去掉指标、时间和当前结果引用，保留聊天记录。超预算时才写带消息范围的历史摘要，摘要不能当指标或 SQL。策略把查询收到 1,000 行时多读一行判断截断；正好 1,000 行且没有多余行视为完整。结果追问只能用已验证摘要里的数字。偏好和「保存本次分析」只供回看，页面写明偏好尚未改变展示。
+会话存在 `app.conversations`，带 `workspace_id` 与 `state_version`。「清空分析上下文」去掉指标、时间和当前结果引用，保留聊天记录。超预算时才写带消息范围的历史摘要，摘要不能当指标或 SQL。在线完整聚合按形态派生结果预算，服从进程行数、字节和超时兜底，多读一行确认是否溢出；不再统一限制 1,000 行。前端首屏仍为 200 行，模型摘要最多 8 行/1,200 字符，分页和下载读取同一验证工件。结果追问只能引用已验证结果。偏好和「保存本次分析」只供回看，页面写明偏好尚未改变展示。
 
 本地模型如果以后接入，只能接在「在线模型写候选 SQL」那个位置，后面的策略、只读执行和结果合同不变。现在没有这条接入。
 
@@ -39,13 +37,20 @@ flowchart TD
 | 发消息 | `frontends/webcomponent/src/services/api-client.ts:streamChat` | 问题、conversation/request ID → HTTP JSON 请求 | 前端代码；不确定权限 |
 | 流式 HTTP | `src/vanna/servers/fastapi/routes.py:chat_sse` | ChatRequest + HTTP cookies/headers → SSE 数据块 | 后端代码；不生成 SQL |
 | 身份、会话与预算 | `src/data_analysis_agent/chat_runtime.py:BudgetedChatHandler.handle_stream` | 请求与服务端认证状态 → 所属会话、run ID、预算状态 | 后端代码 |
-| 指标检索与路由 | `CatalogRetriever.retrieve`、`QuestionRouter.classify/admit_sql_request` | 当前问题 + Catalog + 受控状态 → 指标选择、请求类型、准入决定 | 规则代码；无指标匹配时可调用受约束的 LLM grounder |
+| 语义理解与准入 | `SemanticIntentInterpreter.interpret`、`parse_semantic_intent`、`route_semantic_intent` | 原问题 + 角色可见 Catalog + 受控状态 → 校验后的指标、维度、日期、请求类型 | LLM 理解；服务端校验，不调用旧 classify/admit 语言闸门 |
+| 精确 Catalog 切片 | `select_intent_catalog`、`CatalogRetriever.retrieve(metric_ids=...)` | 已校验指标与维度 ID → 表列、Join 和指标定义 | 服务端代码；不根据原问题关键词重新替换指标 |
 | 查询及结果要求 | `QueryPlan.from_selection`、`ResultContract.from_selection`、`ChartContract.from_query_plan` | 已准入问题 → 指标、维度、时间、结果列与绘图约束 | 后端代码；不是离线 QuerySpec |
 | SQL 候选 | Vanna Agent + `OpenAILlmService` | 受控上下文与工具定义 → `run_sql` 调用及其中的 SQL | 在线 LLM；其输出没有执行权限 |
 | 审查与执行 | `TrustedRunSqlTool`、`SecurePostgresRunner`、`SqlPolicy`、`ResultValidator` | 候选 SQL → 策略决定、只读结果、合同状态 | 后端与 PostgreSQL；受控修复候选可能再次调用 LLM |
 | 结果与图表 | ResultArtifact、presenter、服务端绘图 | 已验证结果 + 有效 ChartContract → 表格、图表和证据 | 后端代码；不需要模型第二次选择绘图工具 |
 
 SSE 是这一 HTTP 请求内逐块返回的传输方式，并不代表每个数据块都调用了一次模型。回答文本是否使用 LLM 取决于具体分支；不能把所有响应都概括为模型生成。
+
+语义解释是一次额外的在线模型调用，结构化输出只是一份理解提案，不能授予执行权限。
+相对日期由服务端按 Asia/Shanghai 运算；“本月”不会因 Olist 是历史数据而偷偷改成
+2018 年窗口，无数据时返回真实空结果。图表类型来自结构化意图，服务端检查轴、指标
+和结果后绘图，不再要求用户必须说“折线图”，也不让模型再调用一次绘图工具。
+阶段验收与残余能力限制见 [`Phase 0/1 记录`](../../plan/feature-semantic-intent-phase01.md)。
 
 ## Day 1 实际请求追踪：2026-10-10
 
