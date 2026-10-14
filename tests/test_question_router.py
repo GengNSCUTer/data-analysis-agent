@@ -487,6 +487,10 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
             metadata={
                 "required_result_columns": ["client_supplied"],
                 "candidate_request": {"prompt_sha256": "client_supplied"},
+                "query_plan": {"query_mode": "export"},
+                "query_mode": "export",
+                "result_budget": {"execution_max_rows": 999_999},
+                "result_budget_check": {"state": "validated"},
             }
         ),
     )
@@ -498,6 +502,10 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
     assert agent.metadata["required_result_columns"] == ["time", "gmv"]
     assert agent.metadata["query_plan"]["plan_type"] == "single_metric"
     assert agent.metadata["query_plan"]["required_result_columns"] == ["time", "gmv"]
+    assert agent.metadata["query_plan"]["query_mode"] == agent.metadata["query_mode"] == "aggregate"
+    assert agent.metadata["query_plan"]["result_budget"] == agent.metadata["result_budget"]
+    assert agent.metadata["result_budget"]["execution_max_rows"] == 1_000
+    assert "result_budget_check" not in agent.metadata
     assert agent.metadata["result_time_column"] == "order_purchase_timestamp"
     assert "month" in agent.metadata["result_time_column_aliases"]
     assert agent.metadata["requested_start"] == "2017-01-01"
@@ -511,6 +519,7 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
     assert recorder.usage.catalog_trace["result_contract"]["metric_ids"] == ["gmv"]
     assert "month" in recorder.usage.catalog_trace["result_contract"]["result_time_column_aliases"]
     assert recorder.usage.query_plan["plan_type"] == "single_metric"
+    assert recorder.usage.catalog_trace["result_contract"]["result_budget"] == agent.metadata["result_budget"]
     candidate_evidence = agent.metadata["candidate_request"]
     assert set(candidate_evidence) == {"prompt_version", "prompt_sha256"}
     assert candidate_evidence["prompt_version"] == "runtime-candidate-sql-v2"

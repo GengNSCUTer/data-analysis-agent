@@ -1049,7 +1049,7 @@ Olist 388 条、TheLook 222 条时间序列的 DATE_TRUNC 粒度均符合请求�
 
 ### 2026-10-12：冻结分层结果预算合同并建立 perf_shop 性能夹具
 
-针对“所有查询统一 1,000 行”不适合大型电商数据的问题，冻结 [`result-budget-v2`](docs/architecture/result-budget-v2.md)。合同将查询分为 `aggregate`、`detail_page` 和 `export` 三种模式，分别定义数据库执行、业务结果基数、模型摘要、前端预览、分页与导出边界。当前在线全局 1,000 行仍是兼容性兜底，没有直接放宽；前端预览继续 200 行，模型摘要继续最多 8 行/1,200 字符，完整导出仍需独立鉴权和审计合同。
+针对“所有查询统一 1,000 行”不适合大型电商数据的问题，冻结 [`result-budget-v2`](docs/architecture/result-budget-v2.md)。合同将查询分为 `aggregate`、`detail_page` 和 `export` 三种模式，分别定义数据库执行、业务结果基数、模型摘要、前端预览、分页与导出边界。当前在线全局 1,000 行仍是兼容性兜底，没有直接放宽；前端预览继续 200 行，模型摘要继续最多 8 行/1,200 字符。新的大结果异步导出还未实现；现有 CSV 路由已经具备用户/workspace 鉴权、工件完整性验证和审计，只下载已有的已验证有界结果。
 
 新增独立 synthetic `perf_shop` workspace，不进入 Olist/TheLook Catalog，也不接入默认在线路由。构建入口为 [`scripts/infra/build_perf_shop.sh`](scripts/infra/build_perf_shop.sh)，使用确定性 `generate_series` 生成 100,000 或 1,000,000 条订单及两倍明细，独立 `perf` schema 和只读 `perf_shop_reader` 角色；manifest/schema 位于仓库外 `data-analysis-agent-data/perf/perf-shop-v1-{100000,1000000}/`。1,000,000 订单 smoke 的 aggregate、36 行月序列、200 行明细、keyset 下一页和 100,000 组高基数分组均成功；当前记录在 `perf-shop-v1-1000000/benchmark.json`，总耗时约 683ms，`EXPLAIN` 估算高基数分组约 100,945 行、总成本 68,814。该结果只证明性能/结果预算夹具可运行，不代表模型语义准确率。
 
@@ -1060,3 +1060,35 @@ Olist 388 条、TheLook 222 条时间序列的 DATE_TRUNC 粒度均符合请求�
 同一 `benchmark_perf_shop.py` 在 100,000 和 1,000,000 订单规模复测，证据分别位于仓库外 `perf/perf-shop-v1-100000/benchmark-v2.json` 与 `perf/perf-shop-v1-1000000/benchmark-v2.json`。1,000,000 订单下标量聚合返回 1 行、月序列 36 行、明细页 200 行并通过 sentinel 确认仍有下一页；高基数客户分组返回 100,000 行、CSV 约 889 KB，导出模拟约 346 ms。`EXPLAIN` 估算标量 1 行/成本 15,468.57，高基数分组约 100,282 行/成本 68,759.2。
 
 这组结果支持“扫描规模、业务结果基数、前端预览和模型上下文必须拆开”的设计，但不直接给出生产阈值，也不证明任意 Olist/TheLook Join 都具有相同性能。新增 [`result-budget-v2-performance-baseline.md`](docs/architecture/result-budget-v2-performance-baseline.md)；下一步仍先把 `query_mode`/预算以服务器字段接入 QueryPlan 与 ResultContract，再决定哪些聚合可完整返回。
+
+### 2026-10-14：模式与执行预算接入 QueryPlan / ResultContract
+
+完成本轮 [`任务卡`](plan/feature-result-budget-runtime-v2.md) 的代码与验收。
+新增 `result_budget.py:ResultBudget` 不可变 DTO，composition root 按实际 PostgreSQL settings
+生成 aggregate 预算；在线 Handler 清除客户端模式/预算/计划后，将同一预算传给
+QueryPlan 和 ResultContract，并存入工具 metadata 与 Agent Run 的计划/合同证据。
+
+Runner 在 Policy 和 reader 查询连接前核对两份预算及实际执行/validator 配置，拒绝
+缺失配对、非法字段、预算不一致、配置漂移和未启用的 detail_page/export。拒绝通过
+应用审计角色写 query_audits 的 `result_budget:...` 原因，不调用模型修复。当前只启用
+Catalog 指标 aggregate，默认仍执行 1,000 行/5,000ms、前端预览 200 行、模型摘要
+8 行/1,200 字符；aggregate_result_rows 暂与执行兜底一致，不宣称已经完整返回高基数聚合。
+
+冻结 runtime-candidate-sql-v2 构造器先核对预算，再显式投影原 SQL 语义字段。同一
+请求的新旧 CandidateSqlRequest 字节与 Prompt SHA-256 相同；旧离线调用不带双方
+预算时保持旧协议，不重建数据/训练/历史成绩。修正了设计和性能记录中的导出表述：
+现有鉴权/workspace 隔离/完整性核验/审计 CSV 接口下载已有的有界验证结果；新的
+大结果异步 export 模式仍未实现，通用 DataFrame 导出开关也未放开。
+
+验收为合同/执行链 207 项、历史候选/评测/运行时回归 138 项、真实本地 PostgreSQL
+集成 8 项，共 353 项通过；定向 Ruff、任务卡 ID 声明唯一性与 diff check 通过。
+执行边界测试证明拒绝不调用 Policy、不连接 reader 且保留审计，工具级测试确认不
+调用 SQL repair。测试未包含新分页/异步导出/EXPLAIN 成本门或新 GPU 评测。
+
+学习记录写入 [`agent-project-walkthrough-v1.md`](docs/learning/agent-project-walkthrough-v1.md)
+的结果预算小单元，阅读顺序为预算创建、在线传递、执行校验；不将 Day 1 自动标为学完。
+下一小单元按 aggregate 结果形态/维度基数区分完整统计、明确 Top-N 与需澄清的高基数分组，
+再用 perf_shop 验证实际返回行为。
+
+本轮事实已用 lark-doc 同步飞书项目文档 revision 269，并局部回读确认；同时定向修正
+上一条性能基线记录对已有 CSV 下载能力的过时描述。

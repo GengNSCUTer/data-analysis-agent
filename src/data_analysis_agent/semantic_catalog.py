@@ -28,6 +28,7 @@ from .sql_policy import (
     SENSITIVE_PROJECTION_COLUMNS,
 )
 from .workspace import WorkspaceProfile
+from .result_budget import ResultBudget
 
 
 CATALOG_VERSION = "olist-catalog-v2"
@@ -257,6 +258,7 @@ class ResultContract:
     )
     attribution_requirements: tuple[AttributionRequirement, ...] = ()
     requested_end_exclusive: bool = False
+    result_budget: ResultBudget | None = None
 
     @classmethod
     def from_selection(
@@ -268,6 +270,7 @@ class ResultContract:
         catalog: Catalog,
         required_result_columns: Sequence[str] | None = None,
         requested_dimensions: Sequence[str] = (),
+        result_budget: ResultBudget | None = None,
     ) -> "ResultContract":
         metric_ids = tuple(metric.metric_id for metric in selection.metrics)
         time_fields = tuple(
@@ -337,6 +340,7 @@ class ResultContract:
                 }
             ),
             attribution_requirements=attribution_requirements,
+            result_budget=result_budget,
         )
 
     @staticmethod
@@ -360,9 +364,9 @@ class ResultContract:
                 )
         return tuple(requirements)
 
-    def as_tool_metadata(self) -> dict[str, Any]:
+    def as_tool_metadata(self, *, include_result_budget: bool = True) -> dict[str, Any]:
         """Return only bounded, JSON-safe fields for ``ToolContext.metadata``."""
-        return {
+        result = {
             "catalog_version": self.catalog_version,
             "dataset_version": self.dataset_version,
             "dataset_version_id": self.dataset_version,
@@ -396,10 +400,13 @@ class ResultContract:
             # The Catalog alone cannot prove runtime row multiplication.
             "join_multiplicity": None,
         }
+        if include_result_budget and self.result_budget is not None:
+            result.update(self.result_budget.as_metadata())
+        return result
 
     def as_evidence(self) -> dict[str, Any]:
         """Return a redacted evidence object suitable for an Agent Run trace."""
-        return {
+        result = {
             "catalog_version": self.catalog_version,
             "dataset_version": self.dataset_version,
             "metric_version": self.metric_version,
@@ -424,6 +431,9 @@ class ResultContract:
                 for requirement in self.attribution_requirements
             ],
         }
+        if self.result_budget is not None:
+            result.update(self.result_budget.as_metadata())
+        return result
 
 
 class CatalogLoader:

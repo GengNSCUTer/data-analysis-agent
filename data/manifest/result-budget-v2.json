@@ -23,7 +23,15 @@
   "current_online_compatibility": {
     "global_execution_cap": 1000,
     "global_cap_is_interim_only": true,
-    "full_export_allowed": false
+    "async_export_enabled": false,
+    "validated_artifact_csv_download": "authenticated-workspace-scoped-audited"
+  },
+  "runtime_migration": {
+    "stage": "metadata-and-execution-guard",
+    "enabled_modes": ["aggregate"],
+    "legacy_calls_without_envelope": "preserved",
+    "candidate_prompt_version": "runtime-candidate-sql-v2",
+    "candidate_prompt_includes_execution_budget": false
   },
   "performance_fixture": {
     "workspace_id": "perf-shop",

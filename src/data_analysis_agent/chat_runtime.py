@@ -29,6 +29,7 @@ from .question_router import QuestionRouter
 from .query_plan import QueryPlan
 from .result_artifact import ResultArtifact
 from .result_artifact_store import ResultArtifactIntegrityError, ResultArtifactStore
+from .result_budget import ResultBudget
 from .run_recorder import PostgresRunRecorder
 from .semantic_catalog import ResultContract
 from .working_memory import WorkingMemory
@@ -88,6 +89,7 @@ class BudgetedChatHandler(ChatHandler):
         workspace: WorkspaceProfile | None = None,
         result_artifact_store: ResultArtifactStore | None = None,
         catalog_grounder: ConstrainedCatalogGrounder | None = None,
+        result_budget: ResultBudget | None = None,
     ):
         super().__init__(agent)
         self.budget = budget
@@ -96,6 +98,9 @@ class BudgetedChatHandler(ChatHandler):
         self.workspace = workspace or OLIST_WORKSPACE
         self.result_artifact_store = result_artifact_store
         self.catalog_grounder = catalog_grounder
+        self.result_budget = result_budget or ResultBudget.aggregate()
+        if self.result_budget.query_mode != "aggregate":
+            raise ValueError("only aggregate execution is enabled in the chat runtime")
 
     async def _get_conversation(self, conversation_id: str, user):
         """Load a conversation with workspace scope while preserving test-store compatibility."""
@@ -114,7 +119,11 @@ class BudgetedChatHandler(ChatHandler):
         request.conversation_id = conversation_id
         request.request_id = request_id
         request.request_context.metadata = {
-            **request.request_context.metadata,
+            # These execution facts belong to the server, never the browser.
+            **{
+                key: value for key, value in request.request_context.metadata.items()
+                if key not in {"query_plan", "query_mode", "result_budget", "result_budget_check"}
+            },
             "budget_usage": BudgetUsage(self.budget),
         }
         usage = request.request_context.metadata["budget_usage"]
@@ -294,6 +303,7 @@ class BudgetedChatHandler(ChatHandler):
                         request.message,
                         route,
                         plan_state,
+                        result_budget=self.result_budget,
                     )
                     # QueryPlan, not assistant prose or client metadata, owns
                     # the resolved grouping for this turn.  Persist it only as
@@ -316,6 +326,7 @@ class BudgetedChatHandler(ChatHandler):
                     requested_dimensions=(
                         query_plan.dimensions if query_plan else ()
                     ),
+                    result_budget=query_plan.result_budget if query_plan else None,
                 )
                 chart_contract = (
                     ChartContract.from_query_plan(

@@ -25,6 +25,7 @@ from .result_validator import (
 from .sql_repair import SafeSqlExecutionError, sanitize_sql_error
 from .metric_context import DATASET_VERSION, METRIC_VERSION, OLIST_WORKSPACE
 from .workspace import WorkspaceProfile
+from .result_budget import ResultBudget, ResultBudgetError, validate_runtime_result_budget
 
 
 def execution_probe(final_sql: str, row_limit: int, *, policy_limit_applied: bool) -> tuple[str, int]:
@@ -208,6 +209,30 @@ class SecurePostgresRunner(SqlRunner):
         role = self._role_for_context(context)
         started_at = perf_counter()
         try:
+            try:
+                result_budget = validate_runtime_result_budget(
+                    context.metadata,
+                    expected=ResultBudget.aggregate(
+                        execution_max_rows=self.settings.max_rows,
+                        statement_timeout_ms=self.settings.statement_timeout_ms,
+                    ),
+                )
+                if result_budget is not None:
+                    if (
+                        self.result_validator.max_rows != result_budget.execution_max_rows
+                        or self.result_validator.display_row_budget != result_budget.preview_rows
+                    ):
+                        raise ResultBudgetError("result budget differs from server validator settings")
+                    context.metadata["result_budget_check"] = {
+                        "contract_id": result_budget.contract_id,
+                        "query_mode": result_budget.query_mode,
+                        "state": "validated",
+                    }
+            except ResultBudgetError as exc:
+                context.metadata["result_budget_check"] = {
+                    "state": "rejected", "reason": str(exc),
+                }
+                raise PolicyViolation(f"result_budget:{exc}") from exc
             decision = self.policy.evaluate(args.sql, role=role)
         except PolicyViolation as exc:
             self._record_timing(context, "sql_policy", started_at)

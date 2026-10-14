@@ -20,6 +20,7 @@ from .semantic_catalog import (
 )
 from .sql_policy import DEFAULT_ANALYST_RESULT_LIMIT
 from .query_time import copy_time_range, extract_absolute_range, time_range_instruction
+from .result_budget import ResultBudget
 from .workspace import WorkspaceProfile
 
 
@@ -198,6 +199,7 @@ class QueryPlan:
     execution_strategy: str
     warnings: tuple[str, ...] = ()
     top_n: tuple[tuple[str, int], ...] = ()
+    result_budget: ResultBudget | None = None
 
     @classmethod
     def preflight(
@@ -299,6 +301,8 @@ class QueryPlan:
         question: str,
         route: QuestionRoute,
         conversation_state: Mapping[str, Any] | None = None,
+        *,
+        result_budget: ResultBudget | None = None,
     ) -> "QueryPlan":
         state = conversation_state or {}
         selection_metrics = tuple(selection.metrics)
@@ -387,6 +391,7 @@ class QueryPlan:
             execution_strategy=execution_strategy,
             warnings=tuple(warnings),
             top_n=top_n,
+            result_budget=result_budget,
         )
 
     @staticmethod
@@ -502,8 +507,8 @@ class QueryPlan:
         value = state.get("comparison_baseline", state.get("comparison"))
         return value.strip()[:120] if isinstance(value, str) and value.strip() else None
 
-    def as_dict(self) -> dict[str, Any]:
-        return {
+    def as_dict(self, *, include_result_budget: bool = True) -> dict[str, Any]:
+        result = {
             "query_plan_version": "query-plan-v2",
             "plan_type": self.plan_type,
             "intent": self.intent,
@@ -522,6 +527,9 @@ class QueryPlan:
             "warnings": list(self.warnings),
             "top_n": {dimension: limit for dimension, limit in self.top_n},
         }
+        if include_result_budget and self.result_budget is not None:
+            result.update(self.result_budget.as_metadata())
+        return result
 
     def prompt_context(self) -> str:
         """Render a bounded instruction block for the SQL-generating Agent."""

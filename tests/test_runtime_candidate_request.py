@@ -18,6 +18,7 @@ from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.runtime_alignment_audit import replay_single_turn
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever, ResultContract
 from data_analysis_agent.working_memory import WorkingMemory
+from data_analysis_agent.result_budget import ResultBudget
 
 
 @pytest.fixture(scope="module")
@@ -83,3 +84,35 @@ def test_summary_never_becomes_candidate_context(retriever):
     assert "UNTRUSTED_SENTINEL" not in render_runtime_candidate_prompt(
         build_runtime_candidate_request(**facts)
     )
+
+
+def test_server_execution_envelope_keeps_frozen_candidate_bytes_and_hash(retriever):
+    facts = runtime_facts(retriever)
+    legacy_request = build_runtime_candidate_request(**facts)
+    legacy_plan_prompt = facts["query_plan"].prompt_context()
+    budget = ResultBudget.aggregate()
+    facts["query_plan"] = replace(facts["query_plan"], result_budget=budget)
+    facts["result_contract"] = replace(facts["result_contract"], result_budget=budget)
+    request = build_runtime_candidate_request(**facts)
+
+    assert facts["query_plan"].as_dict()["query_mode"] == "aggregate"
+    assert facts["result_contract"].as_evidence()["result_budget"]["preview_rows"] == 200
+    assert request == legacy_request
+    assert facts["query_plan"].prompt_context() == legacy_plan_prompt
+    assert request.prompt_sha256 == legacy_request.prompt_sha256
+    assert "result_budget" not in render_runtime_candidate_prompt(request)
+    assert "query_mode" not in render_runtime_candidate_prompt(request)
+
+
+@pytest.mark.parametrize("change", ["half_present", "mode", "timeout"])
+def test_candidate_builder_rejects_unsupported_or_mismatched_budget_pairs(retriever, change):
+    facts = runtime_facts(retriever)
+    budget = ResultBudget.aggregate()
+    if change == "mode":
+        budget = replace(budget, query_mode="export", aggregate_result_rows=None)
+    facts["query_plan"] = replace(facts["query_plan"], result_budget=budget)
+    if change != "half_present":
+        contract_budget = replace(budget, statement_timeout_ms=10_000) if change == "timeout" else budget
+        facts["result_contract"] = replace(facts["result_contract"], result_budget=contract_budget)
+    with pytest.raises(CandidateSqlGenerationError, match="mismatch|not enabled"):
+        build_runtime_candidate_request(**facts)

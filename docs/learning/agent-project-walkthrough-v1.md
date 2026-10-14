@@ -159,3 +159,39 @@
 - 工具执行到结果证据：为什么 SQL 可运行、合同通过、业务正确是不同层次。
 
 本次真实请求已核验，但运行成功不能代替用户读代码。QueryPlan 本段、结果证据小段和闭卷链路复述完成后，才将 Day 1 标记完成。
+
+### 2026-10-14：结果预算小单元——先明确预算由谁生成
+
+继续沿四周学习计划理解执行链。本次实现只增加 QueryPlan/ResultContract 的模式和预算，
+没有再开训练；阶段进度和测量数据见 PROJECT，不把项目流水账混入知识讲解。
+
+例如“按客户州统计有效订单数”，底层可能读取十万条订单，但只返回几十行州统计。
+`execution_max_rows` 数的是返回行，不是读过的事实行；`preview_rows` 控制浏览器一次
+看到多少行；`llm_context_rows` 控制模型摘要取多少行。这几个数字不能互相代替。
+本轮 aggregate 的完整结果基数仍暂时等于 1,000，拆字段是后续改行为的前提，不代表已经放开限制。
+
+本次亲自阅读三个位置即可：
+
+1. `src/data_analysis_agent/result_budget.py:ResultBudget.aggregate()`：从服务端配置生成
+   一份不可变预算。例如执行 1,000、预览 200、摘要 8 行/1,200 字符。
+2. `src/data_analysis_agent/chat_runtime.py:BudgetedChatHandler.handle_stream()`：浏览器
+   传来的模式/预算/计划先删掉；已准入的指标请求得到服务端预算，同一份传给
+   QueryPlan 和 ResultContract。问题和 Catalog 负责业务含义，预算负责执行资源。
+3. `src/data_analysis_agent/result_budget.py:validate_runtime_result_budget()`：查库前
+   对比计划、合同、真实服务端配置；不一致就停止。若 export 模式未实现，不能让
+   模型写一个 SELECT 便顺便启用下载任务。Runner 记录拒绝原因，不让 SQL 修复改变模式。
+
+冻结的候选生成 Prompt 不需要知道工件下载或前端预览预算。构造器校验计划与合同的
+预算一致，再投影原 SQL 语义字段；因此旧数据/评测 Prompt hash 保持相同。
+
+前一轮四个回答的纠正记录：`SELECT *` 返回所有列，`COUNT(*)` 只是聚合计数，
+不是同一个安全含义，仍需遵守指标口径。策略自动补 LIMIT 时，内部多读一行是为了
+确认是否真的执行截断；探测行不进入展示/摘要/工件，不把“正好 1,000 行”一律拒绝。
+ResultValidator 用代码检查列、类型、范围和完整性等合同，比让模型自己宣称正确可靠，
+但不能完全证明公式正确。AOV 是 Average Order Value（客单价）；Olist 这里精确定义为
+有效订单的平均商品金额，不含运费，必须先把商品价格按订单汇总，再对订单金额取平均。
+直接 `AVG(price)` 是平均商品行价格。识别这类错误需要核对 Catalog、SQL 的聚合粒度
+以及独立 Gold 结果，不能只看列名叫 AOV 或结果为正数。
+
+当前仍不因实现完成而宣称学习段完成；下一小段围绕 aggregate 的完整返回与 Top-N
+继续读代码。分页和异步导出到各自小单元再讲，先掌握预算的来源与核对位置。

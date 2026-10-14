@@ -72,6 +72,7 @@ from data_analysis_agent.postgres_runner import (
     SecurePostgresRunner,
 )
 from data_analysis_agent.result_validator import ResultValidator
+from data_analysis_agent.result_budget import ResultBudget
 from data_analysis_agent.result_artifact_store import (
     ResultArtifactIntegrityError,
     ResultArtifactStore,
@@ -326,6 +327,10 @@ def create_app() -> FastAPI:
             question_router,
             workspace=OLIST_RUNTIME_WORKSPACE,
             result_artifact_store=result_artifact_store,
+            result_budget=ResultBudget.aggregate(
+                execution_max_rows=settings.max_rows,
+                statement_timeout_ms=settings.statement_timeout_ms,
+            ),
             catalog_grounder=ConstrainedCatalogGrounder(
                 question_router.retriever.catalog,
                 complete_catalog_grounding,

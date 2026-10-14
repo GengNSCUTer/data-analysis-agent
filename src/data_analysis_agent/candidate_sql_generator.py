@@ -15,6 +15,7 @@ import re
 from typing import TYPE_CHECKING
 
 from .question_router import QuestionRoute
+from .result_budget import ResultBudgetError, validate_matching_result_budgets
 
 if TYPE_CHECKING:
     from .query_plan import QueryPlan
@@ -148,6 +149,10 @@ def build_runtime_candidate_request(
     A successful build is not SQL admission or proof that NL parsing is right.
     """
     require_database_route(route)
+    try:
+        validate_matching_result_budgets(query_plan.result_budget, result_contract.result_budget)
+    except ResultBudgetError as exc:
+        raise CandidateSqlGenerationError(str(exc)) from exc
     if not isinstance(question, str) or not question.strip() or not selection.prompt.strip():
         raise CandidateSqlGenerationError("question and selected Catalog must be non-empty")
     for field in ("catalog_version", "dataset_version", "metric_version", "policy_version"):
@@ -190,8 +195,11 @@ def build_runtime_candidate_request(
         question=question.strip(),
         catalog_prompt=selection.prompt.strip(),
         scope_json=encode(scope),
-        query_plan_json=encode(query_plan.as_dict()),
-        result_contract_json=encode(result_contract.as_tool_metadata()),
+        # v2 is frozen to SQL semantic input. Resource envelopes are enforced
+        # by the server and excluded explicitly so historical Prompt hashes
+        # and offline/online component comparisons remain byte-identical.
+        query_plan_json=encode(query_plan.as_dict(include_result_budget=False)),
+        result_contract_json=encode(result_contract.as_tool_metadata(include_result_budget=False)),
     )
 
 

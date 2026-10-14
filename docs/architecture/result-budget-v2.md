@@ -2,15 +2,17 @@
 title: Result Budget Contract v2
 status: frozen-design
 date: 2026-10-12
+last_updated: 2026-10-14
 ---
 
 # Result Budget Contract v2
 
 ## 1. 目的
 
-v1 把数据库执行上限、业务结果完整性、模型上下文和前端预览都近似成了同一个
-`1,000` 行数字。这个合同把四类预算拆开，避免因为底层数据量很大就拒绝一个最终
-只有几十行的安全聚合，也避免把明细查询的前 1,000 行误认为完整数据。
+v1 已区分数据库执行 1,000 行、前端预览 200 行和模型摘要 8 行/1,200 字符，
+但聚合结果与明细浏览仍受同一个全局输出行数上限。这个合同进一步拆开查询模式和
+结果完整性要求：扫描百万条事实只返回一行聚合，与输出十万行明细是不同的问题。
+普通明细的前 1,000 行不能被称为完整结果，高基数分组也不能无序截取后冒充完整统计。
 
 本合同是设计冻结，不会因为写入本文档就自动放宽现有在线 SQL policy。v1 的在线
 默认执行上限仍保持 1,000 行；后续实现必须按本合同和回归测试逐步迁移。
@@ -48,7 +50,10 @@ v1 把数据库执行上限、业务结果完整性、模型上下文和前端�
 - 完整结果写入受控 `ResultArtifact`，记录行数、字节数、schema、内容 hash、workspace、
   query hash 和 audit ref。
 - 前端获得一次性或短期有效的下载引用；模型上下文永远不包含完整文件。
-- 当前版本继续保持 `full_export_allowed=false`，直到下载鉴权和审计路由冻结。
+- 新的异步、大结果 `export` 模式尚未启用，字节预算和任务生命周期需单独实现。
+- 当前已有鉴权 CSV 接口 `/api/project/conversations/{conversation_id}/result.csv`，
+  验证当前用户、workspace、工件完整性并记录导出审计，只下载已执行且验证过的有界结果。
+  它不会重新执行无上限 SQL；通用 DataFrame 导出开关仍关闭。两者不能混为一项能力。
 
 ## 3. 预算维度
 
@@ -122,5 +127,41 @@ QueryPlan
 4. 不把完整结果送进模型上下文；
 5. 不以性能夹具结果宣称模型语义能力提升。
 
-下一步先用独立 `perf_shop` workspace 验证 10 万到 100 万级数据的聚合、分页、
-高基数分组和资源风险，再依据测量结果实现 `QueryPlan` 的执行模式字段和分层预算。
+独立 `perf_shop` 的 10 万/100 万订单基线已经完成，见
+[`result-budget-v2-performance-baseline.md`](result-budget-v2-performance-baseline.md)。
+单次本机测量只指导设计，不直接推出生产阈值。
+
+## 8. 2026-10-14 已接入的执行合同
+
+本轮只接入模式/预算元数据和执行前一致性校验，尚未迁移聚合返回或实现分页/异步导出。
+当前 Catalog/Router 准入的是指标聚合请求，服务端将其标为 `aggregate`；不会仅根据
+用户或模型提交的 `query_mode` 启用新的模式。
+
+`result_budget.py:ResultBudget` 是不可变 DTO。composition root 从 PostgreSQL settings
+生成 aggregate 预算，Handler 清除客户端保留字段后，给 QueryPlan 和 ResultContract
+传入同一对象。序列化的计划、工具 metadata 和 Agent Run 合同证据都带以下字段：
+
+| 字段 | 当前默认值 | 实际含义 |
+| --- | --- | --- |
+| `query_mode` | `aggregate` | 当前只启用 Catalog 指标聚合 |
+| `result_budget.contract_id` | `result-budget-v2` | 执行合同身份，独立于旧 SQL Prompt 版本 |
+| `execution_max_rows` | 1,000 | 当前 runner 输出兜底上限，不是底层扫描行数 |
+| `aggregate_result_rows` | 1,000 | 本阶段暂与执行兜底一致；后续由维度/结果合同派生 |
+| `statement_timeout_ms` | 5,000 | 当前服务端数据库配置；没有提高超时 |
+| `preview_rows` | 200 | 前端预览预算 |
+| `llm_context_rows` / `llm_context_chars` | 8 / 1,200 | 模型确定性摘要预算 |
+| `detail_page_rows` / `export_max_bytes` | null / null | aggregate 不携带未启用模式的预算 |
+
+执行数值来自实际服务端配置，1,000/5,000 为默认值。在此迁移阶段，Runner 要求
+计划预算、工具结果合同预算、runner 配置和 validator 的执行/预览配置一致；半缺失、
+非法字段、模式不一致或配置漂移均在 Policy 和 reader 查询连接前拒绝。拒绝仍用应用
+审计连接写 `query_audits` 的 `result_budget:...` 原因；它不是 SQL 语法问题，不触发模型修复。
+`detail_page` 和 `export` 可以作为合同表示，但不能进入普通 `run_sql`。
+
+旧离线调用同时不带两个预算时保持旧行为，浏览器不能借此降级：在线 Handler 每个
+已准入 SQL 请求都会覆盖服务端预算。冻结的 `runtime-candidate-sql-v2` 构造器先核对
+预算配对，再显式投影原 SQL 语义字段，预算不进入该 Prompt；对同一问题，新旧输入
+字节与 SHA-256 完全一致。现有数据、模型和历史成绩无需因此重建。
+
+下一小单元是 aggregate 的实际返回合同：区分完整聚合、明确 Top-N 与超出允许基数的
+分组，在 `perf_shop` 验证后再替换全局兜底；本轮未解决高基数完整返回问题。

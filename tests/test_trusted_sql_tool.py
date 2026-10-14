@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from data_analysis_agent.result_validator import ResultValidationError, ResultValidator
+from data_analysis_agent.result_budget import ResultBudget
 from data_analysis_agent.result_artifact_store import ResultArtifactStore
 from data_analysis_agent.sql_policy import SqlPolicy
 from data_analysis_agent.sql_repair import SafeSqlExecutionError, SanitizedSqlError
@@ -73,6 +74,31 @@ class FakeRepairProvider:
     async def __call__(self, prompt: str, context: ToolContext) -> str | None:
         self.prompts.append(prompt)
         return self.candidate
+
+
+@pytest.mark.asyncio
+async def test_result_budget_rejection_does_not_invoke_sql_repair(monkeypatch, tmp_path):
+    from data_analysis_agent import postgres_runner
+
+    runner = postgres_runner.SecurePostgresRunner()
+    provider = FakeRepairProvider("SELECT 7 AS paid_order_count")
+    context = _context()
+    envelope = ResultBudget(query_mode="export", aggregate_result_rows=None).as_metadata()
+    context.metadata.update({**envelope, "query_plan": envelope})
+    monkeypatch.setattr(runner.audit, "record", lambda *args, **kwargs: None)
+
+    def forbidden_connection(*args, **kwargs):
+        raise AssertionError("budget rejection must not open a reader connection")
+
+    monkeypatch.setattr(postgres_runner.psycopg2, "connect", forbidden_connection)
+    tool = TrustedRunSqlTool(
+        runner, repair_provider=provider, file_system=LocalFileSystem(str(tmp_path))
+    )
+    result = await tool.execute(context, RunSqlToolArgs(sql="SELECT 7 AS paid_order_count"))
+    assert result.success is False
+    assert "export is not enabled" in result.error
+    assert provider.prompts == []
+    assert context.metadata["result_budget_check"]["state"] == "rejected"
 
 
 def _tool(

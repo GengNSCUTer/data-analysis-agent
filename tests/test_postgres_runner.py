@@ -17,6 +17,7 @@ from data_analysis_agent.budget import BudgetSafetyMiddleware
 from data_analysis_agent.chat_runtime import BudgetedChatHandler
 from data_analysis_agent.conversation_store import PostgresConversationStore
 from data_analysis_agent.result_validator import ResultValidationError, ResultValidator
+from data_analysis_agent.result_budget import ResultBudget
 from data_analysis_agent.run_recorder import PostgresRunRecorder
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
@@ -59,6 +60,8 @@ async def test_runner_executes_allowed_query_and_audits_policy_rejection() -> No
     user_id = f"postgres-test-{uuid.uuid4().hex[:12]}"
     runner = SecurePostgresRunner()
     context = make_context(user_id)
+    envelope = ResultBudget.aggregate().as_metadata()
+    context.metadata.update({**envelope, "query_plan": envelope})
 
     dataframe = await runner.run_sql(
         RunSqlToolArgs(
@@ -74,6 +77,7 @@ async def test_runner_executes_allowed_query_and_audits_policy_rejection() -> No
 
     assert dataframe.iloc[0]["customer_state"] == "SP"
     assert len(dataframe) == 5
+    assert context.metadata["result_budget_check"]["state"] == "validated"
 
     with pytest.raises(PolicyViolation, match="only SELECT"):
         await runner.run_sql(RunSqlToolArgs(sql="DELETE FROM fact_orders"), context)
@@ -82,6 +86,20 @@ async def test_runner_executes_allowed_query_and_audits_policy_rejection() -> No
     assert [audit["policy_status"] for audit in audits[:2]] == ["rejected", "allowed"]
     assert audits[1]["question"] == "integration test"
     assert "analytics.fact_orders" in audits[1]["final_sql"]
+
+
+@pytest.mark.asyncio
+async def test_runner_audits_unimplemented_modes_without_a_reader_query() -> None:
+    runner = SecurePostgresRunner()
+    context = make_context(f"budget-mode-{uuid.uuid4().hex[:12]}")
+    envelope = ResultBudget(query_mode="export", aggregate_result_rows=None).as_metadata()
+    context.metadata.update({**envelope, "query_plan": envelope})
+    with pytest.raises(PolicyViolation, match="export is not enabled"):
+        await runner.run_sql(RunSqlToolArgs(sql="SELECT 1 AS gmv"), context)
+    audit = runner.audit.list_recent(context.user.id, "analyst")[0]
+    assert audit["policy_status"] == "rejected"
+    assert audit["final_sql"] is None
+    assert audit["policy_reason"] == "result_budget:query_mode export is not enabled"
 
 
 @pytest.mark.asyncio
