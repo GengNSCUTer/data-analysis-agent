@@ -7,12 +7,14 @@ whether the active R2 analysis state and R3 result reference may be reused.
 from __future__ import annotations
 
 from typing import Mapping
+from dataclasses import replace
 
 from vanna.core.storage import Conversation
 
 from .result_artifact import ResultArtifact
 from .working_memory import WorkingMemory
 from .workspace import WorkspaceProfile
+from .analysis_state import AnalysisState
 
 
 VERSION_MISMATCH_NOTICE = (
@@ -63,6 +65,19 @@ def prepare_turn_memory(
     return WorkingMemory(), VERSION_MISMATCH_NOTICE
 
 
+def prepare_analysis_state(
+    conversation: Conversation, workspace: WorkspaceProfile,
+) -> tuple[AnalysisState, str | None]:
+    if not analysis_scope_is_current(conversation.metadata, workspace):
+        _rebind_scope(conversation, workspace)
+        state = AnalysisState.new(workspace, history_start_index=conversation.metadata.get("message_count", len(conversation.messages)))
+        conversation.metadata["working_memory"] = state.as_dict()
+        conversation.metadata.pop("history_summary", None)
+        return state, VERSION_MISMATCH_NOTICE
+    state = AnalysisState.from_mapping(conversation.metadata.get("working_memory"))
+    return replace(state, workspace_id=workspace.workspace_id, dataset_version=workspace.dataset_version_id, metric_version=workspace.metric_version), None
+
+
 def clear_active_analysis_state(
     conversation: Conversation, workspace: WorkspaceProfile
 ) -> None:
@@ -72,7 +87,9 @@ def clear_active_analysis_state(
     raw_memory = conversation.metadata.get("working_memory")
     if summary is None and isinstance(raw_memory, Mapping):
         summary = raw_memory.get("__history_summary")
-    conversation.metadata["working_memory"] = WorkingMemory().as_dict()
+    conversation.metadata["working_memory"] = AnalysisState.new(
+        workspace, history_start_index=conversation.metadata.get("message_count", len(conversation.messages)),
+    ).as_dict()
     if summary:
         conversation.metadata["history_summary"] = summary
     else:

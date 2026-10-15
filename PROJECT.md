@@ -1176,7 +1176,34 @@ Phase 2 的 8 条真实语义回归全部通过，包括两个原问法的改写
 execution/state 关联。各项已归入后续阶段，未标为已修复。
 
 现有定向回归 68 passed / 6 skipped，随后启用项目 PostgreSQL 独立运行会话存储测试
-6 passed，合计覆盖 74 项不同测试。未做真实模型/浏览器多轮验收；下一步只推进 Phase 0.5
-ConversationHistory 读写与关联。
+6 passed，合计覆盖 74 项不同测试。该段是 Phase 0 完成时的历史记录；后续已按同一计划
+完成 ConversationHistory 与 AnalysisState 的 Phase 1 改造，当前结果见下方 2026-10-15
+Phase 1 记录。
 
 已通过 lark-doc 追加到飞书项目文档 revision 274，并局部回读确认。
+
+## 2026-10-15｜上下文与记忆 v2：Phase 1 完成（M1–M4 联合验收）
+
+在不新增第二份权威状态、不改变认证、SQL 安全、reader 权限和结果合同的前提下，完成
+`AnalysisState` 与 ConversationHistory 增量读写改造。`AnalysisState` 现在统一保存 active
+analysis task 的 task/turn/state version、workspace 与数据/指标版本、指标、时间、维度、筛选、
+结果形态、当前计划、最后成功计划和可信结果工件指针；`WorkingMemory` 只做兼容映射，在线
+QueryPlan 不再从两份状态中择一。
+
+会话存储复用既有 `message_id`、`message_index`、metadata、JSONB、事务和 `state_version`：
+新增近期完整 turn 读取、cursor 消息分页和增量消息追加；消息带服务端 turn/run/task 关联，
+失败状态与既有 run 审计关联。更新仍按 workspace/用户隔离并使用 `SELECT ... FOR UPDATE`，
+过期版本返回冲突而不是静默覆盖。清空分析只创建新的 active task、清除当前计划和工件指针，
+保留聊天历史；刷新只恢复同一会话，不重新激活旧任务条件。
+
+M1 宿主上下文与 Bootstrap、M2 workspace/会话版本、M3 ResultArtifact Presenter、M4 可嵌入
+Copilot Shell 已通过联合验收。Python 定向回归 **116 passed, 15 skipped**；定向 Ruff、
+compileall、diff check 通过。真实浏览器通过 8 项组合回归，并额外通过真实认证、SSE、
+PostgreSQL reader、SqlPolicy、ResultContract、ResultArtifact 的“查询 → 工件清单 → 刷新恢复 →
+消息分页 → 清空分析 → 清空后新查询”链路。真实模型偶发生成不符合 QueryPlan 的候选时，后端
+仍拒绝并标记失败；这说明安全边界生效，不代表模型业务准确率。
+
+当前仍未完成：ExecutionMemory 独立视图、上一轮排序实体的可信引用解析、跨会话长期记忆、
+真实 SSO/跨域 iframe、完整导出入口以及生产 SLA。下一步按计划进入 Phase 2，先让每次执行与
+当前 task/state/artifact 的复用关系可回放、可判定；不要把本轮浏览器通过写成多轮业务语义已经
+完成。

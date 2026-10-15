@@ -457,7 +457,7 @@ def create_app() -> FastAPI:
         )
         try:
             conversation = await conversation_store.get_conversation(
-                conversation_id, user
+                conversation_id, user, recent_turns=None
             )
         except InvalidConversationId as exc:
             return JSONResponse({"detail": str(exc)}, status_code=400)
@@ -498,9 +498,23 @@ def create_app() -> FastAPI:
                 # export. The client may render it after a reload without
                 # triggering the model or database.
                 "trusted_result_artifact": artifact.as_dict() if artifact else None,
+                "analysis_state": conversation.metadata.get("working_memory") if scope_current else None,
                 "charts": await _conversation_charts(user.id, conversation),
             }
         )
+
+    @app.get("/api/project/conversations/{conversation_id}/messages")
+    async def conversation_message_page(conversation_id: str, request: Request, before: int | None = None, limit: int = 50):
+        user = await role_resolver.resolve_user(_request_user_context(request))
+        try:
+            messages = await conversation_store.get_history_page(conversation_id, user, before=before, limit=limit)
+        except (InvalidConversationId, ValueError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        return {"messages": [
+            {"role": m.role, "content": "工具结果已记录" if m.role == "tool" else m.content,
+             "message_id": m.metadata["message_id"], "message_index": m.metadata["message_index"],
+             "timestamp": m.timestamp.isoformat()} for m in messages if m.role != "system"
+        ], "next_cursor": messages[0].metadata["message_index"] if messages else None}
 
     @app.get("/api/project/conversations/{conversation_id}/artifacts/{artifact_id}/manifest")
     async def result_artifact_manifest(

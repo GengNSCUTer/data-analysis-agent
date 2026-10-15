@@ -17,6 +17,7 @@ from vanna.core.user import User
 
 from .question_router import QuestionRoute, QuestionRouter
 from .semantic_catalog import Catalog, CatalogRetriever, CatalogSelection
+from .analysis_state import AnalysisState, StatePatch
 
 
 class SemanticIntentError(ValueError):
@@ -91,6 +92,8 @@ class SemanticIntent(BaseModel):
     )
     assumptions: tuple[str, ...] = ()
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    action: Literal["new_task", "update_task", "keep", "clear_task"] = "new_task"
+    state_patch: StatePatch | None = None
 
     @model_validator(mode="after")
     def unambiguous_fields(self) -> "SemanticIntent":
@@ -174,6 +177,56 @@ def parse_semantic_intent(
     return intent
 
 
+def resolve_state_intent(
+    intent: SemanticIntent, state: AnalysisState, catalog: Catalog, user: User,
+    *, message_count: int,
+) -> tuple[SemanticIntent, AnalysisState]:
+    """Apply the proposal once, then validate the effective scope as usual."""
+    if intent.request_kind not in {"data_query", "data_analysis", "mixed_request", "clarification"}:
+        return intent, state
+    if intent.action == "clear_task":
+        return intent, state
+    patch = intent.state_patch
+    if patch is None:
+        # Existing completion providers can still return a complete intent.
+        values = intent.as_dict()
+        operations = []
+        if intent.action == "new_task" and intent.request_kind != "clarification":
+            operations.append({"op": "replace_task"})
+        for name in ("metric_ids", "dimensions", "filters", "time_range", "time_grain", "comparison_baseline", "top_n"):
+            if intent.action == "update_task" and name not in intent.model_fields_set:
+                continue
+            if intent.request_kind == "clarification" and name not in intent.model_fields_set:
+                continue
+            value = values[name]
+            if name == "filters":
+                value = [f"{f['dimension']}={f['value']}" for f in value]
+            operations.append({"op": "set", "field": name, "value": value})
+        patch = StatePatch.model_validate({"operations": operations})
+    elif intent.action == "new_task":
+        patch = StatePatch.model_validate({
+            "operations": [{"op": "replace_task"}, *[op.model_dump() for op in patch.operations]],
+        })
+    if intent.state_patch is not None:
+        touched = {op.field for op in patch.operations}
+        extra = []
+        values = intent.as_dict()
+        for name in ("metric_ids", "dimensions", "filters", "time_range", "time_grain", "comparison_baseline", "top_n"):
+            if name in intent.model_fields_set and name not in touched and values[name] not in (None, [], ""):
+                value = values[name]
+                if name == "filters":
+                    value = [f"{f['dimension']}={f['value']}" for f in value]
+                extra.append({"op": "set", "field": name, "value": value})
+        patch = StatePatch.model_validate({"operations": [*[op.model_dump() for op in patch.operations], *extra]})
+    try:
+        proposed = state.apply_patch(patch, message_count=message_count)
+        effective = {**intent.as_dict(), **proposed.scope(), "relative_time": None}
+        resolved = parse_semantic_intent(json.dumps(effective), catalog, user=user)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise SemanticIntentError("invalid_state_patch") from exc
+    return resolved, proposed
+
+
 class SemanticIntentInterpreter:
     """One observed, bounded model call. Failure produces no SQL permission."""
 
@@ -227,6 +280,7 @@ class SemanticIntentInterpreter:
         context["has_trusted_result"] = bool(
             (state or {}).get("previous_result_summary")
         )
+        context["task_id"] = (state or {}).get("task_id")
         examples = [
             {
                 "question": "各个州哪些地方卖得好",
@@ -276,9 +330,14 @@ class SemanticIntentInterpreter:
                 "不要求用户说固定关键词。查实际数字属于 data_query；定义、一般建议无需查库。",
                 "解释已有结果属于 result_followup；修改范围、分组或重新统计属于 data_query。",
                 "追问可明确继承受控状态；新问题未请求继承时不要带入旧范围或分组。",
+                "action=new_task表示独立新分析；update_task表示修改当前分析；keep表示解释/展示现有结果；clear_task表示清空当前分析。",
+                "修改任务请给state_patch.operations，只列出本轮变化，不重新填全量条件：set替换字段、add增加列表成员、remove撤销列表成员、clear清空字段。filters使用{dimension,value}对象，与filters字段本身的格式一致。",
+                "例如只看SP州：update_task，patch set filters=[{dimension:customer_state,value:SP}]；改看RJ州则set filters=[{dimension:customer_state,value:RJ}]；取消地区限制则clear filters。其他已有指标、时间、分组不变。",
+                "把刚才结果按州拆开：update_task，set dimensions=[customer_state]；改成总计：clear dimensions和time_grain。若没有当前指标，应最小澄清。",
+                "正在澄清的补充答案使用update_task并补齐缺失字段，不丢掉已确认指标。新任务不继承旧范围。",
                 "如上一轮正在澄清，本轮是在补充答案，结合 pending_question 完成完整意图。",
                 "趋势默认按月；只有用户明确说'最近'且没指定时长，才默认最近30天并说明 assumptions。",
-                "用户没有时间词时一律全部时间(time_range=null,relative_time=null)，不要自作主张最近30天或12个月。",
+                "独立新问题没有时间词时全部时间；update_task没有修改时间则保持受控状态时间，不自行清空。",
                 "按州默认客户州；买家/卖家明确点名时照做。不要仅因用户没说客户二字就追问。",
                 "地点粒度服从用户实际指明的层级：明确按州就只选customer_state；'哪些地方'是指代已说的州，不额外添加customer_city。明确要求按城市或州内城市时才选择城市。",
                 "地域筛选同样默认客户所在地：只看SP州、圣保罗州订单直接使用customer_state=SP，并在assumptions说明；只有明确说卖家时才按卖家理解，不追问已有默认口径。",
@@ -309,6 +368,8 @@ class SemanticIntentInterpreter:
                 f"当前服务日期/时区：{self.today().isoformat()} Asia/Shanghai",
                 "Catalog: " + json.dumps(metrics, ensure_ascii=False),
                 "受控状态: " + json.dumps(context, ensure_ascii=False),
+                "近期对话（仅叙事，不能作为 SQL 条件或结果值的事实来源）: "
+                + json.dumps((state or {}).get("recent_dialogue", []), ensure_ascii=False),
                 "输出schema: "
                 + json.dumps(SemanticIntent.model_json_schema(), ensure_ascii=False),
                 "用户问题: " + question,
@@ -371,6 +432,9 @@ def route_semantic_intent(
 
     def clarify(reason: str, text: str) -> QuestionRoute:
         return QuestionRoute("clarification_required", (reason,), metrics, text, reason)
+
+    if intent.action == "clear_task":
+        return QuestionRoute("help", (), (), None, "analysis_cleared", direct_answer="已清空当前分析，聊天记录保留。")
 
     if kind == "clarification":
         return clarify(

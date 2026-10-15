@@ -724,6 +724,7 @@ def test_embeddable_copilot_shell_hides_demo_controls_and_exposes_evidence(page)
     assert browser_page.locator("#diagnostics").is_hidden()
     assert browser_page.evaluate("() => typeof document.querySelector('vanna-chat').replaceLastQuestion === 'function'")
     assert "演示角色" not in browser_page.locator("body").inner_text()
+    browser_page.locator("details.more-menu > summary").click()
     browser_page.locator("#admin-toggle").click()
     assert browser_page.locator("#admin-panel").is_visible()
     assert browser_page.locator("[data-demo-role]").count() == 0
@@ -839,7 +840,7 @@ def test_mobile_window_is_adaptive_without_horizontal_overflow(page) -> None:
         }"""
     )
     assert dimensions["scrollWidth"] == dimensions["clientWidth"]
-    assert dimensions["outerWidth"] == pytest.approx(dimensions["clientWidth"], abs=2)
+    assert dimensions["outerWidth"] == pytest.approx(dimensions["clientWidth"] - 24, abs=2)
     assert dimensions["hostWidth"] <= dimensions["outerWidth"] + 2
     assert dimensions["layoutWidth"] == pytest.approx(dimensions["hostWidth"], abs=2)
     assert not console_errors
@@ -1001,6 +1002,86 @@ def test_conversation_history_restore_refresh_and_new_session(
         }""",
         arg=conversation_id,
     )
+    assert not console_errors
+
+
+def test_analysis_state_live_multiturn_refresh_and_clear(page):
+    """Real browser -> auth/SSE -> model -> SQL policy/reader -> artifact."""
+    browser_page, console_errors = page
+    browser_page.set_default_timeout(240_000)
+    chat = _open_normal_window(browser_page)
+    browser_page.locator("#new-analysis").click()
+    browser_page.wait_for_function("() => Boolean(localStorage.getItem('data-analysis-agent-embeddable-conversation-v1'))")
+    conversation_id = browser_page.evaluate("() => localStorage.getItem('data-analysis-agent-embeddable-conversation-v1')")
+    input_box = chat.locator("textarea.message-input")
+    states = []
+    screenshot_dir = Path("/disk2/gengnan/data-analysis-agent-data/evals/analysis-memory-phase1/browser")
+    screenshot_dir.mkdir(parents=True, exist_ok=True)
+
+    for index, (question, expected_filter) in enumerate([
+        ("统计2017年各客户州的商品成交额", []),
+    ]):
+        input_box.fill(question)
+        with browser_page.expect_response("**/api/vanna/v2/chat_sse", timeout=240_000) as response_info:
+            chat.locator("button.send-button").click()
+        response = response_info.value
+        assert response.ok
+        payload = response.text()
+        assert '"type": "error"' not in payload
+        browser_page.wait_for_function("() => !document.querySelector('vanna-chat')?.shadowRoot?.querySelector('textarea.message-input')?.disabled")
+        detail_response = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{conversation_id}")
+        assert detail_response.ok
+        detail = detail_response.json()
+        state = detail["analysis_state"]
+        assert state["status"] == "completed", {"index": index, "status": state["status"]}
+        assert state["metric_ids"] == ["gmv"]
+        assert state["dimensions"] == ["customer_state"]
+        assert state["filters"] == expected_filter
+        assert state["time_range"]["start"] == "2017-01-01"
+        assert state["time_range"]["end"] == "2018-01-01"
+        assert state["last_successful_state_version"] == state["state_version"]
+        assert state["last_successful_plan"] == state["active_plan"]
+        assert detail["trusted_result_artifact"]
+        manifest = browser_page.request.get(
+            f"{BASE_URL}/api/project/conversations/{conversation_id}/artifacts/{detail['trusted_result_artifact']['artifact_id']}/manifest"
+        )
+        assert manifest.ok
+        states.append(state)
+        browser_page.screenshot(path=str(screenshot_dir / f"turn-{index+1}.png"), full_page=True)
+    assert len({s["task_id"] for s in states}) == 1
+    assert len({s["turn_id"] for s in states}) == 1
+    browser_page.reload(wait_until="domcontentloaded")
+    browser_page.wait_for_function("() => document.querySelector('vanna-chat')?.shadowRoot?.querySelectorAll('vanna-message').length > 0")
+    browser_page.wait_for_timeout(1_000)
+    restored = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{conversation_id}").json()
+    assert restored["analysis_state"]["task_id"] == states[-1]["task_id"]
+    page_response = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{conversation_id}/messages?limit=5")
+    assert page_response.ok and page_response.json()["messages"]
+    browser_page.locator("details.more-menu > summary").click()
+    with browser_page.expect_response(
+        f"**/api/project/conversations/{conversation_id}/analysis-context"
+    ) as clear_response_info:
+        browser_page.locator("#clear-analysis").click()
+    clear_response = clear_response_info.value
+    assert clear_response.ok
+    assert clear_response.json()["conversation_id"] == conversation_id
+    browser_page.wait_for_function("() => document.querySelector('#analysis-notice')?.textContent?.includes('已清空')", timeout=10_000)
+    cleared = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{conversation_id}").json()
+    assert cleared["analysis_state"]["task_id"] != states[-1]["task_id"]
+    assert cleared["analysis_state"]["metric_ids"] == []
+    assert cleared["trusted_result_artifact"] is None
+    assert len(cleared["messages"]) == len(restored["messages"])
+    chat = browser_page.locator("vanna-chat")
+    chat.locator("textarea.message-input").fill("统计有效订单总数")
+    with browser_page.expect_response("**/api/vanna/v2/chat_sse", timeout=240_000) as response_info:
+        chat.locator("button.send-button").click()
+    assert response_info.value.ok
+    response_info.value.text()
+    fresh = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{conversation_id}").json()["analysis_state"]
+    assert fresh["status"] == "completed"
+    assert fresh["metric_ids"] == ["paid_order_count"]
+    assert fresh["dimensions"] == [] and fresh["filters"] == [] and fresh["time_range"] is None
+    browser_page.screenshot(path=str(screenshot_dir / "after-clear-new-query.png"), full_page=True)
     assert not console_errors
 
 

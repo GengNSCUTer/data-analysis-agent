@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 from datetime import datetime, timezone
 import re
+import uuid
 from typing import Any
 
 import psycopg2
@@ -15,6 +17,9 @@ from vanna.core.tool import ToolCall
 from vanna.core.user import User
 
 from .postgres_runner import PostgresConnectionSettings
+
+
+CURRENT_MESSAGE_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar("message_context", default=None)
 
 
 class ConversationOwnershipError(PermissionError):
@@ -58,12 +63,29 @@ class PostgresConversationStore(ConversationStore):
         return conversation
 
     async def get_conversation(
-        self, conversation_id: str, user: User, workspace_id: str | None = None
+        self, conversation_id: str, user: User, workspace_id: str | None = None,
+        *, recent_turns: int | None = 6,
     ) -> Conversation | None:
         self._validate_conversation_id(conversation_id)
         return await asyncio.to_thread(
-            self._get_sync, conversation_id, user, workspace_id or self.default_workspace_id
+            self._get_sync, conversation_id, user, workspace_id or self.default_workspace_id, recent_turns
         )
+
+    async def get_recent_turns(self, conversation_id: str, user: User, *, limit: int = 6) -> Conversation | None:
+        return await self.get_conversation(conversation_id, user, recent_turns=limit)
+
+    async def get_history_page(
+        self, conversation_id: str, user: User, *, before: int | None = None, limit: int = 50,
+    ) -> list[Message]:
+        self._validate_conversation_id(conversation_id)
+        if limit <= 0 or (before is not None and before < 0):
+            raise ValueError("invalid history cursor or page size")
+        return await asyncio.to_thread(self._history_page_sync, conversation_id, user, before, min(limit, 200))
+
+    async def append_turn_messages(self, conversation: Conversation, messages: list[Message]) -> None:
+        for message in messages:
+            conversation.add_message(message)
+        await self.update_conversation(conversation)
 
     async def update_conversation(self, conversation: Conversation) -> None:
         self._validate_conversation_id(conversation.id)
@@ -119,7 +141,7 @@ class PostgresConversationStore(ConversationStore):
             )
 
     def _get_sync(
-        self, conversation_id: str, user: User, workspace_id: str
+        self, conversation_id: str, user: User, workspace_id: str, recent_turns: int | None = 6,
     ) -> Conversation | None:
         connection = self._connect()
         try:
@@ -137,14 +159,26 @@ class PostgresConversationStore(ConversationStore):
                 conversation_row = cursor.fetchone()
                 if not conversation_row:
                     return None
+                start_index = 0
+                if recent_turns is not None:
+                    if recent_turns <= 0:
+                        raise ValueError("recent_turns must be positive")
+                    cursor.execute(
+                        "SELECT message_index FROM app.messages WHERE conversation_id=%s AND role='user' "
+                        "ORDER BY message_index DESC LIMIT %s",
+                        (conversation_id, recent_turns),
+                    )
+                    starts = cursor.fetchall()
+                    start_index = starts[-1]["message_index"] if starts else 0
+                    start_index = max(start_index, (conversation_row.get("working_memory") or {}).get("history_start_index", 0))
                 cursor.execute(
                     """
-                    SELECT role, content, tool_calls_json, tool_call_id, metadata_json, created_at
+                    SELECT message_id, message_index, role, content, tool_calls_json, tool_call_id, metadata_json, created_at
                     FROM app.messages
-                    WHERE conversation_id = %s
+                    WHERE conversation_id = %s AND message_index >= %s
                     ORDER BY message_index ASC
                     """,
-                    (conversation_id,),
+                    (conversation_id, start_index),
                 )
                 messages = [self._message_from_row(row) for row in cursor.fetchall()]
             return Conversation(
@@ -162,6 +196,8 @@ class PostgresConversationStore(ConversationStore):
                     "state_version": conversation_row["state_version"],
                     "working_memory": conversation_row.get("working_memory") or {},
                     "history_summary": (conversation_row.get("working_memory") or {}).get("__history_summary"),
+                    "history_start_index": start_index,
+                    "loaded_message_count": len(messages),
                 },
             )
         finally:
@@ -232,7 +268,13 @@ class PostgresConversationStore(ConversationStore):
                         raise ConversationStateConflict(
                             "conversation state_version is stale"
                         )
-                    for index, message in enumerate(conversation.messages):
+                    loaded = conversation.metadata.get("loaded_message_count", 0)
+                    offset = conversation.metadata.get("history_start_index", 0)
+                    turn_context = dict(CURRENT_MESSAGE_CONTEXT.get() or {})
+                    for index, message in enumerate(conversation.messages[loaded:], start=offset + loaded):
+                        if message.role == "user" and CURRENT_MESSAGE_CONTEXT.get() is None:
+                            turn_context = {"turn_id": str(uuid.uuid4())}
+                        message.metadata.update(turn_context)
                         cursor.execute(
                             """
                             INSERT INTO app.messages (
@@ -240,6 +282,7 @@ class PostgresConversationStore(ConversationStore):
                                 content, tool_calls_json, tool_call_id, metadata_json, created_at
                             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON CONFLICT (conversation_id, message_index) DO NOTHING
+                            RETURNING message_id
                             """,
                             (
                                 conversation.id,
@@ -261,6 +304,9 @@ class PostgresConversationStore(ConversationStore):
                                 self._utc(message.timestamp),
                             ),
                         )
+                        inserted = cursor.fetchone()
+                        if inserted:
+                            message.metadata.update(message_id=inserted[0], message_index=index)
                     cursor.execute(
                         """
                         UPDATE app.conversations
@@ -272,7 +318,7 @@ class PostgresConversationStore(ConversationStore):
                         """,
                         (
                             title,
-                            len(conversation.messages),
+                            offset + len(conversation.messages),
                             self._utc(conversation.updated_at),
                             dataset_version,
                             metric_version,
@@ -288,6 +334,8 @@ class PostgresConversationStore(ConversationStore):
                         raise ConversationStateConflict("conversation state_version is stale")
                     conversation.metadata["workspace_id"] = workspace_id
                     conversation.metadata["state_version"] = expected_state_version + 1
+                    conversation.metadata["message_count"] = offset + len(conversation.messages)
+                    conversation.metadata["loaded_message_count"] = len(conversation.messages)
         finally:
             connection.close()
 
@@ -417,9 +465,23 @@ class PostgresConversationStore(ConversationStore):
             content=row["content"],
             tool_calls=[ToolCall.model_validate(call) for call in raw_calls] or None,
             tool_call_id=row["tool_call_id"],
-            metadata=row["metadata_json"] or {},
+            metadata={**(row["metadata_json"] or {}), "message_id": row["message_id"], "message_index": row["message_index"]},
             timestamp=row["created_at"],
         )
+
+    def _history_page_sync(self, conversation_id: str, user: User, before: int | None, limit: int) -> list[Message]:
+        connection = self._connect()
+        try:
+            with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                cursor.execute(
+                    "SELECT m.* FROM app.messages m JOIN app.conversations c USING(conversation_id) "
+                    "WHERE c.conversation_id=%s AND c.user_id=%s AND c.workspace_id=%s AND c.status='active' "
+                    "AND (%s IS NULL OR m.message_index < %s) ORDER BY m.message_index DESC LIMIT %s",
+                    (conversation_id, user.id, self.default_workspace_id, before, before, limit),
+                )
+                return [self._message_from_row(row) for row in reversed(cursor.fetchall())]
+        finally:
+            connection.close()
 
     @staticmethod
     def _user_from_row(row: Any) -> User:
@@ -435,6 +497,8 @@ class PostgresConversationStore(ConversationStore):
 
     @staticmethod
     def _title_for(conversation: Conversation) -> str | None:
+        if conversation.metadata.get("title"):
+            return conversation.metadata["title"]
         for message in conversation.messages:
             if message.role == "user" and message.content.strip():
                 return message.content.strip()[:120]

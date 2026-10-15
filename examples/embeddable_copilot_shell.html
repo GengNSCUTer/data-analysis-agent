@@ -345,7 +345,11 @@
         analysisNotice.dataset.open = "true";
       }
       function currentConversationId() {
-        return chat.conversationId || localStorage.getItem(conversationStorageKey) || "";
+        // The persisted selection is the page-level source of truth after a reload.
+        // The component may still be restoring its internal property while the
+        // shell actions are already available; preferring it avoids sending a
+        // clear/evidence request to a newly generated component id.
+        return localStorage.getItem(conversationStorageKey) || chat.conversationId || "";
       }
 
       customElements.whenDefined("vanna-chat").then(() => {
@@ -786,7 +790,9 @@
       }
       async function restoreVisibleConversation() {
         await refreshConversations();
-        const savedId = localStorage.getItem(conversationStorageKey) || "";
+        // Capture the page's persisted selection before the component can emit
+        // its own initial generated id during custom-element hydration.
+        const savedId = savedConversationId || localStorage.getItem(conversationStorageKey) || "";
         const ordered = [
           ...conversationItems.filter((item) => item.conversation_id === savedId),
           ...conversationItems.filter((item) => item.conversation_id !== savedId)

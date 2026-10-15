@@ -113,7 +113,7 @@ tags: ["architecture", "memory", "context", "multi-turn", "result-reference", "d
 - **CON-003**: 现有 SQL 生成、只读执行、结果预算、图表确定性生成和离线训练/评测协议保持不变，除非独立任务明确修改并回归验证。
 - **CON-004**: 当前实现优先支持单 workspace、单用户会话内的短期分析状态；跨会话长期事实记忆暂不纳入首个实现。
 - **GUD-001**: 对状态和执行证据采用结构化数据；对自然语言历史采用有界最近窗口和可追溯摘要；对旧历史采用按需召回而不是默认全部注入。
-- **GUD-002**: 每个实施阶段只完成一个可验证的小目标，先冻结合同和测试，再实现代码；不以补齐目标行数或“看起来更智能”为验收标准。
+- **GUD-002**: 按既定阶段完成可验证的改造，不额外拆分阶段或重复冻结合同；优先复用主键、类型、事务、版本和普通测试。每阶段完成后运行完整请求链路与浏览器测试，不以“看起来更智能”为验收标准。
 - **PAT-001**: 采用“原始事实可回放、派生摘要可重建、权威状态不可由摘要覆盖”的分层模式。
 - **PAT-002**: 结果复用与查询修改必须分开：改变图表或分页优先复用可信工件；新增筛选、维度、指标或比较要求必须生成新的受控查询。
 
@@ -131,29 +131,24 @@ tags: ["architecture", "memory", "context", "multi-turn", "result-reference", "d
 | TASK-002 | 在 `docs/architecture/` 新增上下文与记忆基线，明确线上语义路径不调用旧 `classify/admit`，但保留 `QuestionRouter` 的 Catalog/准入辅助职责和离线兼容路径。 | ✅ | 2026-10-15 |
 | TASK-003 | 为后续状态、执行记忆和结果引用冻结术语：`ConversationHistory`、`AnalysisState`、`ExecutionMemory`、`ResultArtifact`、`ReferenceBinding`、`ContextCompaction`。 | ✅ | 2026-10-15 |
 
-### Implementation Phase 0.5 — ConversationHistory 读写与关联
-
-- **GOAL-008**: 使聊天历史成为可恢复、按完整轮次读取并可关联分析任务的基础层；不改变 SQL 安全链。
-
-依赖 Phase 0；TASK-030 → TASK-031 → TASK-032 顺序执行。验收：近期窗口没有孤立 tool 消息，重载能定位同一 turn，增量写入不重复历史消息，跨用户/workspace 读取被拒绝。
-
-| Task | Description | Completed | Date |
-| --- | --- | --- | --- |
-| TASK-030 | 在 `conversation_store.py` 的 `_message_from_row()` 与 SQL 查询中暴露已有 `message_id` / `message_index`，在消息 metadata 保存服务端 turn 关联；旧消息按 user-led 完整轮次兼容读取，接口名和类型写入 `tests/test_postgres_conversation_store.py`。 |  |  |
-| TASK-031 | 在 `conversation_store.py` 增加 `get_recent_turns()`、`get_history_page()` 和 `append_turn_messages()`，近期读取补齐工具调用配对，页面使用 cursor，增量写入复用事务/state version；在 `chat_runtime.py` 接入窗口读取而非全量历史回写。 |  |  |
-| TASK-032 | 在 `chat_runtime.py` / `analysis_lifecycle.py` 贯通 turn 与 request/run 关联及失败/中断状态，保留最后一轮撤回重发语义；受影响摘要不复用。关联 task/execution 字段分别在 Phase 1/2 接入，覆盖重试、刷新、并发和权限隔离。 |  |  |
-
 ### Implementation Phase 1 — AnalysisState 与增量状态更新
 
 - **GOAL-002**: 将当前会话的分析状态从松散的 `WorkingMemory` 字段提升为可版本化、可解释的 active analysis task。
 
+按用户 2026-10-15 要求，ConversationHistory 读写与关联直接并入本阶段，不单独拆阶段；只使用既有消息主键、metadata、JSONB、事务与 state_version。阶段验收包含完整请求链路和真实浏览器。
+
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-004 | 新增 `src/data_analysis_agent/analysis_state.py`，定义冻结的 `AnalysisState`、`StatePatch`、`StatePatchOperation` 和 `AnalysisTaskStatus`；至少包含 task ID、state version、workspace/version、metric IDs、time range、dimensions、filters、comparison、time grain、result shape、active artifact ID 和 pending clarification。 |  |  |
-| TASK-005 | 将 `WorkingMemory` 改造成兼容适配层或明确的持久化映射，不允许 `WorkingMemory` 和 `AnalysisState` 同时成为 SQL 状态权威；在线 QueryPlan 只能读取一个 canonical state。 |  |  |
-| TASK-006 | 实现确定性的 patch 应用规则：`set`、`add`、`remove`、`clear`、`replace_task`；分别覆盖“再加一个筛选”“改成另一个地区”“取消地区筛选”“开始新分析”。操作仅限当前 Catalog/QueryPlan 能表达的条件；单值州筛选替换不冒充多值筛选，能力不足时明确说明。 |  |  |
-| TASK-007 | 在 `conversation_store.py` 中持久化 active task/state version，并复用当前 workspace 过滤与乐观锁；状态冲突不得静默采用 last-write-wins。 |  |  |
-| TASK-008 | 在 `analysis_lifecycle.py` 中定义新分析、清空当前分析、版本失效、会话刷新和恢复的状态转移；聊天历史保留，用 task 边界隔离旧条件；分开保存当前计划与最后成功 execution/artifact 的计划版本，失败后不得错配。 |  |  |
+| TASK-030 | 在 `conversation_store.py` 的 `_message_from_row()` 与 SQL 查询中暴露已有 `message_id` / `message_index`，在消息 metadata 保存服务端 turn 关联；旧消息按 user-led 完整轮次兼容读取。 | ✅ | 2026-10-15 |
+| TASK-031 | 增加近期完整 turns、cursor 消息分页与增量追加，在线默认读取近期窗口；保持历史回看及现有事务/state version。 | ✅ | 2026-10-15 |
+| TASK-032 | 贯通 turn/request/run/task 关联，失败状态复用 run 审计；保留撤回重发及摘要失效语义。 | ✅ | 2026-10-15 |
+| TASK-004 | 新增 `src/data_analysis_agent/analysis_state.py`，定义 `AnalysisState`、`StatePatch`、`StatePatchOperation` 和 `AnalysisTaskStatus`；至少包含 task ID、state version、workspace/version、metric IDs、time range、dimensions、filters、comparison、time grain、result shape、active artifact ID 和 pending clarification。 | ✅ | 2026-10-15 |
+| TASK-005 | 将 `WorkingMemory` 改造成兼容适配层或明确的持久化映射，不允许 `WorkingMemory` 和 `AnalysisState` 同时成为 SQL 状态权威；在线 QueryPlan 只能读取一个 canonical state。 | ✅ | 2026-10-15 |
+| TASK-006 | 实现确定性的 patch 应用规则：`set`、`add`、`remove`、`clear`、`replace_task`；分别覆盖“再加一个筛选”“改成另一个地区”“取消地区筛选”“开始新分析”。操作仅限当前 Catalog/QueryPlan 能表达的条件；单值州筛选替换不冒充多值筛选，能力不足时明确说明。 | ✅ | 2026-10-15 |
+| TASK-007 | 在 `conversation_store.py` 中持久化 active task/state version，并复用当前 workspace 过滤与乐观锁；状态冲突不得静默采用 last-write-wins。 | ✅ | 2026-10-15 |
+| TASK-008 | 在 `analysis_lifecycle.py` 中定义新分析、清空当前分析、版本失效、会话刷新和恢复的状态转移；聊天历史保留，用 task 边界隔离旧条件；分开保存当前计划与最后成功 execution/artifact 的计划版本，失败后不得错配。 | ✅ | 2026-10-15 |
+
+2026-10-15 验收完成：M1–M4 定向 Python 回归 **116 passed, 15 skipped**；项目 PostgreSQL 会话存储测试已包含在上述结果中。定向 Ruff、compileall、diff check 通过。真实浏览器通过 8 项组合回归，另有一项真实链路覆盖“查询 → 工件清单 → 刷新恢复 → 消息分页 → 清空分析上下文 → 清空后新查询”。浏览器验证使用真实认证、SSE、PostgreSQL reader、SqlPolicy、ResultContract 和 ResultArtifact。模型候选偶发不符合计划时，安全链路仍会拒绝该结果；这不被计为模型业务准确率。Phase 1 已完成，后续进入 Phase 2 执行记忆与可信结果工件复用。
 
 ### Implementation Phase 2 — ExecutionMemory 与可信结果工件
 

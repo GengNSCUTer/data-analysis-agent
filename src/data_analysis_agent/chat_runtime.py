@@ -15,7 +15,8 @@ from vanna.core.storage import Conversation, Message
 from vanna.servers.base import ChatHandler
 from vanna.servers.base.models import ChatRequest, ChatStreamChunk
 
-from .analysis_lifecycle import prepare_turn_memory
+from .analysis_lifecycle import prepare_turn_memory, prepare_analysis_state, clear_active_analysis_state
+from .analysis_state import AnalysisState, AnalysisTaskStatus
 from .catalog_grounding import ConstrainedCatalogGrounder, grounded_retrieval_question
 from .candidate_sql_generator import build_runtime_candidate_request
 from .question_router import (
@@ -26,7 +27,7 @@ from .question_router import (
 )
 from .budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
 from .chart_contract import ChartContract, ChartContractError
-from .conversation_store import ConversationStateConflict
+from .conversation_store import ConversationStateConflict, CURRENT_MESSAGE_CONTEXT
 from .metric_context import OLIST_WORKSPACE, PROMPT_VERSION
 from .question_router import QuestionRouter
 from .query_plan import QueryPlan
@@ -41,6 +42,7 @@ from .semantic_intent import (
     SemanticIntentInterpreter,
     route_semantic_intent,
     select_intent_catalog,
+    resolve_state_intent,
 )
 from .working_memory import WorkingMemory
 from .workspace import WorkspaceProfile
@@ -142,6 +144,7 @@ class BudgetedChatHandler(ChatHandler):
         usage.set_input(request.message)
         tracker_token = CURRENT_BUDGET.set(usage)
         run = None
+        message_context_token = None
         chart_contract: ChartContract | None = None
         try:
             user = await self.agent.user_resolver.resolve_user(request.request_context)
@@ -184,6 +187,7 @@ class BudgetedChatHandler(ChatHandler):
                 metric_version=self.workspace.metric_version,
             )
             request.request_context.metadata["run_id"] = run.run_id
+            message_context_token = CURRENT_MESSAGE_CONTEXT.set({"turn_id": run.run_id, "run_id": run.run_id})
 
             if usage.termination_reason == "input_too_long":
                 yield self._budget_chunk(
@@ -194,7 +198,7 @@ class BudgetedChatHandler(ChatHandler):
                 )
                 return
 
-            memory, invalidation_notice = prepare_turn_memory(
+            memory, invalidation_notice = (prepare_analysis_state if self.semantic_interpreter else prepare_turn_memory)(
                 conversation, self.workspace
             )
             if invalidation_notice:
@@ -216,6 +220,12 @@ class BudgetedChatHandler(ChatHandler):
             }:
                 route_started_at = perf_counter()
                 route_state = memory.as_dict()
+                if isinstance(memory, AnalysisState):
+                    route_state["recent_dialogue"] = [
+                        {"role": message.role, "content": message.content[:800]}
+                        for message in conversation.messages
+                        if message.role in {"user", "assistant"} and not message.tool_calls
+                    ][-12:]
                 semantic_intent: SemanticIntent | None = None
                 effective_question = request.message.strip()
                 if self.semantic_interpreter is not None:
@@ -226,6 +236,16 @@ class BudgetedChatHandler(ChatHandler):
                     except SemanticIntentError as exc:
                         usage.record_catalog({"semantic_intent_error": str(exc)})
                         semantic_intent = None
+                    if semantic_intent is not None:
+                        assert isinstance(memory, AnalysisState)
+                        try:
+                            semantic_intent, proposed_state = resolve_state_intent(
+                                semantic_intent, memory, self.semantic_interpreter.catalog, user,
+                                message_count=conversation.metadata.get("message_count", len(conversation.messages)),
+                            )
+                        except SemanticIntentError as exc:
+                            usage.record_catalog({"semantic_intent_error": str(exc)})
+                            semantic_intent = None
                     if semantic_intent is not None:
                         route_state = {
                             **route_state,
@@ -353,7 +373,9 @@ class BudgetedChatHandler(ChatHandler):
                     # legacy time/comparison regexes in WorkingMemory.apply().
                     pending = route.state == "clarification_required"
                     updated_memory = replace(
-                        memory,
+                        proposed_state if semantic_intent is not None and (
+                            route.should_generate_sql or semantic_intent.request_kind == "clarification"
+                        ) else memory,
                         pending_question=request.message.strip()[: memory._MAX_TEXT] if pending else None,
                         pending_missing=route.missing if pending else (),
                     )
@@ -368,6 +390,17 @@ class BudgetedChatHandler(ChatHandler):
                         comparison_baseline=semantic_intent.comparison_baseline,
                         time_grain=semantic_intent.time_grain,
                     )
+                if semantic_intent is not None and semantic_intent.action == "clear_task":
+                    clear_active_analysis_state(conversation, self.workspace)
+                    updated_memory = AnalysisState.from_mapping(conversation.metadata["working_memory"])
+                if isinstance(updated_memory, AnalysisState):
+                    updated_memory = replace(
+                        updated_memory, turn_id=run.run_id, run_id=run.run_id,
+                        status=AnalysisTaskStatus.CLARIFYING if route.needs_clarification else (
+                            AnalysisTaskStatus.EXECUTING if route.should_generate_sql else updated_memory.status
+                        ),
+                    )
+                    CURRENT_MESSAGE_CONTEXT.get()["task_id"] = updated_memory.task_id
                 query_plan = None
                 if route.should_generate_sql:
                     plan_state = updated_memory.as_dict()
@@ -391,6 +424,13 @@ class BudgetedChatHandler(ChatHandler):
                     usage.set_query_plan(
                         query_plan.as_dict(), query_plan.prompt_context()
                     )
+                    if isinstance(updated_memory, AnalysisState):
+                        updated_memory = replace(
+                            updated_memory, active_plan=query_plan.as_dict(),
+                            result_shape="time_series" if query_plan.time_grain else (
+                                "grouped" if query_plan.dimensions else "scalar"
+                            ),
+                        )
                 result_contract = ResultContract.from_selection(
                     selection,
                     retrieval_question,
@@ -459,6 +499,12 @@ class BudgetedChatHandler(ChatHandler):
                 if query_plan is not None:
                     request.request_context.metadata["query_plan"] = query_plan.as_dict()
                     catalog_evidence["query_plan"] = query_plan.as_dict()
+                if isinstance(updated_memory, AnalysisState):
+                    catalog_evidence["analysis_state"] = {
+                        "task_id": updated_memory.task_id, "state_version": updated_memory.state_version,
+                        "turn_id": updated_memory.turn_id, "status": updated_memory.status,
+                    }
+                if query_plan is not None:
                     candidate_request = build_runtime_candidate_request(
                         question=request.message,
                         selection=selection,
@@ -632,6 +678,8 @@ class BudgetedChatHandler(ChatHandler):
                     # validated answer into an SSE failure.  The run still
                     # records the error type for diagnosis.
                     usage.error_type = "result_summary_persistence"
+            elif self.semantic_interpreter is not None:
+                await self._finish_analysis_attempt(conversation_id, user, run.run_id)
             if usage.result_contract_satisfied:
                 # The model's natural-language answer and its tool call are
                 # separate SSE components.  Give the user a small, explicit
@@ -658,6 +706,8 @@ class BudgetedChatHandler(ChatHandler):
             )
         except Exception as exc:
             usage.terminate("execution_error", type(exc).__name__)
+            if run is not None and self.semantic_interpreter is not None:
+                await self._finish_analysis_attempt(conversation_id, user, run.run_id)
             raise
         finally:
             try:
@@ -665,6 +715,8 @@ class BudgetedChatHandler(ChatHandler):
                     await self.run_recorder.finish(run, usage)
             finally:
                 CURRENT_BUDGET.reset(tracker_token)
+                if message_context_token is not None:
+                    CURRENT_MESSAGE_CONTEXT.reset(message_context_token)
 
     @staticmethod
     def _budget_chunk(
@@ -830,7 +882,9 @@ class BudgetedChatHandler(ChatHandler):
         conversation = await self._get_conversation(conversation_id, user)
         if conversation is None:
             return
-        memory = WorkingMemory.from_mapping(conversation.metadata.get("working_memory"))
+        memory = (AnalysisState if self.semantic_interpreter is not None else WorkingMemory).from_mapping(conversation.metadata.get("working_memory"))
+        if isinstance(memory, AnalysisState) and memory.turn_id != (usage.catalog_trace.get("analysis_state") or {}).get("turn_id"):
+            raise ConversationStateConflict("result belongs to an older analysis turn")
         artifact = ResultArtifact.from_trusted_usage(
             request_id=request_id,
             summary=usage.result_summary or "",
@@ -841,6 +895,15 @@ class BudgetedChatHandler(ChatHandler):
             artifact
         ).as_dict()
         await self.agent.conversation_store.update_conversation(conversation)
+
+    async def _finish_analysis_attempt(self, conversation_id: str, user, run_id: str) -> None:
+        conversation = await self._get_conversation(conversation_id, user)
+        if conversation is None:
+            return
+        state = AnalysisState.from_mapping(conversation.metadata.get("working_memory"))
+        if state.run_id == run_id and state.status == AnalysisTaskStatus.EXECUTING:
+            conversation.metadata["working_memory"] = replace(state, status=AnalysisTaskStatus.FAILED).as_dict()
+            await self.agent.conversation_store.update_conversation(conversation)
 
     def _persist_chart_artifact(
         self, *, user, request_id: str, chart_component: UiComponent, usage: BudgetUsage

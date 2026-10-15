@@ -196,3 +196,37 @@ async def test_truncate_removes_last_user_turn_and_clears_memory(store) -> None:
         assert loaded.metadata["working_memory"] == {}
     finally:
         await store.delete_conversation(conversation_id, user)
+
+
+@pytest.mark.asyncio
+async def test_recent_window_append_and_cursor_preserve_full_history(store):
+    user = User(id=f"window-{uuid.uuid4().hex}", group_memberships=["analyst"])
+    other = User(id="not-window-owner", group_memberships=["analyst"])
+    conversation = Conversation(id=f"window-{uuid.uuid4().hex}", user=user)
+    try:
+        for n in range(10):
+            await store.append_turn_messages(conversation, [Message(role="user", content=f"问{n}"), Message(role="assistant", content=f"答{n}")])
+        recent = await store.get_recent_turns(conversation.id, user, limit=2)
+        assert [m.content for m in recent.messages] == ["问8", "答8", "问9", "答9"]
+        assert recent.metadata["message_count"] == 20
+        ids = [m.metadata["message_id"] for m in recent.messages]
+        assert len(set(ids)) == 4
+        assert recent.messages[0].metadata["turn_id"] != recent.messages[2].metadata["turn_id"]
+        await store.append_turn_messages(recent, [Message(role="user", content="问10"), Message(role="assistant", content="答10")])
+        await store.update_conversation(recent)  # metadata-only update does not insert messages
+        full = await store.get_conversation(conversation.id, user, recent_turns=None)
+        assert len(full.messages) == 22
+        assert [m.metadata["message_index"] for m in full.messages] == list(range(22))
+        assert full.messages[16].metadata["message_id"] == ids[0]
+        page = await store.get_history_page(conversation.id, user, limit=5)
+        older = await store.get_history_page(conversation.id, user, before=page[0].metadata["message_index"], limit=5)
+        assert page[0].metadata["message_index"] == 17
+        assert older[-1].metadata["message_index"] == 16
+        assert await store.get_history_page(conversation.id, other) == []
+        full.metadata["working_memory"] = {"history_start_index": 22}
+        await store.update_conversation(full)
+        after_clear = await store.get_conversation(conversation.id, user)
+        assert after_clear.messages == []
+        assert len((await store.get_conversation(conversation.id, user, recent_turns=None)).messages) == 22
+    finally:
+        await store.delete_conversation(conversation.id, user)
