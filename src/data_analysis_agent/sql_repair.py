@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Literal
-import re
 
 from .sql_policy import PolicyDecision, PolicyViolation, SqlPolicy
 

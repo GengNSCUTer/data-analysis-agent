@@ -9,7 +9,6 @@ five fixed date-window samples must remain in the same split.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 from pathlib import Path
 import re
@@ -203,7 +202,6 @@ def audit_thelook_sft_seeds(
         raise TheLookSftCoverageError("seed count does not match train + validation targets")
     ids = [seed.seed_id for seed in seeds]
     specs = [seed.query_spec.query_spec_id for seed in seeds]
-    programs = [seed.program_id for seed in seeds]
     if len(set(ids)) != len(ids) or len(set(specs)) != len(specs):
         raise TheLookSftCoverageError("seed_id and QuerySpec IDs must be unique")
     program_splits: dict[str, str] = {}

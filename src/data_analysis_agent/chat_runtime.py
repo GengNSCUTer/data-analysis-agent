@@ -35,6 +35,12 @@ from .question_router import QuestionRouter
 from .query_plan import QueryPlan
 from .result_artifact import ResultArtifact
 from .result_artifact_store import ResultArtifactIntegrityError, ResultArtifactStore
+from .result_reference import (
+    ResolvedReference,
+    ResultReferenceError,
+    apply_reference_filter,
+    resolve_ranked_entity,
+)
 from .result_budget import ResultBudget
 from .run_recorder import PostgresRunRecorder
 from .semantic_catalog import ResultContract
@@ -230,6 +236,8 @@ class BudgetedChatHandler(ChatHandler):
                         if message.role in {"user", "assistant"} and not message.tool_calls
                     ][-12:]
                 semantic_intent: SemanticIntent | None = None
+                reference_binding: ResolvedReference | None = None
+                reference_error: ResultReferenceError | None = None
                 effective_question = request.message.strip()
                 if self.semantic_interpreter is not None:
                     try:
@@ -249,6 +257,33 @@ class BudgetedChatHandler(ChatHandler):
                         except SemanticIntentError as exc:
                             usage.record_catalog({"semantic_intent_error": str(exc)})
                             semantic_intent = None
+                        if semantic_intent is not None and semantic_intent.reference_requests:
+                            try:
+                                reference_binding = resolve_ranked_entity(
+                                    semantic_intent.reference_requests[0],
+                                    memory.previous_result_artifact,
+                                    workspace_id=self.workspace.workspace_id,
+                                    dataset_version=self.workspace.dataset_version_id,
+                                    metric_version=self.workspace.metric_version,
+                                )
+                            except ResultReferenceError as exc:
+                                reference_error = exc
+                                usage.record_catalog({
+                                    "result_reference": {
+                                        "status": "rejected",
+                                        "reason_code": exc.reason_code,
+                                    }
+                                })
+                            else:
+                                proposed_state = apply_reference_filter(
+                                    proposed_state, reference_binding
+                                )
+                                usage.record_catalog({
+                                    "result_reference": {
+                                        "status": "resolved",
+                                        **reference_binding.as_dict(),
+                                    }
+                                })
                     if semantic_intent is not None:
                         route_state = {
                             **route_state,
@@ -256,6 +291,7 @@ class BudgetedChatHandler(ChatHandler):
                             "comparison_baseline": semantic_intent.comparison_baseline,
                             "semantic_intent": semantic_intent.as_dict(),
                         }
+                        route_state.update(proposed_state.scope())
                         usage.record_catalog({"semantic_intent": semantic_intent.as_dict()})
                         request.request_context.metadata["semantic_intent"] = semantic_intent.as_dict()
                 # A new question that already names a metric must not be
@@ -320,6 +356,17 @@ class BudgetedChatHandler(ChatHandler):
                         selection,
                         route_state,
                     )
+                    if reference_error is not None:
+                        route = QuestionRoute(
+                            "clarification_required",
+                            ("result_reference",),
+                            semantic_intent.metric_ids,
+                            reference_error.message,
+                            reference_error.reason_code,
+                            intent="clarification_required",
+                            requires_database=False,
+                            evidence_mode="clarification",
+                        )
                 elif self.semantic_interpreter is not None:
                     route = QuestionRoute(
                         "clarification_required", ("semantic_service",), (),
@@ -394,11 +441,23 @@ class BudgetedChatHandler(ChatHandler):
                 else:
                     updated_memory = memory.apply(request.message, route)
                 if semantic_intent is not None and route.should_generate_sql:
+                    filters = [
+                        f"{item.dimension}={item.value}"
+                        for item in semantic_intent.filters
+                    ]
+                    if reference_binding is not None:
+                        filters = [
+                            item for item in filters
+                            if not item.startswith(f"{reference_binding.dimension}=")
+                        ]
+                        filters.append(
+                            f"{reference_binding.dimension}={reference_binding.value}"
+                        )
                     updated_memory = replace(
                         updated_memory, metric_ids=semantic_intent.metric_ids,
                         dimensions=semantic_intent.dimensions,
                         time_range=route_state["time_range"],
-                        filters=tuple(f"{item.dimension}={item.value}" for item in semantic_intent.filters),
+                        filters=tuple(filters),
                         comparison_baseline=semantic_intent.comparison_baseline,
                         time_grain=semantic_intent.time_grain,
                     )
@@ -427,6 +486,12 @@ class BudgetedChatHandler(ChatHandler):
                         plan_state,
                         result_budget=self.result_budget,
                     )
+                    if isinstance(updated_memory, AnalysisState):
+                        updated_memory = replace(
+                            updated_memory,
+                            dimensions=tuple(query_plan.dimensions),
+                            metric_ids=tuple(query_plan.metric_ids),
+                        )
                     # Legacy offline callers retain lexical memory behavior.
                     # Online semantic turns persist their validated full scope.
                     if semantic_intent is None:

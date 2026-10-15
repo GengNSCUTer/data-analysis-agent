@@ -29,7 +29,6 @@ from .thelook_v2_queryspec import (
     validate_thelook_v2_query_spec,
 )
 from .thelook_v2_renderer import render_thelook_v2_gold_sql
-from .thelook_v2_context import THELOOK_V2_WORKSPACE
 from .thelook_queryspec import TheLookQueryTime
 from .workspace import WorkspaceProfile
 

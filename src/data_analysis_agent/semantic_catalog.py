@@ -24,7 +24,6 @@ from vanna.core.user import User
 from .budget import CURRENT_BUDGET
 from .sql_policy import (
     ANALYTICS_COLUMNS,
-    ANALYST_TABLES,
     SENSITIVE_PROJECTION_COLUMNS,
 )
 from .workspace import WorkspaceProfile

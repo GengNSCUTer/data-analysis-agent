@@ -45,7 +45,6 @@ QuestionState = Literal[
 IntentKind = Literal[
     "data_query",
     "data_analysis",
-    "data_analysis",
     "catalog_definition",
     "general_business",
     "general_knowledge",

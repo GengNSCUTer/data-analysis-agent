@@ -8,7 +8,6 @@ Catalog, so admission does not need to invent a question or use retrieval.
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Mapping
 
 import pandas as pd
 from sqlglot import exp, parse_one

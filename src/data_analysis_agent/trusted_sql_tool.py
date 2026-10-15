@@ -31,6 +31,16 @@ from .result_presentation import build_result_presentation, display_records
 from .result_artifact_store import ResultArtifactStore
 
 
+def _json_safe(value: object) -> object:
+    """Keep bounded ranking evidence serializable without exposing row payloads."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return str(isoformat())[:128]
+    return str(value)[:128]
+
+
 class RepairCandidateProvider(Protocol):
     async def __call__(self, prompt: str, context: ToolContext) -> str | None:
         """Return one untrusted SQL candidate, or ``None``."""
@@ -309,8 +319,17 @@ class TrustedRunSqlTool(RunSqlTool):
                 {name: row[name][:128] for name in dimensions if isinstance(row.get(name), str)}
                 for row in rows[:8]
             ] if dimensions else [],
+            "ranked_entities": [
+                {
+                    "rank": index,
+                    "dimension": dimensions[0],
+                    "value": row.get(dimensions[0])[:128],
+                    "order_value": _json_safe(row.get(ordering[0]["column"])) if ordering else None,
+                }
+                for index, row in enumerate(rows[:8], start=1)
+                if dimensions and isinstance(row.get(dimensions[0]), str)
+            ],
         }
-
     @staticmethod
     def _evidence(outcome: SqlRepairOutcome) -> dict[str, object]:
         data = outcome.as_dict()

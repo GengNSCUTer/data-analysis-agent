@@ -56,6 +56,18 @@ class IntentFilter(BaseModel):
     value: str = Field(min_length=1, max_length=120)
 
 
+class ReferenceRequest(BaseModel):
+    """A bounded request to reuse one entity from the current result artifact."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["previous_ranked_entity"]
+    dimension: str
+    rank: int = Field(ge=1, le=8)
+    match_mode: Literal["first_row", "unique_highest"] = "unique_highest"
+    expected_source_artifact_id: str | None = Field(default=None, max_length=64)
+
+
 class SemanticIntent(BaseModel):
     """An interpretation proposal, never SQL or an authority to access data."""
 
@@ -83,6 +95,7 @@ class SemanticIntent(BaseModel):
     relative_time: RelativeTime | None = None
     comparison_baseline: str | None = Field(default=None, max_length=120)
     filters: tuple[IntentFilter, ...] = ()
+    reference_requests: tuple[ReferenceRequest, ...] = ()
     chart_request: str | None = Field(default=None, max_length=80)
     top_n: int | None = Field(default=None, ge=1, le=100_000)
     clarification: str | None = Field(
@@ -103,6 +116,8 @@ class SemanticIntent(BaseModel):
             raise ValueError("duplicate metric ids")
         if len(set(self.dimensions)) != len(self.dimensions):
             raise ValueError("duplicate dimensions")
+        if len(self.reference_requests) > 1:
+            raise ValueError("only one result reference is supported per turn")
         return self
 
     def as_dict(self) -> dict[str, object]:
@@ -166,6 +181,8 @@ def parse_semantic_intent(
     }
     if any(item not in dimensions for item in intent.dimensions):
         raise SemanticIntentError("unknown_or_invisible_dimension")
+    if any(item.dimension not in dimensions for item in intent.reference_requests):
+        raise SemanticIntentError("unknown_or_invisible_reference_dimension")
     if any(item.dimension not in dimensions for item in intent.filters):
         raise SemanticIntentError("unknown_or_invisible_filter")
     if intent.relative_time:
@@ -281,6 +298,12 @@ class SemanticIntentInterpreter:
             (state or {}).get("previous_result_summary")
         )
         context["task_id"] = (state or {}).get("task_id")
+        artifact = (state or {}).get("previous_result_artifact")
+        context["active_artifact_id"] = (
+            artifact.get("artifact_id")
+            if isinstance(artifact, Mapping)
+            else None
+        )
         examples = [
             {
                 "question": "各个州哪些地方卖得好",
@@ -363,6 +386,7 @@ class SemanticIntentInterpreter:
                 "当前可编译的额外筛选只有customer_state=州代码；其他筛选不要忽略，最小澄清。",
                 "comparison_baseline可描述要比较的基线，不必要求用户说同比/环比。",
                 "chart_request写用户要求的图类型，不要求用户必须说'图表'。",
+                "如果用户说‘这个州/第一名/刚才排名第一的州’并要重新统计，使用reference_requests；只填写kind=previous_ranked_entity、dimension、rank、match_mode和expected_source_artifact_id，不填写value。服务端只从当前已验证结果工件解析值；没有唯一最高或工件失效时会澄清。",
                 "参考理解（展示语义，不要求用户模仿句式）：",
                 json.dumps(examples, ensure_ascii=False),
                 f"当前服务日期/时区：{self.today().isoformat()} Asia/Shanghai",

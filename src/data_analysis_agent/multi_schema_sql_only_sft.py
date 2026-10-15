@@ -9,7 +9,7 @@ stages respectively.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 import json
 from typing import Any
 

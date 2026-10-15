@@ -1233,3 +1233,22 @@ diff check 通过。截图：仓库外 `evals/analysis-memory-phase2/browser/`�
 
 下一步按计划进入 Phase 3：从可信结果实体解析“这个州/上一轮第几名”并生成新查询条件。
 Phase 2 尚不等于实现跨轮实体下钻、持久摘要增量续接或跨会话长期记忆。
+
+## 2026-10-15｜上下文与记忆 v2：Phase 3 可信结果实体引用完成
+
+新增 `ReferenceRequest` 和 `result_reference.py`，把“这个州/上一轮第几名”限制为服务端可验证的
+排名实体引用。语义模型只能提交引用类型、维度、排名和匹配语义，不能提交实体值；服务端从当前
+已通过 `ResultValidator` 的 `ResultArtifact` 读取有界 `ranked_entities`，校验用户/工作区、数据与
+指标版本、结果列、排序方向、排名范围和并列情况。第一行与唯一最高分开处理：第一行可以按
+`first_row` 引用，唯一最高必须是降序第一行且与第二行不并列。
+
+成功绑定后，运行时将解析出的值写入 `AnalysisState` 的服务器拥有筛选，再继续原有
+Catalog → QueryPlan → ResultContract → SqlPolicy → PostgreSQL reader → ResultValidator 链路。
+值不从助手自然语言、HistorySummary 或客户端字段提取；引用失败只产生可解释澄清，不进入 SQL。
+
+本轮同时清理了 10 个静态无引用导入、1 个无用局部变量和 1 个重复类型字面量；QuestionRouter、
+WorkingMemory、历史离线评测路径和 `/embedded-demo` 经引用审计仍在使用，未误删。定向联合回归
+**193 passed**，定向 Ruff、compileall、diff check 通过。浏览器真实验收已通过：第一轮排名查询、
+跨轮实体下钻生成新 SQL 的独立测试 **1 passed**，既有浏览器组合 **9 passed**；台账验证引用成功
+绑定到 `customer_state=SP`，且后续继续经过既有 SQL 治理链。一次完整重跑遇到在线模型提供方超时，
+未输出未经验证结果。Phase 3 不将单次链路写成任意业务语义准确率。

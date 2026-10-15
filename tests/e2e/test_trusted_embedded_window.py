@@ -1128,6 +1128,75 @@ def test_analysis_state_live_multiturn_refresh_and_clear(page):
     assert not console_errors
 
 
+def test_analysis_state_live_ranked_entity_reference(page) -> None:
+    """Resolve a follow-up entity from the validated result, never prose."""
+    browser_page, console_errors = page
+    browser_page.set_default_timeout(240_000)
+    chat = _open_normal_window(browser_page)
+    browser_page.locator("#new-analysis").click()
+    browser_page.wait_for_function(
+        "() => Boolean(localStorage.getItem('data-analysis-agent-embeddable-conversation-v1'))"
+    )
+    conversation_id = browser_page.evaluate(
+        "() => localStorage.getItem('data-analysis-agent-embeddable-conversation-v1')"
+    )
+    input_box = chat.locator("textarea.message-input")
+
+    input_box.fill("统计2017年各客户州的商品成交额，按成交额从高到低排序")
+    with browser_page.expect_response("**/api/vanna/v2/chat_sse", timeout=240_000) as first_info:
+        chat.locator("button.send-button").click()
+    assert first_info.value.ok
+    first_info.value.text()
+    browser_page.wait_for_function(
+        "() => !document.querySelector('vanna-chat')?.shadowRoot?.querySelector('textarea.message-input')?.disabled",
+        timeout=240_000,
+    )
+    first = browser_page.request.get(
+        f"{BASE_URL}/api/project/conversations/{conversation_id}"
+    ).json()
+    artifact = first["trusted_result_artifact"]
+    assert artifact["query_scope"]["dimensions"] == ["customer_state"]
+    assert artifact["result_metadata"]["validation_status"] == "valid"
+    assert artifact["result_metadata"]["ranked_entities"][0]["value"]
+
+    input_box.fill("刚才排名第一的州哪些商品种类卖得好")
+    with browser_page.expect_response("**/api/vanna/v2/chat_sse", timeout=240_000) as second_info:
+        chat.locator("button.send-button").click()
+    assert second_info.value.ok
+    second_info.value.text()
+    browser_page.wait_for_function(
+        "() => !document.querySelector('vanna-chat')?.shadowRoot?.querySelector('textarea.message-input')?.disabled",
+        timeout=240_000,
+    )
+    second = browser_page.request.get(
+        f"{BASE_URL}/api/project/conversations/{conversation_id}"
+    ).json()
+    state = second["analysis_state"]
+    assert state["status"] == "completed"
+    assert state["filters"] == ["customer_state=SP"]
+    assert state["dimensions"] == ["product_category_name"]
+    assert not console_errors
+
+    connection = psycopg2.connect(
+        host=PostgresConnectionSettings().host,
+        port=PostgresConnectionSettings().port,
+        database=PostgresConnectionSettings().database,
+        user=PostgresConnectionSettings().writer_user,
+    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT catalog_trace FROM app.agent_runs "
+                "WHERE conversation_id = %s ORDER BY started_at DESC LIMIT 1",
+                (conversation_id,),
+            )
+            trace = cursor.fetchone()[0]
+    finally:
+        connection.close()
+    assert trace["result_reference"]["status"] == "resolved"
+    assert "original_sql" not in json.dumps(trace["result_reference"])
+
+
 def test_w4_04_demo_script_browser_steps(page) -> None:
     """Walk the browser controls named by the W4-04 demo script."""
     browser_page, console_errors = page

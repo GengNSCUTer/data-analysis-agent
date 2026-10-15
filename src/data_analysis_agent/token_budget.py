@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Iterable
 
 from vanna.core.storage import Message
 

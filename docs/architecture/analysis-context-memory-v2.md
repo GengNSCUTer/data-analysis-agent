@@ -171,10 +171,25 @@ Phase 0 的三个任务以及 Phase 1 的 TASK-004～008、TASK-030～032 已完
 定义完成后再调用其恢复方法；用户已开始新分析或切换会话时，过时的加载响应不得覆盖当前选择。
 这避免了刷新后追问被发到其他旧会话，以及组件尚未注册时历史列表被错误标记不可用。
 
-这一步为 Phase 3 的“最高州 → 这个州的品类”准备可信数据来源，尚未实现引用解析器或新增下钻能力。
+这一步为 Phase 3 的“最高州 → 这个州的品类”准备可信数据来源。
 
 验收：`RUN_PROJECT_DB=1` 定向 Python 回归 **127 passed**；真实浏览器组合回归 **9 passed,
 9 deselected**；Ruff、compileall、diff check 通过。浏览器覆盖真实查询 → 执行记录及工件 → 刷新 →
 解释已有结果（审计确认零新增 SQL，reuse=validated_result）→ 清空 → 新查询，并覆盖历史会话恢复、
 新会话、移动端、结果预览及受控 SSE。截图位于仓库外
 `/disk2/gengnan/data-analysis-agent-data/evals/analysis-memory-phase2/browser/`。
+
+## 9. Phase 3：可信结果实体引用
+
+Phase 3 新增 `ReferenceRequest` 和 `result_reference.py`。语义解释器只能提出
+`previous_ranked_entity`、维度、排名、`first_row`/`unique_highest` 语义及可选工件 ID，不能
+提交实体值。服务端从当前已验证 `ResultArtifact` 的 `ranked_entities` 读取最多 8 条有界排名证据，
+校验用户/工作区、数据和指标版本、结果列、SQL AST 证明的排序、排名范围和并列；值不从助手文本、
+历史摘要或客户端字段提取。
+
+唯一最高要求降序第一行且不与第二行并列；“第一行”则使用 `first_row`，不会被表述为唯一最高。
+解析成功后，服务端将值写入 `AnalysisState` 的受控筛选，后续继续经过 Catalog、QueryPlan、
+ResultContract、SqlPolicy、PostgreSQL reader 和 ResultValidator。解析失败只返回可解释澄清，不进入
+SQL。Phase 3 定向联合回归 **193 passed**；真实浏览器跨轮实体下钻独立测试 **1 passed**，完整
+浏览器组合 **9 passed**。一次全套重跑遇到在线模型提供方超时，台账确认引用已经解析成功且没有
+产生未经验证结果。Phase 4 的短期上下文压缩尚未开始。

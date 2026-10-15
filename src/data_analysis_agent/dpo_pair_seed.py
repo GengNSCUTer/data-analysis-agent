@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-import hashlib
 from typing import Any
 
 from .dpo_pair import DpoPairValidationError, canonical_sql, sha256_text

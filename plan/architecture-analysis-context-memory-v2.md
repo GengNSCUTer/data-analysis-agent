@@ -169,11 +169,20 @@ Phase 2 验收：设置 `RUN_PROJECT_DB=1` 的定向 Python 回归 **127 passed*
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-013 | 在 `semantic_intent.py` 增加受限的 `reference_requests` 结构，首版只允许 `previous_ranked_entity`、维度、rank 和预期来源工件，不允许模型直接提交任意 dimension/value SQL 条件。 |  |  |
-| TASK-014 | 新增 `src/data_analysis_agent/result_reference.py`，从当前有效 `ResultArtifact` 的结构化 binding 中解析引用；校验用户/workspace/version、结果列、排序合同、rank 范围、所指行的维度值和工件完整性；按 REQ-007 区分第一行与唯一最高。 |  |  |
-| TASK-015 | 在 `chat_runtime.py` 的语义意图到 QueryPlan 之间加入引用解析；解析成功后生成服务端拥有的 filter binding，再由 Catalog/QueryPlan/SqlPolicy/reader/ResultValidator 继续执行。 |  |  |
-| TASK-016 | 对“最高州 → 这个州哪些商品种类卖得好”实现端到端回归：第一轮保存 `customer_state=SP` 等结构化 binding，第二轮保留适用指标/时间条件、改为商品类别维度并生成新的查询。 |  |  |
-| TASK-017 | 为引用失败定义可解释分支：没有可信工件、版本失效、没有排序依据、并列无法唯一确定、维度不允许筛选、用户显式覆盖旧引用时分别澄清或按新条件查询。 |  |  |
+| TASK-013 | 在 `semantic_intent.py` 增加受限的 `reference_requests` 结构，首版只允许 `previous_ranked_entity`、维度、rank 和预期来源工件，不允许模型直接提交任意 dimension/value SQL 条件。 | ✅ | 2026-10-15 |
+| TASK-014 | 新增 `src/data_analysis_agent/result_reference.py`，从当前有效 `ResultArtifact` 的结构化 binding 中解析引用；校验用户/workspace/version、结果列、排序合同、rank 范围、所指行的维度值和工件完整性；按 REQ-007 区分第一行与唯一最高。 | ✅ | 2026-10-15 |
+| TASK-015 | 在 `chat_runtime.py` 的语义意图到 QueryPlan 之间加入引用解析；解析成功后生成服务端拥有的 filter binding，再由 Catalog/QueryPlan/SqlPolicy/reader/ResultValidator 继续执行。 | ✅ | 2026-10-15 |
+| TASK-016 | 对“最高州 → 这个州哪些商品种类卖得好”实现端到端回归：第一轮保存 `customer_state=SP` 等结构化 binding，第二轮保留适用指标/时间条件、改为商品类别维度并生成新的查询。 | ✅ | 2026-10-15 |
+| TASK-017 | 为引用失败定义可解释分支：没有可信工件、版本失效、没有排序依据、并列无法唯一确定、维度不允许筛选、用户显式覆盖旧引用时分别澄清或按新条件查询。 | ✅ | 2026-10-15 |
+
+2026-10-15 验收完成：`ReferenceRequest` 只暴露受限引用字段；`ResultArtifact` 保存最多 8 条
+有界排名实体；`ResultReferenceResolver` 校验当前工件的用户/工作区、版本、验证状态、输出列、
+排序方向、排名范围和并列；成功值由服务端写入 `AnalysisState` 筛选后继续走原有查询治理链。
+定向联合回归 **193 passed**，定向 Ruff、compileall、diff check 通过。真实浏览器跨轮验收通过：
+第一轮排名查询、第二轮实体下钻均经过登录、SSE、语义解释、PostgreSQL、ResultValidator 和会话
+持久化，第二轮得到 `customer_state=SP`；独立测试 **1 passed**。完整浏览器组合为 **9 passed**，
+另有一次在线模型提供方超时；台账显示引用已解析但后续候选调用超时，未输出未经验证结果。
+Phase 4 的上下文压缩不提前开始。
 
 ### Implementation Phase 4 — 短期上下文包与滚动压缩 v2
 

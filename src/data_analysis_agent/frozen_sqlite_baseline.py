@@ -22,7 +22,6 @@ from urllib.request import Request, urlopen
 
 from data_analysis_agent.sqlite_benchmark import (
     BenchmarkCase,
-    BenchmarkInputError,
     SqlPrediction,
     resolve_benchmark_database_path,
 )

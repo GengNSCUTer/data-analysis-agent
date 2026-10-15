@@ -18,7 +18,7 @@ import subprocess
 import sys
 from typing import Any, Iterable, Mapping, Sequence
 
-from data_analysis_agent.sqlite_benchmark import BenchmarkInputError, SqlPrediction
+from data_analysis_agent.sqlite_benchmark import SqlPrediction
 from data_analysis_agent.candidate_sql_generator import (
     CandidateSqlGenerationError,
     unwrap_sql_completion,

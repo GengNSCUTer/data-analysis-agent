@@ -16,7 +16,7 @@ def example_default_usage():
     """Example 1: Use default embedding function (no GPU, no sentence-transformers required)"""
     print("Example 1: Default ChromaDB embedding (CPU-only, no extra dependencies)")
 
-    memory = ChromaAgentMemory(
+    _memory = ChromaAgentMemory(
         persist_directory="./chroma_memory_default"
     )
 
@@ -35,7 +35,7 @@ def example_auto_gpu():
     # Create embedding function with automatic device selection
     embedding_fn = create_sentence_transformer_embedding_function()
 
-    memory = ChromaAgentMemory(
+    _memory = ChromaAgentMemory(
         persist_directory="./chroma_memory_gpu",
         embedding_function=embedding_fn
     )
@@ -51,7 +51,7 @@ def example_explicit_cuda():
     # Explicitly request CUDA
     embedding_fn = create_sentence_transformer_embedding_function(device="cuda")
 
-    memory = ChromaAgentMemory(
+    _memory = ChromaAgentMemory(
         persist_directory="./chroma_memory_cuda",
         embedding_function=embedding_fn
     )
@@ -69,7 +69,7 @@ def example_custom_model_gpu():
         model_name="sentence-transformers/all-mpnet-base-v2"
     )
 
-    memory = ChromaAgentMemory(
+    _memory = ChromaAgentMemory(
         persist_directory="./chroma_memory_large",
         embedding_function=embedding_fn
     )
@@ -91,7 +91,7 @@ def example_manual_chromadb():
         device=device
     )
 
-    memory = ChromaAgentMemory(
+    _memory = ChromaAgentMemory(
         persist_directory="./chroma_memory_manual",
         embedding_function=embedding_fn
     )
@@ -111,7 +111,10 @@ if __name__ == "__main__":
 
     # Examples 2-5 require sentence-transformers to be installed
     try:
-        import sentence_transformers
+        import importlib.util
+
+        if importlib.util.find_spec("sentence_transformers") is None:
+            raise ImportError("sentence-transformers is not installed")
 
         example_auto_gpu()
 
