@@ -9,7 +9,7 @@ integrity metadata.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any, Mapping
 
@@ -33,6 +33,8 @@ class ResultArtifact:
     plotly_ref: str | None = None
     plotly_sha256: str | None = None
     plotly_bytes: int | None = None
+    query_scope: dict[str, Any] = field(default_factory=dict)
+    result_metadata: dict[str, Any] = field(default_factory=dict)
 
     def chart_replay_ref(self) -> "ChartReplayRef | None":
         """Return the external chart pointer when this artifact actually saved one."""
@@ -75,6 +77,12 @@ class ResultArtifact:
         ) or "unknown"
         external = trace.get("result_artifact")
         external = external if isinstance(external, Mapping) else {}
+        result_columns = _strings(external.get("columns")) or result_columns
+        state = trace.get("analysis_state")
+        state = state if isinstance(state, Mapping) else {}
+        plan = trace.get("query_plan")
+        plan = plan if isinstance(plan, Mapping) else {}
+        query_scope = _query_scope(trace, state, plan, external)
         return cls(
             artifact_id="rta_" + sha256(request_id.encode("utf-8")).hexdigest()[:20],
             summary=_bounded_text(summary, 1_200) or "",
@@ -90,6 +98,8 @@ class ResultArtifact:
             plotly_ref=_bounded_text(external.get("plotly_ref"), 128),
             plotly_sha256=_bounded_text(external.get("plotly_sha256"), 64),
             plotly_bytes=_non_negative_int(external.get("plotly_bytes")),
+            query_scope=query_scope,
+            result_metadata=_mapping(external.get("result_metadata")),
         )
 
     @classmethod
@@ -119,6 +129,8 @@ class ResultArtifact:
             plotly_ref=_bounded_text(value.get("plotly_ref"), 128),
             plotly_sha256=_bounded_text(value.get("plotly_sha256"), 64),
             plotly_bytes=_non_negative_int(value.get("plotly_bytes")),
+            query_scope=_mapping(value.get("query_scope")),
+            result_metadata=_mapping(value.get("result_metadata")),
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -138,6 +150,8 @@ class ResultArtifact:
             "plotly_ref": self.plotly_ref,
             "plotly_sha256": self.plotly_sha256,
             "plotly_bytes": self.plotly_bytes,
+            "query_scope": self.query_scope,
+            "result_metadata": self.result_metadata,
         }
 
     def replay_text(self) -> str:
@@ -219,3 +233,28 @@ def _bounded_text(value: Any, limit: int) -> str | None:
 
 def _non_negative_int(value: Any) -> int | None:
     return value if isinstance(value, int) and value >= 0 else None
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _query_scope(
+    trace: Mapping[str, Any],
+    state: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    external: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep only server-derived scope fields needed for governed reuse."""
+    scope: dict[str, Any] = {}
+    for key in (
+        "workspace_id", "dataset_version", "metric_version", "metric_ids",
+        "dimensions", "filters", "time_range", "time_grain", "comparison_baseline",
+        "top_n", "result_shape",
+    ):
+        scope[key] = state.get(key, plan.get(key))
+    contract = trace.get("result_contract") or {}
+    scope["workspace_id"] = external.get("workspace_id")
+    scope["dataset_version"] = contract.get("dataset_version")
+    scope["metric_version"] = contract.get("metric_version")
+    return scope

@@ -18,6 +18,7 @@ from data_analysis_agent.postgres_runner import (
     SecurePostgresRunner,
 )
 from data_analysis_agent.run_recorder import PostgresRunRecorder
+from data_analysis_agent.sql_repair import SafeSqlExecutionError
 
 
 pytestmark = pytest.mark.postgres
@@ -73,21 +74,32 @@ async def test_run_recorder_links_query_audit_to_finished_run() -> None:
             finish_reason="stop",
         )
         usage.finish()
-        await recorder.finish(run, usage)
-
         context = ToolContext(
             user=user,
             conversation_id=conversation_id,
             request_id=request_id,
             agent_memory=DemoAgentMemory(),
-            metadata={"question": "统计订单数", "run_id": run.run_id},
+            metadata={"question": "统计订单数", "run_id": run.run_id, "budget_usage": usage,
+                      "required_result_columns": ["order_count"], "metric_result_columns": ["order_count"]},
         )
-        await SecurePostgresRunner(settings, model_name="test-model").run_sql(
+        runner = SecurePostgresRunner(settings, model_name="test-model")
+        with pytest.raises(SafeSqlExecutionError):
+            await runner.run_sql(RunSqlToolArgs(sql="SELECT COUNT(*) / 0 AS order_count FROM fact_orders"), context)
+        await runner.run_sql(
             RunSqlToolArgs(
                 sql="SELECT COUNT(*) AS order_count FROM fact_orders LIMIT 1"
             ),
             context,
         )
+        await recorder.finish(run, usage)
+        attempts = await recorder.list_execution_memory(conversation_id=conversation_id, user_id=user.id)
+        assert len(attempts) == 2
+        assert attempts[1].execution_id == f"audit-{context.metadata['query_audit_id']}"
+        assert attempts[1].execution_status == "completed"
+        assert attempts[0].execution_status == "failed"
+        assert attempts[0].validation_status == "not_validated"
+        assert attempts[1].validation_status == "valid"
+        assert not await recorder.list_execution_memory(conversation_id=conversation_id, user_id="other-user")
 
         connection = psycopg2.connect(
             host=settings.host,

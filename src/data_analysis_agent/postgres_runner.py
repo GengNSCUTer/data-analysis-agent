@@ -140,6 +140,7 @@ class PostgresQueryAudit:
                         dataset_version_id, metric_version, elapsed_ms, row_count,
                         error_message, repair_evidence
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING audit_id
                     """,
                     (
                         context.metadata.get("run_id"),
@@ -163,7 +164,17 @@ class PostgresQueryAudit:
                         else None,
                     ),
                 )
+                audit_id = cursor.fetchone()[0]
             connection.commit()
+            context.metadata["query_audit_id"] = audit_id
+            validation = context.metadata.get("result_validation") or {}
+            validation_state = validation.get("state", "not_validated")
+            context.metadata["audited_sql"] = final_sql if status == "allowed" else None
+            usage = context.metadata.get("budget_usage")
+            if usage is not None:
+                attempts = dict((usage.catalog_trace or {}).get("execution_attempts") or {})
+                attempts[str(audit_id)] = {"validation_status": validation_state}
+                usage.record_catalog({"execution_attempts": attempts})
         finally:
             connection.close()
 
@@ -231,6 +242,10 @@ class SecurePostgresRunner(SqlRunner):
         return "admin" if "admin" in context.user.group_memberships else "analyst"
 
     def _run_sql_sync(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+        # Each attempt owns its own validation; a repair must not inherit it.
+        context.metadata.pop("result_validation", None)
+        context.metadata.pop("query_audit_id", None)
+        context.metadata.pop("audited_sql", None)
         role = self._role_for_context(context)
         started_at = perf_counter()
         try:

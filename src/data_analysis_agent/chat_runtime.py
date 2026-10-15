@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+import asyncio
 from dataclasses import replace
 import inspect
 import json
@@ -28,6 +29,7 @@ from .question_router import (
 from .budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
 from .chart_contract import ChartContract, ChartContractError
 from .conversation_store import ConversationStateConflict, CURRENT_MESSAGE_CONTEXT
+from .execution_memory import reuse_decision
 from .metric_context import OLIST_WORKSPACE, PROMPT_VERSION
 from .question_router import QuestionRouter
 from .query_plan import QueryPlan
@@ -54,6 +56,7 @@ def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
         "version", "artifact_id", "workspace_id", "dataset_version",
         "metric_version", "row_count", "columns", "csv_sha256", "csv_bytes",
         "csv_ref", "plotly_sha256", "plotly_bytes", "plotly_ref",
+        "result_metadata",
     }
     return {key: manifest[key] for key in allowed if key in manifest}
 
@@ -329,6 +332,15 @@ class BudgetedChatHandler(ChatHandler):
                         selection=selection,
                         conversation_state=route_state,
                     )
+                if self.semantic_interpreter is not None and route.intent == "result_followup":
+                    decision = await self._result_reuse_decision(memory, user)
+                    usage.record_catalog({"result_reuse": decision})
+                    if decision == "query_required":
+                        route = QuestionRoute(
+                            "clarification_required", ("current_result",), (),
+                            "当前条件没有可复用的已验证结果，请重新查询后再解释结果。",
+                            "result_not_reusable",
+                        )
                 resolved_dimensions: tuple[str, ...] = ()
                 if route.should_generate_sql:
                     if (
@@ -501,8 +513,14 @@ class BudgetedChatHandler(ChatHandler):
                     catalog_evidence["query_plan"] = query_plan.as_dict()
                 if isinstance(updated_memory, AnalysisState):
                     catalog_evidence["analysis_state"] = {
+                        **updated_memory.scope(),
+                        "workspace_id": updated_memory.workspace_id,
+                        "dataset_version": updated_memory.dataset_version,
+                        "metric_version": updated_memory.metric_version,
+                        "result_shape": updated_memory.result_shape,
                         "task_id": updated_memory.task_id, "state_version": updated_memory.state_version,
                         "turn_id": updated_memory.turn_id, "status": updated_memory.status,
+                        "parent_state_version": memory.state_version,
                     }
                 if query_plan is not None:
                     candidate_request = build_runtime_candidate_request(
@@ -895,6 +913,35 @@ class BudgetedChatHandler(ChatHandler):
             artifact
         ).as_dict()
         await self.agent.conversation_store.update_conversation(conversation)
+
+    async def _result_reuse_decision(self, state: AnalysisState, user) -> str:
+        artifact = state.previous_result_artifact
+        if artifact is None or self.result_artifact_store is None:
+            return "query_required"
+        requested_scope = {
+            **state.scope(), "workspace_id": self.workspace.workspace_id,
+            "dataset_version": self.workspace.dataset_version_id,
+            "metric_version": self.workspace.metric_version, "result_shape": state.result_shape,
+        }
+        decision = reuse_decision(
+            artifact_scope=artifact.query_scope, requested_scope=requested_scope,
+            artifact_id=artifact.artifact_id,
+            validation_status=artifact.result_metadata.get("validation_status", "not_validated"),
+        )
+        if decision == "query_required":
+            return decision
+        try:
+            manifest = await asyncio.to_thread(
+                self.result_artifact_store.verify_manifest, artifact_id=artifact.artifact_id,
+                user_id=user.id, workspace_id=self.workspace.workspace_id,
+            )
+        except (FileNotFoundError, PermissionError, ResultArtifactIntegrityError):
+            return "query_required"
+        if (manifest["dataset_version"], manifest["metric_version"], manifest["csv_sha256"]) != (
+            artifact.dataset_version, artifact.metric_version, artifact.csv_sha256,
+        ):
+            return "query_required"
+        return decision
 
     async def _finish_analysis_attempt(self, conversation_id: str, user, run_id: str) -> None:
         conversation = await self._get_conversation(conversation_id, user)

@@ -33,6 +33,7 @@ class ResultArtifactStore:
         row_count: int,
         dataset_version: str,
         metric_version: str,
+        result_metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         scope = self._scope(user_id, workspace_id, artifact_id)
         scope.mkdir(parents=True, exist_ok=True)
@@ -66,6 +67,7 @@ class ResultArtifactStore:
             "page_index_stride": 200,
             "page_offsets": page_offsets,
             "plotly_ref": None,
+            "result_metadata": dict(result_metadata or {}),
         }
         self._write_json_atomic(scope / "manifest.json", manifest)
         return manifest

@@ -120,12 +120,15 @@ def test_demo_bootstrap_route_preserves_server_authority(monkeypatch: pytest.Mon
             json={"surface_id": "orders-page"},
         )
         assert anonymous.status_code == 401
+        assert client.get("/api/project/conversations/unknown/execution-memory").status_code == 401
         assert client.post("/api/project/demo-session", json={"role": "analyst"}).status_code == 401
         logged_in = client.post(
             "/api/auth/login",
             json={"username": "bootstrapuser", "password": "bootstrap-password"},
         )
         assert logged_in.status_code == 200
+        assert client.get("/api/project/conversations/bad.id/execution-memory").status_code == 400
+        assert client.get("/api/project/conversations/unknown/execution-memory").status_code == 404
         allowed = client.post(
             "/api/copilot/bootstrap",
             json={

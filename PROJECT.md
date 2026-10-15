@@ -1207,3 +1207,29 @@ PostgreSQL reader、SqlPolicy、ResultContract、ResultArtifact 的“查询 →
 真实 SSO/跨域 iframe、完整导出入口以及生产 SLA。下一步按计划进入 Phase 2，先让每次执行与
 当前 task/state/artifact 的复用关系可回放、可判定；不要把本轮浏览器通过写成多轮业务语义已经
 完成。
+
+## 2026-10-15｜上下文与记忆 v2：Phase 2 完成
+
+实现逐次执行的 `ExecutionMemory` 视图，复用 `query_audits.audit_id` 与既有 `agent_runs`
+及 JSONB trace，不新增表、数据库迁移或 Plan/SQL hash。一次 SQL 尝试关联自己的
+run/task/turn、父/当前 state version、计划和查询范围、验证状态与 artifact；同一轮先失败后成功
+保持两条独立证据，不把整轮最终成功套在失败尝试上。新增所属会话的执行记录读取 API，
+不返回原始 SQL、数据库原始错误或完整结果行。
+
+`ResultArtifact` 保存查询范围、真实结果列、可由 SQL AST 证明的排序、最多 8 行分组实体及
+执行关联。结果解释在复用前核对范围、用户/workspace、版本和文件完整性；条件变化或工件失效
+不能用旧结果回答。展示/分页继续读取原工件，范围相同的解释不重复查库。没有新加兼容层，
+也没有额外增加 LLM 调用。禁止无必要兼容层的协作约束已写入 `AGENTS.md`。
+
+真实测试修复两处实际缺陷：保存工件读取错误的嵌套字段，导致数据/指标版本成为 `unknown`；
+页面启动遍历历史的回退及组件注册时序，导致新分析或刷新后可能被旧会话覆盖。现直接读取
+服务端平铺版本字段，只恢复选定会话，等待组件就绪并忽略已过时的加载响应；旧 unknown 工件
+不补推为有效，不增加旧格式兼容分支。
+
+验收：项目数据库开启后的定向 Python 回归 **127 passed**；浏览器组合回归 **9 passed,
+9 deselected**。真实模型/PostgreSQL 链路覆盖查询、执行证据、刷新、解释结果不重复 SQL、
+清空及新查询；其他浏览器用例覆盖历史恢复、移动端、预览和受控 SSE。Ruff、compileall、
+diff check 通过。截图：仓库外 `evals/analysis-memory-phase2/browser/`。
+
+下一步按计划进入 Phase 3：从可信结果实体解析“这个州/上一轮第几名”并生成新查询条件。
+Phase 2 尚不等于实现跨轮实体下钻、持久摘要增量续接或跨会话长期记忆。

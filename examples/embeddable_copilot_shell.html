@@ -789,29 +789,24 @@
         renderConversations();
       }
       async function restoreVisibleConversation() {
+        const selectedId = localStorage.getItem(conversationStorageKey);
+        await customElements.whenDefined("vanna-chat");
         await refreshConversations();
-        // Capture the page's persisted selection before the component can emit
-        // its own initial generated id during custom-element hydration.
-        const savedId = savedConversationId || localStorage.getItem(conversationStorageKey) || "";
-        const ordered = [
-          ...conversationItems.filter((item) => item.conversation_id === savedId),
-          ...conversationItems.filter((item) => item.conversation_id !== savedId)
-        ];
-        for (const item of ordered) {
-          try {
-            await loadConversation(item.conversation_id);
-            return;
-          } catch (_) {
-            continue;
-          }
+        // Restore only the selected conversation. Never choose an unrelated
+        // history entry, or overwrite a new analysis started during this fetch.
+        if (selectedId && currentConversationId() === selectedId) {
+          await loadConversation(selectedId);
+        } else if (!localStorage.getItem(conversationStorageKey)) {
+          chat.showStarterIfEmpty();
         }
-        localStorage.removeItem(conversationStorageKey);
-        if (typeof chat.showStarterIfEmpty === "function") chat.showStarterIfEmpty();
       }
       async function loadConversation(conversationId) {
+        chat.setConversationId(conversationId);
+        localStorage.setItem(conversationStorageKey, conversationId);
         const response = await fetch(`/api/project/conversations/${encodeURIComponent(conversationId)}`, withAuth());
         if (!response.ok) throw new Error("conversation unavailable");
         const detail = await response.json();
+        if (currentConversationId() !== conversationId) return;
         const messages = Array.isArray(detail.messages) ? detail.messages : [];
         if (detail.trusted_result_artifact?.summary) {
           messages.push({ role: "assistant", content: detail.trusted_result_artifact.summary });

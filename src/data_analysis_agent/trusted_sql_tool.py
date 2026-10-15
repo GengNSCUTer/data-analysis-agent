@@ -11,6 +11,8 @@ import re
 from hashlib import sha256
 from typing import Protocol
 
+from sqlglot import exp, parse_one
+
 from vanna.capabilities.sql_runner import RunSqlToolArgs
 from vanna.core.llm import LlmMessage, LlmRequest, LlmService
 from vanna.core.tool import ToolContext, ToolResult
@@ -259,8 +261,6 @@ class TrustedRunSqlTool(RunSqlTool):
             return
         workspace_id = str(context.metadata.get("workspace_id") or "unknown")
         artifact_id = "rta_" + sha256(context.request_id.encode("utf-8")).hexdigest()[:20]
-        contract = context.metadata.get("result_contract")
-        contract = contract if isinstance(contract, dict) else {}
         manifest = self.result_artifact_store.save_result_csv(
             artifact_id=artifact_id,
             user_id=context.user.id,
@@ -268,13 +268,48 @@ class TrustedRunSqlTool(RunSqlTool):
             columns=columns,
             rows=rows,
             row_count=int(result.metadata.get("row_count") or len(rows)),
-            dataset_version=str(contract.get("dataset_version") or "unknown"),
-            metric_version=str(contract.get("metric_version") or "unknown"),
+            dataset_version=str(context.metadata.get("dataset_version_id") or "unknown"),
+            metric_version=str(context.metadata.get("metric_version") or "unknown"),
+            result_metadata=self._result_metadata(context, columns, rows),
         )
         context.metadata["result_artifact"] = manifest
         usage = CURRENT_BUDGET.get()
         if usage is not None:
             usage.record_catalog({"result_artifact": _safe_artifact_manifest(manifest)})
+            audit_id = context.metadata.get("query_audit_id")
+            if audit_id is not None:
+                attempts = dict((usage.catalog_trace or {}).get("execution_attempts") or {})
+                attempts[str(audit_id)] = {"validation_status": "valid", "artifact_id": artifact_id}
+                usage.record_catalog({"execution_attempts": attempts})
+
+    @staticmethod
+    def _result_metadata(context: ToolContext, columns: list, rows: list) -> dict:
+        """Bounded structured evidence from validated rows and the audited AST."""
+        plan = context.metadata.get("query_plan") or {}
+        dimensions = [name for name in plan.get("dimensions", ()) if name in columns]
+        ordering = []
+        sql = context.metadata.get("audited_sql")
+        if sql:
+            statement = parse_one(sql, read="postgres")
+            order = statement.args.get("order")
+            if order:
+                for item in order.expressions:
+                    column = item.this
+                    if isinstance(column, exp.Column) and column.name in columns:
+                        ordering.append({
+                            "column": column.name, "direction": "desc" if item.args.get("desc") else "asc",
+                            "nulls_first": bool(item.args.get("nulls_first")),
+                        })
+        return {
+            "execution_id": f"audit-{context.metadata['query_audit_id']}" if context.metadata.get("query_audit_id") else None,
+            "result_shape": "time_series" if plan.get("time_grain") else "grouped" if dimensions else "scalar",
+            "validation_status": "valid",
+            "ordering": ordering,
+            "entities": [
+                {name: row[name][:128] for name in dimensions if isinstance(row.get(name), str)}
+                for row in rows[:8]
+            ] if dimensions else [],
+        }
 
     @staticmethod
     def _evidence(outcome: SqlRepairOutcome) -> dict[str, object]:
@@ -365,19 +400,9 @@ class TrustedRunSqlTool(RunSqlTool):
         display_rows, _ = display_records(records, columns=columns, labels=labels)
         row_count = int(result.metadata.get("row_count") or len(display_rows))
         budget = int(result.metadata.get("display_row_budget") or len(display_rows))
-        contract = context.metadata.get("result_contract")
-        contract = contract if isinstance(contract, dict) else {}
         workspace_id = str(context.metadata.get("workspace_id") or "unknown")
-        dataset_version = str(
-            contract.get("dataset_version")
-            or context.metadata.get("dataset_version_id")
-            or "unknown"
-        )
-        metric_version = str(
-            contract.get("metric_version")
-            or context.metadata.get("metric_version")
-            or "unknown"
-        )
+        dataset_version = str(context.metadata.get("dataset_version_id") or "unknown")
+        metric_version = str(context.metadata.get("metric_version") or "unknown")
         artifact = context.metadata.get("result_artifact")
         artifact_id = artifact.get("artifact_id") if isinstance(artifact, dict) else None
         notice = context.metadata.get("result_display_notice")
@@ -439,5 +464,6 @@ def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
         "version", "artifact_id", "workspace_id", "dataset_version",
         "metric_version", "row_count", "columns", "csv_sha256", "csv_bytes",
         "csv_ref", "plotly_sha256", "plotly_bytes", "plotly_ref",
+        "result_metadata",
     }
     return {key: manifest[key] for key in allowed if key in manifest}

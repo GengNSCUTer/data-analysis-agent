@@ -156,10 +156,12 @@ tags: ["architecture", "memory", "context", "multi-turn", "result-reference", "d
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-009 | 审阅 `run_recorder.py`、`TrustedRunSqlTool`、`ResultValidator`、`ResultArtifactStore` 和现有 PostgreSQL 审计表，优先复用已有字段；只有当前证据无法表达执行关系时才新增迁移。 |  |  |
-| TASK-010 | 定义 `ExecutionMemory` 视图或数据类：execution ID、task ID、父/当前 state version、QueryPlan ID/hash、SQL hash、参数摘要、provider/model、执行状态、validation status、result artifact ID、数据和指标版本、创建时间和失败原因。 |  |  |
-| TASK-011 | 扩展 `ResultArtifact` 的结构化元数据，使其能够保存结果列、排序指标、排序方向、结果形态、结果版本、完整性摘要和有限的可引用分组实体；不通过解析自然语言摘要生成这些字段。 |  |  |
-| TASK-012 | 将“只改变展示”“复用已验证工件”“需要重新查询”分别编码为可判定的复用规则；数据/指标/workspace 版本漂移、字段缺失、工件过期或验证不通过时禁止复用。 |  |  |
+| TASK-009 | 审阅 `run_recorder.py`、`TrustedRunSqlTool`、`ResultValidator`、`ResultArtifactStore` 和现有 PostgreSQL 审计表，优先复用已有字段；只有当前证据无法表达执行关系时才新增迁移。 | ✅ | 2026-10-15 |
+| TASK-010 | 定义 `ExecutionMemory` 视图或数据类：复用 audit_id 作为 SQL 尝试 ID，关联 run/task/turn、父/当前 state version、QueryPlan 快照及结构化查询范围、model、逐次执行/验证状态、artifact ID、版本、时间与安全失败类别。原始 SQL 沿用受限 query_audits，不新增 Plan/SQL hash 或额外表。 | ✅ | 2026-10-15 |
+| TASK-011 | 扩展 `ResultArtifact` 的结构化元数据，使其能够保存结果列、排序指标、排序方向、结果形态、结果版本、完整性摘要和有限的可引用分组实体；不通过解析自然语言摘要生成这些字段。 | ✅ | 2026-10-15 |
+| TASK-012 | 将“只改变展示”“复用已验证工件”“需要重新查询”分别编码为可判定的复用规则；数据/指标/workspace 版本漂移、字段缺失、工件过期或验证不通过时禁止复用。 | ✅ | 2026-10-15 |
+
+Phase 2 验收：设置 `RUN_PROJECT_DB=1` 的定向 Python 回归 **127 passed**，覆盖同一 run 先失败后成功、逐次验证归属、跨用户读取、工件版本/范围变化、文件篡改/丢失及原有安全执行链。真实浏览器组合回归 **9 passed, 9 deselected**，其中一项使用真实模型与 PostgreSQL 覆盖查询、执行证据、刷新、结果解释不重复查库、清空及新查询。其余覆盖历史恢复、新会话、结果展示、移动端和受控 SSE 交互，不全部计为模型准确率。Ruff、compileall、diff check 通过。没有新增表、迁移、Plan/SQL hash、兼容层或额外 LLM 调用。旧 unknown 工件不回填；文件失效沿用既有版本/权限/完整性检查，不新增任意 TTL。下一步进入 Phase 3 可信实体引用解析。
 
 ### Implementation Phase 3 — Trusted ResultReferenceResolver v1
 

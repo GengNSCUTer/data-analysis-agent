@@ -26,8 +26,27 @@ def _context() -> ToolContext:
             "required_result_columns": ["paid_order_count"],
             "metric_result_columns": ["paid_order_count"],
             "catalog_context": "analytics.fact_orders.order_id",
+            "dataset_version_id": "test-data-v1",
+            "metric_version": "test-metrics-v1",
         },
     )
+
+
+def test_result_metadata_comes_from_audited_order_and_only_bounded_entities():
+    context = _context()
+    context.metadata.update({
+        "query_audit_id": 42,
+        "query_plan": {"dimensions": ["customer_state"]},
+        "audited_sql": "SELECT customer_state, SUM(price) AS gmv FROM fact_order_items GROUP BY customer_state ORDER BY gmv DESC",
+    })
+    rows = [{"customer_state": f"S{i}", "gmv": 100-i, "private": "hidden"} for i in range(12)]
+    meta = TrustedRunSqlTool._result_metadata(context, ["customer_state", "gmv", "private"], rows)
+    assert meta["execution_id"] == "audit-42"
+    assert meta["ordering"] == [{"column": "gmv", "direction": "desc", "nulls_first": True}]
+    assert meta["entities"] == [{"customer_state": f"S{i}"} for i in range(8)]
+    assert "hidden" not in str(meta)
+    context.metadata["audited_sql"] = "SELECT customer_state, SUM(price) AS gmv FROM fact_order_items GROUP BY customer_state"
+    assert TrustedRunSqlTool._result_metadata(context, ["customer_state", "gmv"], rows)["ordering"] == []
 
 
 class SequenceRunner(SqlRunner):
@@ -158,6 +177,8 @@ async def test_presenter_carries_persisted_artifact_reference(tmp_path) -> None:
 
     assert result.success is True
     artifact_id = context.metadata["result_artifact"]["artifact_id"]
+    assert context.metadata["result_artifact"]["dataset_version"] == "test-data-v1"
+    assert context.metadata["result_artifact"]["metric_version"] == "test-metrics-v1"
     assert result.metadata["result_presentation"]["artifact_id"] == artifact_id
     assert result.ui_component.rich_component.audit_ref == "trusted-tool-request"
 

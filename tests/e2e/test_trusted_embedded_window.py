@@ -277,8 +277,8 @@ def seeded_history_conversation():
                     """
                     INSERT INTO app.conversations (
                         conversation_id, user_id, user_role, title,
-                        dataset_version_id, metric_version, message_count
-                    ) VALUES (%s, %s, 'analyst', %s, %s, %s, 2)
+                        dataset_version_id, metric_version, message_count, workspace_id
+                    ) VALUES (%s, %s, 'analyst', %s, %s, %s, 2, 'olist-demo')
                     """,
                     (
                         conversation_id,
@@ -936,6 +936,9 @@ def test_conversation_history_restore_refresh_and_new_session(
     browser_page, console_errors = page
     conversation_id = seeded_history_conversation
     _login(browser_page)
+    listing = browser_page.request.get(f"{BASE_URL}/api/project/conversations?limit=20")
+    assert listing.ok
+    assert conversation_id in [item["conversation_id"] for item in listing.json()], listing.json()
     browser_page.goto(f"{BASE_URL}/embedded-copilot", wait_until="domcontentloaded")
 
     history_button = browser_page.locator(
@@ -970,6 +973,7 @@ def test_conversation_history_restore_refresh_and_new_session(
     assert history_chat.locator("strong").count() >= 1
 
     browser_page.reload(wait_until="domcontentloaded")
+    browser_page.wait_for_function("id => document.querySelector('vanna-chat')?.conversationId === id", arg=conversation_id)
     browser_page.wait_for_function(
         """id => {
           const chat = document.querySelector('vanna-chat');
@@ -1015,7 +1019,7 @@ def test_analysis_state_live_multiturn_refresh_and_clear(page):
     conversation_id = browser_page.evaluate("() => localStorage.getItem('data-analysis-agent-embeddable-conversation-v1')")
     input_box = chat.locator("textarea.message-input")
     states = []
-    screenshot_dir = Path("/disk2/gengnan/data-analysis-agent-data/evals/analysis-memory-phase1/browser")
+    screenshot_dir = Path("/disk2/gengnan/data-analysis-agent-data/evals/analysis-memory-phase2/browser")
     screenshot_dir.mkdir(parents=True, exist_ok=True)
 
     for index, (question, expected_filter) in enumerate([
@@ -1046,15 +1050,54 @@ def test_analysis_state_live_multiturn_refresh_and_clear(page):
             f"{BASE_URL}/api/project/conversations/{conversation_id}/artifacts/{detail['trusted_result_artifact']['artifact_id']}/manifest"
         )
         assert manifest.ok
+        artifact = detail["trusted_result_artifact"]
+        assert artifact["query_scope"]["dimensions"] == ["customer_state"]
+        assert artifact["result_metadata"]["validation_status"] == "valid"
+        assert 0 < len(artifact["result_metadata"]["entities"]) <= 8
+        evidence_response = browser_page.request.get(
+            f"{BASE_URL}/api/project/conversations/{conversation_id}/execution-memory"
+        )
+        assert evidence_response.ok
+        executions = evidence_response.json()["executions"]
+        successful = [item for item in executions if item["artifact_id"] == artifact["artifact_id"]]
+        assert len(successful) == 1
+        assert successful[0]["execution_id"] == artifact["result_metadata"]["execution_id"]
+        assert successful[0]["validation_status"] == "valid"
+        assert successful[0]["task_id"] == state["task_id"]
+        assert "original_sql" not in str(executions) and "final_sql" not in str(executions)
         states.append(state)
         browser_page.screenshot(path=str(screenshot_dir / f"turn-{index+1}.png"), full_page=True)
     assert len({s["task_id"] for s in states}) == 1
     assert len({s["turn_id"] for s in states}) == 1
     browser_page.reload(wait_until="domcontentloaded")
+    browser_page.wait_for_function("id => document.querySelector('vanna-chat')?.conversationId === id", arg=conversation_id)
     browser_page.wait_for_function("() => document.querySelector('vanna-chat')?.shadowRoot?.querySelectorAll('vanna-message').length > 0")
     browser_page.wait_for_timeout(1_000)
     restored = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{conversation_id}").json()
     assert restored["analysis_state"]["task_id"] == states[-1]["task_id"]
+    # A pure explanation reuses the verified artifact, without a second SQL.
+    before = len(executions)
+    chat = browser_page.locator("vanna-chat")
+    chat.locator("textarea.message-input").fill("解释一下刚才的查询结果，不要重新查询")
+    with browser_page.expect_response("**/api/vanna/v2/chat_sse", timeout=240_000) as followup_info:
+        chat.locator("button.send-button").click()
+    assert followup_info.value.ok
+    followup_info.value.text()
+    after = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{conversation_id}/execution-memory").json()["executions"]
+    assert len(after) == before
+    restored = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{conversation_id}").json()
+    connection = psycopg2.connect(
+        host=PostgresConnectionSettings().host, port=PostgresConnectionSettings().port,
+        database=PostgresConnectionSettings().database, user=PostgresConnectionSettings().writer_user,
+    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT catalog_trace FROM app.agent_runs WHERE conversation_id = %s ORDER BY started_at DESC LIMIT 1", (conversation_id,))
+            followup_trace = cursor.fetchone()[0]
+    finally:
+        connection.close()
+    assert followup_trace["result_reuse"] == "validated_result"
+    assert restored["trusted_result_artifact"]["artifact_id"] == artifact["artifact_id"]
     page_response = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{conversation_id}/messages?limit=5")
     assert page_response.ok and page_response.json()["messages"]
     browser_page.locator("details.more-menu > summary").click()

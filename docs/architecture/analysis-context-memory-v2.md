@@ -1,17 +1,17 @@
-# 分析上下文与记忆 v2：Phase 0/1 代码基线
+# 分析上下文与记忆 v2：Phase 0–2 代码基线
 
-核对日期：2026-10-15。代码基线：Phase 1 已实现并通过定向回归；目标设计与后续任务统一见 [实施计划](../../plan/architecture-analysis-context-memory-v2.md)。本文件回答“现在实际上怎样工作”，计划回答“接下来怎样改”。
+核对日期：2026-10-15。Phase 1 完成 ConversationHistory 与 AnalysisState；Phase 2 增加逐次执行证据和可信结果复用，详见文末。目标设计与后续任务统一见 [实施计划](../../plan/architecture-analysis-context-memory-v2.md)。本文件回答“现在实际上怎样工作”，计划回答“接下来怎样改”。
 
 ## 1. 本阶段任务卡
 
 | 项目 | 范围 |
 | --- | --- |
-| 目标 | 完成 TASK-001～003 基线，并完成 TASK-004～008、TASK-030～032 的 active state 与 ConversationHistory 增量读写 |
+| 目标 | 完成 Phase 0 基线、Phase 1 active state/ConversationHistory 和 Phase 2 执行证据及结果复用 |
 | 输入 | 当前 Web 装配、ChatHandler、语义解释器、WorkingMemory、会话存储、摘要过滤器、执行审计及结果工件代码 |
-| 输出 | 本基线、Phase 1 代码与测试证据、项目记录与文档导航 |
+| 输出 | 本基线、Phase 1/2 代码与测试证据、项目记录与文档导航 |
 | 不变量 | 不恢复关键词准入；不改变模型、权限、SQL/结果校验、查询预算及离线训练评测协议 |
 | 验收 | 对照函数调用和数据库字段核对；运行现有相关回归，单独运行项目数据库会话存储测试 |
-| 非目标 | 本阶段不实现 ExecutionMemory、ReferenceBinding 或跨会话长期记忆；这些仍按计划进入后续阶段 |
+| 非目标 | Phase 0/1 未实现 ExecutionMemory，现已在 Phase 2 补充；ReferenceBinding 和跨会话长期记忆仍未实现 |
 
 ## 2. 当前在线调用顺序
 
@@ -136,4 +136,45 @@ RUN_PROJECT_DB=1 conda run -n data-analysis-agent python -c \
 
 未验证：结果实体引用、增量摘要续接、跨会话长期记忆和生产认证尚未实现；真实浏览器验收只覆盖当前任务/会话状态、结果工件、刷新、分页和清空，不代表任意业务语义正确。SQL 可执行与合同通过也不保证模型生成质量。
 
-Phase 0 的三个任务以及 Phase 1 的 TASK-004～008、TASK-030～032 已完成。定向 Python 回归为 **116 passed, 15 skipped**，真实浏览器 M1–M4 组合回归通过；下一实施单元是计划中的 **Phase 2：ExecutionMemory 与可信结果工件复用**。本阶段不代表已经实现结果实体引用、跨会话长期记忆或模型业务准确率。
+Phase 0 的三个任务以及 Phase 1 的 TASK-004～008、TASK-030～032 已完成。定向 Python 回归为 **116 passed, 15 skipped**，真实浏览器 M1–M4 组合回归通过。Phase 2 的实际实现见下节，结果实体引用仍由 Phase 3 负责。
+
+## 8. Phase 2：执行记忆与结果复用
+
+`ExecutionMemory` 是已有 `query_audits` 与 `agent_runs.catalog_trace` 的读取视图，不是新数据库表。
+一次 SQL 尝试使用 `audit-{audit_id}`，保留 run/task/turn、父/当前 state version、计划与范围、
+模型、状态、耗时、行数和对应 artifact。Runner 的审计写入返回既有主键，在本轮 trace 的
+`execution_attempts` 中记录该次 validation；只有实际通过验证并保存 CSV 的那次才关联 artifact。
+同一 run 先失败后成功，两次记录各自保留，不能套用整轮的最终成功状态。旧记录缺少逐次验证证据时，
+显示 `not_validated`，不补推成功。
+
+新增读取入口 `GET /api/project/conversations/{id}/execution-memory?limit=100`，先校验登录及
+所属 conversation/workspace，返回最近至多 100 次尝试，按发生顺序展示。接口不返回原始 SQL、
+数据库原始错误或完整行数据；SQL 仍在既有受限审计中。单次完成时间取审计时间，开始时间按已记录耗时估算。
+
+结果工件现在带 `query_scope`（指标、维度、时间、筛选、比较、Top-N、结果形态及版本）和
+`result_metadata`。后者包含 execution ID、验证状态、外层 SQL AST 可证明的输出列排序和
+最多 8 行分组实体，每个字符串最多 128 字符。不会从助手回答或摘要提取实体，不把第一行
+自动解释为唯一最高；无法映射到输出列的排序表达式暂不声明排序依据。完整 CSV 与 Plotly
+继续保存在仓库外，沿用原有完整性校验。
+
+复用决策分为 `display_only`、`validated_result` 和 `query_required`。展示/分页继续读原工件，
+既有路由校验归属、版本和完整性；在线结果解释额外核对当前查询范围。范围相同且工件验证通过时，
+无需再次执行 SQL；改变指标、维度、筛选、时间、比较、Top-N 或版本必须重新查询。若当前条件
+没有对应成功结果，只提示重新查询，不能把更早的成功结果冒充当前结果。文件丢失、篡改或用户不匹配
+也不能复用。当前没有新增按时间自动过期的 TTL；失效依据是版本、权限、范围和实际工件可用性。
+
+浏览器验收还发现并修复了既有版本写入问题：`ResultContract.as_tool_metadata()` 提供平铺字段，
+保存工件原先读取不存在的嵌套 `result_contract`，导致 manifest 版本为 `unknown`。现已直接读取
+真实 `dataset_version_id/metric_version`，删除错误的嵌套读取，不为旧 unknown 工件提供兼容回退。
+
+同时删除页面启动时“遍历旧历史直到加载成功”的回退：只恢复选定的会话，并等待 Web Component
+定义完成后再调用其恢复方法；用户已开始新分析或切换会话时，过时的加载响应不得覆盖当前选择。
+这避免了刷新后追问被发到其他旧会话，以及组件尚未注册时历史列表被错误标记不可用。
+
+这一步为 Phase 3 的“最高州 → 这个州的品类”准备可信数据来源，尚未实现引用解析器或新增下钻能力。
+
+验收：`RUN_PROJECT_DB=1` 定向 Python 回归 **127 passed**；真实浏览器组合回归 **9 passed,
+9 deselected**；Ruff、compileall、diff check 通过。浏览器覆盖真实查询 → 执行记录及工件 → 刷新 →
+解释已有结果（审计确认零新增 SQL，reuse=validated_result）→ 清空 → 新查询，并覆盖历史会话恢复、
+新会话、移动端、结果预览及受控 SSE。截图位于仓库外
+`/disk2/gengnan/data-analysis-agent-data/evals/analysis-memory-phase2/browser/`。

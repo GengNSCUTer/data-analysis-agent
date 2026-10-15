@@ -16,6 +16,7 @@ from vanna.core.user import User
 from .budget import BudgetUsage, RequestBudget
 from .postgres_runner import PostgresConnectionSettings
 from .result_artifact import ChartReplayRef, chart_replay_from_trace
+from .execution_memory import ExecutionMemory
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,45 @@ class PostgresRunRecorder:
         return await asyncio.to_thread(
             self._list_rendered_charts_sync, conversation_id, user_id
         )
+
+    async def list_execution_memory(
+        self, *, conversation_id: str, user_id: str, limit: int = 100
+    ) -> list[ExecutionMemory]:
+        """Return safe execution evidence for one already-authorized conversation."""
+        if not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        rows = await asyncio.to_thread(
+            self._list_execution_memory_sync, conversation_id, user_id, limit
+        )
+        return [ExecutionMemory.from_row(row) for row in reversed(rows)]
+
+    def _list_execution_memory_sync(
+        self, conversation_id: str, user_id: str, limit: int
+    ) -> list[dict[str, Any]]:
+        connection = self._connect()
+        try:
+            with connection:
+                with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                    cursor.execute(
+                        """
+                        SELECT
+                            qa.audit_id, qa.run_id, qa.conversation_id, qa.user_id,
+                            qa.policy_status, qa.policy_reason, qa.model_name,
+                            qa.dataset_version_id, qa.metric_version, qa.elapsed_ms,
+                            qa.row_count, qa.error_message, qa.created_at,
+                            ar.catalog_trace, ar.termination_reason,
+                            ar.error_type, ar.started_at, ar.finished_at
+                        FROM app.query_audits AS qa
+                        LEFT JOIN app.agent_runs AS ar ON ar.run_id = qa.run_id
+                        WHERE qa.conversation_id = %s AND qa.user_id = %s
+                        ORDER BY qa.audit_id DESC
+                        LIMIT %s
+                        """,
+                        (conversation_id, user_id, limit),
+                    )
+                    return [dict(row) for row in cursor.fetchall()]
+        finally:
+            connection.close()
 
     def _connect(self):
         return psycopg2.connect(

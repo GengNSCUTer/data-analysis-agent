@@ -516,6 +516,23 @@ def create_app() -> FastAPI:
              "timestamp": m.timestamp.isoformat()} for m in messages if m.role != "system"
         ], "next_cursor": messages[0].metadata["message_index"] if messages else None}
 
+    @app.get("/api/project/conversations/{conversation_id}/execution-memory")
+    async def conversation_execution_memory(
+        conversation_id: str, request: Request, limit: int = Query(default=100, ge=1, le=100)
+    ) -> JSONResponse:
+        """Return safe execution evidence without raw SQL or result rows."""
+        user = await role_resolver.resolve_user(_request_user_context(request))
+        try:
+            conversation = await conversation_store.get_conversation(conversation_id, user)
+        except InvalidConversationId as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        if conversation is None:
+            return JSONResponse({"detail": "conversation not found"}, status_code=404)
+        executions = await run_recorder.list_execution_memory(
+            conversation_id=conversation_id, user_id=user.id, limit=limit
+        )
+        return JSONResponse({"conversation_id": conversation_id, "executions": [item.as_dict() for item in executions]})
+
     @app.get("/api/project/conversations/{conversation_id}/artifacts/{artifact_id}/manifest")
     async def result_artifact_manifest(
         conversation_id: str, artifact_id: str, request: Request
