@@ -1161,3 +1161,22 @@ Phase 2 的 8 条真实语义回归全部通过，包括两个原问法的改写
 `/disk2/gengnan/data-analysis-agent-data/evals/semantic-intent-phase23-20261014/`，
 任务卡为 `plan/feature-semantic-intent-phase23.md`。这些结果只说明语义范围和在线接线
 符合合同，不是 SQL 业务准确率、吞吐或生产 SLA；下一步回到四周计划继续 Day 1 小单元学习。
+
+## 2026-10-15｜上下文与记忆 v2：Phase 0 基线完成
+
+按 [`architecture-analysis-context-memory-v2.md`](plan/architecture-analysis-context-memory-v2.md)
+完成 TASK-001～003：核对线上请求、会话历史、WorkingMemory、摘要、执行审计和结果工件的
+实际读写与失败边界；新增 [代码基线](docs/architecture/analysis-context-memory-v2.md)，
+统一 ConversationHistory、AnalysisState、ExecutionMemory、ResultArtifact、ReferenceBinding
+和 ContextCompaction 术语。本轮仅修改文档，未改变在线行为、SQL 权限或预算，未启动训练。
+
+默认在线入口已有语义解释器，不调用旧 classify/admit；QuestionRouter 仍承载 Catalog 等辅助
+职责及旧离线兼容。确认待改缺口：语义解释器没有读取近期对话/可信实体引用；历史全量读写；
+持久摘要未用于增量续接且来源范围可能大于实际摘要输入；当前计划与上一成功结果缺少 task/
+execution/state 关联。各项已归入后续阶段，未标为已修复。
+
+现有定向回归 68 passed / 6 skipped，随后启用项目 PostgreSQL 独立运行会话存储测试
+6 passed，合计覆盖 74 项不同测试。未做真实模型/浏览器多轮验收；下一步只推进 Phase 0.5
+ConversationHistory 读写与关联。
+
+已通过 lark-doc 追加到飞书项目文档 revision 274，并局部回读确认。

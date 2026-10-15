@@ -4,13 +4,13 @@ version: "2.1"
 date_created: "2026-10-14"
 last_updated: "2026-10-15"
 owner: "GengNSCUTer/data-analysis-agent"
-status: "Planned"
+status: "In progress"
 tags: ["architecture", "memory", "context", "multi-turn", "result-reference", "data-analysis"]
 ---
 
 # Introduction
 
-![Status: Planned](https://img.shields.io/badge/status-Planned-blue)
+![Status: In progress](https://img.shields.io/badge/status-In%20progress-yellow)
 
 本方案将当前数据分析 Agent 的上下文和记忆能力改造成“有状态、可追溯、可验证的分析工作流”。它吸收 [`docs/数据分析Agent上下文设计.md`](../docs/数据分析Agent上下文设计.md) 对对话记忆、分析状态、执行记忆和语义记忆的划分，也结合当前已有的 `WorkingMemory`、`ResultArtifact`、`HistorySummary`、workspace/version 和 SQL 治理链。
 
@@ -123,11 +123,13 @@ tags: ["architecture", "memory", "context", "multi-turn", "result-reference", "d
 
 - **GOAL-001**: 统一当前代码、设计文档和术语，明确 `QuestionRouter`、`SemanticIntent`、`WorkingMemory`、`ResultArtifact`、`HistorySummary` 各自的职责。
 
+2026-10-15 完成。代码事实、读写/失败边界表、术语及验证证据见 [Phase 0 基线](../docs/architecture/analysis-context-memory-v2.md)。现有回归 68 passed / 6 skipped，随后单独启用项目数据库 6 passed；不代表后续记忆改造或真实多轮验收已经完成。
+
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-001 | 审阅 `chat_runtime.py`、`semantic_intent.py`、`question_router.py`、`working_memory.py`、`result_artifact.py`、`context_builder.py` 和 `conversation_store.py`，形成当前入口、状态来源、更新触发和失败边界表。 |  |  |
-| TASK-002 | 在 `docs/architecture/` 新增上下文与记忆基线，明确线上语义路径不调用旧 `classify/admit`，但保留 `QuestionRouter` 的 Catalog/准入辅助职责和离线兼容路径。 |  |  |
-| TASK-003 | 为后续状态、执行记忆和结果引用冻结术语：`ConversationHistory`、`AnalysisState`、`ExecutionMemory`、`ResultArtifact`、`ReferenceBinding`、`ContextCompaction`。 |  |  |
+| TASK-001 | 审阅 `chat_runtime.py`、`semantic_intent.py`、`question_router.py`、`working_memory.py`、`result_artifact.py`、`context_builder.py` 和 `conversation_store.py`，形成当前入口、状态来源、更新触发和失败边界表。 | ✅ | 2026-10-15 |
+| TASK-002 | 在 `docs/architecture/` 新增上下文与记忆基线，明确线上语义路径不调用旧 `classify/admit`，但保留 `QuestionRouter` 的 Catalog/准入辅助职责和离线兼容路径。 | ✅ | 2026-10-15 |
+| TASK-003 | 为后续状态、执行记忆和结果引用冻结术语：`ConversationHistory`、`AnalysisState`、`ExecutionMemory`、`ResultArtifact`、`ReferenceBinding`、`ContextCompaction`。 | ✅ | 2026-10-15 |
 
 ### Implementation Phase 0.5 — ConversationHistory 读写与关联
 
