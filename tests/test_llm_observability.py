@@ -63,6 +63,47 @@ def _request() -> LlmRequest:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stream", [False, True])
+async def test_fresh_planned_query_requires_sql_but_followup_does_not(stream):
+    captured = []
+
+    class Capturing(ImmediateLlm):
+        async def send_request(self, request):
+            captured.append(request)
+            return LlmResponse(content="ok")
+
+        async def stream_request(self, request):
+            captured.append(request)
+            yield LlmStreamChunk(content="ok")
+
+    usage = BudgetUsage(RequestBudget())
+    usage.set_query_plan({"metric_ids": ["gmv"]}, "已确认查询计划")
+    request = _request().model_copy(update={"tools": [
+        ToolSchema(name="run_sql", description="SQL", parameters={"type": "object"}),
+        ToolSchema(name="other", description="other", parameters={"type": "object"}),
+    ]})
+    service = ObservedLlmService(Capturing())
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        if stream:
+            async for _ in service.stream_request(request):
+                pass
+        else:
+            await service.send_request(request)
+        assert captured[0].tool_choice == "required"
+        assert [t.name for t in captured[0].tools] == ["run_sql"]
+        assert service._query_request(_request()).tool_choice == "auto"
+        usage.sql_calls_used = 1
+        assert service._query_request(request).tool_choice == "auto"
+        assert request.tool_choice == "auto"  # no in-place request mutation
+    finally:
+        CURRENT_BUDGET.reset(token)
+    from vanna.integrations.openai.llm import OpenAILlmService
+    client = OpenAILlmService(model="test", api_key="test-only-not-a-secret")
+    assert client._build_payload(captured[0])["tool_choice"] == "required"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
 async def test_full_request_budget_includes_system_tools_and_output(stream):
     request = LlmRequest(messages=[LlmMessage(role="user", content="查询")], user=User(id="test"),
                          system_prompt="Catalog" * 1000, max_tokens=4000,

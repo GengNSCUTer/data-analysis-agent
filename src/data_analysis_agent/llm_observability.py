@@ -117,6 +117,15 @@ class ObservedLlmService(LlmService):
         if prompt_tokens + reserve > usage.budget.max_prompt_tokens:
             raise ContextCapacityError("当前问题、状态与工具定义超过上下文预算，请拆分分析。")
 
+    def _query_request(self, request: LlmRequest) -> LlmRequest:
+        """A planned fresh query must execute SQL, never quote a prior answer."""
+        usage = CURRENT_BUDGET.get()
+        if usage is not None and usage.query_plan and usage.sql_calls_used == 0:
+            sql_tools = [tool for tool in (request.tools or []) if tool.name == "run_sql"]
+            if sql_tools:
+                return request.model_copy(update={"tools": sql_tools, "tool_choice": "required"})
+        return request
+
     async def send_request(self, request: LlmRequest) -> LlmResponse:
         usage = CURRENT_BUDGET.get()
         if usage is not None and usage.can_finalize_trusted_result():
@@ -127,6 +136,7 @@ class ObservedLlmService(LlmService):
                 finish_reason="trusted_result_finalized",
                 metadata={"deterministic_result_finalized": True},
             )
+        request = self._query_request(request)
         started = perf_counter()
         self._check_context(request)
         try:
@@ -177,6 +187,7 @@ class ObservedLlmService(LlmService):
                 metadata={"deterministic_result_finalized": True},
             )
             return
+        request = self._query_request(request)
         started = perf_counter()
         self._check_context(request)
         iterator = self.delegate.stream_request(request).__aiter__()

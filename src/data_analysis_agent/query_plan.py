@@ -610,7 +610,8 @@ class QueryPlan:
                 "- 敏感标识列仅可在内部 CTE 或受控聚合子查询中用于 JOIN ON、WHERE、"
                 "COUNT/COUNT DISTINCT 或其他受控聚合；不得原样出现在顶层最终 SELECT、"
                 "最终结果别名、GROUP BY 或 ORDER BY 中。内部 CTE 如需按关联键保持事实粒度，"
-                "可以保留该键，但外层最终结果必须丢弃它。"
+                "可以保留该键，但外层最终结果必须丢弃它。需要按订单等敏感标识键做二层聚合时，"
+                "将内层聚合写成具名 WITH CTE，不用 FROM 内联子查询投影或 GROUP BY 该键。"
             ),
             f"- 维度：{', '.join(self.dimensions) if self.dimensions else '无'}；时间粒度：{self.time_grain or '标量汇总'}。",
             f"- 执行策略：`{self.execution_strategy}`。",
@@ -626,7 +627,11 @@ class QueryPlan:
                 code = warning.split(":", 1)[1]
                 lines.append(
                     f"- 筛选：`dim_customers.customer_state = '{code}'`。"
-                    "这是过滤条件，不要按客户州分组，最终结果列不要包含 customer_state。"
+                    + (
+                        "仍须按计划的 customer_state 分组并返回该列；筛选不取消已确认分组。"
+                        if "customer_state" in self.dimensions else
+                        "这是过滤条件，不额外按客户州分组或返回 customer_state。"
+                    )
                 )
         if any(item.policy_mode == "multi_membership" for item in self.attribution_requirements):
             lines.append(

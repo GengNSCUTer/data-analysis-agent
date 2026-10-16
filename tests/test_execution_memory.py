@@ -157,3 +157,65 @@ async def test_runtime_reuse_checks_scope_owner_versions_and_payload(tmp_path):
     assert await decide() == "query_required"
     csv_path.unlink()
     assert await decide() == "query_required"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chart_type,rows,accepted", [
+    ("donut", [{"customer_state": "SP", "gmv": 10}, {"customer_state": "RJ", "gmv": 5}], True),
+    ("horizontal_bar", [{"customer_state": "SP", "gmv": 10}], True),
+    ("line", [{"customer_state": "SP", "gmv": 10}], False),
+    ("donut", [], False),
+    ("bar", [{"customer_state": "SP", "gmv": 1}] * 201, False),
+])
+async def test_chart_only_followup_uses_bounded_verified_csv(tmp_path, chart_type, rows, accepted):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from vanna.core.user import User
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.budget import BudgetUsage, RequestBudget
+    from data_analysis_agent.chat_runtime import BudgetedChatHandler
+    from data_analysis_agent.metric_context import OLIST_RUNTIME_WORKSPACE
+    from data_analysis_agent.question_router import QuestionRouter
+    from data_analysis_agent.result_artifact import ResultArtifact
+    from data_analysis_agent.result_artifact_store import ResultArtifactStore
+    from data_analysis_agent.result_budget import ResultBudget
+    from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
+    from data_analysis_agent.semantic_intent import SemanticIntent
+
+    workspace = OLIST_RUNTIME_WORKSPACE
+    store = ResultArtifactStore(tmp_path)
+    manifest = store.save_result_csv(
+        artifact_id="rta-chart", user_id="owner", workspace_id=workspace.workspace_id,
+        columns=["customer_state", "gmv"], rows=rows, row_count=len(rows),
+        dataset_version=workspace.dataset_version_id, metric_version=workspace.metric_version,
+        result_metadata={"validation_status": "valid"},
+    )
+    state = replace(AnalysisState.new(workspace), metric_ids=("gmv",), dimensions=("customer_state",), result_shape="grouped")
+    artifact = ResultArtifact(
+        artifact_id="rta-chart", summary="可信摘要", metric_ids=("gmv",),
+        result_columns=("customer_state", "gmv"), workspace_id=workspace.workspace_id,
+        dataset_version=workspace.dataset_version_id, metric_version=workspace.metric_version,
+        chart_state="not_rendered", csv_sha256=manifest["csv_sha256"],
+        query_scope={**state.scope(), "workspace_id": workspace.workspace_id,
+                     "dataset_version": workspace.dataset_version_id,
+                     "metric_version": workspace.metric_version, "result_shape": "grouped"},
+        result_metadata=manifest["result_metadata"],
+    )
+    state = state.with_result_artifact(artifact)
+    handler = SimpleNamespace(
+        workspace=workspace, result_artifact_store=store, result_budget=ResultBudget.aggregate(),
+        question_router=QuestionRouter(CatalogRetriever(CatalogLoader(workspace).load()), full_results=True),
+    )
+    user = User(id="owner", group_memberships=["analyst"])
+    assert await BudgetedChatHandler._result_reuse_decision(handler, state, user) == "validated_result"
+    evidence = BudgetUsage(RequestBudget())
+    component, notice = await BudgetedChatHandler._chart_from_previous_result(
+        handler, SimpleNamespace(message="只换图"), state,
+        SemanticIntent(request_kind="result_followup", action="keep", chart_request=chart_type), user, evidence,
+    )
+    assert bool(component) is accepted and notice
+    assert evidence.deterministic_chart_rendered is accepted
+    assert evidence.sql_calls_used == 0 and evidence.llm_rounds_used == 0
+    if accepted:
+        assert component.rich_component.data["data"]
+        assert store.verify_manifest(artifact_id="rta-chart", user_id="owner", workspace_id=workspace.workspace_id)["plotly_ref"]

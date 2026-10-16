@@ -19,6 +19,8 @@ class MemoryStore:
         self.saved = None
 
     async def get_turn_range(self, conversation_id, user, *, start, before):
+        if before < start:
+            raise ValueError("invalid compaction range")
         return [
             m
             for m in self.messages
@@ -74,6 +76,26 @@ def fixture(turns=10):
 
 def usage():
     return BudgetUsage(RequestBudget())
+
+
+@pytest.mark.asyncio
+async def test_summary_ahead_of_recent_window_does_not_read_negative_range():
+    conversation, state, store, provider = fixture()
+    first = AnalysisContextBuilder(provider)
+    first.recent_tokens = 1
+    await first.build(conversation, state, store, usage())
+    summary = dict(conversation.metadata["history_summary"])
+    # A later request may fit more recent turns than the request which produced
+    # the summary. Its recent window then overlaps already summarised messages.
+    conversation.messages = store.messages
+    builder = AnalysisContextBuilder(provider)
+    builder.recent_tokens = 100_000
+    evidence = usage()
+    packet = await builder.build(conversation, state, store, evidence)
+    assert packet["narrative_summary"] == summary["text"]
+    assert conversation.metadata["history_summary"] == summary
+    assert len(provider.calls) == 1
+    assert evidence.catalog_trace["context_packet"]["summary_status"] == "reused"
 
 
 @pytest.mark.asyncio

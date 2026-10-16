@@ -270,7 +270,7 @@ class OpenAILlmService(LlmService):
             payload["max_tokens"] = request.max_tokens
         if tools_payload:
             payload["tools"] = tools_payload
-            payload["tool_choice"] = "auto"
+            payload["tool_choice"] = request.tool_choice
 
         return payload
 

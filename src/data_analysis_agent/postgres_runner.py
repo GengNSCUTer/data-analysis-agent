@@ -323,6 +323,7 @@ class SecurePostgresRunner(SqlRunner):
                         decision.row_limit,
                         policy_limit_applied=decision.policy_limit_applied,
                     )
+                    frame = pd.DataFrame(rows, columns=[column.name for column in cursor.description])
             finally:
                 connection.close()
         except ResultValidationError as exc:
@@ -359,7 +360,7 @@ class SecurePostgresRunner(SqlRunner):
             if time_bucket_grain is None and isinstance(query_plan, dict):
                 time_bucket_grain = query_plan.get("time_grain")
             validation = validator.validate(
-                pd.DataFrame(rows),
+                frame,
                 required_columns=context.metadata.get("required_result_columns", ()),
                 required_column_aliases=context.metadata.get(
                     "required_result_column_aliases", {}
@@ -405,7 +406,7 @@ class SecurePostgresRunner(SqlRunner):
                     repair_evidence=context.metadata.get("repair_evidence"),
                 )
                 raise ResultValidationError(validation)
-            validated_frame = pd.DataFrame(rows)
+            validated_frame = frame
             if validation.dropped_columns:
                 validated_frame = validated_frame.drop(
                     columns=list(validation.dropped_columns), errors="ignore"
@@ -460,7 +461,7 @@ class SecurePostgresRunner(SqlRunner):
             repair_evidence=context.metadata.get("repair_evidence"),
         )
         self._record_timing(context, "postgres_sql", started_at)
-        return pd.DataFrame(rows)
+        return frame
 
     @staticmethod
     def _record_timing(context: ToolContext, phase: str, started_at: float) -> None:

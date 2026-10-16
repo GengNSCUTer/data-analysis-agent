@@ -349,7 +349,14 @@ class ResultValidator:
             if resolved_time_column is None:
                 shape_notes.append("结果没有可核对的时间列，表中的数字仍会显示。")
             else:
-                parsed = pd.to_datetime(frame[resolved_time_column], errors="coerce").dropna()
+                values = frame[resolved_time_column]
+                if time_bucket_grain == "year" and pd.api.types.is_numeric_dtype(values):
+                    # EXTRACT(YEAR) returns a numeric year, not epoch nanoseconds.
+                    years = pd.to_numeric(values, errors="coerce")
+                    years = years.where(years.between(1, 9999) & (years % 1 == 0))
+                    parsed = pd.to_datetime(years.astype("Int64").astype("string"), format="%Y", errors="coerce").dropna()
+                else:
+                    parsed = pd.to_datetime(values, errors="coerce").dropna()
                 if parsed.empty:
                     shape_notes.append("结果没有可核对的时间覆盖，表中的数字仍会显示。")
                 else:

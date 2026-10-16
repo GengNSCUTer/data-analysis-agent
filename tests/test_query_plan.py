@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from data_analysis_agent.query_plan import QueryPlan
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever, ResultContract
@@ -12,6 +14,18 @@ def _router() -> QuestionRouter:
 
 def _user() -> User:
     return User(id="query-plan-analyst", group_memberships=["analyst"])
+
+
+def test_state_filter_does_not_override_explicit_grouping_in_prompt():
+    router = _router()
+    selection = router.retriever.retrieve("各州GMV", _user())
+    route = router.classify("各州GMV", user=_user(), selection=selection)
+    plan = QueryPlan.from_selection(selection, "各州GMV", route)
+    filtered = replace(plan, warnings=("filter_customer_state:SP",))
+    assert "仍须按计划的 customer_state 分组并返回该列" in filtered.prompt_context()
+    assert "最终结果列不要包含 customer_state" not in filtered.prompt_context()
+    scalar = replace(filtered, dimensions=(), required_result_columns=("gmv",))
+    assert "不额外按客户州分组" in scalar.prompt_context()
 
 
 def test_scalar_multi_metric_plan_requires_one_cte_per_metric() -> None:
@@ -37,6 +51,7 @@ def test_scalar_multi_metric_plan_requires_one_cte_per_metric() -> None:
     assert "必须且只能返回上述白名单列" in plan.prompt_context()
     assert "不得原样出现在顶层最终 SELECT" in plan.prompt_context()
     assert "内部 CTE 如需按关联键保持事实粒度" in plan.prompt_context()
+    assert "将内层聚合写成具名 WITH CTE" in plan.prompt_context()
     assert plan.as_dict()["metric_plans"][0]["grain"]
 
 

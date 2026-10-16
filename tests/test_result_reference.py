@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from dataclasses import replace
 
 from data_analysis_agent.analysis_state import AnalysisState
 from data_analysis_agent.result_artifact import ResultArtifact
@@ -87,3 +88,33 @@ def test_server_owned_binding_replaces_same_dimension_filter():
         ),
     )
     assert updated.filters == ("payment_type=credit_card", "customer_state=SP")
+
+
+def test_second_row_resolves_without_claiming_unique_highest():
+    binding = resolve_ranked_entity(
+        ReferenceRequest(kind="previous_ranked_entity", dimension="customer_state",
+                         rank=2, match_mode="first_row"),
+        _artifact(), workspace_id="olist-demo", dataset_version="olist-dataset-v3",
+        metric_version="olist-metrics-v3",
+    )
+    assert binding.value == "RJ" and binding.rank == 2
+
+
+@pytest.mark.parametrize("change,reference_options,reason", [
+    (None, {}, "reference_artifact_missing"),
+    ({"workspace_id": "other"}, {}, "reference_workspace_mismatch"),
+    ({"metric_version": "old"}, {}, "reference_version_stale"),
+    ({}, {"expected_source_artifact_id": "old"}, "reference_artifact_mismatch"),
+    ({"result_metadata": {"validation_status": "degraded"}}, {}, "reference_result_unvalidated"),
+    ({"query_scope": {"dimensions": []}}, {}, "reference_dimension_missing"),
+    ({"result_metadata": {"validation_status": "valid", "ordering": []}}, {}, "reference_ordering_missing"),
+    ({"result_metadata": {"validation_status": "valid", "ordering": [{"column": "gmv", "direction": "desc"}], "ranked_entities": []}}, {}, "reference_rank_missing"),
+])
+def test_reference_failures_do_not_create_filters(change, reference_options, reason):
+    state = AnalysisState(filters=("customer_state=MG",))
+    artifact = replace(_artifact(), **change) if change is not None else None
+    with pytest.raises(ResultReferenceError) as failure:
+        resolve_ranked_entity(_request(**reference_options), artifact, workspace_id="olist-demo",
+                              dataset_version="olist-dataset-v3", metric_version="olist-metrics-v3")
+    assert failure.value.reason_code == reason
+    assert state.filters == ("customer_state=MG",)

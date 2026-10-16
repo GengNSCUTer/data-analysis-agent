@@ -4,7 +4,7 @@ LLM domain models.
 This module contains data models for LLM communication.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,7 @@ class LlmRequest(BaseModel):
     tools: Optional[List[Any]] = Field(
         default=None, description="Available tools"
     )  # Will be ToolSchema but avoiding circular import
+    tool_choice: Literal["auto", "required", "none"] = "auto"
     user: User = Field(description="User making the request")
     stream: bool = Field(default=False, description="Whether to stream response")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)

@@ -10,6 +10,8 @@ import json
 import re
 from time import perf_counter
 
+import pandas as pd
+
 from vanna.components import RichTextComponent, SimpleTextComponent, StatusCardComponent, UiComponent
 from vanna.core.llm import LlmMessage, LlmRequest, LlmResponse
 from vanna.core.storage import Conversation, Message
@@ -276,6 +278,11 @@ class BudgetedChatHandler(ChatHandler):
                             semantic_intent = None
                         if semantic_intent is not None and semantic_intent.reference_requests:
                             try:
+                                if memory.previous_result_artifact is not None and await self._result_reuse_decision(memory, user) == "query_required":
+                                    raise ResultReferenceError(
+                                        "reference_artifact_unavailable",
+                                        "上一轮结果已失效或不属于当前分析范围，请重新查询后再引用。",
+                                    )
                                 reference_binding = resolve_ranked_entity(
                                     semantic_intent.reference_requests[0],
                                     memory.previous_result_artifact,
@@ -669,7 +676,23 @@ class BudgetedChatHandler(ChatHandler):
                 if not route.should_generate_sql:
                     detail = route.direct_answer or route.clarification or "当前请求无法在受控数据范围内回答。"
                     streamed_tool_free = False
-                    if route.should_use_tool_free_llm:
+                    if route.intent == "result_followup" and semantic_intent is not None and semantic_intent.chart_request:
+                        component, detail = await self._chart_from_previous_result(
+                            request, updated_memory, semantic_intent, user, usage,
+                        )
+                        if component is not None:
+                            yield ChatStreamChunk.from_component(component, conversation_id, request_id)
+                            updated_memory = replace(
+                                updated_memory,
+                                previous_result_artifact=replace(
+                                    updated_memory.previous_result_artifact, chart_state="rendered",
+                                    plotly_ref="chart.plotly.json",
+                                    plotly_sha256=usage.catalog_trace["result_artifact"]["plotly_sha256"],
+                                    plotly_bytes=usage.catalog_trace["result_artifact"]["plotly_bytes"],
+                                ),
+                            )
+                            conversation.metadata["working_memory"] = updated_memory.as_dict()
+                    elif route.should_use_tool_free_llm:
                         detail = ""
                         async for piece in self._tool_free_answer(
                             request,
@@ -1040,6 +1063,63 @@ class BudgetedChatHandler(ChatHandler):
         ):
             return "query_required"
         return decision
+
+    async def _chart_from_previous_result(self, request, state, intent, user, usage):
+        """Re-render the verified artifact without a new model/SQL query."""
+        # The caller has already checked reuse, owner, versions and payload.
+        artifact = state.previous_result_artifact
+        selection = self.question_router.retriever.retrieve(
+            request.message, user, metric_ids=state.metric_ids,
+        )
+        semantic = {
+            **state.scope(), "chart_request": intent.chart_request,
+            "filters": [dict(zip(("dimension", "value"), f.split("=", 1))) for f in state.filters],
+        }
+        route = QuestionRoute("answerable", (), state.metric_ids, None, "chart_reuse")
+        plan = QueryPlan.from_selection(
+            selection, request.message, route,
+            {**state.as_dict(), "semantic_intent": semantic}, result_budget=self.result_budget,
+        )
+        result_contract = ResultContract.from_selection(
+            selection, request.message, state.time_range,
+            catalog=self.question_router.retriever.catalog,
+            required_result_columns=plan.required_result_columns,
+            requested_dimensions=plan.dimensions, result_budget=plan.result_budget,
+        )
+        chart = ChartContract.from_query_plan(
+            request.message, plan, result_contract, semantic_intent=semantic,
+        )
+        usage.record_catalog({"chart_contract": chart.as_evidence()})
+        if not chart.safe_to_visualize:
+            return None, chart.clarification
+        manifest = await asyncio.to_thread(
+            self.result_artifact_store.load_manifest, artifact_id=artifact.artifact_id,
+            user_id=user.id, workspace_id=self.workspace.workspace_id,
+        )
+        if manifest["row_count"] > chart.max_rows:
+            return None, f"当前结果超过绘图上限 {chart.max_rows} 行，请缩小查询范围后再绘图。"
+        page = await asyncio.to_thread(
+            self.result_artifact_store.read_csv_page, artifact_id=artifact.artifact_id,
+            user_id=user.id, workspace_id=self.workspace.workspace_id, page_size=chart.max_rows,
+        )
+        try:
+            component = build_server_chart_component(
+                chart, pd.DataFrame(page["rows"], columns=page["columns"]),
+                source_file=artifact.artifact_id,
+            )
+        except (ChartContractError, ValueError) as exc:
+            return None, str(exc)
+        manifest = await asyncio.to_thread(
+            self.result_artifact_store.save_plotly_json, artifact_id=artifact.artifact_id,
+            user_id=user.id, workspace_id=self.workspace.workspace_id,
+            figure=component.rich_component.data,
+        )
+        usage.mark_deterministic_chart_rendered()
+        usage.record_catalog({
+            "result_artifact": _safe_artifact_manifest(manifest),
+            "deterministic_chart": {"status": "rendered", "source": "validated_artifact"},
+        })
+        return component, "已使用上次已验证结果重新绘图，没有重新查询。"
 
     async def _finish_analysis_attempt(self, conversation_id: str, user, run_id: str) -> None:
         conversation = await self._get_conversation(conversation_id, user)

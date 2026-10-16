@@ -136,6 +136,24 @@ async def test_runner_rejects_columns_outside_the_server_result_contract() -> No
 
 
 @pytest.mark.asyncio
+async def test_empty_query_preserves_database_column_metadata():
+    runner = SecurePostgresRunner()
+    context = make_context(f"empty-columns-{uuid.uuid4().hex[:12]}")
+    context.metadata.update({"required_result_columns": ["customer_state", "gmv"],
+                             "metric_result_columns": ["gmv"], "exact_result_columns": True})
+    frame = await runner.run_sql(RunSqlToolArgs(sql=(
+        "SELECT customer_state, SUM(price) AS gmv FROM fact_order_items "
+        "JOIN fact_orders USING(order_id) JOIN dim_customers USING(customer_id) "
+        "WHERE order_purchase_timestamp >= TIMESTAMP '2020-01-01' GROUP BY customer_state"
+    )), context)
+    assert frame.empty and list(frame.columns) == ["customer_state", "gmv"]
+    validation = context.metadata["result_validation"]
+    assert validation["state"] == "degraded" and not validation["missing_columns"]
+    assert "没有返回数据" in validation["reason"]
+    assert not context.metadata.get("result_contract_satisfied")
+
+
+@pytest.mark.asyncio
 async def test_runner_treats_the_online_execution_cap_as_possible_truncation() -> None:
     """The online 1,000-row Policy cap remains authoritative for completeness."""
     runner = SecurePostgresRunner()

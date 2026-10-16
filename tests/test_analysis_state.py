@@ -91,6 +91,20 @@ def test_structured_filter_patch_matches_semantic_intent_shape():
     assert proposed.filters == ("customer_state=SP",)
 
 
+def test_patch_is_the_only_authority_for_incremental_scope_changes():
+    catalog = CatalogLoader(WORKSPACE).load()
+    state = replace(AnalysisState.new(WORKSPACE), metric_ids=("gmv",),
+                    dimensions=("customer_state",), time_grain=None, top_n=5)
+    intent = parse_semantic_intent(json.dumps({
+        "request_kind": "data_query", "action": "update_task",
+        "time_grain": "year", "metric_ids": ["paid_order_count"],
+        "state_patch": {"operations": [{"op": "set", "field": "filters", "value": ["customer_state=SP"]}]},
+    }), catalog, user=USER)
+    resolved, proposed = resolve_state_intent(intent, state, catalog, USER, message_count=8)
+    assert proposed.metric_ids == ("gmv",) and proposed.time_grain is None and proposed.top_n == 5
+    assert resolved.filters[0].value == "SP"
+
+
 def test_patch_cannot_introduce_hidden_metric_or_multiple_state_filters():
     catalog = CatalogLoader(WORKSPACE).load()
     state = replace(AnalysisState.new(WORKSPACE), metric_ids=("gmv",))

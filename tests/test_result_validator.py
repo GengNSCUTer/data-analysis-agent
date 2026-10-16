@@ -6,6 +6,19 @@ import pytest
 from data_analysis_agent.result_validator import ResultValidator, build_result_summary
 
 
+@pytest.mark.parametrize("years", [[2017, 2018], [2017.0, 2018.0]])
+def test_year_bucket_numbers_are_not_epoch_nanoseconds(years):
+    validation = ResultValidator().validate(
+        pd.DataFrame({"time": years, "gmv": [10, 20]}),
+        required_columns=("time", "gmv"), metric_columns=("gmv",),
+        time_column="time", time_bucket_grain="year", requested_start="2017-01-01",
+        requested_end="2019-01-01", requested_end_exclusive=True,
+    )
+    assert validation.state == "valid"
+    assert validation.time_start == "2017-01-01T00:00:00"
+    assert validation.time_end == "2018-01-01T00:00:00"
+
+
 def test_regional_gmv_without_time_column_is_a_trusted_table() -> None:
     result = ResultValidator().validate(
         pd.DataFrame({"customer_state": ["SP", "RJ"], "gmv": [10.0, 4.0]}),

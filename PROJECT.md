@@ -1293,3 +1293,23 @@ safe trace 新增摘要状态、失败类型、耗时及各模型调用的预算
 既有 32013/32014 服务未替换。架构说明已更新到
 [`analysis-context-memory-v2.md`](docs/architecture/analysis-context-memory-v2.md) 第 10 节。
 下一步为计划 Phase 5 的多轮产品验收与指标化，不提前引入长期记忆或训练。
+
+## 2026-10-16｜上下文与记忆 v2：Phase 5 多轮产品验收
+
+完成 Phase 5 的真实多轮验收准备、代码修复和证据整理。`AnalysisContextBuilder` 现在在持久摘要
+watermark 已经覆盖近期窗口时不再读取反向范围，避免摘要复用过程中出现无效的历史区间；语义解释
+提示明确要求 `catalog_definition` 也填写对应 `metric_ids`，定义问题不会因为只写在 assumptions
+而被错误澄清。SQL 计划提示补充了二层聚合应使用具名 CTE 的约束，避免模型用内联子查询触发敏感
+标识列策略拒绝；策略本身没有放宽。
+
+确定性 Python 定向回归 **244 passed**，上下文/意图补充回归 **58 passed**。真实浏览器多轮矩阵
+覆盖任务切换、增删改筛选、指标切换、时间粒度、结果解释、图表复用、排名实体下钻、刷新恢复、
+空结果、过期工件、未知指标、写入请求和恶意摘要隔离；最新代码下功能矩阵 9 组通过，恶意摘要
+场景修正为保留合法来源证据后单独复验通过。既有浏览器组合 11 个选中用例中 10 个通过；唯一
+失败是在线语义提供方返回 `semantic_service_unavailable`，未进入 QueryPlan/SQL 执行，不能归因
+为状态或引用实现错误。此前完整矩阵已成功将排名第一州绑定为 `customer_state=SP` 并生成新查询。
+
+本轮每个 run/audit 关联、状态快照、模型调用次数、延迟和脱敏 SSE/截图均保存于仓库外
+`/disk2/gengnan/data-analysis-agent-data/evals/analysis-memory-phase5-20261016/`；safe report 不含
+完整 SQL 或结果行。当前仍没有自动历史召回，召回命中率记为 N/A；Phase 5 通过的是组件和链路
+行为，不是任意自然语言业务语义准确率。Phase 6 跨会话长期记忆继续暂缓。

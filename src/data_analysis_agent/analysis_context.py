@@ -62,8 +62,12 @@ class AnalysisContextBuilder:
         summary_elapsed_ms = 0
         # Read only a bounded set of complete turns. Unprocessed backlog remains
         # explicit; no clipped prefix is labelled as a fully compressed history.
-        old = await store.get_turn_range(
-            conversation.id, conversation.user, start=watermark, before=recent_start
+        old = (
+            await store.get_turn_range(
+                conversation.id, conversation.user, start=watermark, before=recent_start
+            )
+            if watermark < recent_start
+            else []
         )
         groups = _group_complete_turns(old)
         selected = []
