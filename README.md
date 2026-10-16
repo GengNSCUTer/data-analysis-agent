@@ -49,7 +49,7 @@ PYTHONPATH=src DATA_ANALYSIS_DEMO_PORT=32013 python examples/trusted_olist_web_d
 ```dotenv
 SILICONFLOW_API_KEY=your_key
 SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
-SILICONFLOW_MODEL=deepseek-ai/DeepSeek-V4-Flash
+SILICONFLOW_MODEL=deepseek-ai/DeepSeek-V3.2
 ```
 
 打开 http://127.0.0.1:32013/embedded-copilot；/embedded-demo 重定向到产品页。登录和演示顺序见 [演示脚本](docs/demo-script.md)，数据库准备见 [PostgreSQL 基础设施](infra/postgres/)。

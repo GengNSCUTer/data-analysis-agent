@@ -237,6 +237,16 @@ Phase 5 验收记录：确定性联合 Python 回归 **244 passed**；上下文/
 `/disk2/gengnan/data-analysis-agent-data/evals/analysis-memory-phase5-20261016/`；不宣称自动召回
 命中率（当前仅显式 recall 接口），也不将这些场景通过写成任意业务语义准确率。
 
+2026-10-16 最终补验：在线默认模型切换为 `deepseek-ai/DeepSeek-V3.2`，修复客户端遗漏
+temperature 和可信引用未贯通有效 SemanticIntent/QueryPlan 的问题；删除后置重复筛选注入。
+确定性联合回归 **256 passed**，完整真实浏览器矩阵 **10 组、36 轮通过**；最终语义提示下
+排名第一/第二下钻独立复验 **2 passed**。既有网页套件初跑 15 passed、3 failed、2 skipped，
+三项失败修复后分别通过，18 个有效场景均有通过证据；两项 skip 为已移除的浮动宿主测试。
+长会话摘要生成及增量续接亦通过。最终提示相关回归 **45 passed**。
+证据在仓库外 `evals/analysis-memory-phase5-20261016/v32-r4/` 与 `v32-r5/`。
+详细失败与修复见 PROJECT.md 及架构说明第 11.1 节；不是逐条 Gold 语义准确率评测，
+不由这些结果提前启动长期记忆或新的后训练实验。
+
 ### Implementation Phase 6 — 长期语义记忆（暂缓）
 
 - **GOAL-007**: 为未来跨会话业务偏好和用户记忆保留扩展边界，但不在当前短期记忆改造中实现。

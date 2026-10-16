@@ -121,6 +121,8 @@ class LiveConversation:
             binding = trace.get("result_reference") or {}
             if binding.get("status") != "resolved" or binding.get("value") != reference:
                 failures.append("reference_binding")
+            if f"filter_customer_state:{reference}" not in trace.get("query_plan", {}).get("warnings", []):
+                failures.append("reference_missing_from_query_plan")
         if chart is not None and not trace.get("deterministic_chart_rendered"):
             failures.append("chart_not_rendered")
         if chart is not None and trace.get("chart_contract", {}).get("chart_type") != chart:

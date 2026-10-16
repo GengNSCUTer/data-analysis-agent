@@ -208,7 +208,7 @@ class SecurePostgresRunner(SqlRunner):
         self,
         settings: PostgresConnectionSettings | None = None,
         policy: SqlPolicy | None = None,
-        model_name: str = "deepseek-ai/DeepSeek-V4-Flash",
+        model_name: str = "deepseek-ai/DeepSeek-V3.2",
         result_validator: ResultValidator | None = None,
         workspace: WorkspaceProfile | None = None,
     ):

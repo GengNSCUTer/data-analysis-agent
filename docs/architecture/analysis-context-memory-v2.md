@@ -1,6 +1,6 @@
 # 分析上下文与记忆 v2：实现与验收
 
-核对日期：2026-10-16。Phase 1 完成 ConversationHistory 与 AnalysisState；Phase 2 增加执行证据和结果复用；Phase 3 增加可信实体引用；Phase 4 增加任务内上下文包和持久滚动摘要。目标设计与后续任务见 [实施计划](../../plan/architecture-analysis-context-memory-v2.md)。第 1–7 节保留早期审计记录；其中列出的待办由第 8–10 节更新，当前摘要行为以第 10 节为准。
+核对日期：2026-10-16。Phase 1 完成 ConversationHistory 与 AnalysisState；Phase 2 增加执行证据和结果复用；Phase 3 增加可信实体引用；Phase 4 增加任务内上下文包和持久滚动摘要；Phase 5 完成 V3.2 多轮产品验收。目标设计与后续任务见 [实施计划](../../plan/architecture-analysis-context-memory-v2.md)。第 1–7 节保留早期审计记录；其中列出的待办由第 8–11 节更新，当前摘要行为以第 10 节为准，最终验收以第 11.1 节为准。
 
 ## 1. 本阶段任务卡
 
@@ -272,3 +272,24 @@ SQL。Phase 3 定向联合回归 **193 passed**；真实浏览器跨轮实体下
 只进入叙事解释，不进入 QueryPlan/SQL 条件链路。当前没有自动历史召回，召回命中率不适用；真实
 模型提供方偶发 `semantic_service_unavailable` 时请求 fail closed，不能把该外部依赖失败写成产品
 逻辑通过或业务语义准确率。
+
+### 11.1 V3.2 补验与引用条件贯通修复
+
+在线默认模型切换为 `deepseek-ai/DeepSeek-V3.2`，并修复 OpenAI 兼容客户端未发送
+`LlmRequest.temperature` 的问题。语义提示明确合法增量 patch、未改字段的继承、
+指标定义与结果追问的区别，以及引用来源维度与目标分组的区别；没有增加关键词路由。
+
+真实测试发现引用绑定只改了 state、没有进入有效 SemanticIntent 的问题。Handler 现在
+在 `apply_reference_filter()` 后，以合并状态构造有效意图，供 Catalog、QueryPlan、候选
+生成和会话保存共同使用；删除后置重复注入 filter 的分支。回归不只检查页面和 state，
+还要求引用筛选进入 QueryPlan，并保留原年份及新的目标维度。
+
+确定性联合回归 **256 passed**。完整真实浏览器矩阵 **10 组、36 轮全部通过**；
+最终提示下排名第一/第二下钻独立复验 **2 passed**。既有网页套件初跑 15 passed、
+3 failed、2 skipped，三项失败修复后分别复验通过，18 个有效场景均有通过证据；
+两项 skip 为已移除浮动宿主的拖拽/缩放测试。长会话摘要生成和增量续接已在网页套件中通过。
+最终提示定向回归 **45 passed**。各次测试独立记录，没有把分次通过写成单次全绿。
+
+证据目录：仓库外 `evals/analysis-memory-phase5-20261016/v32-r4/`（完整矩阵）及
+`v32-r5/`（最终排名复验）。测试验证状态/引用/结果合同与交互，不包含逐条 Gold denotation；
+不能据此推断任意业务语义准确率。跨会话长期记忆、自动历史召回仍未实现。

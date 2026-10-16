@@ -302,6 +302,9 @@ class BudgetedChatHandler(ChatHandler):
                                 proposed_state = apply_reference_filter(
                                     proposed_state, reference_binding
                                 )
+                                semantic_intent = SemanticIntent.model_validate({
+                                    **semantic_intent.as_dict(), **proposed_state.scope(),
+                                })
                                 usage.record_catalog({
                                     "result_reference": {
                                         "status": "resolved",
@@ -469,14 +472,6 @@ class BudgetedChatHandler(ChatHandler):
                         f"{item.dimension}={item.value}"
                         for item in semantic_intent.filters
                     ]
-                    if reference_binding is not None:
-                        filters = [
-                            item for item in filters
-                            if not item.startswith(f"{reference_binding.dimension}=")
-                        ]
-                        filters.append(
-                            f"{reference_binding.dimension}={reference_binding.value}"
-                        )
                     updated_memory = replace(
                         updated_memory, metric_ids=semantic_intent.metric_ids,
                         dimensions=semantic_intent.dimensions,

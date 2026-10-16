@@ -179,7 +179,7 @@ def create_app() -> FastAPI:
             "Build frontends/webcomponent before starting the trusted demo."
         )
 
-    model_name = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V4-Flash")
+    model_name = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V3.2")
     settings = PostgresConnectionSettings.from_environment()
     runner = SecurePostgresRunner(
         settings=settings,

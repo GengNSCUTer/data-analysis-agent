@@ -796,7 +796,8 @@ def test_result_browser_pages_without_new_sql_or_model_calls(page, width) -> Non
             }
             payload["rows"][0]["city"] = "<img src=x onerror=alert(1)>"
         else:
-            payload = {"messages": [], "charts": [], "trusted_result_artifact": {"artifact_id": "paging-artifact"}}
+            payload = {"conversation_id": "paging-test", "messages": [], "charts": [],
+                       "trusted_result_artifact": {"artifact_id": "paging-artifact"}}
         route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
 
     browser_page.route("**/api/project/conversations/paging-test**", result_response)
@@ -1262,6 +1263,7 @@ def test_analysis_state_live_ranked_entity_reference(page) -> None:
     assert state["status"] == "completed"
     assert state["filters"] == ["customer_state=SP"]
     assert state["dimensions"] == ["product_category_name"]
+    assert state["time_range"] == artifact["query_scope"]["time_range"]
     assert not console_errors
 
     connection = psycopg2.connect(
@@ -1281,6 +1283,7 @@ def test_analysis_state_live_ranked_entity_reference(page) -> None:
     finally:
         connection.close()
     assert trace["result_reference"]["status"] == "resolved"
+    assert "filter_customer_state:SP" in trace["query_plan"]["warnings"]
     assert "original_sql" not in json.dumps(trace["result_reference"])
 
 

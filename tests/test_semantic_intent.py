@@ -544,3 +544,75 @@ async def test_handler_semantic_path_does_not_call_legacy_router(
         assert memory["time_range"] == plan["time_range"]
     else:
         assert recorder.usage.sql_calls_used == 0
+
+
+@pytest.mark.asyncio
+async def test_ranked_reference_filter_reaches_effective_intent_and_sql_plan(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.budget import RequestBudget
+    from data_analysis_agent.chat_runtime import BudgetedChatHandler
+    from data_analysis_agent.result_artifact import ResultArtifact
+    from data_analysis_agent.run_recorder import AgentRun
+    from vanna.core.storage import Conversation
+    from vanna.core.user import RequestContext
+    from vanna.servers.base.models import ChatRequest
+
+    workspace = OLIST_RUNTIME_WORKSPACE
+    user = User(id="reference-handoff", group_memberships=["analyst"])
+    catalog = CatalogLoader(workspace).load()
+    dates = {"start": "2017-01-01", "end": "2018-01-01", "end_semantics": "exclusive"}
+    state = replace(AnalysisState.new(workspace), metric_ids=("gmv",),
+                    dimensions=("customer_state",), time_range=dates)
+    artifact = ResultArtifact(
+        "ranking", "可信排名", ("gmv",), ("customer_state", "gmv"),
+        workspace.dataset_version_id, workspace.metric_version, "not_rendered",
+        workspace_id=workspace.workspace_id, query_scope=state.scope(),
+        result_metadata={"validation_status": "valid",
+                         "ordering": [{"column": "gmv", "direction": "desc"}],
+                         "ranked_entities": [
+                             {"rank": 1, "value": "SP", "order_value": 100},
+                             {"rank": 2, "value": "RJ", "order_value": 80},
+                         ]},
+    )
+    state = state.with_result_artifact(artifact)
+    conversation = Conversation(id="reference-handoff", user=user, metadata={
+        "workspace_id": workspace.workspace_id,
+        "dataset_version_id": workspace.dataset_version_id,
+        "metric_version": workspace.metric_version, "working_memory": state.as_dict(),
+    })
+    async def complete(prompt, user):
+        return json.dumps({"request_kind": "data_query", "action": "update_task",
+            "state_patch": {"operations": [{"op": "set", "field": "dimensions", "value": ["product_category_name"]}]},
+            "reference_requests": [{"kind": "previous_ranked_entity", "dimension": "customer_state",
+                                    "rank": 2, "match_mode": "first_row"}]})
+
+    async def send_message(*args, **kwargs):
+        if False:
+            yield
+
+    store = SimpleNamespace(get_conversation=AsyncMock(return_value=conversation),
+                            update_conversation=AsyncMock())
+    agent = SimpleNamespace(user_resolver=SimpleNamespace(resolve_user=AsyncMock(return_value=user)),
+                            conversation_store=store, send_message=send_message)
+    recorder = SimpleNamespace(start=AsyncMock(return_value=AgentRun("ref-run", "ref-request", conversation.id)),
+                               finish=AsyncMock())
+    handler = BudgetedChatHandler(
+        agent, RequestBudget(), recorder, workspace=workspace,
+        question_router=QuestionRouter(CatalogRetriever(catalog), full_results=True),
+        semantic_interpreter=SemanticIntentInterpreter(catalog, complete),
+    )
+    monkeypatch.setattr(handler, "_result_reuse_decision", AsyncMock(return_value="validated_result"))
+    request = ChatRequest(message="刚才排名第二的州哪些品类成交额高？",
+                          conversation_id=conversation.id, request_context=RequestContext())
+    _chunks = [chunk async for chunk in handler.handle_stream(request)]
+    plan = request.request_context.metadata["query_plan"]
+    intent = request.request_context.metadata["semantic_intent"]
+    assert "filter_customer_state:RJ" in plan["warnings"]
+    assert intent["filters"] == [{"dimension": "customer_state", "value": "RJ"}]
+    assert plan["time_range"] == dates
+    memory = conversation.metadata["working_memory"]
+    assert memory["task_id"] == state.task_id
+    assert memory["filters"] == ["customer_state=RJ"]

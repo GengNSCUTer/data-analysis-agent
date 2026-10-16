@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 
 import pytest
 
@@ -12,10 +11,14 @@ from vanna.integrations.openai import OpenAILlmService
 
 class _FakeCompletions:
     def __init__(self) -> None:
-        self.thread_id: int | None = None
+        self.payload = None
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
 
-    def create(self, **kwargs):
-        self.thread_id = threading.get_ident()
+    async def create(self, **kwargs):
+        self.payload = kwargs
+        self.started.set()
+        await self.release.wait()
         return type(
             "Response",
             (),
@@ -36,19 +39,25 @@ class _FakeCompletions:
 
 
 @pytest.mark.asyncio
-async def test_openai_non_streaming_call_runs_off_event_loop() -> None:
+@pytest.mark.parametrize("temperature", [0.0, 0.7])
+async def test_openai_async_call_yields_and_preserves_sampling_settings(temperature) -> None:
     service = OpenAILlmService.__new__(OpenAILlmService)
     completions = _FakeCompletions()
     service.model = "test-model"
     service._client = type(
         "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
     )()
-    event_loop_thread = threading.get_ident()
-
-    response = await service.send_request(
-        LlmRequest(messages=[], user=User(id="openai-thread-test"))
-    )
+    task = asyncio.create_task(service.send_request(LlmRequest(
+        messages=[], user=User(id="openai-async-test"),
+        temperature=temperature, max_tokens=800,
+    )))
+    await asyncio.wait_for(completions.started.wait(), timeout=1)
+    assert not task.done()
+    completions.release.set()
+    response = await task
 
     assert response.content == "ok"
-    assert completions.thread_id is not None
-    assert completions.thread_id != event_loop_thread
+    assert completions.payload == {
+        "model": "test-model", "messages": [], "temperature": temperature,
+        "max_tokens": 800, "stream": False,
+    }

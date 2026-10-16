@@ -128,7 +128,7 @@ def create_app() -> FastAPI:
     llm = OpenAILlmService(
         api_key=api_key,
         base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
-        model=os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V4-Flash"),
+        model=os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V3.2"),
     )
     registry = ToolRegistry()
     registry.register_local_tool(

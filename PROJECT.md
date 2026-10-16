@@ -1313,3 +1313,34 @@ watermark 已经覆盖近期窗口时不再读取反向范围，避免摘要复�
 `/disk2/gengnan/data-analysis-agent-data/evals/analysis-memory-phase5-20261016/`；safe report 不含
 完整 SQL 或结果行。当前仍没有自动历史召回，召回命中率记为 N/A；Phase 5 通过的是组件和链路
 行为，不是任意自然语言业务语义准确率。Phase 6 跨会话长期记忆继续暂缓。
+
+### 2026-10-16｜V3.2 切换与 Phase 5 补验
+
+在线 PostgreSQL 与 SQLite 示例、SQL 审计的默认模型及 README 示例统一改为
+`deepseek-ai/DeepSeek-V3.2`；历史模型评测和训练记录不改写。补验服务在
+screen `data-analysis-agent-phase5`、`http://127.0.0.1:32016/embedded-copilot`。
+
+真实多轮测试发现并修复：可信排名实体只更新会话 filters，却没有同步进入有效语义意图，
+导致 QueryPlan 缺少该筛选。现在引用绑定后只生成一份合并后的有效意图，Catalog、QueryPlan、
+SQL 候选和会话状态都使用它，删除后置重复注入 filter 的分支。确定性 Handler 回归和浏览器
+断言均检查引用值真正进入 QueryPlan，不能只凭状态页出现州代码就判为成功。
+
+OpenAI 兼容客户端此前漏发 `LlmRequest.temperature`，导致语义入口的 `temperature=0`
+没有生效；现流式/非流式的公共请求构造器都传递该字段，并用异步客户端回归验证参数和让出
+事件循环。语义提示补齐合法 JSON patch、清除条件、指标切换、保持年份、引用来源与目标
+分组的区别；保持模型语义理解，不添加关键词路由或解析失败的隐式回退。分页浏览器 fixture
+补齐当前会话接口的 `conversation_id`，没有为旧测试数据增加产品兼容层。
+
+开启项目 PostgreSQL 的确定性联合回归 **256 passed**，定向 Ruff、compileall、diff check 通过。
+V3.2 完整浏览器矩阵 **10 passed，36 轮无断言失败，耗时 16 分 16 秒**，覆盖条件增删改、
+指标切换、排名引用、刷新恢复、图表复用、澄清、空结果、失效工件、未知指标、写入拒绝及摘要污染。
+最终补充“引用来源维度不等于目标分组”的语义提示后，排名第一和第二的真实下钻再次独立复验
+**2 passed，3 分 24 秒**；确认州筛选进入 QueryPlan、原年份保留、目标改为商品品类。
+
+既有网页套件首次 **15 passed、3 failed、2 skipped**：两项分页 fixture 和一项排名下钻
+分别修复后复验 **2 passed** 与上述排名组合 **2 passed**，18 个有效场景均有通过证据，
+并非同一次完整套件全部通过。两项 skip 为已移除的浮动宿主拖拽/缩放场景，不属于现产品页。
+原有长会话摘要生成与增量续接用例在该网页套件中通过。最终提示相关定向回归 **45 passed**。
+证据位于仓库外 `evals/analysis-memory-phase5-20261016/v32-r4/` 与 `v32-r5/`。
+这些测试验证状态、引用、结果合同和产品行为，未做逐条 Gold denotation，不代表任意业务问题
+100% 正确；跨会话长期记忆和自动历史召回仍未接入。
