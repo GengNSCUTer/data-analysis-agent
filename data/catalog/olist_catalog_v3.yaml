@@ -37,7 +37,7 @@ tables:
     context_columns: [order_id, order_item_id, product_id, seller_id, price, freight_value]
     columns:
       - {name: order_id, type: text, description: 订单标识, aliases: [订单ID], sensitive: true}
-      - {name: order_item_id, type: integer, description: 订单内商品行序号, aliases: [商品行号, 明细序号], sensitive: false}
+      - {name: order_item_id, type: integer, description: "订单内商品行序号；跨订单会重复，单独去重不能计算商品件数，商品行键为 (order_id, order_item_id)", aliases: [商品行号, 明细序号], sensitive: false}
       - {name: product_id, type: text, description: 商品标识，仅用于关联或聚合, aliases: [商品ID, 产品ID], sensitive: true}
       - {name: seller_id, type: text, description: 卖家标识，仅用于关联或聚合, aliases: [卖家ID, 商家ID], sensitive: true}
       - {name: shipping_limit_date, type: timestamp, description: 发货时限, aliases: [发货时限], sensitive: false}
@@ -137,7 +137,7 @@ tables:
     context_columns: [product_category_name, product_category_name_english]
     columns:
       - {name: product_category_name, type: text, description: 葡萄牙语品类名, aliases: [原始品类, 葡萄牙语品类], sensitive: false}
-      - {name: product_category_name_english, type: text, description: 英文品类名, aliases: [英文品类, 展示品类, 品类名称], sensitive: false}
+      - {name: product_category_name_english, type: text, description: 英文品类名, aliases: [英文品类, 展示品类, 品类名称, product_category_name], sensitive: false}
       - {name: dataset_version_id, type: text, description: 数据版本标识, aliases: [数据版本], sensitive: true}
 
   - table_id: dataset_versions
@@ -161,7 +161,7 @@ tables:
 metrics:
   - metric_id: gmv
     name: 商品成交额
-    description: "有效订单商品价格之和，不含运费。"
+    description: "有效订单的商品行 price 之和，不含运费。按品类筛选时只累加该品类商品行，不是先找到含该品类的订单再累加整单所有品类金额。"
     aliases: [GMV, 商品成交额, 成交额, 销售额, 商品销售额]
     grain: order_item
     time_field: fact_orders.order_purchase_timestamp
@@ -172,7 +172,7 @@ metrics:
     result_value_constraints: {minimum: 0}
     dimension_policies:
       payment_type:
-        description: "金额按订单内 payment_value 占比分摊到 payment_type，禁止只用第一条支付代表整单。"
+        description: "仅按 payment_type 分组拆分金额时，按订单内 payment_value 占比分摊，禁止只用第一条支付代表整单。若仅筛选使用过某支付方式的订单，使用 EXISTS 限定订单，商品行 price 不分摊；筛选与按支付方式分组不同。"
         mode: payment_share
     recommended_chart: bar_or_line
     role_visibility: [analyst, admin]
@@ -236,7 +236,7 @@ metrics:
 
   - metric_id: item_count
     name: 商品件数
-    description: "有效订单的商品行数；Olist 每个 (order_id, order_item_id) 为一件商品行，不按订单去重。"
+    description: "有效订单的商品行数，保持商品行粒度后用 COUNT(*)；需去重时按完整 (order_id, order_item_id) 去重。order_item_id 仅是订单内序号，禁止单独 COUNT(DISTINCT order_item_id)，也不按订单去重。"
     aliases: [商品件数, 商品数量, 销售件数, 商品行数, 销量, item count]
     grain: order_item
     time_field: fact_orders.order_purchase_timestamp

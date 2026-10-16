@@ -351,6 +351,7 @@ def create_app() -> FastAPI:
                 complete_semantic_intent,
             ),
             context_builder=context_builder,
+            filter_source_resolver=runner.resolve_filter_sources,
         ),
         config={"cdn_url": "/static/vanna-components.js"},
     )

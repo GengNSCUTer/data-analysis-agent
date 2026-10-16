@@ -11,7 +11,7 @@ from data_analysis_agent.analysis_state import AnalysisState, StatePatch
 from data_analysis_agent.analysis_lifecycle import clear_active_analysis_state, prepare_analysis_state
 from data_analysis_agent.metric_context import OLIST_RUNTIME_WORKSPACE as WORKSPACE
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
-from data_analysis_agent.semantic_intent import parse_semantic_intent, resolve_state_intent, route_semantic_intent
+from data_analysis_agent.semantic_intent import parse_semantic_intent, resolve_state_intent, route_semantic_intent, select_intent_catalog
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.result_artifact import ResultArtifact
 
@@ -76,7 +76,7 @@ def test_incremental_intent_is_validated_after_merge():
     assert resolved.metric_ids == ("gmv",) and resolved.filters[0].value == "SP"
     assert proposed.task_id == state.task_id
     router = QuestionRouter(CatalogRetriever(catalog), full_results=True)
-    selection = router.retriever.retrieve("gmv", USER, metric_ids=resolved.metric_ids)
+    selection = select_intent_catalog(resolved, router.retriever, USER, question="gmv")
     assert route_semantic_intent(resolved, router, selection, proposed.as_dict()).should_generate_sql
 
 

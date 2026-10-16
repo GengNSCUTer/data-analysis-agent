@@ -9,6 +9,7 @@ import inspect
 import json
 import re
 from time import perf_counter
+from typing import Awaitable, Callable
 
 import pandas as pd
 
@@ -35,6 +36,7 @@ from .execution_memory import reuse_decision
 from .metric_context import OLIST_WORKSPACE, PROMPT_VERSION
 from .question_router import QuestionRouter
 from .query_plan import QueryPlan
+from .query_filters import QueryFilter
 from .result_artifact import ResultArtifact
 from .analysis_context import AnalysisContextBuilder, ContextCapacityError
 from .result_artifact_store import ResultArtifactIntegrityError, ResultArtifactStore
@@ -117,6 +119,7 @@ class BudgetedChatHandler(ChatHandler):
         semantic_interpreter: SemanticIntentInterpreter | None = None,
         result_budget: ResultBudget | None = None,
         context_builder: AnalysisContextBuilder | None = None,
+        filter_source_resolver: Callable[[tuple[QueryFilter, ...]], Awaitable[tuple[QueryFilter, ...]]] | None = None,
     ):
         super().__init__(agent)
         self.budget = budget
@@ -128,6 +131,7 @@ class BudgetedChatHandler(ChatHandler):
         self.semantic_interpreter = semantic_interpreter
         self.result_budget = result_budget or ResultBudget.aggregate()
         self.context_builder = context_builder
+        self.filter_source_resolver = filter_source_resolver
         if self.result_budget.query_mode != "aggregate":
             raise ValueError("only aggregate execution is enabled in the chat runtime")
 
@@ -506,6 +510,8 @@ class BudgetedChatHandler(ChatHandler):
                         plan_state,
                         result_budget=self.result_budget,
                     )
+                    if query_plan.filters and self.filter_source_resolver is not None:
+                        query_plan = replace(query_plan, filters=await self.filter_source_resolver(query_plan.filters))
                     if isinstance(updated_memory, AnalysisState):
                         updated_memory = replace(
                             updated_memory,

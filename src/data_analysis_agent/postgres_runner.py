@@ -13,6 +13,7 @@ from typing import Any
 import pandas as pd
 import psycopg2
 import psycopg2.extras
+from psycopg2 import sql as pg_sql
 from sqlglot import exp, parse_one
 
 from vanna.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
@@ -28,6 +29,7 @@ from .result_validator import (
 from .sql_repair import SafeSqlExecutionError, sanitize_sql_error
 from .metric_context import DATASET_VERSION, METRIC_VERSION, OLIST_WORKSPACE
 from .workspace import WorkspaceProfile
+from .query_filters import QueryFilter
 from .result_budget import ResultBudget, ResultBudgetError, validate_runtime_result_budget
 
 
@@ -237,6 +239,42 @@ class SecurePostgresRunner(SqlRunner):
 
     async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
         return await asyncio.to_thread(self._run_sql_sync, args, context)
+
+    async def resolve_filter_sources(self, filters: tuple[QueryFilter, ...]) -> tuple[QueryFilter, ...]:
+        """Locate display/raw values among already authorized Catalog columns.
+
+        Only booleans leave the reader query. Unknown values remain valid
+        filters (possibly with an empty result), rather than a language gate.
+        """
+        if not any(len(item.sources) > 1 for item in filters):
+            return filters
+        return await asyncio.to_thread(self._resolve_filter_sources_sync, filters)
+
+    def _resolve_filter_sources_sync(self, filters):
+        connection = psycopg2.connect(
+            host=self.settings.host, port=self.settings.port,
+            database=self.settings.database, user=self.settings.reader_user,
+        )
+        try:
+            connection.set_session(readonly=True, autocommit=False)
+            with connection.cursor() as cursor:
+                cursor.execute("SET LOCAL statement_timeout = %s", (self.settings.statement_timeout_ms,))
+                resolved = []
+                for item in filters:
+                    if len(item.sources) < 2:
+                        resolved.append(item)
+                        continue
+                    checks = [pg_sql.SQL("EXISTS(SELECT 1 FROM {}.{} WHERE {} = %s)").format(
+                        pg_sql.Identifier(self.workspace.analytics_schema), pg_sql.Identifier(table),
+                        pg_sql.Identifier(column),
+                    ) for table, column in item.sources]
+                    cursor.execute(pg_sql.SQL("SELECT ") + pg_sql.SQL(", ").join(checks),
+                                   (item.value,) * len(checks))
+                    matched = tuple(source for source, exists in zip(item.sources, cursor.fetchone()) if exists)
+                    resolved.append(replace(item, value_sources=matched))
+                return tuple(resolved)
+        finally:
+            connection.close()
 
     def _role_for_context(self, context: ToolContext) -> str:
         return "admin" if "admin" in context.user.group_memberships else "analyst"

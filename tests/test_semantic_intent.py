@@ -372,10 +372,6 @@ def test_interpreter_does_not_copy_untrusted_prose_into_query_scope():
 @pytest.mark.parametrize(
     "payload,reason",
     [
-        (
-            {"filters": [{"dimension": "payment_type", "value": "credit_card"}]},
-            "filter_not_supported",
-        ),
         ({"clarification": "按什么期间比较？"}, "semantic_ambiguity"),
     ],
 )

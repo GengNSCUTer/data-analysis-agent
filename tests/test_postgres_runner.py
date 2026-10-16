@@ -22,6 +22,7 @@ from data_analysis_agent.run_recorder import PostgresRunRecorder
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
 from data_analysis_agent.sql_policy import PolicyViolation
+from data_analysis_agent.query_filters import QueryFilter
 from data_analysis_agent.trusted_sql_tool import TrustedRunSqlTool
 from vanna import Agent
 from vanna.capabilities.sql_runner import RunSqlToolArgs
@@ -53,6 +54,26 @@ def make_context(user_id: str, role: str = "analyst") -> ToolContext:
         agent_memory=DemoAgentMemory(),
         metadata={"question": "integration test"},
     )
+
+
+@pytest.mark.asyncio
+async def test_display_filter_resolves_to_its_actual_reader_column():
+    runner = SecurePostgresRunner()
+    sources = (("dim_products", "product_category_name"),
+               ("dim_category_translation", "product_category_name"),
+               ("dim_category_translation", "product_category_name_english"))
+    filters = (QueryFilter("customer_state", "SP", (("dim_customers", "customer_state"),)),
+               QueryFilter("product_category_name", "bed_bath_table", sources))
+    resolved = await runner.resolve_filter_sources(filters)
+    assert resolved[0] == filters[0]
+    assert resolved[1].sources == sources
+    assert resolved[1].value_sources == (("dim_category_translation", "product_category_name_english"),)
+    raw = await runner.resolve_filter_sources((QueryFilter("product_category_name", "cama_mesa_banho", sources),))
+    assert raw[0].value_sources == sources[:2]
+    # Values are parameters. A quote/SQL-looking value is neither executed
+    # nor turned into a mandatory clarification when it has no match.
+    unknown = QueryFilter("product_category_name", "missing' OR TRUE --", sources)
+    assert await runner.resolve_filter_sources((unknown,)) == (unknown,)
 
 
 @pytest.mark.asyncio

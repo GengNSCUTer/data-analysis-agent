@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from vanna.core.user import User
 
 from .question_router import QuestionRoute, QuestionRouter
+from .query_filters import bind_query_filters
 from .semantic_catalog import Catalog, CatalogRetriever, CatalogSelection
 from .analysis_state import AnalysisState, StatePatch
 from .chart_contract import ChartType
@@ -367,11 +368,11 @@ class SemanticIntentInterpreter:
                 "给了state_patch时不要再填写未改变的顶层metric_ids/dimensions/time_range/time_grain/top_n；服务端从当前状态继承。",
                 "排名数量属于当前分组：换分组时，服务端默认清除旧top_n；只有用户本轮明确要求数量才设置top_n。省略指标、时间或筛选的追问默认修改当前任务，保留这些已确认条件，不重复澄清。失败仅表示执行未成功，不表示用户已撤销分析范围。",
                 "当前status=failed时，用户要求重试应使用data_query和update_task，不改变已确认字段，不用上一次成功结果替代这次尚未成功的查询。",
-                "例如只看SP州：update_task，patch set filters=[{dimension:customer_state,value:SP}]；改看RJ州则set filters=[{dimension:customer_state,value:RJ}]；取消地区限制则clear filters。其他已有指标、时间、分组不变。",
+                "筛选补丁的value必须是对象数组，不能是单个对象。只添加条件用add；替换某个维度先remove当前同维度条件再add新条件；仅撤销某个维度用remove已有条件，保留其他维度。只有用户明确取消全部筛选才clear filters。",
                 '严格JSON示例：{"request_kind":"data_query","action":"update_task","metric_ids":[],"dimensions":[],"state_patch":{"operations":[{"op":"clear","field":"filters","value":null}]},"confidence":0.9}。不要输出未转义的伪JSON、注释、Markdown或自然语言。',
-                '结构化示例：取消州的筛选限制只能输出 state_patch.operations=[{"op":"clear","field":"filters","value":null}]，不要把旧RJ筛选复制回filters。',
+                '结构化示例：已有RJ州和某品类，只取消州限制：state_patch.operations=[{"op":"remove","field":"filters","value":[{"dimension":"customer_state","value":"RJ"}]}]。这是删除一个条件，不是清空filters；要删除的值从受控状态读取。',
                 '结构化示例：把商品成交额改成有效订单数只能输出 state_patch.operations=[{"op":"set","field":"metric_ids","value":["paid_order_count"]}]，不要清空或重写未变化字段。',
-                '结构化示例：明确改看MG州只能输出 state_patch.operations=[{"op":"set","field":"filters","value":[{"dimension":"customer_state","value":"MG"}]}]；这是显式新筛选，不是引用排名。',
+                '结构化示例：已有SP州和某品类，明确改看MG州：state_patch.operations=[{"op":"remove","field":"filters","value":[{"dimension":"customer_state","value":"SP"}]},{"op":"add","field":"filters","value":[{"dimension":"customer_state","value":"MG"}]}]；保留品类，这是显式新筛选，不是引用排名。',
                 "把刚才结果按州拆开：update_task，set dimensions=[customer_state]；改成总计：clear dimensions和time_grain。若没有当前指标，应最小澄清。",
                 "正在澄清的补充答案使用update_task并补齐缺失字段，不丢掉已确认指标。新任务不继承旧范围。",
                 "如上一轮正在澄清，本轮是在补充答案，结合 pending_question 完成完整意图。",
@@ -401,7 +402,8 @@ class SemanticIntentInterpreter:
                 "absolute time_range为[start,end)，含开始不含结束；用户说含截止日时end为次日。",
                 "例如'2017年'必须time_range={start:2017-01-01,end:2018-01-01,end_semantics:exclusive}，不是2017-12-31。",
                 "分组 dimensions 和 filters 不同。只看SP州不是按州分组；filter用dimension/value。",
-                "当前可编译的额外筛选只有customer_state=州代码；其他筛选不要忽略，最小澄清。",
+                "filters支持Catalog允许维度的等值筛选，多个不同维度表示同时满足，例如客户州与商品品类可以组合。筛选不自动添加分组。不得因为不是州筛选就追问；只询问真正缺失的信息。",
+                "state_patch修改filters时用add增加条件、remove撤销指定条件；set会替换整个筛选列表，所以仅替换其中一个维度时必须保留其他已确认维度。引用前一张表的第一名品类时继承既有州筛选，reference_requests.dimension=product_category_name。",
                 "comparison_baseline可描述要比较的基线，不必要求用户说同比/环比。",
                 f"chart_request：支持的图类型用这些规范ID {json.dumps(get_args(ChartType))}，只要求画图但没指定类型用auto，不需要图用null。不能自行添加_chart后缀；不支持的图保留原类型供能力校验，不悄悄换图。不要求用户必须说'图表'。",
                 "如果用户说‘这个州/第一名/刚才排名第一的州’并要重新统计，使用reference_requests；只填写kind=previous_ranked_entity、dimension、rank、match_mode和expected_source_artifact_id，不填写value。服务端只从当前已验证结果工件解析值；没有唯一最高或工件失效时会澄清。",
@@ -566,19 +568,13 @@ def route_semantic_intent(
                     "attribution_unavailable",
                     f"“{metric.name}”在这个维度上的归属口径尚未配置。",
                 )
-    for item in intent.filters:
-        if (
-            item.dimension != "customer_state"
-            or len(item.value) != 2
-            or not item.value.isascii()
-            or not item.value.isupper()
-            or not item.value.isalpha()
-        ):
-            return clarify(
-                "filter_not_supported", "这个筛选还不能编译为受控查询，请先调整筛选。"
-            )
-    if len(intent.filters) > 1:
-        return clarify("filter_not_supported", "当前只支持单个客户州筛选，请拆分查询。")
+    try:
+        bind_query_filters(selection, [item.model_dump() for item in intent.filters])
+    except ValueError as exc:
+        return QuestionRoute(
+            "unsupported", (), metrics, None, "filter_not_supported",
+            direct_answer=str(exc),
+        )
     if intent.top_n and (len(intent.dimensions) != 1 or intent.time_grain):
         return clarify(
             "top_n_shape_not_supported",
