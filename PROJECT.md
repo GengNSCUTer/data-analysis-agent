@@ -1381,3 +1381,39 @@ workspace、任务/数据/指标版本、旧覆盖位置和源消息；不会拿
 实现说明见 [后台摘要任务记录](plan/feature-background-context-compaction.md) 与
 [上下文架构第 10 节](docs/architecture/analysis-context-memory-v2.md)。下一轮再讨论同一会话更早
 分析任务与结果的召回，本轮不延伸该范围。
+
+## 2026-10-16｜短对话状态连续性与 SQL 修复收尾
+
+针对用户报告的“哪个州销售额最高 → 这个州哪些商品卖得好 → 前十商品品类”排查，
+确认主要问题不是 token 窗口不足：换分组沿用了旧 Top-1；编辑最后一问会清空整个状态；
+澄清分支丢失已知字段；四表 Catalog 无法完整提供品类与州筛选来源；SQL 修复仅预留
+320 tokens 且输入按字符截断，出现过遗漏条件和半截 SQL。
+
+已完成以下修复：分组改变时移除旧排名数量，明确新数量优先；澄清保留已验证的草稿；
+用户消息保存服务端轮前状态，编辑在原事务内恢复前缀并使摘要失效，清空/版本失效不能被撤销；
+失败保留当前意图和上次成功结果的独立归属。在线 Catalog 放宽到六表并保护必要关联路径；
+修复完整接收 QueryPlan/Catalog，输出复用统一预算（当前 4,000 tokens），截断响应不执行。
+
+真实验收还发现图类型自造后缀和金额自造加权：解释器现在获得共享 ChartType 的规范 ID；
+SQL 提示明确事实粒度、多对一维度关联和计划归因的区别，禁止无归因要求的金额重新分摊。
+这只是明确已有指标口径，SQL 语义仍需数值对照，不能把提示视为完备的语义证明。
+浏览器测试也改为匹配当前问题的 SSE 请求，避免欢迎流被错认成答案。
+
+最新代码定向回归 **250 passed**，包含实际 PostgreSQL 状态恢复、版本/归属、摘要竞态、
+修复输出、计划完整性、结果复用及图表回归；Ruff、compileall 和 diff check 通过。
+最终真实模型浏览器分两批 **4 + 1 组通过，共 18 轮**，覆盖三组不同措辞的三问、
+澄清补充与七轮编辑/重试/刷新/换图/取消筛选。失败状态续接由受控状态夹具安排，随后调用
+真实模型与数据库；另有 **1 项真实 SQL 修复验收通过**，漏掉 SP 的候选被拦截，修复补齐客户关联
+与 SP 筛选后返回十行。九次品类排名对照独立 reader SQL 的类别、顺序和金额，误差阈值 0.01。
+
+有效证据为仓库外 `evals/task-continuity-20261016/final-r3/` 中的
+`category-ranking-continuity`、`partial-clarification-continuity`、`gold-comparisons`，
+以及 `final-r4/` 中的编辑/重试完整链路和逐轮 Gold 对照；独立修复证据为
+`final/live-sql-repair.json`。早期失败、模型 stream-idle 超时和欢迎流误匹配证据保留，
+没有把它们计入最终通过。上述回归不等于任意电商问题或任意 SQL 的语义准确率。
+
+当前服务为 screen `data-analysis-agent-continuity`，地址仍是
+`http://127.0.0.1:32016/embedded-copilot`。没有改摘要预算、模型、数据库权限或后训练数据。
+旧消息不补写轮前快照；没有快照的历史编辑无法据此恢复，不能从助手文本猜回业务条件。
+代码阅读见 [修复任务卡](plan/fix-analysis-turn-continuity.md) 和
+[上下文架构第 12 节](docs/architecture/analysis-context-memory-v2.md)。

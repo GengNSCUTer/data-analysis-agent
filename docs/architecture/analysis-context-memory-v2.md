@@ -253,7 +253,8 @@ Conversation 或修改消息、state_version；普通状态更新保留数据库
 ### 10.3 失效与受限召回
 
 摘要只有 task/workspace/数据版本/指标版本全部一致才使用。清空或切换任务后旧摘要不进入新任务；
-编辑/撤回最后一轮由既有 store 清掉派生 memory，随后重新生成。摘要只传给语义理解/叙事层，
+编辑/撤回最后一轮由 store 恢复该轮开始前的 AnalysisState，并清除派生摘要；不再清空整个任务。
+快照只存于服务端用户消息 metadata；清空或版本变更后不能借编辑恢复旧范围。摘要只传给语义理解/叙事层，
 不会由程序解析为 SQL 筛选；结果实体仍需 Phase 3 的可信 artifact 绑定。
 
 `AnalysisContextBuilder.recall()` 提供同一会话的显式接口：最多读取 6 条消息，返回最多
@@ -298,3 +299,31 @@ Conversation 或修改消息、state_version；普通状态更新保留数据库
 证据目录：仓库外 `evals/analysis-memory-phase5-20261016/v32-r4/`（完整矩阵）及
 `v32-r5/`（最终排名复验）。测试验证状态/引用/结果合同与交互，不包含逐条 Gold denotation；
 不能据此推断任意业务语义准确率。跨会话长期记忆、自动历史召回仍未实现。
+
+## 12. 短对话的状态连续性修复（2026-10-16）
+
+用户报告“最高销售额州 → 这个州卖得好的品类 → 前十品类”在第三问失败。
+这不是长历史压缩造成的：当时历史很短，州与指标曾被正确识别；问题来自字段继承、编辑和澄清的状态写入，以及不完整的 SQL 上下文。
+
+| 操作 | 当前实现 | 代码 |
+| --- | --- | --- |
+| 改分组 | 不携带上一种分组的 Top-N；本轮明确指定数量则使用该数量，补丁顺序不影响结果 | `AnalysisState.apply_patch()` |
+| 补充澄清 | 保留已经验证的品类、筛选、时间和排名，仅等待尚缺字段 | `BudgetedChatHandler.handle_stream()` |
+| 编辑上一问 | 用户消息 metadata 保存该轮开始前状态；事务中删除最后一轮并恢复前缀状态，旧摘要失效 | `PostgresConversationStore._truncate_from_last_user_sync()` |
+| 执行失败后重试 | 当前意图与上次成功结果分开；解释器看到 failed 状态，重试使用当前范围 | `SemanticIntentInterpreter.prompt()` |
+| 筛选后按品类统计 | 在线 Catalog 上限为 6 表，已选必要维度的关联路径不再被后续维度挤掉 | `CatalogRetriever.retrieve()` / Web 装配 |
+| 一次 SQL 修复 | 完整 QueryPlan 与 Catalog 传入修复，取消按字符截掉后半段上下文；输出预留采用统一预算，默认 4,000 tokens；截断响应拒绝执行 | `build_repair_prompt()` / `LlmRepairCandidateProvider` |
+| 只换图 | 解释器直接获得绘图模块的规范类型，使用 `horizontal_bar` 等规范 ID，不自造后缀 | `SemanticIntentInterpreter.prompt()` / `ChartType` |
+| 度量口径 | 明确区分事实粒度计算与维度关联；只有计划要求的归因才分摊，不因订单/商品关联自造金额权重 | `metric_context.py:SYSTEM_PROMPT` |
+
+例如第二问解析后保留 `gmv`、绑定可信结果中的 `customer_state=SP`，改为按 `product_category_name` 分组，并移除旧的 `top_n=1`。
+第三问只更新 `top_n=10`。SQL 失败不会清空这些条件；编辑第三问只撤销第三问的变化，不撤销第二问的州筛选和分组。
+编辑快照不对旧消息补写；没有快照的历史轮次无法据此恢复，不能从助手叙述猜回条件。
+
+本轮未调整摘要触发阈值，也未新增语言关键词路由、hash、存储表或兼容别名。
+SQL 仍走计划检查、安全策略、只读角色和结果合同；是否符合真实业务还需结果对照。
+
+最新定向回归 250 passed。最终真实浏览器五组共十八轮分两批通过，其中九次品类排名
+逐行匹配独立 reader 的类别、顺序与金额；另有一次真实模型漏筛选修复验收通过。
+失败状态续接使用受控夹具；旧消息不回填快照，提供方超时仍会作为失败记录。
+详细证据路径和早期失败说明见 PROJECT.md 最新记录及修复任务卡。

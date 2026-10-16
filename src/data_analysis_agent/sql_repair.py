@@ -150,24 +150,21 @@ def build_repair_prompt(
     original_sql: str,
     error: SanitizedSqlError,
     catalog_context: str = "",
-    *,
-    max_chars: int = 8_000,
 ) -> str:
-    """Build a bounded repair request with only a sanitized error category."""
-    if max_chars <= 0:
-        raise ValueError("max_chars must be positive")
-    sql = original_sql.strip()[: max_chars // 2]
-    context = catalog_context.strip()[: max_chars // 2]
+    """Preserve the full server plan; the shared LLM request budget bounds it."""
+    sql = original_sql.strip()
+    context = catalog_context.strip()
     prompt = (
         "你正在修复一条只读 PostgreSQL 查询。数据库错误已被归类，不能猜测或扩大权限。\n"
         f"错误类别：{error.category}\n"
         f"安全提示：{error.public_reason}\n"
         "请只返回一条修复后的 SQL，不要解释、不要写库、不要访问 Catalog 未列出的对象。\n"
+        "严格保留 current_query_plan 的指标、筛选、时间、分组和排名数量；不能通过删除条件修复错误。\n"
         f"<original_sql>\n{sql}\n</original_sql>\n"
     )
     if context:
         prompt += f"<allowed_catalog>\n{context}\n</allowed_catalog>\n"
-    return prompt[:max_chars]
+    return prompt
 
 
 class OneShotSqlRepair:

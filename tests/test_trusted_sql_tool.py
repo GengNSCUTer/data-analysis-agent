@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pandas as pd
 import pytest
 
@@ -30,6 +31,22 @@ def _context() -> ToolContext:
             "metric_version": "test-metrics-v1",
         },
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason,expected", [("stop", "SELECT 1 AS gmv"), ("length", None)])
+async def test_repair_provider_uses_full_output_budget_and_rejects_truncation(finish_reason, expected):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from vanna.core.llm import LlmResponse
+    from data_analysis_agent.budget import RequestBudget
+    from data_analysis_agent.trusted_sql_tool import LlmRepairCandidateProvider, extract_sql_candidate
+
+    llm = SimpleNamespace(send_request=AsyncMock(return_value=LlmResponse(
+        content="SELECT 1 AS gmv", finish_reason=finish_reason)))
+    assert await LlmRepairCandidateProvider(llm)("repair", _context()) == expected
+    assert llm.send_request.call_args.args[0].max_tokens == RequestBudget.max_output_tokens
+    assert extract_sql_candidate("SELECT " + "a" * 101, max_chars=100) is None
 
 
 def test_result_metadata_comes_from_audited_order_and_only_bounded_entities():
@@ -215,12 +232,16 @@ async def test_execution_error_is_repaired_once_and_reexecuted(tmp_path) -> None
         "SELECT COUNT(order_id) AS paid_order_count FROM fact_orders"
     )
     context = _context()
+    context.metadata["query_plan"] = {"metric_ids": ["paid_order_count"], "dimensions": [], "warnings": []}
+    context.metadata["catalog_context"] = "a" * 10000 + "END_OF_CATALOG"
     result = await _tool(runner, provider, tmp_path).execute(
         context, RunSqlToolArgs(sql="SELECT missing_column FROM fact_orders")
     )
 
     assert result.success is True
     assert len(provider.prompts) == 1
+    assert json.loads(provider.prompts[0].split("<current_query_plan>\n")[1].split("\n</current_query_plan>")[0]) == context.metadata["query_plan"]
+    assert "END_OF_CATALOG" in provider.prompts[0] and "paid_order_count" in provider.prompts[0]
     assert runner.calls == [
         "SELECT missing_column FROM fact_orders",
         "SELECT COUNT(order_id) AS paid_order_count FROM fact_orders",

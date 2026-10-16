@@ -68,15 +68,10 @@ def test_repair_rejects_unsafe_candidate() -> None:
     assert outcome.reason == "repaired_sql_rejected_by_policy"
 
 
-def test_repair_prompt_is_bounded_and_contains_only_allowed_context() -> None:
+def test_repair_prompt_preserves_complete_catalog_and_plan() -> None:
     error = sanitize_sql_error("column x does not exist")
-    prompt = build_repair_prompt(
-        "SELECT " + "x" * 10000,
-        error,
-        catalog_context="analytics.fact_orders.order_id",
-        max_chars=200,
-    )
-
-    assert len(prompt) <= 200
-    assert "<allowed_catalog>" not in prompt or "fact_orders" in prompt
+    sql = "SELECT " + "x" * 10000
+    catalog = "analytics.fact_orders.order_id\n" * 400 + "filter_customer_state:SP top_n:10"
+    prompt = build_repair_prompt(sql, error, catalog_context=catalog)
+    assert sql in prompt and catalog in prompt
     assert "column x does not exist" not in prompt

@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import date, datetime, timedelta
 import json
-from typing import Awaitable, Callable, Literal, Mapping
+from typing import Awaitable, Callable, Literal, Mapping, get_args
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -18,6 +18,7 @@ from vanna.core.user import User
 from .question_router import QuestionRoute, QuestionRouter
 from .semantic_catalog import Catalog, CatalogRetriever, CatalogSelection
 from .analysis_state import AnalysisState, StatePatch
+from .chart_contract import ChartType
 from .token_budget import ContextCapacityError
 
 
@@ -289,6 +290,7 @@ class SemanticIntentInterpreter:
                 "pending_missing",
                 "time_grain",
                 "top_n",
+                "status",
             )
         }
         context["has_trusted_result"] = bool(
@@ -363,6 +365,8 @@ class SemanticIntentInterpreter:
                 "action=new_task表示独立新分析；update_task表示修改当前分析；keep表示解释/展示现有结果；clear_task表示清空当前分析。",
                 "修改任务请给state_patch.operations，只列出本轮变化，不重新填全量条件：set替换字段、add增加列表成员、remove撤销列表成员、clear清空字段。filters使用{dimension,value}对象，与filters字段本身的格式一致。state_patch中的op、field、value必须是合法JSON字符串/数组；clear操作必须省略value或写null，不能写空字符串。",
                 "给了state_patch时不要再填写未改变的顶层metric_ids/dimensions/time_range/time_grain/top_n；服务端从当前状态继承。",
+                "排名数量属于当前分组：换分组时，服务端默认清除旧top_n；只有用户本轮明确要求数量才设置top_n。省略指标、时间或筛选的追问默认修改当前任务，保留这些已确认条件，不重复澄清。失败仅表示执行未成功，不表示用户已撤销分析范围。",
+                "当前status=failed时，用户要求重试应使用data_query和update_task，不改变已确认字段，不用上一次成功结果替代这次尚未成功的查询。",
                 "例如只看SP州：update_task，patch set filters=[{dimension:customer_state,value:SP}]；改看RJ州则set filters=[{dimension:customer_state,value:RJ}]；取消地区限制则clear filters。其他已有指标、时间、分组不变。",
                 '严格JSON示例：{"request_kind":"data_query","action":"update_task","metric_ids":[],"dimensions":[],"state_patch":{"operations":[{"op":"clear","field":"filters","value":null}]},"confidence":0.9}。不要输出未转义的伪JSON、注释、Markdown或自然语言。',
                 '结构化示例：取消州的筛选限制只能输出 state_patch.operations=[{"op":"clear","field":"filters","value":null}]，不要把旧RJ筛选复制回filters。',
@@ -399,7 +403,7 @@ class SemanticIntentInterpreter:
                 "分组 dimensions 和 filters 不同。只看SP州不是按州分组；filter用dimension/value。",
                 "当前可编译的额外筛选只有customer_state=州代码；其他筛选不要忽略，最小澄清。",
                 "comparison_baseline可描述要比较的基线，不必要求用户说同比/环比。",
-                "chart_request写用户要求的图类型，不要求用户必须说'图表'。",
+                f"chart_request：支持的图类型用这些规范ID {json.dumps(get_args(ChartType))}，只要求画图但没指定类型用auto，不需要图用null。不能自行添加_chart后缀；不支持的图保留原类型供能力校验，不悄悄换图。不要求用户必须说'图表'。",
                 "如果用户说‘这个州/第一名/刚才排名第一的州’并要重新统计，使用reference_requests；只填写kind=previous_ranked_entity、dimension、rank、match_mode和expected_source_artifact_id，不填写value。服务端只从当前已验证结果工件解析值；没有唯一最高或工件失效时会澄清。",
                 "最高的州用rank=1,match_mode=unique_highest；排名第二的州用rank=2,match_mode=first_row，不可用unique_highest。显式改看MG州则直接修改filter，不再引用旧排名。",
                 '引用来源维度和本次分组是两件事：问“这个州哪些商品种类卖得好”时，reference_requests.dimension仍是customer_state，但本次按品类分组，必须给state_patch.operations=[{"op":"set","field":"dimensions","value":["product_category_name"]}]，不能给空operations而继续按州分组。不要在assumptions说改了分组却不提交相应patch。',

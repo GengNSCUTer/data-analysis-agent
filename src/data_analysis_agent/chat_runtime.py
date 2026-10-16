@@ -216,6 +216,7 @@ class BudgetedChatHandler(ChatHandler):
             memory, invalidation_notice = (prepare_analysis_state if self.semantic_interpreter else prepare_turn_memory)(
                 conversation, self.workspace
             )
+            CURRENT_MESSAGE_CONTEXT.get()["analysis_state_before_turn"] = memory.as_dict()
             if invalidation_notice:
                 await self.agent.conversation_store.update_conversation(conversation)
                 yield self._budget_chunk(
@@ -460,7 +461,7 @@ class BudgetedChatHandler(ChatHandler):
                     pending = route.state == "clarification_required"
                     updated_memory = replace(
                         proposed_state if semantic_intent is not None and (
-                            route.should_generate_sql or semantic_intent.request_kind == "clarification"
+                            route.should_generate_sql or route.needs_clarification
                         ) else memory,
                         pending_question=request.message.strip()[: memory._MAX_TEXT] if pending else None,
                         pending_missing=route.missing if pending else (),

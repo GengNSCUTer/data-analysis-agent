@@ -168,10 +168,22 @@ async def test_store_persists_workspace_and_rejects_stale_state(
 
 
 @pytest.mark.asyncio
-async def test_truncate_removes_last_user_turn_and_clears_memory(store) -> None:
+@pytest.mark.parametrize("invalidated", [None, "clear", "version"])
+async def test_edit_restores_prefix_state_but_not_invalidated_scope(store, invalidated) -> None:
     suffix = uuid.uuid4().hex[:12]
     user = User(id=f"truncate-owner-{suffix}", group_memberships=["analyst"])
     conversation_id = f"truncate-conversation-{suffix}"
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.metric_context import OLIST_RUNTIME_WORKSPACE
+    from dataclasses import replace
+    prior = replace(AnalysisState.new(OLIST_RUNTIME_WORKSPACE), metric_ids=("gmv",),
+                    dimensions=("product_category_name",), filters=("customer_state=SP",),
+                    top_n=None, previous_result_summary="上一轮可信结果")
+    current = replace(prior, top_n=10, status="failed", state_version=prior.state_version + 1)
+    if invalidated == "clear":
+        current = AnalysisState.new(OLIST_RUNTIME_WORKSPACE, history_start_index=4)
+    elif invalidated == "version":
+        current = replace(current, metric_version="changed")
     try:
         conversation = Conversation(
             id=conversation_id,
@@ -179,12 +191,12 @@ async def test_truncate_removes_last_user_turn_and_clears_memory(store) -> None:
             metadata={
                 "workspace_id": "olist-demo",
                 "state_version": 0,
-                "working_memory": {"metric_ids": ["gmv"], "previous_result_summary": "旧结果"},
+                "working_memory": current.as_dict(),
             },
             messages=[
                 Message(role="user", content="第一问"),
                 Message(role="assistant", content="第一答"),
-                Message(role="user", content="第二问"),
+                Message(role="user", content="第二问", metadata={"analysis_state_before_turn": prior.as_dict()}),
                 Message(role="assistant", content="第二答"),
             ],
         )
@@ -194,9 +206,28 @@ async def test_truncate_removes_last_user_turn_and_clears_memory(store) -> None:
         loaded = await store.get_conversation(conversation_id, user, "olist-demo")
         assert loaded is not None
         assert [message.content for message in loaded.messages] == ["第一问", "第一答"]
-        assert loaded.metadata["working_memory"] == {}
+        assert loaded.metadata["working_memory"] == (prior.as_dict() if invalidated is None else {})
     finally:
         await store.delete_conversation(conversation_id, user)
+
+
+@pytest.mark.asyncio
+async def test_turn_snapshot_is_server_authored_and_stored_only_on_user_message(store):
+    from data_analysis_agent.conversation_store import CURRENT_MESSAGE_CONTEXT
+
+    user = User(id=f"turn-snapshot-{uuid.uuid4().hex}", group_memberships=["analyst"])
+    conversation = Conversation(id=f"turn-snapshot-{uuid.uuid4().hex}", user=user)
+    prior = {"metric_ids": ["gmv"], "filters": ["customer_state=SP"]}
+    token = CURRENT_MESSAGE_CONTEXT.set({"run_id": "snapshot-run", "analysis_state_before_turn": prior})
+    try:
+        await store.append_turn_messages(conversation, [Message(role="user", content="改成十个品类"),
+                                                       Message(role="assistant", content="完成")])
+        loaded = await store.get_conversation(conversation.id, user)
+        assert loaded.messages[0].metadata["analysis_state_before_turn"] == prior
+        assert "analysis_state_before_turn" not in loaded.messages[1].metadata
+    finally:
+        CURRENT_MESSAGE_CONTEXT.reset(token)
+        await store.delete_conversation(conversation.id, user)
 
 
 @pytest.mark.asyncio

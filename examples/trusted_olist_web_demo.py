@@ -191,7 +191,9 @@ def create_app() -> FastAPI:
     conversation_store = PostgresConversationStore(settings)
     run_recorder = PostgresRunRecorder(settings, model_name=model_name)
     agent_memory = DemoAgentMemory()
-    catalog_retriever = CatalogRetriever(CatalogLoader(OLIST_RUNTIME_WORKSPACE).load())
+    # A filtered category analysis needs orders, items, customers, products and
+    # category translation together; four tables cannot express that scope.
+    catalog_retriever = CatalogRetriever(CatalogLoader(OLIST_RUNTIME_WORKSPACE).load(), max_tables=6)
     catalog_enhancer = CatalogContextEnhancer(
         catalog_retriever,
         base_enhancer=DefaultLlmContextEnhancer(agent_memory),
@@ -243,7 +245,7 @@ def create_app() -> FastAPI:
     registry.register_local_tool(
         TrustedRunSqlTool(
             sql_runner=runner,
-            repair_provider=LlmRepairCandidateProvider(llm_service),
+            repair_provider=LlmRepairCandidateProvider(llm_service, max_tokens=budget.max_output_tokens),
             file_system=query_file_system,
             result_artifact_store=result_artifact_store,
             custom_tool_description="Run a policy-checked, read-only PostgreSQL analytics query.",

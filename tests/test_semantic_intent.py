@@ -616,3 +616,79 @@ async def test_ranked_reference_filter_reaches_effective_intent_and_sql_plan(mon
     memory = conversation.metadata["working_memory"]
     assert memory["task_id"] == state.task_id
     assert memory["filters"] == ["customer_state=RJ"]
+
+
+def test_category_catalog_keeps_filter_source_and_all_join_bridges():
+    catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
+    intent = parse_semantic_intent(json.dumps({
+        "request_kind": "data_query", "metric_ids": ["gmv"],
+        "dimensions": ["product_category_name"],
+        "filters": [{"dimension": "customer_state", "value": "SP"}], "top_n": 10,
+    }), catalog)
+    selection = select_intent_catalog(intent, CatalogRetriever(catalog, max_tables=6), User(id="u"))
+    assert {"fact_orders", "fact_order_items", "dim_customers", "dim_products"} <= set(selection.trace.selected_tables)
+    assert "customer_state" in dict(selection.trace.selected_columns)["dim_customers"]
+    assert any(j.to_table == "dim_customers" or j.from_table == "dim_customers" for j in selection.joins)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["data_query", "clarification"])
+async def test_clarification_keeps_known_scope_until_metric_is_supplied(kind):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.budget import RequestBudget
+    from data_analysis_agent.chat_runtime import BudgetedChatHandler
+    from data_analysis_agent.run_recorder import AgentRun
+    from vanna.core.storage import Conversation
+    from vanna.core.user import RequestContext
+    from vanna.servers.base.models import ChatRequest
+
+    user = User(id="clarify-draft", group_memberships=["analyst"])
+    catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
+    conversation = Conversation(id="clarify-draft", user=user, metadata={
+        "workspace_id": OLIST_RUNTIME_WORKSPACE.workspace_id,
+        "dataset_version_id": OLIST_RUNTIME_WORKSPACE.dataset_version_id,
+        "metric_version": OLIST_RUNTIME_WORKSPACE.metric_version,
+        "working_memory": AnalysisState.new(OLIST_RUNTIME_WORKSPACE).as_dict(),
+    })
+    completions = iter([
+        {"request_kind": kind, "action": "update_task", "state_patch": {"operations": [
+            {"op": "set", "field": "dimensions", "value": ["product_category_name"]},
+            {"op": "set", "field": "filters", "value": ["customer_state=SP"]},
+            {"op": "set", "field": "top_n", "value": 10},
+        ]}},
+        {"request_kind": "data_query", "action": "update_task", "state_patch": {"operations": [
+            {"op": "set", "field": "metric_ids", "value": ["gmv"]},
+        ]}},
+    ])
+    async def complete(prompt, user):
+        return json.dumps(next(completions))
+
+    calls = []
+    async def send_message(*args, **kwargs):
+        calls.append(kwargs)
+        if False:
+            yield
+
+    store = SimpleNamespace(get_conversation=AsyncMock(return_value=conversation),
+                            update_conversation=AsyncMock())
+    agent = SimpleNamespace(user_resolver=SimpleNamespace(resolve_user=AsyncMock(return_value=user)),
+                            conversation_store=store, send_message=send_message)
+    recorder = SimpleNamespace(start=AsyncMock(return_value=AgentRun("draft-run", "draft-request", conversation.id)),
+                               finish=AsyncMock())
+    handler = BudgetedChatHandler(agent, RequestBudget(), recorder, workspace=OLIST_RUNTIME_WORKSPACE,
+        question_router=QuestionRouter(CatalogRetriever(catalog, max_tables=6), full_results=True),
+        semantic_interpreter=SemanticIntentInterpreter(catalog, complete))
+    first = ChatRequest(message="SP州排名前十的商品种类", conversation_id=conversation.id, request_context=RequestContext())
+    _ = [chunk async for chunk in handler.handle_stream(first)]
+    draft = conversation.metadata["working_memory"]
+    assert draft["dimensions"] == ["product_category_name"]
+    assert draft["top_n"] == 10 and draft["filters"] == ["customer_state=SP"]
+    assert draft["status"] == "clarifying" and calls == []
+    second = ChatRequest(message="我想看销售额", conversation_id=conversation.id, request_context=RequestContext())
+    _ = [chunk async for chunk in handler.handle_stream(second)]
+    plan = second.request_context.metadata["query_plan"]
+    assert plan["metric_ids"] == ["gmv"] and plan["dimensions"] == ["product_category_name"]
+    assert plan["top_n"] == {"product_category_name": 10}
+    assert "filter_customer_state:SP" in plan["warnings"] and len(calls) == 1

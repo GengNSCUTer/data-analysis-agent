@@ -357,7 +357,10 @@ class PostgresConversationStore(ConversationStore):
                     for index, message in enumerate(conversation.messages[loaded:], start=offset + loaded):
                         if message.role == "user" and CURRENT_MESSAGE_CONTEXT.get() is None:
                             turn_context = {"turn_id": str(uuid.uuid4())}
-                        message.metadata.update(turn_context)
+                        message.metadata.update({
+                            key: value for key, value in turn_context.items()
+                            if key != "analysis_state_before_turn" or message.role == "user"
+                        })
                         cursor.execute(
                             """
                             INSERT INTO app.messages (
@@ -443,14 +446,29 @@ class PostgresConversationStore(ConversationStore):
                         return None
                     cursor.execute(
                         """
-                        SELECT MAX(message_index) FROM app.messages
+                        SELECT message_index, metadata_json FROM app.messages
                         WHERE conversation_id = %s AND role = 'user'
+                        ORDER BY message_index DESC LIMIT 1
                         """,
                         (conversation_id,),
                     )
-                    user_index = cursor.fetchone()[0]
-                    if user_index is None:
+                    last_user = cursor.fetchone()
+                    if last_user is None:
                         return None
+                    user_index, message_metadata = last_user
+                    restored = dict((message_metadata or {}).get("analysis_state_before_turn", {}))
+                    current = row[2] or {}
+                    # An explicit clear or workspace/version invalidation after
+                    # the message must not be undone by editing that message.
+                    if current.get("history_start_index", 0) > user_index or any(
+                        restored.get(key) != current.get(key)
+                        for key in ("workspace_id", "dataset_version", "metric_version")
+                    ):
+                        restored = {}
+                    # Summaries derived from the removed turn are invalid. Raw
+                    # surviving messages remain available for recompression.
+                    restored.pop("__history_summary", None)
+                    restored.pop("__summary_attempt", None)
                     cursor.execute(
                         """
                         DELETE FROM app.messages
@@ -474,7 +492,7 @@ class PostgresConversationStore(ConversationStore):
                         """,
                         (
                             remaining,
-                            psycopg2.extras.Json({}),
+                            psycopg2.extras.Json(restored),
                             conversation_id,
                             row[1],
                         ),

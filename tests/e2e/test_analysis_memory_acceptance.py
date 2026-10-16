@@ -74,12 +74,25 @@ class LiveConversation:
 
     def send(self, label, question, *, expected=None, sql=None, reuse=False,
              task="same", reference=None, chart=None, empty=False,
-             terminal=None):
+             terminal=None, edit=False):
         before = self.detail() if self.records else None
         started = perf_counter()
-        self.chat.locator("textarea.message-input").fill(question)
-        with self.page.expect_response("**/api/vanna/v2/chat_sse", timeout=240_000) as pending:
-            self.chat.locator("button.send-button").click()
+        if edit:
+            self.chat.locator("button.edit-question").click()
+            self.chat.locator(".edit-box textarea").fill(question)
+        else:
+            self.chat.locator("textarea.message-input").fill(question)
+        # Starter UI also uses chat_sse. Match this exact user request rather
+        # than accidentally accepting a late welcome response as its answer.
+        with self.page.expect_response(
+            lambda response: response.url.endswith("/api/vanna/v2/chat_sse")
+            and response.request.post_data_json.get("message") == question,
+            timeout=240_000,
+        ) as pending:
+            if edit:
+                self.chat.locator(".edit-actions button").filter(has_text="发送").click()
+            else:
+                self.chat.locator("button.send-button").click()
         response = pending.value
         assert response.ok
         payload = response.text()
@@ -152,6 +165,198 @@ class LiveConversation:
 
 
 YEAR = {"start": "2017-01-01", "end": "2018-01-01", "end_semantics": "exclusive"}
+
+
+@pytest.mark.parametrize("questions", [
+    ("哪个州销售额最高", "这个州哪些商品卖的好", "排名前十的商品种类都给一下"),
+    ("成交额排第一的是哪个客户州？", "在那里，按商品品类比较销售表现", "把榜单扩到十个品类"),
+    ("先找出销售金额最大的州", "再看看当地卖得好的商品类别", "列出前10名就行"),
+])
+def test_live_three_turn_category_ranking_continuity(page, questions):
+    browser, errors = page
+    live = LiveConversation(browser, "category-ranking-continuity")
+    first = live.send("state-winner", questions[0], sql=True,
+        expected={"metric_ids": ["gmv"], "dimensions": ["customer_state"], "top_n": 1})
+    winner = first["trusted_result_artifact"]["result_metadata"]["ranked_entities"][0]["value"]
+    live.send("category-drilldown", questions[1], sql=True, reference=winner,
+        expected={"metric_ids": ["gmv"], "dimensions": ["product_category_name"],
+                  "filters": [f"customer_state={winner}"], "top_n": None})
+    live.send("top-ten", questions[2], sql=True,
+        expected={"metric_ids": ["gmv"], "dimensions": ["product_category_name"],
+                  "filters": [f"customer_state={winner}"], "top_n": 10})
+    executions = [e for e in live.executions() if e["run_id"] == live.records[-1]["run_id"]]
+    assert executions and executions[-1]["row_count"] == 10
+    _assert_category_ranking_denotation(browser, live.cid, winner)
+    live.finish(errors)
+
+
+def _assert_category_ranking_denotation(browser, cid, winner):
+    """Independent reader calculation; compare real values, not plan metadata."""
+    from decimal import Decimal
+    detail = browser.request.get(f"{BASE_URL}/api/project/conversations/{cid}").json()
+    assert detail["analysis_state"]["status"] == "completed", "Query did not complete; inspect turn evidence"
+    assert detail["trusted_result_artifact"] is not None
+    artifact = detail["trusted_result_artifact"]["artifact_id"]
+    limit = detail["analysis_state"]["top_n"]
+    actual = browser.request.get(
+        f"{BASE_URL}/api/project/conversations/{cid}/artifacts/{artifact}/rows"
+    ).json()["rows"]
+    settings = PostgresConnectionSettings.from_environment()
+    connection = psycopg2.connect(host=settings.host, port=settings.port,
+                                 database=settings.database, user=settings.reader_user)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT p.product_category_name, MAX(t.product_category_name_english), SUM(i.price)
+                FROM analytics.fact_order_items i
+                JOIN analytics.fact_orders o ON o.order_id=i.order_id
+                JOIN analytics.dim_customers c ON c.customer_id=o.customer_id
+                JOIN analytics.dim_products p ON p.product_id=i.product_id
+                LEFT JOIN analytics.dim_category_translation t ON t.product_category_name=p.product_category_name
+                WHERE o.order_status NOT IN ('canceled','unavailable') AND (%s IS NULL OR c.customer_state=%s)
+                GROUP BY p.product_category_name ORDER BY SUM(i.price) DESC NULLS LAST LIMIT %s
+            """, (winner, winner, limit))
+            gold = cursor.fetchall()
+    finally:
+        connection.close()
+    assert len(actual) == len(gold) == limit
+    for row, (category, english, amount) in zip(actual, gold):
+        assert row["product_category_name"] in {category, english}
+        assert abs(Decimal(str(row["gmv"])) - amount) < Decimal("0.01")
+    output = ROOT / "gold-comparisons" / cid / f"{artifact}.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps({"matched": True, "customer_state": winner,
+        "actual": actual, "expected": gold, "numeric_tolerance": "0.01"}, ensure_ascii=False, indent=2, default=str))
+    output.chmod(0o600)
+
+
+def test_live_saved_category_rankings_match_gold(page):
+    """Recheck already collected browser results without model regeneration."""
+    from test_trusted_embedded_window import _login
+    browser, errors = page
+    _login(browser)
+    reports = list((ROOT / "category-ranking-continuity").glob("*/turns.json"))
+    assert reports, "Run the three-turn browser scenarios first"
+    for report in reports:
+        turns = json.loads(report.read_text())
+        assert len(turns) == 3 and not any(t["failures"] for t in turns)
+        _assert_category_ranking_denotation(browser, report.parent.name,
+            turns[-1]["actual"]["filters"][0].split("=", 1)[1])
+    assert not errors
+
+
+def test_live_edit_and_failed_retry_keep_scope(page):
+    browser, errors = page
+    live = LiveConversation(browser, "edit-failed-retry-continuity")
+    live.send("initial", "统计SP州销售额最高的十个商品品类", sql=True,
+        expected={"metric_ids": ["gmv"], "dimensions": ["product_category_name"], "top_n": 10,
+                  "filters": ["customer_state=SP"]})
+    _assert_category_ranking_denotation(browser, live.cid, "SP")
+    live.send("five", "只要前五名", sql=True, expected={"top_n": 5})
+    _assert_category_ranking_denotation(browser, live.cid, "SP")
+    live.send("edit-seven", "改成前七名", sql=True, edit=True,
+        expected={"metric_ids": ["gmv"], "dimensions": ["product_category_name"], "top_n": 7,
+                  "filters": ["customer_state=SP"]})
+    _assert_category_ranking_denotation(browser, live.cid, "SP")
+    def failed_attempt(conversation):
+        # Controlled failed-state fixture; SQL failures themselves are covered
+        # by the tool regression. No special runtime endpoint is introduced.
+        state = conversation.metadata["working_memory"]
+        state.update(status="failed", top_n=10, state_version=state["state_version"] + 1)
+    _update_owned_conversation(live.cid, failed_attempt)
+    live.send("retry", "刚才那次查询失败了，请按原来的条件重新查一次", sql=True,
+        expected={"metric_ids": ["gmv"], "dimensions": ["product_category_name"], "top_n": 10,
+                  "filters": ["customer_state=SP"]})
+    _assert_category_ranking_denotation(browser, live.cid, "SP")
+    browser.reload(wait_until="domcontentloaded")
+    live.send("after-refresh", "范围不变，列前六名", sql=True,
+        expected={"top_n": 6, "filters": ["customer_state=SP"]})
+    _assert_category_ranking_denotation(browser, live.cid, "SP")
+    live.send("chart", "把这份结果改成横向条形图，不要重查", sql=False, reuse=True, chart="horizontal_bar")
+    live.send("unfilter", "取消州限制，仍然按销售额列前六个品类", sql=True,
+        expected={"metric_ids": ["gmv"], "dimensions": ["product_category_name"], "top_n": 6, "filters": []})
+    _assert_category_ranking_denotation(browser, live.cid, None)
+    live.finish(errors)
+
+
+def test_live_partial_clarification_keeps_category_and_rank(page):
+    browser, errors = page
+    live = LiveConversation(browser, "partial-clarification-continuity")
+    live.send("draft", "请列出SP州排名前十的商品种类，衡量标准我下一条说明", sql=False,
+        expected={"dimensions": ["product_category_name"], "filters": ["customer_state=SP"], "top_n": 10, "status": "clarifying"})
+    live.send("metric-answer", "按销售额", sql=True,
+        expected={"metric_ids": ["gmv"], "dimensions": ["product_category_name"], "filters": ["customer_state=SP"], "top_n": 10})
+    live.finish(errors)
+
+
+@pytest.mark.asyncio
+async def test_live_sql_repair_keeps_full_filtered_plan(tmp_path):
+    """Force a missing-filter candidate through the real repair model/reader."""
+    import uuid
+    from dotenv import load_dotenv
+    from vanna.core.storage import Conversation
+    from vanna.core.tool import ToolContext
+    from vanna.core.user import User
+    from vanna.capabilities.sql_runner import RunSqlToolArgs
+    from vanna.integrations.openai import OpenAILlmService
+    from vanna.integrations.local.agent_memory import DemoAgentMemory
+    from vanna.integrations.local.file_system import LocalFileSystem
+    from data_analysis_agent.budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
+    from data_analysis_agent.conversation_store import PostgresConversationStore
+    from data_analysis_agent.llm_observability import ObservedLlmService
+    from data_analysis_agent.metric_context import OLIST_RUNTIME_WORKSPACE
+    from data_analysis_agent.postgres_runner import SecurePostgresRunner
+    from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
+    from data_analysis_agent.semantic_intent import SemanticIntent, select_intent_catalog, route_semantic_intent
+    from data_analysis_agent.question_router import QuestionRouter
+    from data_analysis_agent.query_plan import QueryPlan
+    from data_analysis_agent.trusted_sql_tool import LlmRepairCandidateProvider, TrustedRunSqlTool
+
+    load_dotenv(".env")
+    workspace = OLIST_RUNTIME_WORKSPACE
+    user = User(id="local:analyst", group_memberships=["analyst"])
+    intent = SemanticIntent(request_kind="data_query", metric_ids=("gmv",),
+        dimensions=("product_category_name",), filters=[{"dimension": "customer_state", "value": "SP"}], top_n=10)
+    retriever = CatalogRetriever(CatalogLoader(workspace).load(), max_tables=6)
+    selection = select_intent_catalog(intent, retriever, user)
+    route = route_semantic_intent(intent, QuestionRouter(retriever), selection)
+    plan = QueryPlan.from_selection(selection, "SP州销售额最高的十个品类", route, {"semantic_intent": intent.as_dict()})
+    budget = RequestBudget()
+    llm = ObservedLlmService(OpenAILlmService(api_key=os.environ["SILICONFLOW_API_KEY"],
+        base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
+        model=os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V3.2")))
+    cid = "repair-acceptance-" + uuid.uuid4().hex
+    store = PostgresConversationStore()
+    await store.update_conversation(Conversation(id=cid, user=user))
+    context = ToolContext(user=user, conversation_id=cid, request_id=uuid.uuid4().hex,
+        agent_memory=DemoAgentMemory(), metadata={"query_plan": plan.as_dict(),
+            "catalog_context": selection.prompt, "required_result_columns": plan.required_result_columns,
+            "metric_result_columns": ["gmv"], "dataset_version_id": workspace.dataset_version_id,
+            "metric_version": workspace.metric_version})
+    usage = BudgetUsage(budget)
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        tool = TrustedRunSqlTool(SecurePostgresRunner(workspace=workspace),
+            repair_provider=LlmRepairCandidateProvider(llm, max_tokens=budget.max_output_tokens),
+            file_system=LocalFileSystem(str(tmp_path)))
+        result = await tool.execute(context, RunSqlToolArgs(sql="""
+            SELECT p.product_category_name, SUM(i.price) AS gmv
+            FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id
+            JOIN analytics.dim_products p ON p.product_id=i.product_id
+            WHERE o.order_status NOT IN ('canceled','unavailable')
+            GROUP BY p.product_category_name ORDER BY gmv DESC LIMIT 10
+        """))
+        output = ROOT / "live-sql-repair.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps({"success": result.success, "row_count": result.metadata.get("row_count"),
+            "repair": context.metadata.get("repair_evidence"), "observations": usage.llm_observations}, ensure_ascii=False, indent=2))
+        output.chmod(0o600)
+        assert result.success, result.error
+        assert result.metadata["row_count"] == 10
+        assert context.metadata["repair_evidence"]["repair_attempted"]
+    finally:
+        CURRENT_BUDGET.reset(token)
+        await store.delete_conversation(cid, user)
 
 
 def test_live_scope_edits_metric_switch_and_new_task(page):

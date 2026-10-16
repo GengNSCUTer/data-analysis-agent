@@ -987,6 +987,7 @@ class CatalogRetriever:
                 if fitted is None:
                     continue
                 selected_table_ids = fitted
+                required_table_ids.update(path[0])
                 break
         # A requested dimension may need a lower-scoring bridge table (for
         # example, translation -> products -> order items). Iterate to a fixed

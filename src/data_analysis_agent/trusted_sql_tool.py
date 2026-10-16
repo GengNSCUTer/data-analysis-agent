@@ -7,6 +7,7 @@ the injected runner reports a sanitized execution failure.
 
 from __future__ import annotations
 
+import json
 import re
 from hashlib import sha256
 from typing import Protocol
@@ -19,7 +20,7 @@ from vanna.core.tool import ToolContext, ToolResult
 from vanna.tools import RunSqlTool
 from vanna.components import DataFrameComponent, SimpleTextComponent, UiComponent
 
-from .budget import CURRENT_BUDGET
+from .budget import CURRENT_BUDGET, RequestBudget
 from .plan_sql_guard import sql_plan_mismatch
 from .sql_policy import SqlPolicy
 from .sql_repair import (
@@ -46,7 +47,7 @@ class RepairCandidateProvider(Protocol):
         """Return one untrusted SQL candidate, or ``None``."""
 
 
-def extract_sql_candidate(content: str | None, *, max_chars: int = 8_000) -> str | None:
+def extract_sql_candidate(content: str | None, *, max_chars: int = 32_000) -> str | None:
     """Extract only a bounded SQL-shaped response from a repair model."""
 
     if not isinstance(content, str) or not content.strip():
@@ -61,13 +62,13 @@ def extract_sql_candidate(content: str | None, *, max_chars: int = 8_000) -> str
         text = text[match.start() :]
     if not re.match(r"^(?:select|with)\b", text, re.I):
         return None
-    return text[:max_chars].strip() or None
+    return text if len(text) <= max_chars else None
 
 
 class LlmRepairCandidateProvider:
     """Adapt Vanna's LlmService to the bounded repair callback."""
 
-    def __init__(self, llm_service: LlmService, *, max_tokens: int = 320):
+    def __init__(self, llm_service: LlmService, *, max_tokens: int = RequestBudget.max_output_tokens):
         self.llm_service = llm_service
         self.max_tokens = max_tokens
 
@@ -88,6 +89,8 @@ class LlmRepairCandidateProvider:
         usage = CURRENT_BUDGET.get()
         if usage is not None:
             usage.record_usage(response.usage)
+        if response.finish_reason == "length":
+            return None
         return extract_sql_candidate(response.content)
 
 
@@ -184,6 +187,12 @@ class TrustedRunSqlTool(RunSqlTool):
         role = "admin" if "admin" in context.user.group_memberships else "analyst"
         coordinator = OneShotSqlRepair(self.repair_policy, role=role)
         catalog_context = str(context.metadata.get("catalog_context", ""))
+        plan = context.metadata.get("query_plan")
+        if plan:
+            catalog_context = (
+                "<current_query_plan>\n" + json.dumps(plan, ensure_ascii=False)
+                + "\n</current_query_plan>\n" + catalog_context
+            )
         required_columns = context.metadata.get("required_result_columns", ())
         if isinstance(required_columns, (list, tuple)) and required_columns:
             catalog_context = (

@@ -149,6 +149,13 @@ class AnalysisState(WorkingMemory):
                 else:
                     value = tuple(v for v in getattr(state, name) if v not in values)
             state = replace(state, **{name: value})
+        # A rank limit belongs to the population being grouped. Changing that
+        # population is not a request for the same number of groups. An explicit
+        # limit in this patch always wins, irrespective of operation order.
+        if state.dimensions != self.dimensions and not any(
+            op.field == "top_n" for op in patch.operations
+        ):
+            state = replace(state, top_n=None)
         return replace(state, state_version=self.state_version + 1)
 
     def scope(self) -> dict[str, Any]:

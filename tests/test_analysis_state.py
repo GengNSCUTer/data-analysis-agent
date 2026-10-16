@@ -120,3 +120,21 @@ def test_patch_cannot_introduce_hidden_metric_or_multiple_state_filters():
     router = QuestionRouter(CatalogRetriever(catalog), full_results=True)
     selection = router.retriever.retrieve("gmv", USER, metric_ids=resolved.metric_ids)
     assert not route_semantic_intent(resolved, router, selection, proposed.as_dict()).should_generate_sql
+
+
+@pytest.mark.parametrize("dimensions,explicit_limit,expected", [
+    (["product_category_name"], None, None),
+    ([], None, None),
+    (["customer_state"], None, 1),
+    (["product_category_name"], 10, 10),
+])
+@pytest.mark.parametrize("limit_first", [True, False])
+def test_rank_limit_belongs_to_grouping_population(dimensions, explicit_limit, expected, limit_first):
+    state = replace(AnalysisState.new(WORKSPACE), metric_ids=("gmv",),
+                    dimensions=("customer_state",), filters=("customer_state=SP",), top_n=1)
+    operations = [{"op": "set", "field": "dimensions", "value": dimensions}]
+    if explicit_limit is not None:
+        operations.insert(0 if limit_first else 1, {"op": "set", "field": "top_n", "value": explicit_limit})
+    proposed = apply(state, operations)
+    assert proposed.top_n == expected
+    assert proposed.metric_ids == ("gmv",) and proposed.filters == ("customer_state=SP",)

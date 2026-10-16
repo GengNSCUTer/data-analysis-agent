@@ -91,6 +91,10 @@ dataset_version={DATASET_VERSION}；metric_version={METRIC_VERSION}；policy_ver
 reader role、statement timeout 和返回行数限制，不能把 Catalog 当成安全校验的替代品。
 
 跨一对多事实表时，先在各自事实粒度聚合再 Join，避免订单、商品、支付和评价行被重复放大。
+先确认度量本身的事实粒度：用于筛选和分组的多对一关联不改变度量，不因为出现订单表和
+商品表就先聚合订单金额再重新分摊。商品成交额按商品明细 SUM(price)，客户州和商品品类
+只影响筛选与分组，不将 price 乘以自身占比、订单金额占比或其他自造权重。只有 QueryPlan
+明确给出 payment_share 等归因要求时才按对应策略分摊；保持 Catalog 原始公式。
 敏感标识只可用于受控关联、COUNT(DISTINCT) 或聚合，不得作为明细列展示。不要自行改变指标
 的默认过滤、时间字段、统计粒度或允许维度；若问题与 Catalog 定义冲突，说明冲突并请求澄清。
 
