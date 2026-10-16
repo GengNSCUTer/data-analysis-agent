@@ -141,6 +141,49 @@ async def test_summary_timeout_does_not_terminate_analysis_request():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_complete_request_overflow_rebuilds_once_after_compaction(stream):
+    from unittest.mock import AsyncMock
+    usage = BudgetUsage(RequestBudget(max_prompt_tokens=5000, max_history_tokens=4000))
+    usage.context_compactor = AsyncMock()
+    rebuilt = LlmRequest(messages=[LlmMessage(role="user", content="当前问题")],
+                         user=User(id="test"), max_tokens=500)
+    rebuild = AsyncMock(return_value=rebuilt)
+    request = rebuilt.model_copy(update={"system_prompt": "中" * 6000})
+    request._rebuild_context = rebuild
+    assert "rebuild_context" not in request.model_dump_json()
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        service = ObservedLlmService(ImmediateLlm())
+        if stream:
+            _chunks = [c async for c in service.stream_request(request)]
+        else:
+            assert (await service.send_request(request)).content == "ok"
+    finally:
+        CURRENT_BUDGET.reset(token)
+    usage.context_compactor.assert_awaited_once()
+    rebuild.assert_awaited_once()
+    assert len(usage.catalog_trace["prompt_budgets"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_summary_output_budget_is_shared_with_coordinator():
+    from data_analysis_agent.history_summary import build_llm_summary_provider, HistorySummary
+    from vanna.core.storage import Message
+    captured = []
+    class Capture(ImmediateLlm):
+        async def send_request(self, request):
+            captured.append(request)
+            return await super().send_request(request)
+    budget = RequestBudget()
+    turns = [[Message(role="user", content="请先给结论，原因后续讨论")]]
+    await build_llm_summary_provider(Capture(), budget=budget)(turns,
+        HistorySummary.from_turns(turns, source_turn_start=1, reason="message_budget"))
+    assert captured[0].max_tokens == budget.history_summary_max_tokens == 4000
+    assert "2000" in captured[0].messages[0].content
+
+
+@pytest.mark.asyncio
 async def test_observed_llm_records_reported_usage_and_duration() -> None:
     usage = BudgetUsage(RequestBudget())
     token = CURRENT_BUDGET.set(usage)

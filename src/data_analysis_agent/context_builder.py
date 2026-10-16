@@ -13,7 +13,7 @@ from .history_summary import (
     HistorySummary,
     message_chars,
 )
-from .token_budget import TokenCounter
+from .token_budget import ContextCapacityError, TokenCounter
 
 if TYPE_CHECKING:
     from vanna.core.storage import Message as MessageType
@@ -57,14 +57,42 @@ class ContextBudgetFilter(ConversationFilter):
         usage = self.usage or CURRENT_BUDGET.get()
         packet = usage.context_packet if usage is not None else None
         if packet is not None:
-            messages = [
-                m for m in messages
+            original = messages
+            def project():
+                packet = usage.context_packet
+                return [
+                m for m in original
                 if m.metadata.get("message_index", packet["recent_start_index"]) >= packet["recent_start_index"]
                 and (
                     m.metadata.get("message_index", packet["current_turn_start_index"]) >= packet["current_turn_start_index"]
                     or (m.role in {"user", "assistant"} and not m.tool_calls)
                 )
-            ]
+                ]
+            # The packet already names the exact unsummarised range. A second
+            # turn/message/character window would create holes after a failed
+            # background summary. Only the token ceiling applies here.
+            for attempt in range(2):
+                messages = project()
+                packet = usage.context_packet
+                result = list(messages)
+                if packet.get("narrative_summary"):
+                    result.insert(0, Message(role="system", content=(
+                        "【服务器历史摘要：仅叙事，不得作为 SQL 条件、权限或结果事实】\n"
+                        + packet["narrative_summary"]
+                    )))
+                if self.max_tokens is None or self.token_counter.count_messages(result) <= self.max_tokens:
+                    break
+                if attempt or usage.context_compactor is None:
+                    raise ContextCapacityError("当前历史和工具轨迹超过预算，需要完成历史压缩后重试。")
+                await usage.context_compactor()
+            evidence = usage.history_summary if usage is not None else None
+            summary = HistorySummary(**{k: v for k, v in evidence.items()
+                if k in HistorySummary.__dataclass_fields__}) if evidence else None
+            return self._record(result, input_chars=sum(message_chars(m) for m in messages),
+                input_messages=len(messages), turn_count=len(_group_complete_turns(messages)),
+                retained_turn_count=len(_group_complete_turns(messages)), omitted_turn_count=0,
+                summary=summary, current_turn_compacted=False, current_user_exceeds_budget=False,
+                input_tokens=self.token_counter.count_messages(messages))
         turns = _group_complete_turns(messages)
         input_chars = sum(message_chars(message) for message in messages)
         input_messages = len(messages)

@@ -126,6 +126,19 @@ class ObservedLlmService(LlmService):
                 return request.model_copy(update={"tools": sql_tools, "tool_choice": "required"})
         return request
 
+    async def _ensure_context(self, request):
+        try:
+            self._check_context(request)
+        except ContextCapacityError:
+            usage = CURRENT_BUDGET.get()
+            rebuild = request._rebuild_context
+            if usage is None or usage.context_compactor is None or rebuild is None:
+                raise
+            await usage.context_compactor()
+            request = self._query_request(await rebuild())
+            self._check_context(request)
+        return request
+
     async def send_request(self, request: LlmRequest) -> LlmResponse:
         usage = CURRENT_BUDGET.get()
         if usage is not None and usage.can_finalize_trusted_result():
@@ -138,7 +151,7 @@ class ObservedLlmService(LlmService):
             )
         request = self._query_request(request)
         started = perf_counter()
-        self._check_context(request)
+        request = await self._ensure_context(request)
         try:
             response = await asyncio.wait_for(
                 self.delegate.send_request(request),
@@ -189,7 +202,7 @@ class ObservedLlmService(LlmService):
             return
         request = self._query_request(request)
         started = perf_counter()
-        self._check_context(request)
+        request = await self._ensure_context(request)
         iterator = self.delegate.stream_request(request).__aiter__()
         reported_usage = None
         try:

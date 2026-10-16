@@ -836,6 +836,10 @@ class BudgetedChatHandler(ChatHandler):
                 CURRENT_BUDGET.reset(tracker_token)
                 if message_context_token is not None:
                     CURRENT_MESSAGE_CONTEXT.reset(message_context_token)
+                if run is not None and self.context_builder is not None:
+                    self.context_builder.schedule(
+                        conversation_id, user, self.agent.conversation_store
+                    )
 
     @staticmethod
     def _budget_chunk(
@@ -1007,7 +1011,15 @@ class BudgetedChatHandler(ChatHandler):
 
         if self.semantic_interpreter is None:
             return None
-        return await self.semantic_interpreter.interpret(question, user, state)
+        try:
+            return await self.semantic_interpreter.interpret(question, user, state)
+        except ContextCapacityError:
+            usage = CURRENT_BUDGET.get()
+            if usage is None or usage.context_compactor is None:
+                raise
+            await usage.context_compactor()
+            state = {**state, "context_packet": usage.context_packet}
+            return await self.semantic_interpreter.interpret(question, user, state)
 
     async def _persist_result_artifact(
         self, conversation_id: str, user, request_id: str, usage: BudgetUsage

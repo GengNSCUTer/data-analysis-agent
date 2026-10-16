@@ -42,6 +42,40 @@ def page():
     with sync_playwright() as engine:
         browser = engine.chromium.launch(headless=True)
         browser_page = browser.new_page(viewport={"width": 1440, "height": 960})
+        browser_page.add_init_script("""(() => {
+          const original = window.fetch.bind(window);
+          window.__sseTimings = [];
+          window.fetch = async (...args) => {
+            const target = String(args[0]?.url || args[0]);
+            const started = performance.now();
+            const response = await original(...args);
+            if (target.includes('/api/vanna/v2/chat_sse') && response.ok) {
+              const record = {first_effective_ms: null, elapsed_ms: null};
+              window.__sseTimings.push(record);
+              (async () => {
+                const reader = response.clone().body.getReader();
+                const decoder = new TextDecoder(); let buffer = '';
+                while (true) {
+                  const {value, done} = await reader.read();
+                  if (done) break;
+                  buffer += decoder.decode(value, {stream: true});
+                  const frames = buffer.split('\\n\\n'); buffer = frames.pop();
+                  for (const frame of frames) {
+                    const line = frame.split('\\n').find(x => x.startsWith('data: '));
+                    if (!line || line === 'data: [DONE]') continue;
+                    const event = JSON.parse(line.slice(6));
+                    if (record.first_effective_ms === null &&
+                        ['text', 'dataframe', 'plotly', 'chart'].includes(event.rich?.type)) {
+                      record.first_effective_ms = Math.round(performance.now() - started);
+                    }
+                  }
+                }
+                record.elapsed_ms = Math.round(performance.now() - started);
+              })().catch(() => { record.measurement_error = true; });
+            }
+            return response;
+          };
+        })();""")
         errors: list[str] = []
         browser_page.on(
             "console",
@@ -1143,6 +1177,7 @@ def test_analysis_context_live_summary_reload_and_incremental_resume(page):
     browser_page.locator("#new-analysis").click()
     browser_page.wait_for_function("() => Boolean(localStorage.getItem('data-analysis-agent-embeddable-conversation-v1'))")
     cid = browser_page.evaluate("() => localStorage.getItem('data-analysis-agent-embeddable-conversation-v1')")
+    timings = []
 
     def send(question):
         chat.locator("textarea.message-input").fill(question)
@@ -1151,6 +1186,7 @@ def test_analysis_context_live_summary_reload_and_incremental_resume(page):
         assert response.value.ok
         payload = response.value.text()
         browser_page.wait_for_function("() => !document.querySelector('vanna-chat')?.shadowRoot?.querySelector('textarea.message-input')?.disabled")
+        timings.append(browser_page.evaluate("() => window.__sseTimings.at(-1)"))
         return payload
 
     send("统计2017年各客户州的商品成交额")
@@ -1166,8 +1202,10 @@ def test_analysis_context_live_summary_reload_and_incremental_resume(page):
         conversation = await store.get_conversation(cid, owner)
         for n in range(count):
             await store.append_turn_messages(conversation, [
-                Message(role="user", content=f"第{n+1}轮补充：我想先理解销售分析的口径，暂时不换指标、不修改查询条件。"),
-                Message(role="assistant", content="保持当前分析范围，接下来解释已验证的结果。"),
+                Message(role="user", content=f"第{n+1}轮补充：分析目的是理解销售地区分布。我纠正前面的说法：不要按卖家地区理解，要按客户地区理解。请先给结论再解释。差异原因留到下一步讨论。目前不改指标和查询条件。"
+                        + "这里继续讨论业务分析的解释方式，保持当前已经确认的分析范围，暂时不增加新的业务事实。" * 15),
+                Message(role="assistant", content="收到对解释方式的纠正，后续按客户地区理解，先结论后解释。差异原因尚待讨论。"
+                        + "讨论只涉及叙事目标和表达顺序，当前指标、时间、维度和筛选以服务器结构化状态为准。" * 15),
             ])
 
     def read_summary_and_trace():
@@ -1185,34 +1223,57 @@ def test_analysis_context_live_summary_reload_and_incremental_resume(page):
 
     # Playwright's sync driver runs its own event loop on this thread.
     with ThreadPoolExecutor(max_workers=1) as executor:
-        executor.submit(asyncio.run, add_narrative_turns(8)).result()
+        executor.submit(asyncio.run, add_narrative_turns(24)).result()
     browser_page.reload(wait_until="domcontentloaded")
     browser_page.wait_for_function("id => document.querySelector('vanna-chat')?.conversationId === id", arg=cid)
     send("解释一下刚才的查询结果，不要重新查询，也不要改任何筛选条件")
-    first_summary, trace = read_summary_and_trace()
+    from time import monotonic
+    def wait_summary(after=-1):
+        deadline = monotonic() + 150
+        while monotonic() < deadline:
+            summary, trace = read_summary_and_trace()
+            if summary and summary["source_message_end"] > after:
+                return summary, trace
+            browser_page.wait_for_timeout(500)
+        raise AssertionError("后台摘要未在时限内提交")
+
+    first_summary, trace = wait_summary()
     assert first_summary and first_summary["text"]
-    assert trace["context_packet"]["summary_status"] == "generated"
-    assert trace["context_packet"]["recent_turns"] <= 6
-    assert trace["context_packet"]["recent_tokens"] <= 6000
+    assert trace["context_packet"]["recent_turns"] > 6
+    assert trace["context_packet"]["recent_tokens"] > 24000
+    assert all(p["purpose"] != "history_semantic_summary" for p in trace["prompt_budgets"])
+    assert "客户" in first_summary["text"] and "卖家" in first_summary["text"]
+    assert "结论" in first_summary["text"] and "差异" in first_summary["text"]
     assert trace["prompt_budgets"]
     assert trace["result_reuse"] == "validated_result"
     with ThreadPoolExecutor(max_workers=1) as executor:
-        executor.submit(asyncio.run, add_narrative_turns(2)).result()
+        executor.submit(asyncio.run, add_narrative_turns(14)).result()
     browser_page.reload(wait_until="domcontentloaded")
     browser_page.wait_for_function("id => document.querySelector('vanna-chat')?.conversationId === id", arg=cid)
     explanation = send("说明刚才已验证查询的时间范围和分组口径，继续解释已有结果，不改条件、不重新查询")
     assert "2017" in explanation
-    second_summary, trace = read_summary_and_trace()
+    second_summary, trace = wait_summary(first_summary["source_message_end"])
     assert second_summary["source_message_end"] > first_summary["source_message_end"]
     assert second_summary["latest_batch_start"] == first_summary["source_message_end"] + 1
     assert second_summary["scope"]["task_id"] == task_id
+    assert "客户" in second_summary["text"] and "结论" in second_summary["text"]
+    assert "差异" in second_summary["text"]
     after = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{cid}/execution-memory").json()["executions"]
     assert len(after) == len(before)
     final = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{cid}").json()
     assert final["analysis_state"]["task_id"] == task_id
     assert final["analysis_state"]["filters"] == []
     assert final["trusted_result_artifact"]["artifact_id"] == artifact_id
-    browser_page.screenshot(path="/disk2/gengnan/data-analysis-agent-data/evals/analysis-memory-phase4-20261016/browser/long-history-reloaded.png", full_page=True)
+    evidence = Path(os.getenv("ANALYSIS_ACCEPTANCE_OUTPUT", "/disk2/gengnan/data-analysis-agent-data/evals/background-context-compaction"))
+    evidence.mkdir(parents=True, exist_ok=True)
+    browser_page.screenshot(path=str(evidence / "long-history-reloaded.png"), full_page=True)
+    (evidence / "summary-checks.json").write_text(json.dumps({
+        "conversation_id": cid, "first_end": first_summary["source_message_end"],
+        "second_end": second_summary["source_message_end"], "task_preserved": True,
+        "artifact_preserved": True, "correction_and_pending_question_retained": True,
+        "foreground_summary_calls": 0,
+        "turn_timings": timings,
+    }, ensure_ascii=False, indent=2))
     assert not console_errors
 
 

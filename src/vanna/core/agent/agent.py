@@ -1255,7 +1255,10 @@ You can:
                         tags={"enhancer": self.llm_context_enhancer.__class__.__name__},
                     )
 
-        return LlmRequest(
+        async def rebuild_context():
+            return await self._build_llm_request(conversation, tool_schemas, user, system_prompt)
+
+        request = LlmRequest(
             messages=messages,
             tools=tool_schemas if tool_schemas else None,
             user=user,
@@ -1264,6 +1267,8 @@ You can:
             stream=self.config.stream_responses,
             system_prompt=system_prompt,
         )
+        request._rebuild_context = rebuild_context
+        return request
 
     async def _send_llm_request(self, request: LlmRequest) -> LlmResponse:
         """Send LLM request with middleware and observability."""

@@ -9,7 +9,7 @@
 - **业务查询与澄清**：QuestionRouter、Semantic Catalog、运行时 QueryPlan 和 WorkingMemory 约束指标、时间、分组与追问；缺少必要条件时先澄清。
 - **可信执行**：`sqlglot` AST Policy 校验单条只读查询、Schema/表/列白名单、敏感字段投影和函数；PostgreSQL reader role、超时与行数预算提供数据库层约束；ResultValidator 校验结果合同。合同通过不等于业务语义已被证明。
 - **结果与图表**：执行最多 1,000 行，页面预览最多 200 行；支持柱状图、横向柱状图、折线图、面积图和环形图，服务端基于有效 ChartContract 直接绘图。
-- **会话与上下文**：PostgreSQL 会话存储、workspace 隔离、状态版本冲突检测、可信结果追问、历史摘要和上下文预算；摘要不能成为 SQL 条件或权限依据。
+- **会话与上下文**：PostgreSQL 会话存储、workspace 隔离、状态版本冲突检测、可信结果追问与回答后后台摘要；历史按 token 读取，24K 触发压缩、约 16K 保留原文，摘要失败保留未压缩历史；摘要不能成为 SQL 条件或权限依据。
 - **工件与下载**：完整 CSV/Plotly 工件保存在仓库外，绑定用户、工作区和版本；完整 CSV 下载检查归属与完整性并记录导出审计。通用预览导出按钮关闭。
 - **嵌入与身份**：`/embedded-copilot` 提供会话列表、保存分析、查看依据和移动端适配；支持本地账号会话和绑定允许来源的 5 分钟嵌入令牌。产品身份解析器不接受旧演示角色 cookie。
 - **模型实验**：完成 Qwen2.5-Coder-1.5B Base 的 bf16 LoRA SQL-only SFT、validation-best checkpoint 选择和完整 Gold 对照；在线页面仍使用 SiliconFlow，本地 Adapter 尚未接入。

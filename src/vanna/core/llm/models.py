@@ -6,7 +6,7 @@ This module contains data models for LLM communication.
 
 from typing import Any, Dict, List, Optional, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from ..tool.models import ToolCall
 from ..user.models import User
@@ -23,6 +23,9 @@ class LlmMessage(BaseModel):
 
 class LlmRequest(BaseModel):
     """Request to LLM service."""
+
+    # Server-only callback; never serialised into prompts, logs or API payloads.
+    _rebuild_context: Any = PrivateAttr(default=None)
 
     messages: List[LlmMessage] = Field(description="Messages to send")
     tools: Optional[List[Any]] = Field(

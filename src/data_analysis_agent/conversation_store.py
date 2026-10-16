@@ -17,6 +17,7 @@ from vanna.core.tool import ToolCall
 from vanna.core.user import User
 
 from .postgres_runner import PostgresConnectionSettings
+from .budget import CURRENT_BUDGET
 
 
 CURRENT_MESSAGE_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar("message_context", default=None)
@@ -64,11 +65,14 @@ class PostgresConversationStore(ConversationStore):
 
     async def get_conversation(
         self, conversation_id: str, user: User, workspace_id: str | None = None,
-        *, recent_turns: int | None = 6,
+        *, recent_turns: int | None = 20,
     ) -> Conversation | None:
         self._validate_conversation_id(conversation_id)
+        usage = CURRENT_BUDGET.get()
+        packet = usage.context_packet if usage is not None else None
+        start = packet["recent_start_index"] if packet is not None and recent_turns is not None else None
         return await asyncio.to_thread(
-            self._get_sync, conversation_id, user, workspace_id or self.default_workspace_id, recent_turns
+            self._get_sync, conversation_id, user, workspace_id or self.default_workspace_id, recent_turns, start
         )
 
     async def get_recent_turns(self, conversation_id: str, user: User, *, limit: int = 6) -> Conversation | None:
@@ -84,11 +88,11 @@ class PostgresConversationStore(ConversationStore):
 
     async def get_turn_range(
         self, conversation_id: str, user: User, *, start: int, before: int,
-        limit_turns: int = 6,
+        limit_turns: int = 20,
     ) -> list[Message]:
         """Read complete old turns for incremental compaction, scoped to owner/workspace."""
         self._validate_conversation_id(conversation_id)
-        if start < 0 or before < start or not 1 <= limit_turns <= 6:
+        if start < 0 or before < start or not 1 <= limit_turns <= 100:
             raise ValueError("invalid compaction range")
         return await asyncio.to_thread(
             self._turn_range_sync, conversation_id, user, start, before, limit_turns
@@ -102,6 +106,56 @@ class PostgresConversationStore(ConversationStore):
     async def update_conversation(self, conversation: Conversation) -> None:
         self._validate_conversation_id(conversation.id)
         await asyncio.to_thread(self._update_sync, conversation)
+
+    async def save_history_summary(
+        self, conversation_id: str, user: User, *, scope: dict,
+        expected_end: int, sources: list[Message], summary: dict | None, attempt: dict,
+    ) -> bool:
+        """Compare-and-update derived memory without touching messages or state_version."""
+        self._validate_conversation_id(conversation_id)
+        return await asyncio.to_thread(
+            self._save_history_summary_sync, conversation_id, user, scope,
+            expected_end, sources, summary, attempt,
+        )
+
+    def _save_history_summary_sync(self, conversation_id, user, scope, expected_end, sources, summary, attempt):
+        connection = self._connect()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT working_memory, dataset_version_id, metric_version FROM app.conversations "
+                        "WHERE conversation_id=%s AND user_id=%s AND workspace_id=%s AND status='active' FOR UPDATE",
+                        (conversation_id, user.id, scope["workspace_id"]),
+                    )
+                    row = cursor.fetchone()
+                    if row is None:
+                        return False
+                    memory = row[0] or {}
+                    current_scope = {k: memory.get(k) for k in scope}
+                    if current_scope != scope or row[1] != scope["dataset_version"] or row[2] != scope["metric_version"]:
+                        return False
+                    saved = memory.get("__history_summary")
+                    end = saved["source_message_end"] if saved and saved.get("scope") == scope else memory.get("history_start_index", 0) - 1
+                    if end != expected_end:
+                        return False
+                    cursor.execute(
+                        "SELECT message_id, message_index FROM app.messages WHERE conversation_id=%s "
+                        "AND message_index >= %s AND message_index <= %s ORDER BY message_index",
+                        (conversation_id, sources[0].metadata["message_index"], sources[-1].metadata["message_index"]),
+                    )
+                    if cursor.fetchall() != [(m.metadata["message_id"], m.metadata["message_index"]) for m in sources]:
+                        return False
+                    if summary is not None:
+                        memory["__history_summary"] = summary
+                    memory["__summary_attempt"] = attempt
+                    cursor.execute(
+                        "UPDATE app.conversations SET working_memory=%s WHERE conversation_id=%s",
+                        (psycopg2.extras.Json(memory), conversation_id),
+                    )
+                    return True
+        finally:
+            connection.close()
 
     async def truncate_from_last_user_message(
         self, conversation_id: str, user: User
@@ -153,7 +207,8 @@ class PostgresConversationStore(ConversationStore):
             )
 
     def _get_sync(
-        self, conversation_id: str, user: User, workspace_id: str, recent_turns: int | None = 6,
+        self, conversation_id: str, user: User, workspace_id: str, recent_turns: int | None = 20,
+        context_start: int | None = None,
     ) -> Conversation | None:
         connection = self._connect()
         try:
@@ -172,7 +227,9 @@ class PostgresConversationStore(ConversationStore):
                 if not conversation_row:
                     return None
                 start_index = 0
-                if recent_turns is not None:
+                if context_start is not None:
+                    start_index = context_start
+                elif recent_turns is not None:
                     if recent_turns <= 0:
                         raise ValueError("recent_turns must be positive")
                     cursor.execute(
@@ -208,6 +265,7 @@ class PostgresConversationStore(ConversationStore):
                     "state_version": conversation_row["state_version"],
                     "working_memory": conversation_row.get("working_memory") or {},
                     "history_summary": (conversation_row.get("working_memory") or {}).get("__history_summary"),
+                    "summary_attempt": (conversation_row.get("working_memory") or {}).get("__summary_attempt"),
                     "history_start_index": start_index,
                     "loaded_message_count": len(messages),
                 },
@@ -264,7 +322,7 @@ class PostgresConversationStore(ConversationStore):
                     )
                     cursor.execute(
                         """
-                        SELECT user_id, workspace_id, state_version
+                        SELECT user_id, workspace_id, state_version, working_memory
                         FROM app.conversations WHERE conversation_id = %s FOR UPDATE
                         """,
                         (conversation.id,),
@@ -280,6 +338,19 @@ class PostgresConversationStore(ConversationStore):
                         raise ConversationStateConflict(
                             "conversation state_version is stale"
                         )
+                    # A background summary may have advanced after this object
+                    # was loaded. Never replace it with a stale foreground copy.
+                    db_memory = owner[3] or {}
+                    stored_memory.pop("__history_summary", None)
+                    stored_memory.pop("__summary_attempt", None)
+                    same_task = all(db_memory.get(k) == stored_memory.get(k) for k in (
+                        "task_id", "workspace_id", "dataset_version", "metric_version", "history_start_index"
+                    ))
+                    if same_task and db_memory.get("__history_summary"):
+                        stored_memory["__history_summary"] = db_memory["__history_summary"]
+                    if same_task and db_memory.get("__summary_attempt"):
+                        stored_memory["__summary_attempt"] = db_memory["__summary_attempt"]
+                    conversation.metadata["history_summary"] = stored_memory.get("__history_summary")
                     loaded = conversation.metadata.get("loaded_message_count", 0)
                     offset = conversation.metadata.get("history_start_index", 0)
                     turn_context = dict(CURRENT_MESSAGE_CONTEXT.get() or {})

@@ -278,7 +278,18 @@ def create_app() -> FastAPI:
         system_prompt_builder=DefaultSystemPromptBuilder(base_prompt=SYSTEM_PROMPT),
         workflow_handler=TrustedOlistWorkflowHandler(),
     )
-    app = FastAPI(title="Trusted Olist Data Analysis Agent")
+    from contextlib import asynccontextmanager
+
+    context_builder = AnalysisContextBuilder(build_llm_summary_provider(
+        llm_service, model_name=model_name, budget=budget,
+    ), budget=budget)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        await context_builder.close()
+
+    app = FastAPI(title="Trusted Olist Data Analysis Agent", lifespan=lifespan)
     if embed_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -337,9 +348,7 @@ def create_app() -> FastAPI:
                 question_router.retriever.catalog,
                 complete_semantic_intent,
             ),
-            context_builder=AnalysisContextBuilder(build_llm_summary_provider(
-                llm_service, model_name=model_name
-            )),
+            context_builder=context_builder,
         ),
         config={"cdn_url": "/static/vanna-components.js"},
     )

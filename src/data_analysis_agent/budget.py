@@ -45,6 +45,13 @@ class RequestBudget:
     # History receives 48K; system/catalog/tools and output use the remainder.
     max_prompt_tokens: int = 64_000
     max_history_tokens: int = 48_000
+    history_compaction_trigger_tokens: int = 24_000
+    history_recent_target_tokens: int = 16_000
+    history_summary_target_tokens: int = 2_000
+    history_summary_max_tokens: int = 4_000
+    history_summary_input_tokens: int = 24_000
+    history_state_target_tokens: int = 4_000
+    history_summary_timeout_seconds: float = 60.0
     max_context_chars: int = 192_000  # legacy observability ceiling
     max_context_messages: int = 160
     max_output_tokens: int = 4_000
@@ -67,6 +74,10 @@ class RequestBudget:
             raise ValueError("max_visualization_calls cannot exceed max_tool_calls")
         if self.max_history_tokens > self.max_prompt_tokens:
             raise ValueError("max_history_tokens cannot exceed max_prompt_tokens")
+        if self.history_recent_target_tokens >= self.history_compaction_trigger_tokens:
+            raise ValueError("history target must be below compaction trigger")
+        if self.history_summary_target_tokens > self.history_summary_max_tokens:
+            raise ValueError("summary target cannot exceed summary maximum")
 
     @classmethod
     def from_environment(cls) -> "RequestBudget":
@@ -104,6 +115,17 @@ class RequestBudget:
             max_history_tokens=read(
                 "DATA_ANALYSIS_MAX_HISTORY_TOKENS", cls.max_history_tokens
             ),
+            **{
+                name: read("DATA_ANALYSIS_" + name.upper(), getattr(cls, name))
+                for name in (
+                    "history_compaction_trigger_tokens", "history_recent_target_tokens",
+                    "history_summary_target_tokens", "history_summary_max_tokens",
+                    "history_summary_input_tokens", "history_state_target_tokens",
+                )
+            },
+            history_summary_timeout_seconds=float(os.getenv(
+                "DATA_ANALYSIS_HISTORY_SUMMARY_TIMEOUT_SECONDS", str(cls.history_summary_timeout_seconds)
+            )),
             max_context_messages=read(
                 "DATA_ANALYSIS_MAX_CONTEXT_MESSAGES", cls.max_context_messages
             ),
@@ -155,6 +177,7 @@ class BudgetUsage:
     context_truncated: bool = False
     context_budget: dict[str, Any] | None = None
     context_packet: dict[str, Any] | None = None
+    context_compactor: Any = None
     history_summary: dict[str, Any] | None = None
     history_summary_text: str | None = None
     termination_reason: str = "running"

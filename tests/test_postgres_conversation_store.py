@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import uuid
 
 import pytest
@@ -243,33 +244,118 @@ async def test_incremental_summary_persists_across_store_and_builder_instances(s
     from data_analysis_agent.analysis_context import AnalysisContextBuilder
     from data_analysis_agent.analysis_state import AnalysisState
     from data_analysis_agent.budget import BudgetUsage, RequestBudget
+    from dataclasses import replace
 
     user = User(id=f"summary-{uuid.uuid4().hex}", group_memberships=["analyst"])
     state = AnalysisState(task_id="summary-task", workspace_id="olist-demo", dataset_version="data", metric_version="metric")
     conversation = Conversation(id=f"summary-{uuid.uuid4().hex}", user=user,
-                                metadata={"working_memory": state.as_dict()})
+                                metadata={"working_memory": state.as_dict(),
+                                          "dataset_version_id": "data", "metric_version": "metric"})
     calls = []
     async def summarize(turns, source):
         calls.append(source)
         return "用户希望逐步分析交易趋势，待解释口径。"
     try:
         for n in range(9):
-            await store.append_turn_messages(conversation, [Message(role="user", content=f"问题{n}"), Message(role="assistant", content=f"回复{n}")])
+            await store.append_turn_messages(conversation, [Message(role="user", content=f"问题{n}" + "中" * 100), Message(role="assistant", content=f"回复{n}" + "中" * 100)])
         loaded = await store.get_conversation(conversation.id, user)
-        await AnalysisContextBuilder(summarize).build(loaded, state, store, BudgetUsage(RequestBudget()))
-        assert loaded.metadata["history_summary"]["source_message_end"] == 5
+        budget = replace(RequestBudget(), history_compaction_trigger_tokens=1500,
+                         history_recent_target_tokens=700)
+        builder = AnalysisContextBuilder(summarize, budget=budget)
+        await builder.build(loaded, state, store, BudgetUsage(budget))
+        assert loaded.metadata["history_summary"] is None
+        builder.schedule(conversation.id, user, store)
+        await asyncio.gather(*list(builder.tasks.values()))
         restarted_store = PostgresConversationStore(store.settings)
         restored = await restarted_store.get_conversation(conversation.id, user)
-        await AnalysisContextBuilder(summarize).build(restored, state, restarted_store, BudgetUsage(RequestBudget()))
+        await AnalysisContextBuilder(summarize, budget=budget).build(restored, state, restarted_store, BudgetUsage(budget))
         assert len(calls) == 1
         assert restored.metadata["history_summary"]["text"].startswith("用户希望")
-        await restarted_store.append_turn_messages(restored, [Message(role="user", content="第十问"), Message(role="assistant", content="第十答")])
+        previous_end = restored.metadata["history_summary"]["source_message_end"]
+        await restarted_store.append_turn_messages(restored, [Message(role="user", content="第十问" + "中" * 1000), Message(role="assistant", content="第十答")])
         next_turn = await restarted_store.get_conversation(conversation.id, user)
-        await AnalysisContextBuilder(summarize).build(next_turn, state, restarted_store, BudgetUsage(RequestBudget()))
+        restarted = AnalysisContextBuilder(summarize, budget=budget)
+        restarted.schedule(conversation.id, user, restarted_store)
+        await asyncio.gather(*list(restarted.tasks.values()))
         assert calls[-1].previous_text.startswith("用户希望")
-        assert next_turn.metadata["history_summary"]["source_message_end"] == 7
+        next_turn = await restarted_store.get_conversation(conversation.id, user)
+        assert next_turn.metadata["history_summary"]["source_message_end"] > previous_end
         await store.truncate_from_last_user_message(conversation.id, user)
         edited = await store.get_conversation(conversation.id, user)
         assert edited.metadata["history_summary"] is None and edited.metadata["working_memory"] == {}
     finally:
         await store.delete_conversation(conversation.id, user)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["append", "clear", "edit", "version", "other_owner", "workspace"])
+async def test_background_summary_transaction_never_overwrites_messages_or_stale_scope(store, change):
+    from dataclasses import replace
+    from data_analysis_agent.analysis_context import AnalysisContextBuilder
+    from data_analysis_agent.analysis_state import AnalysisState
+
+    owner = User(id=f"summary-race-{uuid.uuid4().hex}", group_memberships=["analyst"])
+    state = AnalysisState(task_id="task", workspace_id="olist-demo", dataset_version="data", metric_version="metric")
+    conversation = Conversation(id=f"summary-race-{uuid.uuid4().hex}", user=owner,
+        metadata={"working_memory": state.as_dict(), "dataset_version_id": "data", "metric_version": "metric"},
+        messages=[Message(role="user", content="问题"), Message(role="assistant", content="答复")])
+    try:
+        await store.update_conversation(conversation)
+        snapshot = await store.get_conversation(conversation.id, owner)
+        sources = snapshot.messages
+        stale_foreground = snapshot.model_copy(deep=True)
+        if change == "append":
+            await store.append_turn_messages(snapshot, [Message(role="user", content="新问题"), Message(role="assistant", content="新答复")])
+            stale_foreground = await store.get_conversation(conversation.id, owner)
+        elif change == "clear":
+            snapshot.metadata["working_memory"] = replace(state, task_id="new").as_dict()
+            await store.update_conversation(snapshot)
+        elif change == "version":
+            snapshot.metadata["working_memory"] = replace(state, metric_version="new").as_dict()
+            snapshot.metadata["metric_version"] = "new"
+            await store.update_conversation(snapshot)
+        elif change == "edit":
+            await store.truncate_from_last_user_message(conversation.id, owner)
+        summary = {"text": "分析目标：比较销售。", "scope": AnalysisContextBuilder.scope(state), "source_message_end": 1}
+        caller = owner if change != "other_owner" else User(id="someone-else", group_memberships=["analyst"])
+        scope = AnalysisContextBuilder.scope(state)
+        if change == "workspace":
+            scope = {**scope, "workspace_id": "other"}
+        result = await store.save_history_summary(conversation.id, caller, scope=scope,
+            expected_end=-1, sources=sources, summary=summary, attempt={"status": "generated"})
+        assert result is (change == "append")
+        if change == "append":
+            # Background writes do not create a spurious optimistic state conflict.
+            await store.append_turn_messages(stale_foreground, [Message(role="user", content="又一问")])
+            loaded = await store.get_conversation(conversation.id, owner, recent_turns=None)
+            assert len(loaded.messages) == 5 and loaded.messages[-1].content == "又一问"
+            assert loaded.metadata["history_summary"] == summary
+            assert await store.save_history_summary(conversation.id, owner, scope=scope,
+                expected_end=-1, sources=sources, summary=summary, attempt={}) is False
+        else:
+            loaded = await store.get_conversation(conversation.id, owner)
+            assert loaded.metadata["history_summary"] is None
+    finally:
+        await store.delete_conversation(conversation.id, owner)
+
+
+@pytest.mark.asyncio
+async def test_agent_reload_uses_context_packet_history_cursor(store):
+    from data_analysis_agent.budget import BudgetUsage, RequestBudget, CURRENT_BUDGET
+    owner = User(id=f"cursor-{uuid.uuid4().hex}", group_memberships=["analyst"])
+    conversation = Conversation(id=f"cursor-{uuid.uuid4().hex}", user=owner,
+        messages=[Message(role=role, content=f"{n}") for n in range(35) for role in ("user", "assistant")])
+    try:
+        await store.update_conversation(conversation)
+        evidence = BudgetUsage(RequestBudget())
+        evidence.context_packet = {"recent_start_index": 0}
+        token = CURRENT_BUDGET.set(evidence)
+        try:
+            loaded = await store.get_conversation(conversation.id, owner)
+        finally:
+            CURRENT_BUDGET.reset(token)
+        assert len(loaded.messages) == 70 and loaded.metadata["history_start_index"] == 0
+        rows = await store.get_turn_range(conversation.id, owner, start=0, before=70, limit_turns=20)
+        assert len(rows) == 40
+    finally:
+        await store.delete_conversation(conversation.id, owner)
