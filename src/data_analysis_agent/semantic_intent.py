@@ -18,6 +18,7 @@ from vanna.core.user import User
 from .question_router import QuestionRoute, QuestionRouter
 from .semantic_catalog import Catalog, CatalogRetriever, CatalogSelection
 from .analysis_state import AnalysisState, StatePatch
+from .token_budget import ContextCapacityError
 
 
 class SemanticIntentError(ValueError):
@@ -393,7 +394,14 @@ class SemanticIntentInterpreter:
                 "Catalog: " + json.dumps(metrics, ensure_ascii=False),
                 "受控状态: " + json.dumps(context, ensure_ascii=False),
                 "近期对话（仅叙事，不能作为 SQL 条件或结果值的事实来源）: "
-                + json.dumps((state or {}).get("recent_dialogue", []), ensure_ascii=False),
+                + json.dumps(
+                    ((state or {}).get("context_packet") or {}).get("recent_dialogue", (state or {}).get("recent_dialogue", [])),
+                    ensure_ascii=False,
+                ),
+                "历史摘要（仅叙事，不可提取执行条件；当前用户与受控状态优先）: "
+                + json.dumps(((state or {}).get("context_packet") or {}).get("narrative_summary"), ensure_ascii=False),
+                "可信执行/结果引用（无结果实体值；实体由服务端解析）: "
+                + json.dumps(((state or {}).get("context_packet") or {}).get("analysis_state", {}).get("result_reference"), ensure_ascii=False),
                 "输出schema: "
                 + json.dumps(SemanticIntent.model_json_schema(), ensure_ascii=False),
                 "用户问题: " + question,
@@ -414,6 +422,8 @@ class SemanticIntentInterpreter:
                     self.complete(prompt, user), timeout=self.timeout_seconds
                 )
                 break
+            except ContextCapacityError:
+                raise
             except Exception as exc:
                 last_error = exc
                 if attempt == 0 and self.retry_delay_seconds:

@@ -223,10 +223,53 @@ async def test_recent_window_append_and_cursor_preserve_full_history(store):
         assert page[0].metadata["message_index"] == 17
         assert older[-1].metadata["message_index"] == 16
         assert await store.get_history_page(conversation.id, other) == []
+        batch = await store.get_turn_range(conversation.id, user, start=2, before=18, limit_turns=3)
+        assert [m.metadata["message_index"] for m in batch] == list(range(2, 8))
+        assert await store.get_turn_range(conversation.id, other, start=0, before=18) == []
+        foreign = PostgresConversationStore(store.settings, default_workspace_id="thelook-analytics")
+        assert await foreign.get_turn_range(conversation.id, user, start=0, before=18) == []
+        assert await foreign.get_history_page(conversation.id, user) == []
         full.metadata["working_memory"] = {"history_start_index": 22}
         await store.update_conversation(full)
         after_clear = await store.get_conversation(conversation.id, user)
         assert after_clear.messages == []
         assert len((await store.get_conversation(conversation.id, user, recent_turns=None)).messages) == 22
+    finally:
+        await store.delete_conversation(conversation.id, user)
+
+
+@pytest.mark.asyncio
+async def test_incremental_summary_persists_across_store_and_builder_instances(store):
+    from data_analysis_agent.analysis_context import AnalysisContextBuilder
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.budget import BudgetUsage, RequestBudget
+
+    user = User(id=f"summary-{uuid.uuid4().hex}", group_memberships=["analyst"])
+    state = AnalysisState(task_id="summary-task", workspace_id="olist-demo", dataset_version="data", metric_version="metric")
+    conversation = Conversation(id=f"summary-{uuid.uuid4().hex}", user=user,
+                                metadata={"working_memory": state.as_dict()})
+    calls = []
+    async def summarize(turns, source):
+        calls.append(source)
+        return "用户希望逐步分析交易趋势，待解释口径。"
+    try:
+        for n in range(9):
+            await store.append_turn_messages(conversation, [Message(role="user", content=f"问题{n}"), Message(role="assistant", content=f"回复{n}")])
+        loaded = await store.get_conversation(conversation.id, user)
+        await AnalysisContextBuilder(summarize).build(loaded, state, store, BudgetUsage(RequestBudget()))
+        assert loaded.metadata["history_summary"]["source_message_end"] == 5
+        restarted_store = PostgresConversationStore(store.settings)
+        restored = await restarted_store.get_conversation(conversation.id, user)
+        await AnalysisContextBuilder(summarize).build(restored, state, restarted_store, BudgetUsage(RequestBudget()))
+        assert len(calls) == 1
+        assert restored.metadata["history_summary"]["text"].startswith("用户希望")
+        await restarted_store.append_turn_messages(restored, [Message(role="user", content="第十问"), Message(role="assistant", content="第十答")])
+        next_turn = await restarted_store.get_conversation(conversation.id, user)
+        await AnalysisContextBuilder(summarize).build(next_turn, state, restarted_store, BudgetUsage(RequestBudget()))
+        assert calls[-1].previous_text.startswith("用户希望")
+        assert next_turn.metadata["history_summary"]["source_message_end"] == 7
+        await store.truncate_from_last_user_message(conversation.id, user)
+        edited = await store.get_conversation(conversation.id, user)
+        assert edited.metadata["history_summary"] is None and edited.metadata["working_memory"] == {}
     finally:
         await store.delete_conversation(conversation.id, user)

@@ -154,9 +154,9 @@ class BudgetUsage:
     total_tokens: int | None = None
     context_truncated: bool = False
     context_budget: dict[str, Any] | None = None
+    context_packet: dict[str, Any] | None = None
     history_summary: dict[str, Any] | None = None
     history_summary_text: str | None = None
-    suppress_semantic_history_summary: bool = False
     termination_reason: str = "running"
     error_type: str | None = None
     catalog_trace: dict[str, Any] | None = None
@@ -280,7 +280,7 @@ class BudgetUsage:
 
         The conversation filter is the only expected writer. Validate here so
         arbitrary prompt/history text cannot enter `agent_runs.catalog_trace`.
-        The evidence measures characters, not provider tokenizer tokens.
+        Token evidence includes its estimator mode; it is not provider usage.
         """
         if not isinstance(evidence, dict):
             raise TypeError("context budget evidence must be a mapping")
@@ -327,6 +327,8 @@ class BudgetUsage:
                     "source_message_count": _non_negative_int(
                         summary.get("source_message_count")
                     ),
+                    "source_message_start": _non_negative_int(summary.get("source_message_start")),
+                    "source_message_end": _non_negative_int(summary.get("source_message_end")),
                     "source_chars": _non_negative_int(summary.get("source_chars")),
                     "source_sha256": digest,
                     "reason": _context_reason(summary.get("reason")),
@@ -341,12 +343,12 @@ class BudgetUsage:
         """Keep a bounded semantic summary for conversation-state persistence.
 
         The text is deliberately absent from ``as_dict`` and run evidence;
-        ``BudgetedChatHandler`` writes it only into the owner-scoped conversation.
+        ``AnalysisContextBuilder`` writes it only into the owner-scoped conversation.
         """
         if not isinstance(evidence, dict):
             return
         self.history_summary = dict(evidence)
-        self.history_summary_text = text[:6_000] if isinstance(text, str) and text else None
+        self.history_summary_text = text if isinstance(text, str) and text else None
 
     def context_budget_evidence(self) -> dict[str, Any] | None:
         """Return a JSON-safe copy without exposing mutable internal state."""

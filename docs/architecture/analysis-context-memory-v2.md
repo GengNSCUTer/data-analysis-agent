@@ -1,6 +1,6 @@
-# 分析上下文与记忆 v2：Phase 0–2 代码基线
+# 分析上下文与记忆 v2：实现与验收
 
-核对日期：2026-10-15。Phase 1 完成 ConversationHistory 与 AnalysisState；Phase 2 增加逐次执行证据和可信结果复用，详见文末。目标设计与后续任务统一见 [实施计划](../../plan/architecture-analysis-context-memory-v2.md)。本文件回答“现在实际上怎样工作”，计划回答“接下来怎样改”。
+核对日期：2026-10-16。Phase 1 完成 ConversationHistory 与 AnalysisState；Phase 2 增加执行证据和结果复用；Phase 3 增加可信实体引用；Phase 4 增加任务内上下文包和持久滚动摘要。目标设计与后续任务见 [实施计划](../../plan/architecture-analysis-context-memory-v2.md)。第 1–7 节保留早期审计记录；其中列出的待办由第 8–10 节更新，当前摘要行为以第 10 节为准。
 
 ## 1. 本阶段任务卡
 
@@ -21,7 +21,8 @@
 flowchart TD
     A[服务端解析身份并加载所属会话] --> B[检查 workspace / 数据和指标版本]
     B --> C[读取 WorkingMemory]
-    C --> D[SemanticIntentInterpreter 理解本轮问题]
+    C --> C1[AnalysisContextBuilder 装配任务内近期对话与持久摘要]
+    C1 --> D[SemanticIntentInterpreter 理解本轮问题]
     D --> E[选择 Catalog 并校验业务能力]
     E --> F{需要查询数据库?}
     F -->|否| G[口径答复 / 通用解释 / 结果追问 / 澄清]
@@ -31,15 +32,15 @@ flowchart TD
     J --> K[模型生成 run_sql 工具调用]
     K --> L[计划一致性检查 / SqlPolicy / PostgreSQL reader / ResultValidator]
     L --> M[保存有效结果工件并按合同展示及绘图]
-    M --> N[保存结果引用 / 历史摘要并结束 run 审计]
+    M --> N[保存结果引用并结束 run 审计]
 ```
 
 这是正常链路；解析失败、SQL 拒绝、空结果、超预算和状态冲突分别有分支，不能认为每个请求都会到达最后一步。`/help` 等 workflow 命令保留 Vanna 自身入口。
 
 有两个不同的模型上下文入口，当前不能混为一谈：
 
-- **语义解释调用**在 Vanna 主对话之前发生，只接收当前问题、可用 Catalog 指标及部分 WorkingMemory；没有接入近期聊天原文、HistorySummary 或结果实体行。
-- **Vanna 主对话调用**由 `Agent._build_llm_request()` 从会话消息经 `ContextBudgetFilter` 构造。它能看到近期完整 turns，`CatalogContextEnhancer` 还加入本轮 Catalog、计划及结构化状态。按“语义理解 / SQL 生成 / 回答”分别构建 history projection、统一剥离历史工具 SQL 仍是后续工作。
+- **语义解释调用**在 Vanna 主对话之前发生，接收当前问题、可用 Catalog、受控状态、任务内最近完整问答、持久叙事摘要和不含行值的结果引用元数据。实体值仍由服务端解析。
+- **Vanna 主对话调用**由 `Agent._build_llm_request()` 经 `ContextBudgetFilter` 装配历史。只保留任务内近期叙事，剥离旧轮次的工具调用和工具结果；当前轮次的工具调用与返回仍成对保留。`CatalogContextEnhancer` 加入本轮 Catalog、计划及结构化状态。`ObservedLlmService` 在发给提供方前统一计算整个请求预算。
 
 `candidate_sql_generator.py` 的运行时请求构造器在 Handler 中生成候选组件的对齐证据，不代表默认在线 Provider 已被独立的 SQL-only 小模型替换。
 
@@ -192,4 +193,72 @@ Phase 3 新增 `ReferenceRequest` 和 `result_reference.py`。语义解释器只
 ResultContract、SqlPolicy、PostgreSQL reader 和 ResultValidator。解析失败只返回可解释澄清，不进入
 SQL。Phase 3 定向联合回归 **193 passed**；真实浏览器跨轮实体下钻独立测试 **1 passed**，完整
 浏览器组合 **9 passed**。一次全套重跑遇到在线模型提供方超时，台账确认引用已经解析成功且没有
-产生未经验证结果。Phase 4 的短期上下文压缩尚未开始。
+产生未经验证结果。后续 Phase 4 的短期上下文改造见下一节。
+
+## 10. Phase 4：任务内上下文包与持久滚动摘要
+
+入口为 `analysis_context.py:AnalysisContextBuilder.build()`，由 Handler 在版本检查之后、
+语义解释之前调用。它复用会话 JSONB 和现有消息索引，没有新增表、摘要缓存或兼容写入路径。
+当前问题仍作为本轮用户消息单独传入；Catalog 与工具定义由各调用方装配，最后一起检查预算。
+
+### 10.1 对话、状态和结果各自负责什么
+
+| 信息 | 来源及用途 |
+| --- | --- |
+| 当前问题 | 本轮用户输入，不能被截成半句来满足预算 |
+| 当前分析状态 | `AnalysisState`，负责指标、范围、筛选、未解决澄清和 task/version |
+| 最近对话 | 当前任务最多 6 个历史完整 turns / 6,000 估算 tokens，剥离工具调用与工具返回 |
+| 叙事摘要 | 最多 1,000 估算 tokens，只说明目标、讨论脉络、待解释问题 |
+| 执行与结果引用 | 当前成功 artifact/execution ID、列名、维度、排序和验证状态；不带完整行或 CSV |
+| 当前工具轨迹 | 保留当前调用及返回配对；旧 SQL/工具结果不作为聊天历史重放 |
+
+无需新 SQL 的解释调用也接入近期叙事和摘要。解释可信结果时，额外提供该 artifact 的
+已验证查询范围，不能仅凭数值摘要猜时间/分组。数字复述检查允许该可信范围里的日期与 Top-N，
+仍拒绝叙事历史里出现、但不在可信结果或范围中的新数字。
+
+结构化状态/引用默认预算 2,000 tokens，超过时提示拆分分析；不截掉其中某些字段再执行。
+总体沿用 64,000 tokens 上限和 48,000 history ceiling。完整请求检查在
+`llm_observability.py:_check_context()`，包括 system、Catalog、消息、工具 schema、包装估算
+和输出预留。语义调用、摘要调用、SQL/回答调用都经过这层。
+
+本地 tokenizer 是代理估算器；与在线提供方的实际 tokenizer/template 不同，不能宣称精确计数。
+无本地 tokenizer 时使用明确标记的字符估算；中文与 ASCII 分别计量。
+运行证据记录 tokenizer mode/id、prompt tokens 和 output reserve，不记录完整 prompt。
+摘要另记录失败类型和耗时，原始异常文本不进入 safe trace。
+
+### 10.2 何时压缩、如何续接
+
+当当前任务存在落在最近窗口之外、尚未覆盖的历史时，从数据库按消息索引读取最多 6 个完整 turns。
+摘要输入为“旧摘要 + 新增省略问答”，整个输入最多 6,000 估算 tokens。按完整 turn 选择前缀，
+没有旧的每消息 2,000 / 总计 8,000 字符截断。工具 SQL/结果不进入摘要提示词。
+
+成功后立即通过原有版本事务保存到 `working_memory.__history_summary`，记录真实
+`source_message_start/end`、累计轮次/消息数、task/workspace/dataset/metric scope。
+`latest_batch_start` 表示本次增量开始位置；原有 `source_sha256` 只指本次增量，
+不是全部累计历史的摘要校验。服务重启后由同一 JSONB 继续读取，不依赖进程内缓存。
+
+单次最多处理一批历史，积压量由 `source_message_end` 与 `pending_before` 显式表示，
+不宣称积压全部完成。单个 turn 超过摘要输入预算时不切片、不跳过并标为已完成；
+记录 `source_turn_too_large`，保留近期对话和已有状态。该极端情况暂不做分段摘要。
+
+摘要生成限时 30 秒。超时、异常、截断输出或摘要超过 1,000 tokens 时，保留上一份有效摘要，
+不推进 watermark，不让摘要超时终止本轮正常分析。原始历史始终保留。
+摘要生成成功但数据库版本冲突时，沿用原有冲突提示，不覆盖其他请求。
+
+### 10.3 失效与受限召回
+
+摘要只有 task/workspace/数据版本/指标版本全部一致才使用。清空或切换任务后旧摘要不进入新任务；
+编辑/撤回最后一轮由既有 store 清掉派生 memory，随后重新生成。摘要只传给语义理解/叙事层，
+不会由程序解析为 SQL 筛选；结果实体仍需 Phase 3 的可信 artifact 绑定。
+
+`AnalysisContextBuilder.recall()` 提供同一会话的显式接口：最多读取 6 条消息，返回最多
+3 条完整叙事片段 / 800 tokens，每条带 `message_index`。读取沿用 owner/workspace 过滤，
+不修改分析状态，不找回旧结果实体。本阶段只交付接口；没有自动召回触发器、向量检索或跨会话长期记忆。
+
+### 10.4 验收
+
+测试覆盖数据库重载与新 builder 续接、真实 watermark、摘要失败和过长输入、scope 变化、
+旧工具剥离与当前工具配对、完整请求预算、状态不截断、owner/workspace 隔离及编辑后失效。
+浏览器验收通过真实模型和 PostgreSQL 查询，在插入长对话 fixture 后刷新并解释已验证结果，
+随后继续追加历史、刷新并检查摘要增量续接；两轮解释均不得新增 SQL，也不得改变 artifact/筛选。
+具体通过数在 `PROJECT.md` 的本轮记录维护。此处不将通过测试等同任意长对话准确率。

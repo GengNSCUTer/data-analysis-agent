@@ -188,13 +188,25 @@ Phase 4 的上下文压缩不提前开始。
 
 - **GOAL-005**: 让上下文压缩服务于当前任务连续性，而不是让摘要承担业务事实记忆。
 
+2026-10-16 本轮任务卡：输入为当前问题、同会话近期完整 turns、持久摘要和当前分析状态；输出为
+有界语义 context packet、增量摘要与真实消息 watermark，以及各模型调用的完整预算证据。
+复用现有 JSONB/事务/消息索引，不新增数据库表、hash 或兼容分支。摘要失败保留上一有效摘要，
+不推进覆盖范围；清空/版本变化后旧摘要不进入当前任务。验收包含数据库重载、增量续接、权限隔离、
+超预算、摘要失败及浏览器真实长会话。非目标为跨会话记忆、任意历史结果自动恢复和生产 SSO。
+
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-018 | 将每次模型调用前的上下文拆成明确的 packet：当前用户问题、active `AnalysisState`、最近可信 `ExecutionMemory`/`ResultArtifact` 引用、未解决澄清、最近完整 turns、历史摘要和本轮可用工具。 |  |  |
-| TASK-019 | 改造 `ContextBudgetFilter`/`HistorySummary`：读取持久摘要，以旧摘要和新增省略 turns 增量生成，保存真实覆盖 watermark，支持重启续接和源消息编辑后失效；不得只摘要前 8,000 字符却标记全范围已压缩。state、binding 和 execution 不由摘要覆盖。 |  |  |
-| TASK-020 | 保留 64K prompt / 48K history ceiling，语义解释器接入最多 6 turns / 6,000 tokens 的近期投影、最多 1,000 tokens 摘要和 2,000 tokens state/binding；整体预算包含 system/Catalog/tools/输出预留，记录实际 tokenizer mode、来源范围和 fallback；不把估算标成精确 token。 |  |  |
-| TASK-021 | 增加线程内按需历史召回的最小接口设计：只在当前问题与旧 turn 相关时检索同一 conversation 的受限消息片段，默认上限为 3 个片段/800 tokens，记录 recall source；本阶段不实现跨会话向量记忆。 |  |  |
-| TASK-022 | 验证版本失效、清空当前分析和摘要失败时，active state、结果引用和权限边界均 fail closed；摘要失败只影响叙事连续性，不影响 SQL 安全链。 |  |  |
+| TASK-018 | 将每次模型调用前的上下文拆成明确的 packet：当前用户问题、active `AnalysisState`、最近可信 `ExecutionMemory`/`ResultArtifact` 引用、未解决澄清、最近完整 turns、历史摘要和本轮可用工具。 | ✅ | 2026-10-16 |
+| TASK-019 | 改造 `ContextBudgetFilter`/`HistorySummary`：读取持久摘要，以旧摘要和新增省略 turns 增量生成，保存真实覆盖 watermark，支持重启续接和源消息编辑后失效；不得只摘要前 8,000 字符却标记全范围已压缩。state、binding 和 execution 不由摘要覆盖。 | ✅ | 2026-10-16 |
+| TASK-020 | 保留 64K prompt / 48K history ceiling，语义解释器接入最多 6 turns / 6,000 tokens 的近期投影、最多 1,000 tokens 摘要和 2,000 tokens state/binding；整体预算包含 system/Catalog/tools/输出预留，记录实际 tokenizer mode、来源范围和 fallback；不把估算标成精确 token。 | ✅ | 2026-10-16 |
+| TASK-021 | 增加线程内按需历史召回的最小接口设计：只在当前问题与旧 turn 相关时检索同一 conversation 的受限消息片段，默认上限为 3 个片段/800 tokens，记录 recall source；本阶段不实现跨会话向量记忆。 | ✅（显式接口，未自动触发） | 2026-10-16 |
+| TASK-022 | 验证版本失效、清空当前分析和摘要失败时，active state、结果引用和权限边界均 fail closed；摘要失败只影响叙事连续性，不影响 SQL 安全链。 | ✅ | 2026-10-16 |
+
+Phase 4 验收：项目数据库开启的定向 Python 联合回归 274 passed；浏览器组合 10 passed、
+1 failed（30 秒内未生成摘要；状态及可信结果正常保留），长对话用例随后独立复验 1 passed，
+59.58 秒；补齐无工具解释入口的可信查询范围后，最终独立浏览器验收 1 passed、49.59 秒。
+未降低断言或增加自动重试。细节见 PROJECT.md 及架构文档第 10 节；
+Phase 5 的整体正确率、时延和召回指标尚未开展。
 
 ### Implementation Phase 5 — 多轮产品验收与指标化
 

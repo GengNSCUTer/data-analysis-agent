@@ -11,6 +11,7 @@ from vanna.core.llm import LlmRequest, LlmResponse, LlmService, LlmStreamChunk
 
 from .budget import CURRENT_BUDGET
 from .result_presentation import display_label, display_value
+from .token_budget import ContextCapacityError, TokenCounter
 
 
 class LlmPhaseTimeout(TimeoutError):
@@ -96,6 +97,25 @@ class ObservedLlmService(LlmService):
         self.first_byte_timeout_seconds = float(first_byte_timeout_seconds)
         self.stream_idle_timeout_seconds = float(stream_idle_timeout_seconds)
         self.model = getattr(delegate, "model", "unknown")
+        self.token_counter = TokenCounter()
+
+    def _check_context(self, request: LlmRequest) -> None:
+        usage = CURRENT_BUDGET.get()
+        if usage is None:
+            return
+        prompt_tokens = self.token_counter.count_request(request)
+        reserve = request.max_tokens or usage.budget.max_output_tokens
+        evidence = {
+            "purpose": request.metadata.get("purpose", "agent"),
+            "prompt_tokens": prompt_tokens, "output_reserve": reserve,
+            "limit": usage.budget.max_prompt_tokens,
+            "tokenizer_mode": "local_tokenizer_estimate" if self.token_counter.mode == "exact" else self.token_counter.mode,
+            "tokenizer_id": self.token_counter.tokenizer_id,
+        }
+        calls = list((usage.catalog_trace or {}).get("prompt_budgets", []))
+        usage.record_catalog({"prompt_budgets": [*calls, evidence]})
+        if prompt_tokens + reserve > usage.budget.max_prompt_tokens:
+            raise ContextCapacityError("当前问题、状态与工具定义超过上下文预算，请拆分分析。")
 
     async def send_request(self, request: LlmRequest) -> LlmResponse:
         usage = CURRENT_BUDGET.get()
@@ -108,16 +128,23 @@ class ObservedLlmService(LlmService):
                 metadata={"deterministic_result_finalized": True},
             )
         started = perf_counter()
+        self._check_context(request)
         try:
             response = await asyncio.wait_for(
                 self.delegate.send_request(request),
                 timeout=self.first_byte_timeout_seconds,
             )
         except TimeoutError:
+            if request.metadata.get("purpose") == "history_semantic_summary":
+                self._observe(status="timeout", started=started, usage_status="unknown", error_type="TimeoutError")
+                return LlmResponse(content="", finish_reason="llm_timeout")
             return self._timeout_response(started, phase="first_byte")
         except Exception as exc:
             phase = _timeout_phase(exc)
             if phase is not None:
+                if request.metadata.get("purpose") == "history_semantic_summary":
+                    self._observe(status="timeout", started=started, usage_status="unknown", error_type=type(exc).__name__)
+                    return LlmResponse(content="", finish_reason="llm_timeout")
                 return self._timeout_response(started, phase=phase)
             self._observe(
                 status="error",
@@ -151,6 +178,7 @@ class ObservedLlmService(LlmService):
             )
             return
         started = perf_counter()
+        self._check_context(request)
         iterator = self.delegate.stream_request(request).__aiter__()
         reported_usage = None
         try:

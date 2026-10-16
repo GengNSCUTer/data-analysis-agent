@@ -13,6 +13,9 @@ from data_analysis_agent.budget import (
 from data_analysis_agent.llm_observability import ObservedLlmService
 from vanna.core.llm import LlmRequest, LlmResponse, LlmService, LlmStreamChunk
 from vanna.core.user import User
+from vanna.core.llm import LlmMessage
+from vanna.core.tool import ToolSchema
+from data_analysis_agent.token_budget import ContextCapacityError
 
 
 class ImmediateLlm(LlmService):
@@ -56,6 +59,44 @@ class FailingLlm(ImmediateLlm):
 
 def _request() -> LlmRequest:
     return LlmRequest(messages=[], user=User(id="observability-test"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_full_request_budget_includes_system_tools_and_output(stream):
+    request = LlmRequest(messages=[LlmMessage(role="user", content="查询")], user=User(id="test"),
+                         system_prompt="Catalog" * 1000, max_tokens=4000,
+                         tools=[ToolSchema(name="run_sql", description="SQL" * 1000, parameters={"type": "object"})])
+    usage = BudgetUsage(RequestBudget(max_prompt_tokens=5000, max_history_tokens=4000))
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        service = ObservedLlmService(FailingLlm(), timeout_seconds=1)
+        with pytest.raises(ContextCapacityError):
+            if stream:
+                async for _ in service.stream_request(request):
+                    pass
+            else:
+                await service.send_request(request)
+    finally:
+        CURRENT_BUDGET.reset(token)
+    evidence = usage.catalog_trace["prompt_budgets"][0]
+    assert evidence["prompt_tokens"] + evidence["output_reserve"] > 5000
+    assert "Catalog" not in str(evidence) and "查询" not in str(evidence)
+
+
+@pytest.mark.asyncio
+async def test_summary_timeout_does_not_terminate_analysis_request():
+    from data_analysis_agent.history_summary import build_llm_summary_provider, HistorySummary
+    from vanna.core.storage import Message
+    usage = BudgetUsage(RequestBudget())
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        turns = [[Message(role="user", content="之前讨论的目标")]]
+        provider = build_llm_summary_provider(ObservedLlmService(SlowLlm(), timeout_seconds=0.001))
+        result = await provider(turns, HistorySummary.from_turns(turns, source_turn_start=1, reason="message_budget"))
+    finally:
+        CURRENT_BUDGET.reset(token)
+    assert result is None and usage.termination_reason == "running"
 
 
 @pytest.mark.asyncio

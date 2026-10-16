@@ -43,6 +43,7 @@ from data_analysis_agent.budget import (
 from data_analysis_agent.semantic_intent import SemanticIntentInterpreter
 from data_analysis_agent.chat_runtime import BudgetedChatHandler
 from data_analysis_agent.context_builder import ContextBudgetFilter
+from data_analysis_agent.analysis_context import AnalysisContextBuilder
 from data_analysis_agent.history_summary import build_llm_summary_provider
 from data_analysis_agent.analysis_lifecycle import (
     CLEAR_ANALYSIS_NOTICE,
@@ -262,9 +263,6 @@ def create_app() -> FastAPI:
                 max_messages=budget.max_context_messages,
                 max_tokens=budget.max_history_tokens,
                 max_prompt_tokens=budget.max_prompt_tokens,
-                summary_provider=build_llm_summary_provider(
-                    provider_llm_service, model_name=model_name
-                ),
             )
         ],
         llm_middlewares=[BudgetSafetyMiddleware()],
@@ -339,6 +337,9 @@ def create_app() -> FastAPI:
                 question_router.retriever.catalog,
                 complete_semantic_intent,
             ),
+            context_builder=AnalysisContextBuilder(build_llm_summary_provider(
+                llm_service, model_name=model_name
+            )),
         ),
         config={"cdn_url": "/static/vanna-components.js"},
     )

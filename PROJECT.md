@@ -1252,3 +1252,44 @@ WorkingMemory、历史离线评测路径和 `/embedded-demo` 经引用审计仍�
 跨轮实体下钻生成新 SQL 的独立测试 **1 passed**，既有浏览器组合 **9 passed**；台账验证引用成功
 绑定到 `customer_state=SP`，且后续继续经过既有 SQL 治理链。一次完整重跑遇到在线模型提供方超时，
 未输出未经验证结果。Phase 3 不将单次链路写成任意业务语义准确率。
+
+## 2026-10-16｜上下文与记忆 v2：Phase 4 持久增量摘要与请求预算
+
+完成实施计划 TASK-018～022。新增 `AnalysisContextBuilder`，在语义理解之前装配当前任务的
+最近完整问答、持久叙事摘要、未解决澄清、分析状态及可信结果引用元数据；当前问题、Catalog 和
+可用工具分别由实际调用方加入，最终在 `ObservedLlmService` 检查完整请求预算。
+近期历史上限 6 turns/6,000 tokens，摘要 1,000、state/reference 2,000；
+总体 64K、history ceiling 48K，包含输出预留。使用本地 Llama tokenizer 代理估算，
+不宣称在线 DeepSeek 精确计数；无 tokenizer 时明确标记字符估算。
+
+摘要从同一 owner/workspace 的消息原文按完整 turn 增量读取，输入为旧摘要与新增省略问答，
+保存实际消息 watermark 和 task/版本 scope；复用原有 JSONB、事务和 state_version。
+删除旧进程内缓存、旧 Filter 摘要生成入口及 Handler 后置摘要写入，不增加兼容分支或新表。
+旧工具调用与工具结果不再作为历史进入模型；当前工具轨迹仍配对保留。
+摘要失败保留上一有效版本、不推进覆盖位置；超过 30 秒也不终止本轮正常分析。
+safe trace 新增摘要状态、失败类型、耗时及各模型调用的预算来源，不写原始提示词或异常文本。
+
+清空/版本变化后旧摘要不进入新任务；编辑/撤回清掉派生 memory。结果实体继续由可信 artifact
+绑定，不从摘要生成筛选。线程内 recall 仅提供最多 3 条完整叙事/800 tokens 的显式接口与来源
+索引，没有接入自动召回、向量库或跨会话长期记忆。单 turn 超过摘要输入预算时不截断并假称完成，
+记录 source_turn_too_large；该极端情况暂不做分段摘要。
+
+验证：开启项目 PostgreSQL 的定向联合回归 **274 passed**；定向 Ruff、compileall、diff check
+通过。新版服务浏览器组合 **10 passed、1 failed、9 deselected**，唯一失败为摘要未在 30 秒内
+生成，SQL/状态/结果复用正常。没有放宽断言；长对话独立复验 **1 passed、19 deselected，
+59.58 秒**，完成真实查询 → 追加长对话 fixture → 刷新 → 生成持久摘要 → 追加历史 → 刷新 →
+增量续接；两次解释均无新增 SQL，artifact、task 和筛选保持一致。组合同时验证真实实体下钻、
+清空与新查询、页面/移动端、历史恢复和预览。Provider 延迟仍影响交互和摘要生成，
+不能将成功复验写成无条件的长对话准确率或稳定性结论。
+
+截图复核还发现结果解释入口仅收到数值摘要，没有已验证时间/维度，因此会误称查询范围未知。
+已将 artifact 的可信查询范围与有界叙事接到无工具解释入口，删除原 1,000 字符截断；
+数值约束只允许可信摘要/范围中的数字，叙事历史不能扩充数字来源。补充两项确定性回归，
+并在浏览器长会话用例中要求解释真实 2017 年范围且仍不新增 SQL。补齐后的最终浏览器
+独立验收 **1 passed、19 deselected，49.59 秒**，确认日期解释与持久摘要续接同时正常。
+
+本轮证据与截图：仓库外 `evals/analysis-memory-phase4-20261016/`。
+新版服务运行于 screen `data-analysis-agent-phase4`、`http://127.0.0.1:32015/embedded-copilot`；
+既有 32013/32014 服务未替换。架构说明已更新到
+[`analysis-context-memory-v2.md`](docs/architecture/analysis-context-memory-v2.md) 第 10 节。
+下一步为计划 Phase 5 的多轮产品验收与指标化，不提前引入长期记忆或训练。

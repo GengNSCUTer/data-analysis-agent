@@ -82,6 +82,18 @@ class PostgresConversationStore(ConversationStore):
             raise ValueError("invalid history cursor or page size")
         return await asyncio.to_thread(self._history_page_sync, conversation_id, user, before, min(limit, 200))
 
+    async def get_turn_range(
+        self, conversation_id: str, user: User, *, start: int, before: int,
+        limit_turns: int = 6,
+    ) -> list[Message]:
+        """Read complete old turns for incremental compaction, scoped to owner/workspace."""
+        self._validate_conversation_id(conversation_id)
+        if start < 0 or before < start or not 1 <= limit_turns <= 6:
+            raise ValueError("invalid compaction range")
+        return await asyncio.to_thread(
+            self._turn_range_sync, conversation_id, user, start, before, limit_turns
+        )
+
     async def append_turn_messages(self, conversation: Conversation, messages: list[Message]) -> None:
         for message in messages:
             conversation.add_message(message)
@@ -480,6 +492,34 @@ class PostgresConversationStore(ConversationStore):
                     (conversation_id, user.id, self.default_workspace_id, before, before, limit),
                 )
                 return [self._message_from_row(row) for row in reversed(cursor.fetchall())]
+        finally:
+            connection.close()
+
+    def _turn_range_sync(self, conversation_id, user, start, before, limit_turns):
+        connection = self._connect()
+        try:
+            with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                cursor.execute(
+                    "SELECT m.message_index FROM app.messages m "
+                    "JOIN app.conversations c USING(conversation_id) "
+                    "WHERE c.conversation_id=%s AND c.user_id=%s AND c.workspace_id=%s "
+                    "AND c.status='active' AND m.role='user' "
+                    "AND m.message_index >= %s AND m.message_index < %s "
+                    "ORDER BY m.message_index LIMIT %s",
+                    (conversation_id, user.id, self.default_workspace_id, start, before, limit_turns + 1),
+                )
+                starts = cursor.fetchall()
+                if not starts:
+                    return []
+                end = starts[limit_turns]["message_index"] if len(starts) > limit_turns else before
+                cursor.execute(
+                    "SELECT m.* FROM app.messages m JOIN app.conversations c USING(conversation_id) "
+                    "WHERE c.conversation_id=%s AND c.user_id=%s AND c.workspace_id=%s "
+                    "AND c.status='active' AND m.message_index >= %s AND m.message_index < %s "
+                    "ORDER BY m.message_index",
+                    (conversation_id, user.id, self.default_workspace_id, starts[0]["message_index"], end),
+                )
+                return [self._message_from_row(row) for row in cursor.fetchall()]
         finally:
             connection.close()
 

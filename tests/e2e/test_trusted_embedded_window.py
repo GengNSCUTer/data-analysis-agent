@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 import json
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import uuid
 from pathlib import Path
 
@@ -1125,6 +1127,91 @@ def test_analysis_state_live_multiturn_refresh_and_clear(page):
     assert fresh["metric_ids"] == ["paid_order_count"]
     assert fresh["dimensions"] == [] and fresh["filters"] == [] and fresh["time_range"] is None
     browser_page.screenshot(path=str(screenshot_dir / "after-clear-new-query.png"), full_page=True)
+    assert not console_errors
+
+
+def test_analysis_context_live_summary_reload_and_incremental_resume(page):
+    """Real LLM summary plus verified artifact reuse after a browser reload."""
+    from data_analysis_agent.conversation_store import PostgresConversationStore
+    from vanna.core.storage import Message
+    from vanna.core.user import User
+
+    browser_page, console_errors = page
+    browser_page.set_default_timeout(240_000)
+    chat = _open_normal_window(browser_page)
+    browser_page.locator("#new-analysis").click()
+    browser_page.wait_for_function("() => Boolean(localStorage.getItem('data-analysis-agent-embeddable-conversation-v1'))")
+    cid = browser_page.evaluate("() => localStorage.getItem('data-analysis-agent-embeddable-conversation-v1')")
+
+    def send(question):
+        chat.locator("textarea.message-input").fill(question)
+        with browser_page.expect_response("**/api/vanna/v2/chat_sse", timeout=240_000) as response:
+            chat.locator("button.send-button").click()
+        assert response.value.ok
+        payload = response.value.text()
+        browser_page.wait_for_function("() => !document.querySelector('vanna-chat')?.shadowRoot?.querySelector('textarea.message-input')?.disabled")
+        return payload
+
+    send("统计2017年各客户州的商品成交额")
+    detail = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{cid}").json()
+    assert detail["analysis_state"]["status"] == "completed"
+    task_id = detail["analysis_state"]["task_id"]
+    artifact_id = detail["trusted_result_artifact"]["artifact_id"]
+    before = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{cid}/execution-memory").json()["executions"]
+    store = PostgresConversationStore(PostgresConnectionSettings.from_environment())
+    owner = User(id="local:analyst", group_memberships=["analyst"])
+
+    async def add_narrative_turns(count):
+        conversation = await store.get_conversation(cid, owner)
+        for n in range(count):
+            await store.append_turn_messages(conversation, [
+                Message(role="user", content=f"第{n+1}轮补充：我想先理解销售分析的口径，暂时不换指标、不修改查询条件。"),
+                Message(role="assistant", content="保持当前分析范围，接下来解释已验证的结果。"),
+            ])
+
+    def read_summary_and_trace():
+        settings = PostgresConnectionSettings.from_environment()
+        connection = psycopg2.connect(host=settings.host, port=settings.port, database=settings.database, user=settings.writer_user)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT working_memory FROM app.conversations WHERE conversation_id=%s", (cid,))
+                summary = cursor.fetchone()[0].get("__history_summary")
+                cursor.execute("SELECT catalog_trace FROM app.agent_runs WHERE conversation_id=%s ORDER BY started_at DESC LIMIT 1", (cid,))
+                trace = cursor.fetchone()[0]
+            return summary, trace
+        finally:
+            connection.close()
+
+    # Playwright's sync driver runs its own event loop on this thread.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(asyncio.run, add_narrative_turns(8)).result()
+    browser_page.reload(wait_until="domcontentloaded")
+    browser_page.wait_for_function("id => document.querySelector('vanna-chat')?.conversationId === id", arg=cid)
+    send("解释一下刚才的查询结果，不要重新查询，也不要改任何筛选条件")
+    first_summary, trace = read_summary_and_trace()
+    assert first_summary and first_summary["text"]
+    assert trace["context_packet"]["summary_status"] == "generated"
+    assert trace["context_packet"]["recent_turns"] <= 6
+    assert trace["context_packet"]["recent_tokens"] <= 6000
+    assert trace["prompt_budgets"]
+    assert trace["result_reuse"] == "validated_result"
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(asyncio.run, add_narrative_turns(2)).result()
+    browser_page.reload(wait_until="domcontentloaded")
+    browser_page.wait_for_function("id => document.querySelector('vanna-chat')?.conversationId === id", arg=cid)
+    explanation = send("说明刚才已验证查询的时间范围和分组口径，继续解释已有结果，不改条件、不重新查询")
+    assert "2017" in explanation
+    second_summary, trace = read_summary_and_trace()
+    assert second_summary["source_message_end"] > first_summary["source_message_end"]
+    assert second_summary["latest_batch_start"] == first_summary["source_message_end"] + 1
+    assert second_summary["scope"]["task_id"] == task_id
+    after = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{cid}/execution-memory").json()["executions"]
+    assert len(after) == len(before)
+    final = browser_page.request.get(f"{BASE_URL}/api/project/conversations/{cid}").json()
+    assert final["analysis_state"]["task_id"] == task_id
+    assert final["analysis_state"]["filters"] == []
+    assert final["trusted_result_artifact"]["artifact_id"] == artifact_id
+    browser_page.screenshot(path="/disk2/gengnan/data-analysis-agent-data/evals/analysis-memory-phase4-20261016/browser/long-history-reloaded.png", full_page=True)
     assert not console_errors
 
 

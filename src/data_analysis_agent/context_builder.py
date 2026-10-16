@@ -10,9 +10,7 @@ from vanna.core.storage import Message
 
 from .budget import BudgetUsage, CURRENT_BUDGET
 from .history_summary import (
-    SEMANTIC_SUMMARY_VERSION,
     HistorySummary,
-    SummaryProvider,
     message_chars,
 )
 from .token_budget import TokenCounter
@@ -28,8 +26,8 @@ _COMPACT_TURN_CONTENT = "[当前回合的工具交互已因上下文预算压缩
 class ContextBudgetFilter(ConversationFilter):
     """Keep recent complete turns and add a safe boundary for omitted history.
 
-    History summaries are request-local, deterministic provenance markers. They
-    do not summarize user/assistant prose and are not persisted as memory.
+    Online narrative summaries come from the task-scoped context packet.
+    This filter only projects history and preserves complete current tool turns.
     """
 
     def __init__(
@@ -41,7 +39,6 @@ class ContextBudgetFilter(ConversationFilter):
         max_tokens: int | None = None,
         max_prompt_tokens: int | None = None,
         token_counter: TokenCounter | None = None,
-        summary_provider: SummaryProvider | None = None,
     ):
         if max_chars <= 0 or max_messages <= 0:
             raise ValueError("context limits must be positive")
@@ -53,12 +50,21 @@ class ContextBudgetFilter(ConversationFilter):
         # Construct after application dotenv loading so a local tokenizer path
         # configured by the service is actually observed.
         self.token_counter = token_counter or TokenCounter()
-        self.summary_provider = summary_provider
-        self._summary_cache: dict[str, HistorySummary] = {}
 
     async def filter_messages(
         self, messages: list["MessageType"]
     ) -> list["MessageType"]:
+        usage = self.usage or CURRENT_BUDGET.get()
+        packet = usage.context_packet if usage is not None else None
+        if packet is not None:
+            messages = [
+                m for m in messages
+                if m.metadata.get("message_index", packet["recent_start_index"]) >= packet["recent_start_index"]
+                and (
+                    m.metadata.get("message_index", packet["current_turn_start_index"]) >= packet["current_turn_start_index"]
+                    or (m.role in {"user", "assistant"} and not m.tool_calls)
+                )
+            ]
         turns = _group_complete_turns(messages)
         input_chars = sum(message_chars(message) for message in messages)
         input_messages = len(messages)
@@ -104,35 +110,6 @@ class ContextBudgetFilter(ConversationFilter):
                     message for turn in omitted for message in turn
                 ),
             )
-            usage = self.usage or CURRENT_BUDGET.get()
-            allow_semantic = not (
-                usage is not None and usage.suppress_semantic_history_summary
-            )
-            cached = self._summary_cache.get(summary.source_sha256)
-            if allow_semantic and cached is not None:
-                summary = cached
-            elif allow_semantic and self.summary_provider is not None:
-                try:
-                    semantic = await self.summary_provider(omitted, summary)
-                except Exception:
-                    semantic = None
-                if semantic:
-                    summary = HistorySummary(
-                        source_turn_start=summary.source_turn_start,
-                        source_turn_end=summary.source_turn_end,
-                        source_message_count=summary.source_message_count,
-                        source_chars=summary.source_chars,
-                        source_sha256=summary.source_sha256,
-                        reason=summary.reason,
-                        version=SEMANTIC_SUMMARY_VERSION,
-                        semantic_text=semantic[:6_000],
-                        summary_status="semantic_generated",
-                        summary_tokens=self.token_counter.count_text(semantic),
-                        source_tokens=summary.source_tokens,
-                    )
-                    self._summary_cache[summary.source_sha256] = summary
-            if usage is not None and summary.semantic_text:
-                usage.record_history_summary(summary.as_evidence(), summary.semantic_text)
             candidate = [summary.as_message(), *_flatten(retained)]
             if (
                 len(candidate) <= self.max_messages
@@ -188,6 +165,26 @@ class ContextBudgetFilter(ConversationFilter):
                 )
                 summary = None
             result = [*prefix, *compacted]
+
+        if packet is not None and packet.get("narrative_summary"):
+            narrative = Message(
+                role="system",
+                content="【服务器历史摘要：仅叙事，不得作为 SQL 条件、权限或结果事实】\n" + packet["narrative_summary"],
+            )
+            candidate = [narrative, *result]
+            if (
+                len(candidate) <= self.max_messages
+                and sum(message_chars(m) for m in candidate) <= self.max_chars
+                and (self.max_tokens is None or self.token_counter.count_messages(candidate) <= self.max_tokens)
+            ):
+                result = candidate
+                # Report the summary actually inserted, including its persisted
+                # message watermark, rather than an in-process cache hit.
+                evidence = usage.history_summary
+                summary = HistorySummary(**{
+                    k: v for k, v in evidence.items()
+                    if k in HistorySummary.__dataclass_fields__
+                })
 
         return self._record(
             result,

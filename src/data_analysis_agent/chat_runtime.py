@@ -34,6 +34,7 @@ from .metric_context import OLIST_WORKSPACE, PROMPT_VERSION
 from .question_router import QuestionRouter
 from .query_plan import QueryPlan
 from .result_artifact import ResultArtifact
+from .analysis_context import AnalysisContextBuilder, ContextCapacityError
 from .result_artifact_store import ResultArtifactIntegrityError, ResultArtifactStore
 from .result_reference import (
     ResolvedReference,
@@ -93,8 +94,9 @@ TOOL_FREE_SYSTEM_PROMPT = """
 """.strip()
 
 RESULT_FOLLOWUP_SYSTEM_PROMPT = """
-你只能解释上一轮已验证结果摘要。只能使用摘要里已经出现的数字和事实。
-不要计算、估计或补充任何新数字，也不要把摘要没有写明的原因说成确定事实。
+你只能解释上一轮已验证结果摘要和查询范围。结果数字来自结果摘要，时间/维度/筛选来自已验证查询范围。
+不要计算、估计或补充任何新的指标数字，也不要把摘要没有写明的原因说成确定事实。
+叙事历史仅用于理解讨论脉络，不能补充结果数字、查询条件或原因。
 若摘要不足以回答，直接说明依据不足。回答应简洁、中文。
 """.strip()
 
@@ -112,6 +114,7 @@ class BudgetedChatHandler(ChatHandler):
         catalog_grounder: ConstrainedCatalogGrounder | None = None,
         semantic_interpreter: SemanticIntentInterpreter | None = None,
         result_budget: ResultBudget | None = None,
+        context_builder: AnalysisContextBuilder | None = None,
     ):
         super().__init__(agent)
         self.budget = budget
@@ -122,6 +125,7 @@ class BudgetedChatHandler(ChatHandler):
         self.catalog_grounder = catalog_grounder
         self.semantic_interpreter = semantic_interpreter
         self.result_budget = result_budget or ResultBudget.aggregate()
+        self.context_builder = context_builder
         if self.result_budget.query_mode != "aggregate":
             raise ValueError("only aggregate execution is enabled in the chat runtime")
 
@@ -211,13 +215,18 @@ class BudgetedChatHandler(ChatHandler):
                 conversation, self.workspace
             )
             if invalidation_notice:
-                usage.suppress_semantic_history_summary = True
                 await self.agent.conversation_store.update_conversation(conversation)
                 yield self._budget_chunk(
                     conversation_id,
                     request_id,
                     "分析上下文已失效",
                     invalidation_notice,
+                )
+
+            packet = None
+            if self.context_builder is not None:
+                packet = await self.context_builder.build(
+                    conversation, memory, self.agent.conversation_store, usage
                 )
 
             # Route only user-authored analysis turns. Workflow commands such as
@@ -229,7 +238,9 @@ class BudgetedChatHandler(ChatHandler):
             }:
                 route_started_at = perf_counter()
                 route_state = memory.as_dict()
-                if isinstance(memory, AnalysisState):
+                if packet is not None:
+                    route_state["context_packet"] = packet
+                elif isinstance(memory, AnalysisState):
                     route_state["recent_dialogue"] = [
                         {"role": message.role, "content": message.content[:800]}
                         for message in conversation.messages
@@ -254,6 +265,12 @@ class BudgetedChatHandler(ChatHandler):
                                 semantic_intent, memory, self.semantic_interpreter.catalog, user,
                                 message_count=conversation.metadata.get("message_count", len(conversation.messages)),
                             )
+                            if proposed_state.task_id != memory.task_id:
+                                usage.history_summary = None
+                                usage.history_summary_text = None
+                                if usage.context_packet is not None:
+                                    usage.context_packet["narrative_summary"] = None
+                                    usage.context_packet["recent_start_index"] = conversation.metadata["message_count"]
                         except SemanticIntentError as exc:
                             usage.record_catalog({"semantic_intent_error": str(exc)})
                             semantic_intent = None
@@ -744,10 +761,6 @@ class BudgetedChatHandler(ChatHandler):
                             yield ChatStreamChunk.from_component(
                                 component, conversation_id, request_id
                             )
-            try:
-                await self._persist_history_summary(conversation_id, user, usage)
-            except Exception:
-                usage.error_type = "history_summary_persistence"
             if usage.result_summary:
                 try:
                     await self._persist_result_artifact(
@@ -779,6 +792,11 @@ class BudgetedChatHandler(ChatHandler):
             ):
                 usage.terminate("tool_budget_exhausted")
             usage.finish()
+        except ContextCapacityError as exc:
+            usage.terminate("context_truncated", "context_capacity")
+            if run is not None and self.semantic_interpreter is not None:
+                await self._finish_analysis_attempt(conversation_id, user, run.run_id)
+            yield self._budget_chunk(conversation_id, request_id, "上下文预算不足", str(exc))
         except ConversationStateConflict:
             usage.terminate("state_conflict")
             yield self._budget_chunk(
@@ -894,12 +912,27 @@ class BudgetedChatHandler(ChatHandler):
             RESULT_FOLLOWUP_SYSTEM_PROMPT if hold_followup else TOOL_FREE_SYSTEM_PROMPT
         )
         if hold_followup:
+            artifact = memory.previous_result_artifact
+            if artifact is not None:
+                scope = artifact.query_scope
+                summary += "\n已验证查询范围：" + json.dumps({
+                    "指标": scope.get("metric_ids"), "维度": scope.get("dimensions"),
+                    "时间范围（含开始、不含结束）": scope.get("time_range"),
+                    "筛选": scope.get("filters"), "时间粒度": scope.get("time_grain"),
+                    "前N项": scope.get("top_n"),
+                }, ensure_ascii=False)
             prompt = (
-                "可信的上一轮结果摘要如下。只能使用摘要里已经出现的数字；"
-                "不要计算、估计或补充任何新数字：\n"
-                f"{summary[:1000]}\n\n"
+                "可信的上一轮结果摘要及查询范围如下，不得外推新指标数字：\n"
+                f"{summary}\n\n"
                 f"当前追问：{prompt}"
             )
+        usage = CURRENT_BUDGET.get()
+        if usage is not None and usage.context_packet is not None:
+            packet = usage.context_packet
+            prompt += "\n叙事上下文（不是执行条件或结果事实）：" + json.dumps({
+                "recent_dialogue": packet["recent_dialogue"],
+                "narrative_summary": packet["narrative_summary"],
+            }, ensure_ascii=False)
         llm_request = LlmRequest(
             messages=[LlmMessage(role="user", content=prompt)],
             user=user,
@@ -1040,18 +1073,3 @@ class BudgetedChatHandler(ChatHandler):
         except (FileNotFoundError, PermissionError, ResultArtifactIntegrityError, ValueError):
             return
         usage.record_catalog({"result_artifact": _safe_artifact_manifest(manifest)})
-
-    async def _persist_history_summary(
-        self, conversation_id: str, user, usage: BudgetUsage
-    ) -> None:
-        """Persist only the bounded semantic summary in the owner-scoped session."""
-        if not usage.history_summary or not usage.history_summary_text:
-            return
-        conversation = await self._get_conversation(conversation_id, user)
-        if conversation is None:
-            return
-        conversation.metadata["history_summary"] = {
-            **usage.history_summary,
-            "text": usage.history_summary_text,
-        }
-        await self.agent.conversation_store.update_conversation(conversation)
