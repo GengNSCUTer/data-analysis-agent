@@ -1469,7 +1469,7 @@ diff check 通过。更新后的主端口真实 Playwright + 模型 + 数据库�
 
 验收结果：定向 Python 回归 **337 passed**；隔离服务真实 Playwright + SSE + PostgreSQL 三组流程 **9 passed**；主端口 `32016` 的嵌入网页回归 **5 passed**。主服务当前地址为 `http://127.0.0.1:32016/embedded-copilot`，screen 为 `data-analysis-agent-fluency`。详细清单与逐轮证据见 [连续分析流程约束审查](plan/fix-analysis-flow-constraints.md)；证据目录在仓库外 `evals/analysis-memory-phase5-20261016/flow-{continuous,rank-reference,failed-scope}/`。
 
-仍未扩展的能力边界：多维或按时间的 Top-N、结果解释中的数字证据判定、提供方超时处理以及跨任务历史召回。这些应作为独立任务评估，不能通过删除权限和数据安全约束来换取流畅度。
+仍未扩展的能力边界：提供方超时处理以及跨任务历史召回。这些仍应作为独立任务评估，不能通过删除权限和数据安全约束来换取流畅度。
 
 ## 2026-10-17｜分区 Top-N 与结果解释数字判定
 
