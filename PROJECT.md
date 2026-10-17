@@ -1470,3 +1470,13 @@ diff check 通过。更新后的主端口真实 Playwright + 模型 + 数据库�
 验收结果：定向 Python 回归 **337 passed**；隔离服务真实 Playwright + SSE + PostgreSQL 三组流程 **9 passed**；主端口 `32016` 的嵌入网页回归 **5 passed**。主服务当前地址为 `http://127.0.0.1:32016/embedded-copilot`，screen 为 `data-analysis-agent-fluency`。详细清单与逐轮证据见 [连续分析流程约束审查](plan/fix-analysis-flow-constraints.md)；证据目录在仓库外 `evals/analysis-memory-phase5-20261016/flow-{continuous,rank-reference,failed-scope}/`。
 
 仍未扩展的能力边界：多维或按时间的 Top-N、结果解释中的数字证据判定、提供方超时处理以及跨任务历史召回。这些应作为独立任务评估，不能通过删除权限和数据安全约束来换取流畅度。
+
+## 2026-10-17｜分区 Top-N 与结果解释数字判定
+
+补齐了前一节列出的两个在线能力缺口。语义意图现在允许带业务分组维度的分区 Top-N，最后一个维度作为排名目标，前置维度和时间粒度作为分区键：例如“每个州前五个品类”按州分区，“2017 年每月前五个品类”按月份分区。没有分区键的单维度 Top-N 保持原行为；只有时间粒度而没有排名维度仍会澄清。
+
+`QueryPlan` 保存 `top_n_partition_dimensions`，结果预算按分区基数乘以 N 计算。分区 SQL 必须通过 AST 检查包含 `ROW_NUMBER`/`RANK`/`DENSE_RANK`、计划分区和不超过 N 的外层排名过滤；时间分区允许模型在 CTE 中使用 `month_start` 等明确时间字段映射到结果列 `time`。执行策略不再给分区 Top-N 追加全局 Top-N `LIMIT`，但原有 SqlPolicy、只读 reader、超时、字节/行预算和 ResultValidator 均保留。
+
+结果解释数字检查现在忽略行首 `1.`/`1）`、`第 10 名`、`排名第 2`、`Top 10`、`前 5 项`、`共 10 行` 等展示编号；金额、比例、年份和其他业务数字仍必须出现在可信结果摘要中。
+
+确定性回归：**147 passed、10 skipped**，补充测试覆盖全局、州分区、时间分区、时间+多维分区、错误分区字段和数字展示编号。真实 `Playwright + SSE + PostgreSQL` 浏览器验收：分区 Top-N **2 个场景通过**（每州前五个品类、2017 年每月前五个品类），原九轮连续分析流程 **9 轮通过**。证据位于仓库外 `evals/flow-constraints-20261017-final/`，服务仍为 screen `data-analysis-agent-fluency`、`http://127.0.0.1:32016/embedded-copilot`。

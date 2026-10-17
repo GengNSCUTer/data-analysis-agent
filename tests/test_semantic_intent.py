@@ -253,6 +253,50 @@ def test_top_n_is_structured_and_not_inferred_from_metric_alias():
     assert plan.top_n == (("customer_state", 5),)
 
 
+def test_partitioned_top_n_supports_multiple_dimensions_and_time():
+    _, route, per_state = _build_semantic(
+        {
+            "request_kind": "data_query",
+            "metric_ids": ["gmv"],
+            "dimensions": ["customer_state", "product_category_name"],
+            "top_n": 5,
+        },
+        question="每个州销售额最高的前五个商品品类",
+    )
+    assert route.should_generate_sql
+    assert per_state.top_n == (("product_category_name", 5),)
+    assert per_state.top_n_partition_dimensions == ("customer_state",)
+    assert "ROW_NUMBER/RANK/DENSE_RANK" in per_state.prompt_context()
+
+    _, route, per_month = _build_semantic(
+        {
+            "request_kind": "data_query",
+            "metric_ids": ["gmv"],
+            "dimensions": ["product_category_name"],
+            "time_grain": "month",
+            "time_range": {"start": "2017-01-01", "end": "2018-01-01", "end_semantics": "exclusive"},
+            "top_n": 5,
+        },
+        question="每月销售额最高的前五个商品品类",
+    )
+    assert route.should_generate_sql
+    assert per_month.top_n_partition_dimensions == ("time",)
+
+    _, route, per_month_state = _build_semantic(
+        {
+            "request_kind": "data_query",
+            "metric_ids": ["gmv"],
+            "dimensions": ["customer_state", "product_category_name"],
+            "time_grain": "month",
+            "time_range": {"start": "2017-01-01", "end": "2018-01-01", "end_semantics": "exclusive"},
+            "top_n": 5,
+        },
+        question="2017年每月每州销售额最高的前五个商品品类",
+    )
+    assert route.should_generate_sql
+    assert per_month_state.top_n_partition_dimensions == ("customer_state", "time")
+
+
 def test_daily_all_time_is_bounded_by_resources_not_a_date_word_gate():
     _, route, plan = _build_semantic(
         {

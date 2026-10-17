@@ -72,6 +72,45 @@ def test_live_continuous_analysis_constraints(page):
     live.finish(errors)
 
 
+def test_live_partitioned_top_n_shapes(page):
+    """The live model must execute partitioned, bounded ranking shapes."""
+    browser, errors = page
+    by_state = LiveConversation(browser, "flow-partitioned-topn")
+    _observe(
+        by_state,
+        "state-category-top-five",
+        "每个州销售额最高的前五个商品品类",
+        sql=True,
+        expected={
+            "metric_ids": ["gmv"],
+            "dimensions": ["customer_state", "product_category_name"],
+            "top_n": 5,
+        },
+    )
+    plan = by_state.records[-1]["catalog_trace"]["query_plan"]
+    assert plan["top_n_partition_dimensions"] == ["customer_state"]
+    assert by_state.executions()[-1]["row_count"] <= 27 * 5
+    by_state.finish(errors)
+
+    by_month = LiveConversation(browser, "flow-time-partitioned-topn")
+    _observe(
+        by_month,
+        "month-category-top-five",
+        "2017年每月销售额最高的前五个商品品类",
+        sql=True,
+        expected={
+            "metric_ids": ["gmv"],
+            "dimensions": ["product_category_name"],
+            "time_grain": "month",
+            "top_n": 5,
+        },
+    )
+    plan = by_month.records[-1]["catalog_trace"]["query_plan"]
+    assert plan["top_n_partition_dimensions"] == ["time"]
+    assert by_month.executions()[-1]["row_count"] <= 12 * 5
+    by_month.finish(errors)
+
+
 def test_live_reference_beyond_summary_rows(page):
     browser, errors = page
     live = LiveConversation(browser, "flow-rank-reference")

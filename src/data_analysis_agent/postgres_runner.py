@@ -309,11 +309,12 @@ class SecurePostgresRunner(SqlRunner):
                 raise PolicyViolation(f"result_budget:{exc}") from exc
             plan = context.metadata.get("query_plan") or {}
             top_n_values = list((plan.get("top_n") or {}).values())
+            partitioned_top_n = bool(plan.get("top_n_partition_dimensions"))
             if result_budget is not None:
                 decision = self.policy.evaluate(
                     args.sql, role=role, result_limit=result_budget.aggregate_result_rows,
                     complete_result=True,
-                    top_n=min(top_n_values) if top_n_values else None,
+                    top_n=None if partitioned_top_n else min(top_n_values) if top_n_values else None,
                 )
             else:
                 decision = self.policy.evaluate(args.sql, role=role)

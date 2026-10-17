@@ -275,6 +275,16 @@ def test_result_followup_cannot_keep_numbers_missing_from_the_summary() -> None:
     assert "41127" in constrained
 
 
+def test_result_followup_ignores_presentation_numbers_but_keeps_new_business_values() -> None:
+    summary = "SP 41127；RJ 12698"
+    answer = "1. SP 是第一名，排名第 2 的 RJ 也在结果中；共 2 行。"
+    assert followup_adds_numbers(answer, summary) is False
+    assert followup_adds_numbers("第 10 名的销售额是 5000。", summary) is True
+    assert followup_adds_numbers("1. SP 销售额为 41127。", summary) is False
+    assert followup_adds_numbers("Top 10 商品如下：SP 41127。", summary) is False
+    assert followup_adds_numbers("1）SP 销售额为 41127。", summary) is False
+
+
 def test_new_question_is_not_retrieved_with_the_pending_clarification(router) -> None:
     question = "按客户州统计有效订单数前五名，并生成柱状图"
     selection = router.retriever.retrieve(question, _user())

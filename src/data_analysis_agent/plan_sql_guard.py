@@ -17,6 +17,10 @@ from sqlglot.optimizer.scope import Scope, build_scope
 
 _LIMIT = re.compile(r"\blimit\s+(\d+)\b", re.IGNORECASE)
 _TOP_N_DIMENSIONS = {"customer_city": 20, "seller_city": 20}
+_TIME_PARTITION_HINT = re.compile(
+    r"(?:time|date|day|week|month|quarter|year|period|timestamp)",
+    re.IGNORECASE,
+)
 
 
 def sql_plan_mismatch(sql: str, plan: Mapping[str, Any] | None) -> str | None:
@@ -58,10 +62,73 @@ def sql_plan_mismatch(sql: str, plan: Mapping[str, Any] | None) -> str | None:
                 limits[str(key)] = int(value)
             except (TypeError, ValueError):
                 continue
+    partition_dimensions = tuple(
+        item for item in (plan.get("top_n_partition_dimensions") or ())
+        if isinstance(item, str) and item
+    )
+    if partition_dimensions and limits:
+        limit = min(limits.values())
+        try:
+            root = parse_one(sql, read="postgres")
+        except (ParseError, TokenError, RecursionError):
+            root = None
+        rank_windows = [] if root is None else [
+            node for node in root.find_all(exp.Window)
+            if isinstance(node.this, (exp.RowNumber, exp.Rank, exp.DenseRank))
+        ]
+        if not rank_windows:
+            return "分区 Top-N 的 SQL 必须使用窗口排名并按计划分区，不能用全局 LIMIT 代替。"
+        partition_sets = [
+            {
+                column.name.casefold()
+                for column in (window.args.get("partition_by") or ())
+                if isinstance(column, exp.Column)
+            }
+            for window in rank_windows
+        ]
+        partitioned_as_planned = any(
+            all(
+                (
+                    dimension == "time"
+                    and any(_TIME_PARTITION_HINT.search(column) for column in columns)
+                )
+                or dimension.casefold() in columns
+                for dimension in partition_dimensions
+            )
+            for columns in partition_sets
+        )
+        if not partitioned_as_planned:
+            return f"分区 Top-N 缺少计划分区字段：{', '.join(partition_dimensions)}。"
+        # PostgreSQL has no QUALIFY. The model must filter the generated rank
+        # in an outer query; inspect the generated rank alias so an unrelated
+        # date/value predicate cannot satisfy this contract by accident.
+        rank_aliases = {
+            alias.alias_or_name.casefold()
+            for alias in root.find_all(exp.Alias)
+            if isinstance(alias.this, exp.Window)
+            and isinstance(alias.this.this, (exp.RowNumber, exp.Rank, exp.DenseRank))
+        }
+        rank_filter_values = []
+        for predicate in (*root.find_all(exp.LTE), *root.find_all(exp.LT)):
+            column = predicate.this
+            value = predicate.expression
+            if (
+                isinstance(column, exp.Column)
+                and column.name.casefold() in rank_aliases
+                and isinstance(value, exp.Literal)
+                and not value.is_string
+            ):
+                rank_filter_values.append((type(predicate), int(value.this)))
+        if not any(
+            (kind is exp.LTE and value <= limit)
+            or (kind is exp.LT and value <= limit + 1)
+            for kind, value in rank_filter_values
+        ):
+            return f"分区 Top-N 必须在外层过滤排名不超过 {limit} 的行。"
     # The online aggregate runner owns the outer LIMIT: SqlPolicy replaces it
     # using this server plan. Rejecting a missing model-written LIMIT here is a
     # duplicate language-model repair, not an execution safety measure.
-    ranking_dimensions = () if plan.get("result_budget") else plan.get("dimensions") or []
+    ranking_dimensions = () if plan.get("result_budget") or partition_dimensions else plan.get("dimensions") or []
     for dimension in ranking_dimensions:
         limit = limits.get(str(dimension))
         if limit is None:

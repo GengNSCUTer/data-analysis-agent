@@ -397,6 +397,7 @@ class SemanticIntentInterpreter:
                 "普通用户问'买家等多久收到货'是在问实际履约时长，只有问定义/口径才catalog_definition。",
                 "当前是经营数据助手，'最近生意怎么样'应查经营概览，不是一般经营建议。",
                 "Top-N写成top_n数字。'最高的五个州'是dimensions=[customer_state],top_n=5。",
+                "分区Top-N可以与时间和多个维度一起使用：'每个州前五个品类'是dimensions=[customer_state,product_category_name],top_n=5；'每月前五个品类'是dimensions=[product_category_name],time_grain=month,top_n=5。服务端会在前置维度和时间分区内排名最后一个维度，不要把它澄清成只支持单维度。",
                 "只是sales走势并不自动要求图；只有明确要求画曲线/画图时chart_request才填写。",
                 "时序默认month；没有趋势或按日/按月要求时不添加time_grain。",
                 "例如'2017年各州成交额从高到低'：时间范围2017-01-01到2018-01-01，time_grain=null；年份限定不等于按年分组。",
@@ -583,10 +584,10 @@ def route_semantic_intent(
             "unsupported", (), metrics, None, "filter_not_supported",
             direct_answer=str(exc),
         )
-    if intent.top_n and (len(intent.dimensions) != 1 or intent.time_grain):
+    if intent.top_n and not intent.dimensions:
         return clarify(
             "top_n_shape_not_supported",
-            "当前排名支持单个分组维度，请说明要按哪个维度排名。",
+            "Top-N 需要一个排名维度；请说明要按州、品类或城市排名。",
         )
     from .query_plan import QueryPlan
 

@@ -225,6 +225,7 @@ class QueryPlan:
     execution_strategy: str
     warnings: tuple[str, ...] = ()
     top_n: tuple[tuple[str, int], ...] = ()
+    top_n_partition_dimensions: tuple[str, ...] = ()
     result_budget: ResultBudget | None = None
     filters: tuple[QueryFilter, ...] = ()
     lookup_joins: tuple[tuple[str, str], ...] = ()
@@ -274,29 +275,43 @@ class QueryPlan:
                 "按日统计必须先给出明确的绝对日期范围，避免结果超出当前行数预算。",
             )
         estimated_rows = 1
+        dimension_cardinalities: dict[str, int] = {}
         configured_bindings = workspace.dimension_bindings if workspace else {}
         ranking_bound = None if isinstance(semantic, Mapping) else ranking_category_output_bound(question, dimensions)
         for dimension in dimensions:
             if ranking_bound is not None and dimension == "product_category_name":
+                dimension_cardinalities[dimension] = ranking_bound
                 continue
             if dimension in configured_bindings:
-                estimated_rows *= configured_bindings[dimension].max_cardinality
+                cardinality = configured_bindings[dimension].max_cardinality
             elif full_results and dimension in _FULL_DIMENSION_CARDINALITY:
-                estimated_rows *= _FULL_DIMENSION_CARDINALITY[dimension]
+                cardinality = _FULL_DIMENSION_CARDINALITY[dimension]
             elif dimension in _TOP_N_DIMENSIONS:
-                estimated_rows *= _TOP_N_DIMENSIONS[dimension]
+                cardinality = _TOP_N_DIMENSIONS[dimension]
             else:
-                estimated_rows *= _DISPLAY_DIMENSION_CARDINALITY.get(
+                cardinality = _DISPLAY_DIMENSION_CARDINALITY.get(
                     dimension, max_result_rows + 1
                 )
+            dimension_cardinalities[dimension] = cardinality
+            estimated_rows *= cardinality
         if ranking_bound is not None:
             estimated_rows *= ranking_bound
         top_n_request = semantic.get("top_n") if isinstance(semantic, Mapping) else requested_top_n(question)
-        if full_results and top_n_request is not None and len(dimensions) == 1 and not time_grain:
+        if full_results and top_n_request is not None:
             if top_n_request <= 0:
                 return QueryPlanPreflight(False, "invalid_top_n", "Top-N 必须是正整数。")
-            estimated_rows = min(estimated_rows, top_n_request)
-        if time_grain:
+            if not dimensions:
+                return QueryPlanPreflight(
+                    False, "top_n_requires_dimension",
+                    "Top-N 需要一个排名维度；只有时间粒度时请说明要排名的州、品类或城市。",
+                )
+            rank_dimension = dimensions[-1]
+            rank_cardinality = dimension_cardinalities.get(rank_dimension, max_result_rows + 1)
+            partition_rows = max(1, estimated_rows // max(1, rank_cardinality))
+            if time_grain:
+                partition_rows *= cls._series_bucket_bound(time_grain, question, state)
+            estimated_rows = min(estimated_rows, partition_rows * top_n_request)
+        elif time_grain:
             series_state = state
             if not resolved_range and workspace and workspace.fact_date_counts:
                 sources = [workspace.fact_date_counts.get(metric.time_field) for metric in metrics]
@@ -411,10 +426,15 @@ class QueryPlan:
             and not (selection.workspace and selection.workspace.dimension_bindings)
         )
         top_n_request = semantic.get("top_n") if isinstance(semantic, Mapping) else requested_top_n(question)
-        if result_budget is not None and top_n_request and len(dimensions) == 1 and not time_grain:
-            top_n = ((dimensions[0], top_n_request),)
+        if result_budget is not None and top_n_request and dimensions:
+            top_n = ((dimensions[-1], top_n_request),)
         if ranking_bound == _RANKING_CATEGORY_LIMIT and (result_budget is None or top_n_request is None):
             top_n = (*top_n, ("product_category_name", _RANKING_CATEGORY_LIMIT))
+        top_n_partition_dimensions: tuple[str, ...] = ()
+        if top_n:
+            ranked_dimension = top_n[-1][0]
+            if ranked_dimension in dimensions and (len(dimensions) > 1 or time_grain):
+                top_n_partition_dimensions = tuple(dimensions[:-1]) + (("time",) if time_grain else ())
         attribution_requirements = tuple(
             AttributionRequirement(
                 metric_id=metric.metric_id,
@@ -451,6 +471,7 @@ class QueryPlan:
             execution_strategy=execution_strategy,
             warnings=tuple(warnings),
             top_n=top_n,
+            top_n_partition_dimensions=top_n_partition_dimensions,
             result_budget=result_budget,
             filters=filters,
             lookup_joins=tuple((join.to_table, join.on) for join in selection.joins
@@ -596,6 +617,7 @@ class QueryPlan:
             "execution_strategy": self.execution_strategy,
             "warnings": list(self.warnings),
             "top_n": {dimension: limit for dimension, limit in self.top_n},
+            "top_n_partition_dimensions": list(self.top_n_partition_dimensions),
         }
         if include_result_budget and self.result_budget is not None:
             result.update(self.result_budget.as_metadata())
@@ -669,10 +691,18 @@ class QueryPlan:
             )
         for dimension, limit in self.top_n:
             if dimension in self.dimensions:
-                lines.append(
-                    f"- `{dimension}` 只返回该指标最高的 {limit} 个分组，SQL 必须带这个 LIMIT。"
-                    "不要返回全部城市或卖家。"
-                )
+                if self.top_n_partition_dimensions:
+                    partition = "、".join(self.top_n_partition_dimensions)
+                    lines.append(
+                        f"- 在每个 `{partition}` 分区内，只保留 `{dimension}` 指标最高的 {limit} 个分组。"
+                        "必须使用 ROW_NUMBER/RANK/DENSE_RANK() OVER (PARTITION BY ...) 并在外层按排名过滤；"
+                        "不要用全局 LIMIT 代替分区排名。"
+                    )
+                else:
+                    lines.append(
+                        f"- `{dimension}` 只返回该指标最高的 {limit} 个分组，SQL 必须带这个 LIMIT。"
+                        "不要返回全部城市或卖家。"
+                    )
         if "ranking_category_best_per_group" in self.warnings:
             lines.append(
                 "- `product_category_name` 是排名维：每个其余分组只返回该指标最高的 1 个品类，"

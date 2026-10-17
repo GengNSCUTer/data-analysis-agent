@@ -80,3 +80,26 @@ def test_online_ranking_limit_is_owned_by_execution_policy_not_model_repair():
         assert sql_plan_mismatch(sql, plan) is None
         decision = SqlPolicy().evaluate(sql, complete_result=True, top_n=5, result_limit=27)
         assert decision.row_limit == 5 and decision.final_sql.endswith("LIMIT 5")
+
+
+def test_partitioned_top_n_requires_window_rank_and_partition_filter():
+    plan = {
+        "dimensions": ["customer_state", "product_category_name"],
+        "top_n": {"product_category_name": 5},
+        "top_n_partition_dimensions": ["customer_state"],
+        "result_budget": {"query_mode": "aggregate"},
+    }
+    valid = (
+        "WITH ranked AS (SELECT customer_state, product_category_name, gmv, "
+        "ROW_NUMBER() OVER (PARTITION BY customer_state ORDER BY gmv DESC) AS rn "
+        "FROM grouped) SELECT customer_state, product_category_name, gmv "
+        "FROM ranked WHERE rn <= 5"
+    )
+    assert sql_plan_mismatch(valid, plan) is None
+    assert "分区" in sql_plan_mismatch(
+        valid.replace("PARTITION BY customer_state", ""), plan
+    )
+    assert "分区" in sql_plan_mismatch(
+        valid.replace("PARTITION BY customer_state", "PARTITION BY seller_state"), plan
+    )
+    assert "排名" in sql_plan_mismatch(valid.replace("rn <= 5", "rn <= 8"), plan)

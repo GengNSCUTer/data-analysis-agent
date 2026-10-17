@@ -72,14 +72,47 @@ def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
     return {key: manifest[key] for key in allowed if key in manifest}
 
 
-_FOLLOWUP_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+_FOLLOWUP_NUMBER = re.compile(r"(?<![\w.])-?\d+(?:,\d{3})*(?:\.\d+)?%?")
+_FOLLOWUP_PRESENTATION_PREFIX = re.compile(r"(?:第|排名第|前|top\s*)\s*$", re.IGNORECASE)
+_FOLLOWUP_PRESENTATION_UNIT = re.compile(
+    r"^\s*(?:名|位|个|项|条|行|组|页|的|是|为)"
+)
+_FOLLOWUP_COUNT_PREFIX = re.compile(r"(?:共|总共|返回|展示|显示|列出|保留)\s*$")
+
+
+def _followup_business_numbers(text: str) -> tuple[str, ...]:
+    """Extract business numbers while ignoring presentation numbering.
+
+    Result follow-ups are allowed to restate numbers already present in the
+    trusted summary.  List labels and ordinal/range labels are formatting, not
+    new business facts: ``1.`` / ``第 10 名`` / ``前 5 项`` / ``共 8 行``.
+    """
+
+    values: list[str] = []
+    for match in _FOLLOWUP_NUMBER.finditer(text or ""):
+        before = text[max(0, match.start() - 12):match.start()]
+        after = text[match.end():match.end() + 8]
+        line_before = text[text.rfind("\n", 0, match.start()) + 1:match.start()]
+        if _FOLLOWUP_PRESENTATION_PREFIX.search(before):
+            # English ``Top 10`` is itself a ranking label even when the
+            # following word is a dimension rather than a Chinese unit.
+            if re.search(r"top\s*$", before, re.IGNORECASE):
+                continue
+            if _FOLLOWUP_PRESENTATION_UNIT.search(after):
+                continue
+        if _FOLLOWUP_COUNT_PREFIX.search(before) and _FOLLOWUP_PRESENTATION_UNIT.search(after):
+            continue
+        if not line_before.strip() and re.match(r"\s*[.)）、:：-]", after):
+            continue
+        values.append(match.group(0).replace(",", ""))
+    return tuple(values)
 
 
 def followup_adds_numbers(answer: str, summary: str) -> bool:
     """True when a result explanation contains a number absent from the summary."""
 
-    allowed = set(_FOLLOWUP_NUMBER.findall(summary))
-    return any(number not in allowed for number in _FOLLOWUP_NUMBER.findall(answer))
+    allowed = set(_followup_business_numbers(summary))
+    return any(number not in allowed for number in _followup_business_numbers(answer))
 
 
 def constrain_followup_answer(answer: str, summary: str) -> str:

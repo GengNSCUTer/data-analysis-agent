@@ -388,3 +388,13 @@ AST 筛选检查也不宣称能证明任意 SQL 等价。已覆盖行为、失�
 路由、AnalysisState、QueryPlan、SQL 审计、结果合同、复用决定及终止原因；原始 SQL 不进入仓库内文档或模型摘要。
 本轮确定性回归 **337 passed**，真实浏览器流程 **9 passed**，主端口网页回归 **5 passed**。结果只证明这些受控场景
 的状态连续性和安全边界，不能推断任意业务问题的 SQL 语义准确率。
+
+## 15. 分区 Top-N 与结果解释数字判定（2026-10-17）
+
+连续分析审计之后补齐了两项在线能力。语义意图中的 `top_n` 现在要求至少一个业务分组维度；`dimensions` 的最后一个维度是排名目标，前置维度和 `time_grain` 组成分区键。例如，`[customer_state, product_category_name]` 表示每个州内品类排名，`[product_category_name] + month` 表示每个月内品类排名。没有分区键时继续走原有全局 Top-N；只说“每月前五名”但没有排名维度仍澄清。
+
+`QueryPlan.top_n_partition_dimensions` 进入现有计划证据和结果预算。在线分区 SQL 必须包含窗口排名函数、与计划一致的 `PARTITION BY` 和外层 `rank <= N`（或等价上界）。检查使用 sqlglot AST，避免把普通文本中出现的字段当成分区证据；对结果列 `time`，允许 CTE 使用 `month_start` 等明确时间字段作为窗口分区。服务端不再在分区 Top-N 上附加全局排名 `LIMIT`，而是用分区基数乘 N 计算聚合行预算，其他 SQL 安全和结果校验不变。
+
+结果解释的数字证据检查仍禁止模型编造业务数字，但识别并忽略展示格式中的行首编号、排名序号、`Top 10`、`前 5 项`、`共 10 行` 等标签；金额、比例、日期年份和业务计数仍需要可信结果摘要支持。
+
+实现入口：`query_plan.py`、`semantic_intent.py`、`plan_sql_guard.py`、`postgres_runner.py`、`chat_runtime.py`。定向回归 **147 passed、10 skipped**；真实浏览器验收覆盖每州前五品类和每月前五品类各一组，并复跑原九轮连续分析流程，均通过。任务合同和逐轮证据见 [Top-N 与追问数字修复任务卡](../../plan/fix-topn-and-followup-number-20261017.md) 和仓库外 `evals/flow-constraints-20261017-final/`。
