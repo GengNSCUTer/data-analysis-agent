@@ -67,3 +67,16 @@ def test_v2_workspace_city_without_top_n_does_not_inherit_olist_limit():
     assert sql_plan_mismatch(sql, {**plan, "top_n": {"customer_city": 20}}) is not None
     # Legacy plans keep their original rule for historical callers.
     assert sql_plan_mismatch(sql, {"dimensions": ["customer_city"]}) is not None
+
+
+def test_online_ranking_limit_is_owned_by_execution_policy_not_model_repair():
+    from data_analysis_agent.sql_policy import SqlPolicy
+    plan = {"dimensions": ["customer_state"], "top_n": {"customer_state": 5},
+            "result_budget": {"query_mode": "aggregate"}}
+    for suffix in ("", " LIMIT 1", " LIMIT 500"):
+        sql = ("SELECT c.customer_state, COUNT(*) AS paid_order_count FROM analytics.fact_orders o "
+               "JOIN analytics.dim_customers c ON c.customer_id=o.customer_id "
+               "GROUP BY c.customer_state ORDER BY paid_order_count DESC" + suffix)
+        assert sql_plan_mismatch(sql, plan) is None
+        decision = SqlPolicy().evaluate(sql, complete_result=True, top_n=5, result_limit=27)
+        assert decision.row_limit == 5 and decision.final_sql.endswith("LIMIT 5")

@@ -129,7 +129,7 @@ tables:
 
   - table_id: dim_category_translation
     physical_name: dim_category_translation
-    description: "品类翻译维度；将葡萄牙语品类映射为英文展示名。"
+    description: "品类翻译维度；将葡萄牙语品类映射为英文展示名。翻译并不完整，展示品类时用 COALESCE(英文名, 原始品类名)，不能让缺少翻译的非空品类丢失名称；原始品类本身为空时保留空值分组。"
     grain: category
     aliases: [品类翻译, 品类映射, 英文品类, category translation]
     semantic_tags: [品类, 类目, 翻译, 映射]

@@ -115,7 +115,7 @@ def test_successful_run_does_not_validate_other_attempts_or_expose_driver_error(
 @pytest.mark.asyncio
 async def test_runtime_reuse_checks_scope_owner_versions_and_payload(tmp_path):
     from dataclasses import replace
-    from types import SimpleNamespace
+    from types import SimpleNamespace, MethodType
 
     from vanna.core.user import User
     from data_analysis_agent.analysis_state import AnalysisState
@@ -142,6 +142,7 @@ async def test_runtime_reuse_checks_scope_owner_versions_and_payload(tmp_path):
     )
     state = state.with_result_artifact(artifact)
     handler = SimpleNamespace(workspace=OLIST_WORKSPACE, result_artifact_store=store)
+    handler._verified_previous_artifact = MethodType(BudgetedChatHandler._verified_previous_artifact, handler)
     owner = User(id="owner")
 
     async def decide(value=state, user=owner):
@@ -151,12 +152,68 @@ async def test_runtime_reuse_checks_scope_owner_versions_and_payload(tmp_path):
     assert await decide(user=User(id="other")) == "query_required"
     # A failed query leaves the last successful artifact on its original scope.
     assert await decide(replace(state, dimensions=("product_category_name",))) == "query_required"
+    failed = replace(state, dimensions=("product_category_name",), status="failed")
+    assert await BudgetedChatHandler._result_reuse_decision(
+        handler, failed, owner, target="last_successful_result",
+    ) == "validated_result"
+    assert failed.dimensions == ("product_category_name",) and failed.status == "failed"
+    assert await BudgetedChatHandler._result_reuse_decision(
+        handler, failed, User(id="other"), target="last_successful_result",
+    ) == "query_required"
     assert await decide(replace(state, previous_result_artifact=replace(artifact, dataset_version="old"))) == "query_required"
     csv_path = next(tmp_path.rglob("result.csv"))
     csv_path.write_text("tampered", encoding="utf-8")
     assert await decide() == "query_required"
     csv_path.unlink()
     assert await decide() == "query_required"
+
+
+@pytest.mark.asyncio
+async def test_reference_reads_only_requested_rows_from_owned_full_artifact(tmp_path):
+    from dataclasses import replace
+    from types import SimpleNamespace, MethodType
+    from unittest.mock import Mock
+    from vanna.core.user import User
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.chat_runtime import BudgetedChatHandler
+    from data_analysis_agent.metric_context import OLIST_RUNTIME_WORKSPACE as RUNTIME_WORKSPACE
+    from data_analysis_agent.result_artifact import ResultArtifact
+    from data_analysis_agent.result_artifact_store import ResultArtifactStore
+    from data_analysis_agent.result_reference import ResultReferenceError
+    from data_analysis_agent.semantic_intent import ReferenceRequest
+
+    store = ResultArtifactStore(tmp_path)
+    manifest = store.save_result_csv(
+        artifact_id="full-ranking", user_id="owner", workspace_id=RUNTIME_WORKSPACE.workspace_id,
+        dataset_version=RUNTIME_WORKSPACE.dataset_version_id, metric_version=RUNTIME_WORKSPACE.metric_version,
+        columns=["product_category_name", "gmv"], row_count=10,
+        rows=[{"product_category_name": f"category-{i}", "gmv": 100-i} for i in range(1, 11)],
+        result_metadata={"validation_status": "valid", "ordering": [{"column": "gmv", "direction": "desc"}]},
+    )
+    artifact = ResultArtifact("full-ranking", "摘要只有八行", ("gmv",), ("product_category_name", "gmv"),
+        RUNTIME_WORKSPACE.dataset_version_id, RUNTIME_WORKSPACE.metric_version, "not_rendered", workspace_id=RUNTIME_WORKSPACE.workspace_id,
+        query_scope={"dimensions": ["product_category_name"]}, csv_sha256=manifest["csv_sha256"],
+        result_metadata=manifest["result_metadata"])
+    state = replace(AnalysisState.new(RUNTIME_WORKSPACE), top_n=5, status="failed", previous_result_artifact=artifact)
+    handler = SimpleNamespace(workspace=RUNTIME_WORKSPACE, result_artifact_store=store)
+    handler._verified_previous_artifact = MethodType(BudgetedChatHandler._verified_previous_artifact, handler)
+    store.read_csv_page = Mock(wraps=store.read_csv_page)
+    owner = User(id="owner")
+    request = ReferenceRequest(kind="previous_ranked_entity", dimension="product_category_name",
+                               rank=10, match_mode="first_row")
+    binding = await BudgetedChatHandler._resolve_result_reference(handler, state, request, owner)
+    assert binding.value == "category-10" and state.top_n == 5 and state.status == "failed"
+    assert store.read_csv_page.call_args.kwargs["cursor"] == 9
+    assert store.read_csv_page.call_args.kwargs["page_size"] == 1
+    highest = request.model_copy(update={"rank": 1, "match_mode": "unique_highest"})
+    assert (await BudgetedChatHandler._resolve_result_reference(handler, state, highest, owner)).value == "category-1"
+    assert store.read_csv_page.call_args.kwargs["page_size"] == 2
+    with pytest.raises(ResultReferenceError, match="排名行"):
+        await BudgetedChatHandler._resolve_result_reference(handler, state, request.model_copy(update={"rank": 11}), owner)
+    store.read_csv_page.reset_mock()
+    with pytest.raises(ResultReferenceError, match="失效"):
+        await BudgetedChatHandler._resolve_result_reference(handler, state, request, User(id="other"))
+    store.read_csv_page.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -169,7 +226,7 @@ async def test_runtime_reuse_checks_scope_owner_versions_and_payload(tmp_path):
 ])
 async def test_chart_only_followup_uses_bounded_verified_csv(tmp_path, chart_type, rows, accepted):
     from dataclasses import replace
-    from types import SimpleNamespace
+    from types import SimpleNamespace, MethodType
     from vanna.core.user import User
     from data_analysis_agent.analysis_state import AnalysisState
     from data_analysis_agent.budget import BudgetUsage, RequestBudget
@@ -190,7 +247,8 @@ async def test_chart_only_followup_uses_bounded_verified_csv(tmp_path, chart_typ
         dataset_version=workspace.dataset_version_id, metric_version=workspace.metric_version,
         result_metadata={"validation_status": "valid"},
     )
-    state = replace(AnalysisState.new(workspace), metric_ids=("gmv",), dimensions=("customer_state",), result_shape="grouped")
+    state = replace(AnalysisState.new(workspace), metric_ids=("gmv",), dimensions=("customer_state",),
+                    filters=("customer_city=sao paulo",), result_shape="grouped")
     artifact = ResultArtifact(
         artifact_id="rta-chart", summary="可信摘要", metric_ids=("gmv",),
         result_columns=("customer_state", "gmv"), workspace_id=workspace.workspace_id,
@@ -206,11 +264,13 @@ async def test_chart_only_followup_uses_bounded_verified_csv(tmp_path, chart_typ
         workspace=workspace, result_artifact_store=store, result_budget=ResultBudget.aggregate(),
         question_router=QuestionRouter(CatalogRetriever(CatalogLoader(workspace).load()), full_results=True),
     )
+    handler._verified_previous_artifact = MethodType(BudgetedChatHandler._verified_previous_artifact, handler)
     user = User(id="owner", group_memberships=["analyst"])
     assert await BudgetedChatHandler._result_reuse_decision(handler, state, user) == "validated_result"
     evidence = BudgetUsage(RequestBudget())
+    pending = replace(state, metric_ids=("item_count",), top_n=1, status="failed")
     component, notice = await BudgetedChatHandler._chart_from_previous_result(
-        handler, SimpleNamespace(message="只换图"), state,
+        handler, SimpleNamespace(message="只换图"), pending,
         SemanticIntent(request_kind="result_followup", action="keep", chart_request=chart_type), user, evidence,
     )
     assert bool(component) is accepted and notice
@@ -218,4 +278,5 @@ async def test_chart_only_followup_uses_bounded_verified_csv(tmp_path, chart_typ
     assert evidence.sql_calls_used == 0 and evidence.llm_rounds_used == 0
     if accepted:
         assert component.rich_component.data["data"]
+        assert "gmv" in str(component.rich_component.data) and pending.metric_ids == ("item_count",)
         assert store.verify_manifest(artifact_id="rta-chart", user_id="owner", workspace_id=workspace.workspace_id)["plotly_ref"]

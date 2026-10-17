@@ -626,6 +626,7 @@ class QueryPlan:
                 "将内层聚合写成具名 WITH CTE，不用 FROM 内联子查询投影或 GROUP BY 该键。"
             ),
             f"- 维度：{', '.join(self.dimensions) if self.dimensions else '无'}；时间粒度：{self.time_grain or '标量汇总'}。",
+            "- 不自行增加计划外筛选。用户未要求排除缺失值时，分组列为 NULL 的事实仍保留在未分类组，不能添加分组列 IS NOT NULL 而静默丢掉这部分业务量。",
             f"- 执行策略：`{self.execution_strategy}`。",
         ]
         if self.time_range:

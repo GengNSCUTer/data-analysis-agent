@@ -283,17 +283,8 @@ class BudgetedChatHandler(ChatHandler):
                             semantic_intent = None
                         if semantic_intent is not None and semantic_intent.reference_requests:
                             try:
-                                if memory.previous_result_artifact is not None and await self._result_reuse_decision(memory, user) == "query_required":
-                                    raise ResultReferenceError(
-                                        "reference_artifact_unavailable",
-                                        "上一轮结果已失效或不属于当前分析范围，请重新查询后再引用。",
-                                    )
-                                reference_binding = resolve_ranked_entity(
-                                    semantic_intent.reference_requests[0],
-                                    memory.previous_result_artifact,
-                                    workspace_id=self.workspace.workspace_id,
-                                    dataset_version=self.workspace.dataset_version_id,
-                                    metric_version=self.workspace.metric_version,
+                                reference_binding = await self._resolve_result_reference(
+                                    memory, semantic_intent.reference_requests[0], user,
                                 )
                             except ResultReferenceError as exc:
                                 reference_error = exc
@@ -412,8 +403,10 @@ class BudgetedChatHandler(ChatHandler):
                         conversation_state=route_state,
                     )
                 if self.semantic_interpreter is not None and route.intent == "result_followup":
-                    decision = await self._result_reuse_decision(memory, user)
-                    usage.record_catalog({"result_reuse": decision})
+                    decision = await self._result_reuse_decision(
+                        memory, user, target=semantic_intent.result_target,
+                    )
+                    usage.record_catalog({"result_reuse": decision, "result_reuse_target": semantic_intent.result_target})
                     if decision == "query_required":
                         route = QuestionRoute(
                             "clarification_required", ("current_result",), (),
@@ -678,6 +671,11 @@ class BudgetedChatHandler(ChatHandler):
                 if not route.should_generate_sql:
                     detail = route.direct_answer or route.clarification or "当前请求无法在受控数据范围内回答。"
                     streamed_tool_free = False
+                    if route.intent == "result_followup" and semantic_intent is not None and semantic_intent.result_target == "last_successful_result":
+                        yield self._text_chunk(
+                            conversation_id, request_id,
+                            "本次展示/解释上一份成功结果，当前待查询条件保持不变。",
+                        )
                     if route.intent == "result_followup" and semantic_intent is not None and semantic_intent.chart_request:
                         component, detail = await self._chart_from_previous_result(
                             request, updated_memory, semantic_intent, user, usage,
@@ -1049,59 +1047,76 @@ class BudgetedChatHandler(ChatHandler):
         ).as_dict()
         await self.agent.conversation_store.update_conversation(conversation)
 
-    async def _result_reuse_decision(self, state: AnalysisState, user) -> str:
+    async def _verified_previous_artifact(self, state: AnalysisState, user) -> ResultArtifact | None:
+        """Validate result ownership/versions/payload independently of task scope."""
         artifact = state.previous_result_artifact
         if artifact is None or self.result_artifact_store is None:
-            return "query_required"
-        requested_scope = {
-            **state.scope(), "workspace_id": self.workspace.workspace_id,
-            "dataset_version": self.workspace.dataset_version_id,
-            "metric_version": self.workspace.metric_version, "result_shape": state.result_shape,
-        }
-        decision = reuse_decision(
-            artifact_scope=artifact.query_scope, requested_scope=requested_scope,
-            artifact_id=artifact.artifact_id,
-            validation_status=artifact.result_metadata.get("validation_status", "not_validated"),
-        )
-        if decision == "query_required":
-            return decision
+            return None
+        if (artifact.workspace_id, artifact.dataset_version, artifact.metric_version) != (
+            self.workspace.workspace_id, self.workspace.dataset_version_id, self.workspace.metric_version,
+        ) or artifact.result_metadata.get("validation_status") != "valid":
+            return None
         try:
             manifest = await asyncio.to_thread(
                 self.result_artifact_store.verify_manifest, artifact_id=artifact.artifact_id,
                 user_id=user.id, workspace_id=self.workspace.workspace_id,
             )
         except (FileNotFoundError, PermissionError, ResultArtifactIntegrityError):
-            return "query_required"
+            return None
         if (manifest["dataset_version"], manifest["metric_version"], manifest["csv_sha256"]) != (
             artifact.dataset_version, artifact.metric_version, artifact.csv_sha256,
         ):
+            return None
+        return artifact
+
+    async def _result_reuse_decision(self, state: AnalysisState, user, *, target="current_task") -> str:
+        artifact = await self._verified_previous_artifact(state, user)
+        if artifact is None:
             return "query_required"
+        requested_scope = artifact.query_scope if target == "last_successful_result" else {
+            **state.scope(), "workspace_id": self.workspace.workspace_id,
+            "dataset_version": self.workspace.dataset_version_id,
+            "metric_version": self.workspace.metric_version, "result_shape": state.result_shape,
+        }
+        decision = reuse_decision(
+            artifact_scope=artifact.query_scope, requested_scope=requested_scope,
+            artifact_id=artifact.artifact_id, validation_status="valid",
+        )
         return decision
+
+    async def _resolve_result_reference(self, state, request, user):
+        artifact = await self._verified_previous_artifact(state, user)
+        if artifact is None:
+            raise ResultReferenceError(
+                "reference_artifact_unavailable", "上一份成功结果已失效或无法读取，请重新查询后再引用。",
+            )
+        page = await asyncio.to_thread(
+            self.result_artifact_store.read_csv_page,
+            artifact_id=artifact.artifact_id, user_id=user.id,
+            workspace_id=self.workspace.workspace_id,
+            cursor=request.rank - 1, page_size=2 if request.match_mode == "unique_highest" else 1,
+        )
+        return resolve_ranked_entity(
+            request, artifact, ranked_rows=page["rows"],
+            workspace_id=self.workspace.workspace_id, dataset_version=self.workspace.dataset_version_id,
+            metric_version=self.workspace.metric_version,
+        )
 
     async def _chart_from_previous_result(self, request, state, intent, user, usage):
         """Re-render the verified artifact without a new model/SQL query."""
         # The caller has already checked reuse, owner, versions and payload.
         artifact = state.previous_result_artifact
         selection = self.question_router.retriever.retrieve(
-            request.message, user, metric_ids=state.metric_ids,
-        )
-        semantic = {
-            **state.scope(), "chart_request": intent.chart_request,
-            "filters": [dict(zip(("dimension", "value"), f.split("=", 1))) for f in state.filters],
-        }
-        route = QuestionRoute("answerable", (), state.metric_ids, None, "chart_reuse")
-        plan = QueryPlan.from_selection(
-            selection, request.message, route,
-            {**state.as_dict(), "semantic_intent": semantic}, result_budget=self.result_budget,
+            request.message, user, metric_ids=artifact.metric_ids,
         )
         result_contract = ResultContract.from_selection(
-            selection, request.message, state.time_range,
+            selection, request.message, artifact.query_scope.get("time_range"),
             catalog=self.question_router.retriever.catalog,
-            required_result_columns=plan.required_result_columns,
-            requested_dimensions=plan.dimensions, result_budget=plan.result_budget,
+            required_result_columns=artifact.result_columns,
+            requested_dimensions=artifact.query_scope["dimensions"],
         )
-        chart = ChartContract.from_query_plan(
-            request.message, plan, result_contract, semantic_intent=semantic,
+        chart = ChartContract.from_result_artifact(
+            artifact, result_contract, chart_request=intent.chart_request,
         )
         usage.record_catalog({"chart_contract": chart.as_evidence()})
         if not chart.safe_to_visualize:

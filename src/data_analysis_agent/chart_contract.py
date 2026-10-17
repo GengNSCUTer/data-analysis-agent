@@ -15,6 +15,7 @@ from typing import Any, Literal, Mapping
 import pandas as pd
 
 from .query_plan import QueryPlan
+from .result_artifact import ResultArtifact
 from .semantic_catalog import ResultContract
 
 
@@ -99,6 +100,23 @@ class ChartContract:
         semantic_intent: Mapping[str, Any] | None = None,
     ) -> "ChartContract":
         """Derive chart structure without trusting model tool arguments."""
+        return cls._from_shape(
+            question, query_plan.dimensions, query_plan.time_grain, query_plan.metric_ids,
+            query_plan.required_result_columns, result_contract, semantic_intent=semantic_intent,
+        )
+
+    @classmethod
+    def from_result_artifact(cls, artifact: ResultArtifact, result_contract: ResultContract, *, chart_request: str) -> "ChartContract":
+        """A verified CSV needs chart-shape checks, not a new SQL admission."""
+        return cls._from_shape(
+            "", tuple(artifact.query_scope["dimensions"]), artifact.query_scope["time_grain"],
+            artifact.metric_ids, artifact.result_columns, result_contract,
+            semantic_intent={"chart_request": chart_request},
+        )
+
+    @classmethod
+    def _from_shape(cls, question, dimensions, time_grain, metric_ids, result_columns,
+                    result_contract, *, semantic_intent=None) -> "ChartContract":
 
         semantic_type = None
         if semantic_intent is not None:
@@ -117,7 +135,7 @@ class ChartContract:
             semantic_type is not None if semantic_intent is not None
             else bool(_VISUALIZATION_REQUEST.search(question))
         )
-        allowed = tuple(dict.fromkeys(query_plan.required_result_columns))
+        allowed = tuple(dict.fromkeys(result_columns))
         if not requested:
             return cls(
                 status="not_requested",
@@ -166,50 +184,49 @@ class ChartContract:
             )
         requested_type = explicit_types[0] if explicit_types else None
 
-        dimensions = query_plan.dimensions
-        if len(dimensions) > 2 or (query_plan.time_grain and len(dimensions) > 1):
+        if len(dimensions) > 2 or (time_grain and len(dimensions) > 1):
             return cls._blocked(
                 "clarification_required",
                 allowed,
                 "当前一次图表最多支持一个时间轴和一个业务分组维度；请缩小分组范围后重试。",
             )
 
-        if requested_type == "line" and not query_plan.time_grain:
+        if requested_type == "line" and not time_grain:
             return cls._blocked(
                 "clarification_required",
                 allowed,
                 "折线图需要明确的时间粒度；请补充按年、季度、月、周或日汇总。",
             )
         if requested_type == "area" and (
-            not query_plan.time_grain
-            or query_plan.dimensions
-            or len(query_plan.metric_ids) != 1
+            not time_grain
+            or dimensions
+            or len(metric_ids) != 1
         ):
             return cls._blocked(
                 "clarification_required",
                 allowed,
                 "面积图仅支持一个指标、无业务分组的时间序列；请补充时间粒度并缩小为单指标趋势。",
             )
-        if requested_type == "horizontal_bar" and query_plan.time_grain:
+        if requested_type == "horizontal_bar" and time_grain:
             return cls._blocked(
                 "clarification_required",
                 allowed,
                 "横向条形图需要一个业务分组横轴，不能用于时间序列；请改用折线图、面积图或柱状图。",
             )
         if requested_type == "donut":
-            if query_plan.time_grain or len(dimensions) != 1 or len(query_plan.metric_ids) != 1:
+            if time_grain or len(dimensions) != 1 or len(metric_ids) != 1:
                 return cls._blocked(
                     "clarification_required",
                     allowed,
                     "环形图仅支持一个可汇总业务维度和一个指标，不能混用时间轴、多指标或多分组。",
                 )
-            if query_plan.metric_ids[0] not in _DONUT_COMPATIBLE_METRICS:
+            if metric_ids[0] not in _DONUT_COMPATIBLE_METRICS:
                 return cls._blocked(
                     "unsupported",
                     allowed,
                     "当前环形图只支持可相加的金额或数量指标，不能把比率、均值或时长解释成构成占比。",
                 )
-        if query_plan.time_grain:
+        if time_grain:
             chart_type: ChartType = "line"
             x_column = "time"
             series = dimensions[0] if dimensions else None
@@ -231,7 +248,7 @@ class ChartContract:
         if requested_type is not None:
             chart_type = requested_type  # type: ignore[assignment]
 
-        required_fields = (x_column, *query_plan.metric_ids, *( (series,) if series else () ))
+        required_fields = (x_column, *metric_ids, *( (series,) if series else () ))
         if not set(required_fields) <= set(allowed):
             return cls._blocked(
                 "clarification_required",
@@ -245,10 +262,10 @@ class ChartContract:
             chart_type=chart_type,
             explicit_type=requested_type is not None,
             x_column=x_column,
-            y_columns=tuple(query_plan.metric_ids),
+            y_columns=tuple(metric_ids),
             series_column=series,
             allowed_result_columns=allowed,
-            title=cls._title(chart_type, x_column, query_plan.metric_ids, result_contract),
+            title=cls._title(chart_type, x_column, metric_ids, result_contract),
             clarification=None,
             max_x_values=8 if chart_type == "donut" else 120,
         )

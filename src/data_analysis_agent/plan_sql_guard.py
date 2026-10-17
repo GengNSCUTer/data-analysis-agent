@@ -58,7 +58,11 @@ def sql_plan_mismatch(sql: str, plan: Mapping[str, Any] | None) -> str | None:
                 limits[str(key)] = int(value)
             except (TypeError, ValueError):
                 continue
-    for dimension in plan.get("dimensions") or []:
+    # The online aggregate runner owns the outer LIMIT: SqlPolicy replaces it
+    # using this server plan. Rejecting a missing model-written LIMIT here is a
+    # duplicate language-model repair, not an execution safety measure.
+    ranking_dimensions = () if plan.get("result_budget") else plan.get("dimensions") or []
+    for dimension in ranking_dimensions:
         limit = limits.get(str(dimension))
         if limit is None:
             continue

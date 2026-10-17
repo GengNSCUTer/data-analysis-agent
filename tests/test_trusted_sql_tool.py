@@ -113,6 +113,25 @@ class FakeRepairProvider:
 
 
 @pytest.mark.asyncio
+async def test_plan_rejection_records_original_candidate_without_executing(tmp_path):
+    from unittest.mock import Mock
+    context = _context()
+    context.metadata["query_plan"] = {"metric_ids": ["paid_order_count"], "filters": [
+        {"dimension": "customer_state", "value": "SP",
+         "sources": [{"table": "dim_customers", "column": "customer_state"}]},
+    ]}
+    runner = SequenceRunner([])
+    runner.audit = Mock()
+    tool = TrustedRunSqlTool(runner, file_system=LocalFileSystem(working_directory=str(tmp_path)))
+    sql = "SELECT COUNT(*) AS paid_order_count FROM analytics.fact_orders"
+    result = await tool.execute(context, RunSqlToolArgs(sql=sql))
+    assert not result.success and not runner.calls
+    args, kwargs = runner.audit.record.call_args
+    assert args == (context, "analyst", sql)
+    assert kwargs["status"] == "rejected" and kwargs["reason"].startswith("query_plan:")
+
+
+@pytest.mark.asyncio
 async def test_result_budget_rejection_does_not_invoke_sql_repair(monkeypatch, tmp_path):
     from data_analysis_agent import postgres_runner
 

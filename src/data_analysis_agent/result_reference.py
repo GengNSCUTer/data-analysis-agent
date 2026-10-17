@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .analysis_state import AnalysisState
 from .result_artifact import ResultArtifact
@@ -49,6 +49,7 @@ def resolve_ranked_entity(
     request: ReferenceRequest,
     artifact: ResultArtifact | None,
     *,
+    ranked_rows: Sequence[Mapping[str, Any]],
     workspace_id: str,
     dataset_version: str,
     metric_version: str,
@@ -84,23 +85,22 @@ def resolve_ranked_entity(
     if direction not in {"asc", "desc"}:
         raise ResultReferenceError("reference_ordering_invalid", "上一轮结果的排序方向不可验证。")
 
-    ranked = artifact.result_metadata.get("ranked_entities")
-    if not isinstance(ranked, list) or len(ranked) < request.rank:
+    if not ranked_rows:
         raise ResultReferenceError("reference_rank_missing", "上一轮结果没有包含所请求的排名行。")
-    entry = ranked[request.rank - 1]
-    if not isinstance(entry, Mapping) or entry.get("rank") != request.rank:
-        raise ResultReferenceError("reference_rank_invalid", "上一轮结果的排名序号不可验证。")
-    value = entry.get("value")
-    order_value = entry.get("order_value")
+    # The caller reads this bounded page from the owner-verified CSV, starting
+    # at rank - 1. Narrative/preview rows are never reference evidence.
+    entry = ranked_rows[0]
+    value = entry.get(request.dimension)
+    order_value = entry.get(ordering_column)
     if not isinstance(value, str) or not value.strip() or order_value is None:
         raise ResultReferenceError("reference_entity_missing", "上一轮结果没有可引用的实体值。")
 
     if request.match_mode == "unique_highest":
         if request.rank != 1 or direction != "desc":
             raise ResultReferenceError("reference_not_unique_highest", "当前结果不能证明所指实体是唯一最高值。")
-        if len(ranked) > 1:
-            second = ranked[1]
-            if not isinstance(second, Mapping) or second.get("order_value") == order_value:
+        if len(ranked_rows) > 1:
+            second = ranked_rows[1]
+            if second.get(ordering_column) == order_value:
                 raise ResultReferenceError("reference_tie", "第一名存在并列，无法唯一确定‘最高的’实体。")
 
     return ResolvedReference(

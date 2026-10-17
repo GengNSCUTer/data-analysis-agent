@@ -44,8 +44,16 @@ def _request(**kwargs):
     )
 
 
+def _resolve(request, artifact, **kwargs):
+    rows = [] if artifact is None else [
+        {item["dimension"]: item["value"], "gmv": item["order_value"]}
+        for item in artifact.result_metadata.get("ranked_entities", [])
+    ]
+    return resolve_ranked_entity(request, artifact, ranked_rows=rows[request.rank - 1:request.rank + 1], **kwargs)
+
+
 def test_resolves_unique_highest_from_current_artifact():
-    binding = resolve_ranked_entity(
+    binding = _resolve(
         _request(expected_source_artifact_id="rta_current"),
         _artifact(),
         workspace_id="olist-demo",
@@ -58,12 +66,12 @@ def test_resolves_unique_highest_from_current_artifact():
 
 def test_rejects_tied_highest_and_stale_scope():
     with pytest.raises(ResultReferenceError, match="并列"):
-        resolve_ranked_entity(
+        _resolve(
             _request(), _artifact(second_value=100), workspace_id="olist-demo",
             dataset_version="olist-dataset-v3", metric_version="olist-metrics-v3",
         )
     with pytest.raises(ResultReferenceError, match="版本"):
-        resolve_ranked_entity(
+        _resolve(
             _request(), _artifact(), workspace_id="olist-demo",
             dataset_version="other", metric_version="olist-metrics-v3",
         )
@@ -71,7 +79,7 @@ def test_rejects_tied_highest_and_stale_scope():
 
 def test_first_row_does_not_claim_unique_highest():
     request = _request(match_mode="first_row")
-    binding = resolve_ranked_entity(
+    binding = _resolve(
         request, _artifact(second_value=100), workspace_id="olist-demo",
         dataset_version="olist-dataset-v3", metric_version="olist-metrics-v3",
     )
@@ -82,7 +90,7 @@ def test_server_owned_binding_replaces_same_dimension_filter():
     state = AnalysisState(filters=("customer_state=RJ", "payment_type=credit_card"))
     updated = apply_reference_filter(
         state,
-        resolve_ranked_entity(
+        _resolve(
             _request(), _artifact(), workspace_id="olist-demo",
             dataset_version="olist-dataset-v3", metric_version="olist-metrics-v3",
         ),
@@ -91,7 +99,7 @@ def test_server_owned_binding_replaces_same_dimension_filter():
 
 
 def test_second_row_resolves_without_claiming_unique_highest():
-    binding = resolve_ranked_entity(
+    binding = _resolve(
         ReferenceRequest(kind="previous_ranked_entity", dimension="customer_state",
                          rank=2, match_mode="first_row"),
         _artifact(), workspace_id="olist-demo", dataset_version="olist-dataset-v3",
@@ -114,7 +122,18 @@ def test_reference_failures_do_not_create_filters(change, reference_options, rea
     state = AnalysisState(filters=("customer_state=MG",))
     artifact = replace(_artifact(), **change) if change is not None else None
     with pytest.raises(ResultReferenceError) as failure:
-        resolve_ranked_entity(_request(**reference_options), artifact, workspace_id="olist-demo",
+        _resolve(_request(**reference_options), artifact, workspace_id="olist-demo",
                               dataset_version="olist-dataset-v3", metric_version="olist-metrics-v3")
     assert failure.value.reason_code == reason
     assert state.filters == ("customer_state=MG",)
+
+
+def test_rank_ten_uses_requested_csv_row_not_eight_row_metadata():
+    artifact = _artifact(dimensions=("product_category_name",))
+    artifact = replace(artifact, result_columns=("product_category_name", "gmv"))
+    request = ReferenceRequest(kind="previous_ranked_entity", dimension="product_category_name",
+                               rank=10, match_mode="first_row")
+    binding = resolve_ranked_entity(request, artifact,
+        ranked_rows=[{"product_category_name": "toys", "gmv": "12.34"}],
+        workspace_id="olist-demo", dataset_version="olist-dataset-v3", metric_version="olist-metrics-v3")
+    assert (binding.rank, binding.value) == (10, "toys")

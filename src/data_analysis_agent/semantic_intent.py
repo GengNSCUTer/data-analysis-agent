@@ -66,7 +66,7 @@ class ReferenceRequest(BaseModel):
 
     kind: Literal["previous_ranked_entity"]
     dimension: str
-    rank: int = Field(ge=1, le=8)
+    rank: int = Field(ge=1)
     match_mode: Literal["first_row", "unique_highest"] = Field(
         default="unique_highest",
         description="最高值用unique_highest且rank=1；第N行/排名第二等用first_row并填写rank=N。",
@@ -106,6 +106,10 @@ class SemanticIntent(BaseModel):
     filters: tuple[IntentFilter, ...] = ()
     reference_requests: tuple[ReferenceRequest, ...] = ()
     chart_request: str | None = Field(default=None, max_length=80)
+    result_target: Literal["current_task", "last_successful_result"] = Field(
+        default="current_task",
+        description="默认解释当前任务结果；明确要求失败前那份成功结果时选择last_successful_result，不修改当前待查询条件。",
+    )
     top_n: int | None = Field(default=None, ge=1, le=100_000)
     clarification: str | None = Field(
         default=None,
@@ -304,6 +308,9 @@ class SemanticIntentInterpreter:
             if isinstance(artifact, Mapping)
             else None
         )
+        context["last_successful_result_scope"] = (
+            artifact.get("query_scope") if isinstance(artifact, Mapping) else None
+        )
         examples = [
             {
                 "question": "解释一下商品成交额的统计口径，不要查库",
@@ -368,6 +375,7 @@ class SemanticIntentInterpreter:
                 "给了state_patch时不要再填写未改变的顶层metric_ids/dimensions/time_range/time_grain/top_n；服务端从当前状态继承。",
                 "排名数量属于当前分组：换分组时，服务端默认清除旧top_n；只有用户本轮明确要求数量才设置top_n。省略指标、时间或筛选的追问默认修改当前任务，保留这些已确认条件，不重复澄清。失败仅表示执行未成功，不表示用户已撤销分析范围。",
                 "当前status=failed时，用户要求重试应使用data_query和update_task，不改变已确认字段，不用上一次成功结果替代这次尚未成功的查询。",
+                "当前任务和上次成功结果可以范围不同。用户明确要求解释/展示失败前那份成功结果时，使用result_followup、action=keep、result_target=last_successful_result；不要恢复或改写当前待查询范围。只解释当前任务时result_target=current_task，未成功的查询不能用旧数字冒充。",
                 "筛选补丁的value必须是对象数组，不能是单个对象。只添加条件用add；替换某个维度先remove当前同维度条件再add新条件；仅撤销某个维度用remove已有条件，保留其他维度。只有用户明确取消全部筛选才clear filters。",
                 '严格JSON示例：{"request_kind":"data_query","action":"update_task","metric_ids":[],"dimensions":[],"state_patch":{"operations":[{"op":"clear","field":"filters","value":null}]},"confidence":0.9}。不要输出未转义的伪JSON、注释、Markdown或自然语言。',
                 '结构化示例：已有RJ州和某品类，只取消州限制：state_patch.operations=[{"op":"remove","field":"filters","value":[{"dimension":"customer_state","value":"RJ"}]}]。这是删除一个条件，不是清空filters；要删除的值从受控状态读取。',
@@ -406,7 +414,7 @@ class SemanticIntentInterpreter:
                 "state_patch修改filters时用add增加条件、remove撤销指定条件；set会替换整个筛选列表，所以仅替换其中一个维度时必须保留其他已确认维度。引用前一张表的第一名品类时继承既有州筛选，reference_requests.dimension=product_category_name。",
                 "comparison_baseline可描述要比较的基线，不必要求用户说同比/环比。",
                 f"chart_request：支持的图类型用这些规范ID {json.dumps(get_args(ChartType))}，只要求画图但没指定类型用auto，不需要图用null。不能自行添加_chart后缀；不支持的图保留原类型供能力校验，不悄悄换图。不要求用户必须说'图表'。",
-                "如果用户说‘这个州/第一名/刚才排名第一的州’并要重新统计，使用reference_requests；只填写kind=previous_ranked_entity、dimension、rank、match_mode和expected_source_artifact_id，不填写value。服务端只从当前已验证结果工件解析值；没有唯一最高或工件失效时会澄清。",
+                "如果用户说‘这个州/第一名/刚才排名第一的州’并要重新统计，使用reference_requests；只填写kind=previous_ranked_entity、dimension、rank、match_mode和expected_source_artifact_id，不填写value。服务端按所请求排名从上次成功结果的完整工件读取，不受模型八行摘要限制；没有唯一最高或工件失效时会澄清。",
                 "最高的州用rank=1,match_mode=unique_highest；排名第二的州用rank=2,match_mode=first_row，不可用unique_highest。显式改看MG州则直接修改filter，不再引用旧排名。",
                 '引用来源维度和本次分组是两件事：问“这个州哪些商品种类卖得好”时，reference_requests.dimension仍是customer_state，但本次按品类分组，必须给state_patch.operations=[{"op":"set","field":"dimensions","value":["product_category_name"]}]，不能给空operations而继续按州分组。不要在assumptions说改了分组却不提交相应patch。',
                 '结构化示例：刚才排名第二的州按商品品类查看，是当前分析的延续。输出 {"action":"update_task","request_kind":"data_query","state_patch":{"operations":[{"op":"set","field":"dimensions","value":["product_category_name"]}]},"reference_requests":[{"kind":"previous_ranked_entity","dimension":"customer_state","rank":2,"match_mode":"first_row"}]}。可附加当前工件ID为expected_source_artifact_id；未修改的time_range等字段必须省略，不能填null，因为null表示清空。不要猜州代码；只有明确另起分析才new_task。',

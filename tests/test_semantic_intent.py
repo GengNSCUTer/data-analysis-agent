@@ -543,7 +543,7 @@ async def test_handler_semantic_path_does_not_call_legacy_router(
 
 
 @pytest.mark.asyncio
-async def test_ranked_reference_filter_reaches_effective_intent_and_sql_plan(monkeypatch):
+async def test_ranked_reference_filter_reaches_effective_intent_and_sql_plan(tmp_path):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
@@ -551,6 +551,7 @@ async def test_ranked_reference_filter_reaches_effective_intent_and_sql_plan(mon
     from data_analysis_agent.budget import RequestBudget
     from data_analysis_agent.chat_runtime import BudgetedChatHandler
     from data_analysis_agent.result_artifact import ResultArtifact
+    from data_analysis_agent.result_artifact_store import ResultArtifactStore
     from data_analysis_agent.run_recorder import AgentRun
     from vanna.core.storage import Conversation
     from vanna.core.user import RequestContext
@@ -562,10 +563,17 @@ async def test_ranked_reference_filter_reaches_effective_intent_and_sql_plan(mon
     dates = {"start": "2017-01-01", "end": "2018-01-01", "end_semantics": "exclusive"}
     state = replace(AnalysisState.new(workspace), metric_ids=("gmv",),
                     dimensions=("customer_state",), time_range=dates)
+    artifact_store = ResultArtifactStore(tmp_path)
+    manifest = artifact_store.save_result_csv(
+        artifact_id="ranking", user_id=user.id, workspace_id=workspace.workspace_id,
+        columns=["customer_state", "gmv"], rows=[{"customer_state": "SP", "gmv": 100}, {"customer_state": "RJ", "gmv": 80}],
+        row_count=2, dataset_version=workspace.dataset_version_id, metric_version=workspace.metric_version,
+        result_metadata={"validation_status": "valid"},
+    )
     artifact = ResultArtifact(
         "ranking", "可信排名", ("gmv",), ("customer_state", "gmv"),
         workspace.dataset_version_id, workspace.metric_version, "not_rendered",
-        workspace_id=workspace.workspace_id, query_scope=state.scope(),
+        workspace_id=workspace.workspace_id, query_scope=state.scope(), csv_sha256=manifest["csv_sha256"],
         result_metadata={"validation_status": "valid",
                          "ordering": [{"column": "gmv", "direction": "desc"}],
                          "ranked_entities": [
@@ -599,8 +607,8 @@ async def test_ranked_reference_filter_reaches_effective_intent_and_sql_plan(mon
         agent, RequestBudget(), recorder, workspace=workspace,
         question_router=QuestionRouter(CatalogRetriever(catalog), full_results=True),
         semantic_interpreter=SemanticIntentInterpreter(catalog, complete),
+        result_artifact_store=artifact_store,
     )
-    monkeypatch.setattr(handler, "_result_reuse_decision", AsyncMock(return_value="validated_result"))
     request = ChatRequest(message="刚才排名第二的州哪些品类成交额高？",
                           conversation_id=conversation.id, request_context=RequestContext())
     _chunks = [chunk async for chunk in handler.handle_stream(request)]

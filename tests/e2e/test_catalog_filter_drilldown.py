@@ -70,7 +70,9 @@ def _check_reader_values(live):
         assert ranked_values == sorted(ranked_values, reverse=True)
     for row in actual:
         matches = [r for r in gold if all(
-            row[d] == r[index] or d == "product_category_name" and row[d] == r[-1]
+            row[d] == r[index] or d == "product_category_name" and (
+                row[d] == r[-1] or r[index] is None and r[-1] is None and row[d] in ("", "nan", None)
+            )
             for index, d in enumerate(state["dimensions"])
         )]
         assert len(matches) == 1, {"actual": row, "gold": gold}

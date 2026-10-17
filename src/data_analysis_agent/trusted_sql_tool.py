@@ -7,6 +7,7 @@ the injected runner reports a sanitized execution failure.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from hashlib import sha256
@@ -126,6 +127,7 @@ class TrustedRunSqlTool(RunSqlTool):
     async def execute(self, context: ToolContext, args: RunSqlToolArgs) -> ToolResult:
         mismatch = sql_plan_mismatch(args.sql, context.metadata.get("query_plan"))
         if mismatch:
+            await self._audit_plan_rejection(context, args.sql, mismatch)
             context.metadata["safe_sql_error"] = SanitizedSqlError("unknown", mismatch, True)
             result = ToolResult(
                 success=False,
@@ -231,6 +233,7 @@ class TrustedRunSqlTool(RunSqlTool):
             outcome.repaired_sql, context.metadata.get("query_plan")
         )
         if repaired_mismatch:
+            await self._audit_plan_rejection(context, outcome.repaired_sql, repaired_mismatch)
             evidence["repair_execution_status"] = "failed"
             evidence["terminal_reason"] = "plan_sql_mismatch"
             return self._terminal_result(
@@ -259,6 +262,14 @@ class TrustedRunSqlTool(RunSqlTool):
             evidence=evidence,
             detail="修复后的 SQL 仍未通过可信执行链，系统未输出未经验证的数字。",
         )
+
+    async def _audit_plan_rejection(self, context, sql, reason):
+        """Keep pre-execution plan failures in the existing protected SQL audit."""
+        audit = getattr(self.sql_runner, "audit", None)
+        if audit is not None:
+            role = "admin" if "admin" in context.user.group_memberships else "analyst"
+            await asyncio.to_thread(audit.record, context, role, sql,
+                                    status="rejected", reason="query_plan:" + reason)
 
     def _remember_result_artifact(self, context: ToolContext, result: ToolResult) -> None:
         """Bind a chart to the one successful result emitted in this request."""
