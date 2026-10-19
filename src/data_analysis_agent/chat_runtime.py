@@ -153,6 +153,7 @@ class BudgetedChatHandler(ChatHandler):
         result_budget: ResultBudget | None = None,
         context_builder: AnalysisContextBuilder | None = None,
         filter_source_resolver: Callable[[tuple[QueryFilter, ...]], Awaitable[tuple[QueryFilter, ...]]] | None = None,
+        require_semantic_interpreter: bool = False,
     ):
         super().__init__(agent)
         self.budget = budget
@@ -165,6 +166,12 @@ class BudgetedChatHandler(ChatHandler):
         self.result_budget = result_budget or ResultBudget.aggregate()
         self.context_builder = context_builder
         self.filter_source_resolver = filter_source_resolver
+        self.require_semantic_interpreter = require_semantic_interpreter
+        if self.require_semantic_interpreter and self.semantic_interpreter is None:
+            raise ValueError(
+                "the online chat composition requires SemanticIntentInterpreter; "
+                "QuestionRouter.classify/admit_sql_request are offline harness APIs"
+            )
         if self.result_budget.query_mode != "aggregate":
             raise ValueError("only aggregate execution is enabled in the chat runtime")
 

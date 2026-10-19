@@ -617,4 +617,5 @@ def route_semantic_intent(
         intent=kind,
         requires_database=True,
         confidence=intent.confidence,
+        preflight_estimated_rows=preflight.estimated_max_rows,
     )

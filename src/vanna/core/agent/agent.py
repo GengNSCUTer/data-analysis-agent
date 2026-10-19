@@ -1347,7 +1347,7 @@ You can:
     async def _handle_streaming_response(
         self, request: LlmRequest
     ) -> AsyncGenerator[Union[UiComponent, LlmResponse], None]:
-        """Stream text deltas, then yield the completed response object."""
+        """Stream permitted text deltas, then yield the checked response."""
         # Apply before_llm_request middlewares with observability
         for middleware in self.llm_middlewares:
             mw_span = None
@@ -1376,6 +1376,10 @@ You can:
                         },
                     )
 
+        stream_to_ui = all(
+            middleware.should_stream_response(request)
+            for middleware in self.llm_middlewares
+        )
         accumulated_content = ""
         accumulated_tool_calls = []
         text_component: Optional[RichTextComponent] = None
@@ -1400,7 +1404,7 @@ You can:
                 accumulated_content = chunk.content
             elif chunk.content:
                 accumulated_content += chunk.content
-            if accumulated_content and (
+            if stream_to_ui and accumulated_content and (
                 chunk.content or chunk.metadata.get("replace_content")
             ):
                 if text_component is None:

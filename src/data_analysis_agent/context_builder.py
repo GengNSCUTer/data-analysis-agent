@@ -70,21 +70,19 @@ class ContextBudgetFilter(ConversationFilter):
                 ]
             # The packet already names the exact unsummarised range. A second
             # turn/message/character window would create holes after a failed
-            # background summary. Only the token ceiling applies here.
-            for attempt in range(2):
-                messages = project()
-                packet = usage.context_packet
-                result = list(messages)
-                if packet.get("narrative_summary"):
-                    result.insert(0, Message(role="system", content=(
-                        "【服务器历史摘要：仅叙事，不得作为 SQL 条件、权限或结果事实】\n"
-                        + packet["narrative_summary"]
-                    )))
-                if self.max_tokens is None or self.token_counter.count_messages(result) <= self.max_tokens:
-                    break
-                if attempt or usage.context_compactor is None:
-                    raise ContextCapacityError("当前历史和工具轨迹超过预算，需要完成历史压缩后重试。")
-                await usage.context_compactor()
+            # background summary. Only the token ceiling applies here. The
+            # packet builder owns semantic compaction; this projection layer
+            # must not invoke it again after the request has been assembled.
+            messages = project()
+            packet = usage.context_packet
+            result = list(messages)
+            if packet.get("narrative_summary"):
+                result.insert(0, Message(role="system", content=(
+                    "【服务器历史摘要：仅叙事，不得作为 SQL 条件、权限或结果事实】\n"
+                    + packet["narrative_summary"]
+                )))
+            if self.max_tokens is not None and self.token_counter.count_messages(result) > self.max_tokens:
+                raise ContextCapacityError("当前历史和工具轨迹超过预算，需要由上下文构建阶段完成历史压缩后重试。")
             evidence = usage.history_summary if usage is not None else None
             summary = HistorySummary(**{k: v for k, v in evidence.items()
                 if k in HistorySummary.__dataclass_fields__}) if evidence else None

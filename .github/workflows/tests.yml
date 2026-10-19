@@ -28,7 +28,7 @@ jobs:
         python -m pip install -e ".[test]"
     - name: Run deterministic Python tests
       run: |
-        python -m pytest -v \
+        python -m pytest -v -m "not integration" \
           tests/test_tool_permissions.py \
           tests/test_llm_context_enhancer.py \
           tests/test_workflow.py \
@@ -42,6 +42,7 @@ jobs:
           tests/test_demo_session.py \
           tests/test_demo_scenarios.py \
           tests/test_budget.py \
+          tests/test_budget_streaming.py \
           tests/test_context_builder.py
     - name: Run deterministic evaluation inventory
       run: |

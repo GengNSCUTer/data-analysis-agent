@@ -54,6 +54,17 @@ def budget_metadata(budget: ResultBudget | None = None) -> dict:
     return {**budget.as_metadata(), "query_plan": budget.as_metadata()}
 
 
+def test_budget_evidence_names_each_layer_without_changing_contract_payload() -> None:
+    budget = ResultBudget.aggregate(execution_max_rows=100_000)
+    evidence = budget.as_evidence()
+
+    assert evidence["process_row_ceiling"] == 100_000
+    assert evidence["query_result_row_ceiling"] == 100_000
+    assert evidence["frontend_preview_row_limit"] == 200
+    assert evidence["model_summary_row_limit"] == 8
+    assert set(budget.as_metadata()["result_budget"]) != set(evidence)
+
+
 @pytest.mark.parametrize("mode", ["aggregate", "detail_page", "export"])
 def test_query_modes_have_distinct_roundtrippable_budgets(mode):
     budget = ResultBudget(

@@ -189,6 +189,10 @@ class BudgetUsage:
     query_plan: dict[str, Any] | None = None
     query_plan_prompt: str | None = None
     result_summary: str | None = None
+    # A degraded result may be displayed for diagnosis, but it is not a
+    # trusted numeric source. The next model response must not turn it into a
+    # business conclusion.
+    result_answer_blocked: bool = False
     repair_evidence: dict[str, Any] | None = None
     result_contract_satisfied: bool = False
     extra_sql_suppressed: int = 0
@@ -428,6 +432,11 @@ class BudgetUsage:
         """Mark that a server-validated result is available for this request."""
         self.result_contract_satisfied = True
 
+    def mark_result_answer_blocked(self) -> None:
+        """Keep displayable-but-untrusted rows out of the answer path."""
+        self.result_answer_blocked = True
+        self.result_contract_satisfied = False
+
     def set_validated_chart_frame(self, frame: Any) -> None:
         """Keep an ephemeral validated frame for deterministic server charts.
 
@@ -508,6 +517,7 @@ class BudgetUsage:
             "catalog_trace": self.catalog_trace,
             "query_plan": self.query_plan,
             "result_summary": self.result_summary,
+            "result_answer_blocked": self.result_answer_blocked,
             "repair_evidence": self.repair_evidence,
             "result_contract_satisfied": self.result_contract_satisfied,
             "extra_sql_suppressed": self.extra_sql_suppressed,
@@ -597,15 +607,14 @@ class BudgetSafetyMiddleware(LlmMiddleware):
             usage.record_llm_round()
         return request
 
-    async def after_llm_response(
-        self, request: LlmRequest, response: LlmResponse
-    ) -> LlmResponse:
+    def should_stream_response(self, request: LlmRequest) -> bool:
+        """Keep known-untrusted text off both rich and simple SSE channels."""
         usage = CURRENT_BUDGET.get()
-        if usage is None:
-            return response
-        usage.record_llm_response(response.is_tool_call())
-        usage.record_usage(response.usage)
-        usage.finish_llm_round()
+        return usage is None or self._rejection_response(usage) is None
+
+    @staticmethod
+    def _rejection_response(usage: BudgetUsage) -> LlmResponse | None:
+        """One set of existing rejection rules for streaming and final output."""
         if usage.termination_reason == "tool_budget_exhausted":
             return LlmResponse(
                 content=(
@@ -613,6 +622,14 @@ class BudgetSafetyMiddleware(LlmMiddleware):
                     "请缩小问题范围或拆分成多个问题后重试。"
                 ),
                 finish_reason="budget_exhausted",
+            )
+        if usage.result_answer_blocked:
+            return LlmResponse(
+                content=(
+                    "查询结果可以在界面中查看，但没有通过完整的结果合同校验，"
+                    "因此不能据此给出数字结论。请补充筛选条件或调整查询口径后重试。"
+                ),
+                finish_reason="untrusted_result",
             )
         if usage.error_type in {"sql_repair_failed", "result_validation_failed"}:
             return LlmResponse(
@@ -622,6 +639,20 @@ class BudgetSafetyMiddleware(LlmMiddleware):
                 ),
                 finish_reason="trusted_query_failed",
             )
+        return None
+
+    async def after_llm_response(
+        self, request: LlmRequest, response: LlmResponse
+    ) -> LlmResponse:
+        usage = CURRENT_BUDGET.get()
+        if usage is None:
+            return response
+        usage.record_llm_response(response.is_tool_call())
+        usage.record_usage(response.usage)
+        usage.finish_llm_round()
+        rejected = self._rejection_response(usage)
+        if rejected is not None:
+            return rejected
         if usage.result_contract_satisfied and response.is_tool_call():
             sql_calls = [
                 call for call in (response.tool_calls or ()) if call.name == "run_sql"

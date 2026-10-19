@@ -217,6 +217,25 @@ def _build_semantic(payload, question="自然问法"):
     return intent, route, plan
 
 
+def test_semantic_route_preflight_is_reused_by_query_plan(monkeypatch) -> None:
+    """Admission and plan construction share one cardinality calculation."""
+    original = QueryPlan.preflight
+    calls = []
+
+    def counted(cls, *args, **kwargs):
+        calls.append((args, kwargs))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(QueryPlan, "preflight", classmethod(counted))
+    _, route, plan = _build_semantic(
+        {"request_kind": "data_query", "metric_ids": ["gmv"]},
+        question="统计 GMV",
+    )
+
+    assert route.preflight_estimated_rows == plan.result_budget.aggregate_result_rows
+    assert len(calls) == 1
+
+
 def test_plan_reads_structured_dates_dimensions_and_grain_not_old_regex():
     _, route, plan = _build_semantic(
         {

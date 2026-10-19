@@ -81,3 +81,37 @@ Phase 2/3 的范围回归、scope probe 与服务验收见 [`Phase 2/3 记录`](
 审阅边界：本次 QueryPlan 的 `top_n` 为空，不能据此称“前五”已完整冻结进计划。本次 SQL 与返回行数实际正确；排行数量的结构化约束覆盖应在后续 QueryPlan 审阅中核对。
 
 Day 1 的学习进度记录在 [`../learning/agent-project-walkthrough-v1.md`](../learning/agent-project-walkthrough-v1.md)。用户已完成入口及 Router 复述，当前进入 QueryPlan 与模型上下文小段；完整链路复述尚未完成，Day 1 不标记完成。
+
+## 2026-10-19｜五项流程重复与结果预算审计
+
+针对一次请求中可能重复审查、展示不可信结果和预算数字易混淆的问题，完成了五项最小修复：
+
+1. 语义路由的 `QueryPlan.preflight()` 估算通过 `QuestionRoute.preflight_estimated_rows` 传给
+   `QueryPlan.from_selection()`，在线语义路径只计算一次；离线/旧路由没有该估算时，仍在计划边界
+   计算一次，避免在线重复计算。
+2. `ContextBudgetFilter` 只投影 `AnalysisContextBuilder` 已选定的消息范围，不再在同一请求里再次
+   调用语义压缩器。完整请求预算检查仍负责发现系统提示、工具轨迹和输出预留造成的总量超限。
+3. `ResultValidator` 的 `degraded` 结果仍可在界面展示，但 `TrustedRunSqlTool` 会移除模型侧 CSV
+   回退内容并标记 `result_answer_blocked`；预算中间件拒绝后续数字结论，避免把不完整形状当成可信结果。
+4. `ResultBudget.as_metadata()` 的严格计划/合同字段保持不变；新增仅用于审计的 `as_evidence()`，
+   明确区分进程行数上限、查询结果行数上限、前端预览行数、模型摘要行数、字节上限和超时。
+5. 在线组合根要求注入 `SemanticIntentInterpreter`；`QuestionRouter.classify/admit_sql_request` 只
+   保留给离线/定向测试，不再能被生产入口无意间当作默认语义路由。
+
+定向 Python 回归为 **228 passed、28 skipped**；新增覆盖预检复用、二次压缩不重复执行、degraded
+结果禁止数字回答、分层预算证据和在线旧路由组合拒绝。定向 Ruff 通过。使用最新代码重启
+`data-analysis-agent-m4`（`http://127.0.0.1:32013/embedded-copilot`）后，Playwright + SSE 回归
+为 **7 passed、13 deselected**，覆盖嵌入壳、结果预览、移动端布局和多轮澄清。
+
+## 2026-10-19｜拒答与流式展示的先后关系
+
+`after_llm_response()` 在模型流结束后才运行，单靠它替换回答仍可能先泄漏候选文本。
+现在 `LlmMiddleware.should_stream_response(request)` 默认允许增量展示；
+`BudgetSafetyMiddleware` 复用 `_rejection_response(usage)` 的现有判断，在已知不可信状态下返回 false。
+`Agent._handle_streaming_response()` 此时只收集模型文本、工具调用和 usage，先经过最终中间件，
+再由原回答路径展示安全文本。正常回答仍即时显示，不增加一套业务准入规则。
+
+覆盖状态为工具预算耗尽、`result_answer_blocked`、SQL 修复失败和结果校验失败。
+这不是对所有生成文字的语义证明。测试既检查全部 rich/simple/SSE 事件，也在浏览器观察中间 DOM；
+不能仅检查最终回答已被替换。相关回归与真实三轮追问证据见
+[产品完善计划第一阶段](../../plan/process-agent-product-readiness-v1.md#implementation-phase-1)。

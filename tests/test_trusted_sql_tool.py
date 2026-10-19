@@ -311,6 +311,31 @@ async def test_missing_dimension_displays_the_metric_without_a_trusted_stamp(tmp
 
 
 @pytest.mark.asyncio
+async def test_degraded_result_stays_visible_but_is_removed_from_model_payload(tmp_path) -> None:
+    from data_analysis_agent.budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
+
+    runner = SequenceRunner([pd.DataFrame({"paid_order_count": [7]})])
+    context = _context()
+    context.metadata["required_result_columns"] = ["customer_state", "paid_order_count"]
+    usage = BudgetUsage(RequestBudget())
+    context.metadata["budget_usage"] = usage
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        result = await _tool(runner, None, tmp_path).execute(
+            context,
+            RunSqlToolArgs(sql="SELECT COUNT(order_id) AS paid_order_count FROM fact_orders"),
+        )
+    finally:
+        CURRENT_BUDGET.reset(token)
+
+    assert result.success is True
+    assert result.metadata["result_answer_allowed"] is False
+    assert "paid_order_count" not in result.result_for_llm
+    assert "results" not in result.metadata
+    assert usage.result_answer_blocked is True
+
+
+@pytest.mark.asyncio
 async def test_executable_result_missing_metric_is_terminal_without_repair(tmp_path) -> None:
     runner = SequenceRunner([pd.DataFrame({"wrong_column": [7]})])
     provider = FakeRepairProvider(

@@ -1480,3 +1480,19 @@ diff check 通过。更新后的主端口真实 Playwright + 模型 + 数据库�
 结果解释数字检查现在忽略行首 `1.`/`1）`、`第 10 名`、`排名第 2`、`Top 10`、`前 5 项`、`共 10 行` 等展示编号；金额、比例、年份和其他业务数字仍必须出现在可信结果摘要中。
 
 确定性回归：**147 passed、10 skipped**，补充测试覆盖全局、州分区、时间分区、时间+多维分区、错误分区字段和数字展示编号。真实 `Playwright + SSE + PostgreSQL` 浏览器验收：分区 Top-N **2 个场景通过**（每州前五个品类、2017 年每月前五个品类），原九轮连续分析流程 **9 轮通过**。证据位于仓库外 `evals/flow-constraints-20261017-final/`，服务仍为 screen `data-analysis-agent-fluency`、`http://127.0.0.1:32016/embedded-copilot`。
+
+## 2026-10-19｜五项请求流程审计修复
+
+本轮针对一次请求内重复审查、上下文二次压缩、`degraded` 结果误入回答、预算数字混淆和生产入口误走旧路由，完成最小范围修复。语义路由把结果行数预检估算传给 `QueryPlan`，在线只计算一次；`ContextBudgetFilter` 只做已选上下文的投影，不再重复调用压缩器；可展示但未完整满足结果合同的结果会保留前端表格，同时从模型侧移除 CSV 回退并禁止数字结论；`ResultBudget` 增加分层预算审计视图；生产组合根要求 `SemanticIntentInterpreter`，旧 `QuestionRouter` 分类/准入仅用于离线测试。
+
+验证：相关 Python 回归 **228 passed、28 skipped**，定向 Ruff 通过；最新代码的 M4 服务 `http://127.0.0.1:32013/embedded-copilot` 真实 Playwright + SSE 回归 **7 passed、13 deselected**。
+
+## 2026-10-19｜产品完善路线与第一项流式输出修复
+
+将六项改进整理到 [产品完善执行计划](plan/process-agent-product-readiness-v1.md)，顺序为可信流式回答、业务质量、全新环境部署、新业务库接入、多人/故障保障、CI 与开源收口。该计划落实既有四周学习计划，不启动新的后训练，也不将代码实现视为用户已经掌握。
+
+第一项完成：此前预算中间件会在模型完整回答后替换不可信结论，但 Agent 已提前发送文本分片。现在中间件复用现有拒答判断决定是否即时展示；`degraded`、SQL 修复失败、结果校验失败和工具预算耗尽时，先收集完整响应，经过原中间件后才显示。正常回答保持流式，工具调用和 token 计量继续收集。没有增加指标、句式或澄清拦截。
+
+验证：相关 Python 回归 **225 passed、5 deselected**；Playwright 联合回归 **12 passed、25 deselected**，其中 5 项为实际 Agent SSE 的可控 provider 回放（检查中间 DOM 不出现候选数字），7 项为产品页面回归。另用真实模型、数据库和浏览器完成“最高销售额州 → 该州畅销品类 → 前十品类”三轮追问，**1 组通过，76.69 秒**；末轮结果与独立 reader SQL 核对通过。定向 Ruff、compileall、diff check 通过，新增确定性测试纳入 CI。
+
+真实链路证据保存在仓库外 `evals/product-readiness-stage1-20261019/`。服务继续使用 `http://127.0.0.1:32013/embedded-copilot`。本轮只完成第一项，不将此结果当作全业务准确率或可上线结论；下一项为独立业务用例和连续分析质量核验。

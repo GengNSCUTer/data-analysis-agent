@@ -67,3 +67,11 @@ class LlmMiddleware(ABC):
             Modified response, or original if no changes
         """
         return response
+
+    def should_stream_response(self, request: "LlmRequest") -> bool:
+        """Whether response text may reach the UI before final middleware.
+
+        Return False when the complete response must be checked or replaced
+        first. Tool calls and provider usage are still collected normally.
+        """
+        return True

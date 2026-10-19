@@ -26,6 +26,17 @@ def _user(role: str = "analyst") -> User:
     return User(id=f"router-{role}", group_memberships=[role])
 
 
+def test_online_handler_rejects_legacy_router_only_composition(router) -> None:
+    with pytest.raises(ValueError, match="requires SemanticIntentInterpreter"):
+        BudgetedChatHandler(
+            object(),
+            RequestBudget(),
+            None,
+            question_router=router,
+            require_semantic_interpreter=True,
+        )
+
+
 @pytest.mark.parametrize(
     ("question", "state"),
     [

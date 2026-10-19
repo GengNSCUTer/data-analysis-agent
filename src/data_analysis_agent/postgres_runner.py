@@ -301,6 +301,7 @@ class SecurePostgresRunner(SqlRunner):
                         "contract_id": result_budget.contract_id,
                         "query_mode": result_budget.query_mode,
                         "state": "validated",
+                        "evidence": result_budget.as_evidence(),
                     }
             except ResultBudgetError as exc:
                 context.metadata["result_budget_check"] = {

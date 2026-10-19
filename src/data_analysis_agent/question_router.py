@@ -284,6 +284,11 @@ class QuestionRoute:
     evidence_mode: EvidenceMode | None = None
     confidence: float = 1.0
     reason_code: str | None = None
+    # Semantic routing already performs the result-cardinality preflight.  The
+    # plan builder reuses this estimate instead of evaluating the same shape a
+    # second time.  Legacy/offline routes leave it unset and are preflighted by
+    # QueryPlan.from_selection at their single construction boundary.
+    preflight_estimated_rows: int | None = None
 
     def __post_init__(self) -> None:
         """Fill new structured fields without breaking old route callers."""

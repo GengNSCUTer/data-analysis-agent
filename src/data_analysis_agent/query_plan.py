@@ -449,13 +449,23 @@ class QueryPlan:
         )
 
         if result_budget is not None:
-            bound = cls.preflight(
-                metrics, question, state, max_result_rows=result_budget.execution_max_rows,
-                workspace=selection.workspace, full_results=True,
-            )
-            if not bound.allowed:
-                raise ValueError(bound.clarification)
-            result_budget = result_budget.for_result_rows(bound.estimated_max_rows)
+            # route_semantic_intent has already checked this exact shape with
+            # the online execution ceiling. Reusing its estimate keeps route
+            # admission and plan construction on one preflight result. Routes
+            # produced by the offline/legacy router have no estimate and are
+            # checked here once, at the plan boundary.
+            estimated_rows = route.preflight_estimated_rows
+            if estimated_rows is None:
+                bound = cls.preflight(
+                    metrics, question, state, max_result_rows=result_budget.execution_max_rows,
+                    workspace=selection.workspace, full_results=True,
+                )
+                if not bound.allowed:
+                    raise ValueError(bound.clarification)
+                estimated_rows = bound.estimated_max_rows
+            elif estimated_rows > result_budget.execution_max_rows:
+                raise ValueError("当前查询超过结果行数预算，请缩小查询范围。")
+            result_budget = result_budget.for_result_rows(estimated_rows)
 
         return cls(
             plan_type=plan_type,

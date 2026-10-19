@@ -446,7 +446,21 @@ class TrustedRunSqlTool(RunSqlTool):
         artifact_id = artifact.get("artifact_id") if isinstance(artifact, dict) else None
         notice = context.metadata.get("result_display_notice")
         imperfect = isinstance(notice, str) and bool(notice.strip())
-        if imperfect and notice not in (result.result_for_llm or ""):
+        validation = context.metadata.get("result_validation")
+        degraded = isinstance(validation, dict) and validation.get("state") == "degraded"
+        if degraded:
+            # The table remains available to the user, but the model must not
+            # receive a CSV fallback or turn an incomplete shape into a number.
+            result.result_for_llm = (
+                "查询结果已展示在界面中，但结果合同未完整满足，不能据此生成数字结论。"
+                "请补充筛选条件或调整查询口径后重试。"
+            )
+            result.metadata["result_answer_allowed"] = False
+            result.metadata.pop("results", None)
+            usage = context.metadata.get("budget_usage") or CURRENT_BUDGET.get()
+            if usage is not None and hasattr(usage, "mark_result_answer_blocked"):
+                usage.mark_result_answer_blocked()
+        elif imperfect and notice not in (result.result_for_llm or ""):
             result.result_for_llm = f"{result.result_for_llm}\n\n{notice}"
         presentation = build_result_presentation(
             total_row_count=row_count,

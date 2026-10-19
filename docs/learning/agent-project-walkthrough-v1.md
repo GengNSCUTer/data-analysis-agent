@@ -253,3 +253,14 @@ Catalog/权限/能力下能否执行。自然语言理解失败提示重试，�
 语义纠错，也不能把失败计为通过。Phase 2/3 的 8 条真实回归和两个 PostgreSQL scope
 probe 通过后，服务重新加载在 32013。下一次继续阅读 `SemanticIntent` → `parse_semantic_intent`
 → `route_semantic_intent` 的数据流，再回答“为什么 Catalog 校验仍不能证明 SQL 业务口径正确”。
+
+### 2026-10-19｜可信回答的展示时序：待阅读小单元
+
+业务问题：已经决定拒绝一个数字结论，若先流式展示原文，再替换最终文字，用户仍可能看到错误数字。
+本轮修复不改变查库规则，只调整这些已知不可信状态的展示时机；工程已验证，学习尚未标记完成。
+
+下一次只读三个位置：`budget.py` 的 `BudgetSafetyMiddleware.should_stream_response()` 和
+`_rejection_response()`（同一套判断决定是否暂存和最终显示什么）；
+`vanna/core/agent/agent.py` 的 `_handle_streaming_response()`（收集分片与显示分片分开）；
+`tests/test_budget_streaming.py` 的 `test_blocked_answer_never_enters_rich_simple_or_sse()`
+（检查所有中间事件，而不只检查最终答案）。先复述这个先后关系，再进入业务质量用例。

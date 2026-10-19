@@ -93,6 +93,29 @@ class ResultBudget:
         mode = budget.pop("query_mode")
         return {"query_mode": mode, "result_budget": budget}
 
+    def as_evidence(self) -> dict[str, Any]:
+        """Name each limit by the layer it protects.
+
+        ``as_metadata`` is the strict plan/contract payload and keeps its
+        frozen field names. This view is only for logs and UI diagnostics, so
+        readers do not mistake the process ceiling, the aggregate cardinality
+        bound, the frontend preview, and the model summary sample for one
+        shared "row limit".
+        """
+        return {
+            "contract_id": self.contract_id,
+            "query_mode": self.query_mode,
+            "process_row_ceiling": self.execution_max_rows,
+            "query_result_row_ceiling": self.aggregate_result_rows,
+            "detail_page_row_limit": self.detail_page_rows,
+            "frontend_preview_row_limit": self.preview_rows,
+            "model_summary_row_limit": self.llm_context_rows,
+            "model_summary_char_limit": self.llm_context_chars,
+            "result_byte_ceiling": self.result_max_bytes,
+            "statement_timeout_ms": self.statement_timeout_ms,
+            "export_byte_limit": self.export_max_bytes,
+        }
+
     @classmethod
     def from_metadata(cls, metadata: Mapping[str, Any]) -> "ResultBudget":
         budget = metadata.get("result_budget")

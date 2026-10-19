@@ -89,6 +89,28 @@ async def test_budget_middleware_replaces_model_answer_after_sql_repair_failure(
 
 
 @pytest.mark.asyncio
+async def test_budget_middleware_blocks_numeric_answer_for_degraded_result() -> None:
+    usage = BudgetUsage(RequestBudget())
+    usage.mark_result_answer_blocked()
+    from data_analysis_agent.budget import CURRENT_BUDGET
+
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        response = await BudgetSafetyMiddleware().after_llm_response(
+            LlmRequest(messages=[], user=User(id="u")),
+            LlmResponse(
+                content="GMV 是 999",
+                tool_calls=[ToolCall(id="x", name="run_sql", arguments={})],
+            ),
+        )
+    finally:
+        CURRENT_BUDGET.reset(token)
+
+    assert response.tool_calls is None
+    assert "不能据此给出数字结论" in (response.content or "")
+
+
+@pytest.mark.asyncio
 async def test_result_contract_suppresses_redundant_sql_but_keeps_visualization() -> None:
     usage = BudgetUsage(RequestBudget(max_tool_calls=3, max_sql_calls=2))
     usage.mark_result_contract_satisfied()
