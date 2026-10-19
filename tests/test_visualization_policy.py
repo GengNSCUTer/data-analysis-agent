@@ -235,6 +235,42 @@ def test_server_can_render_a_validated_chart_without_tool_arguments() -> None:
     assert component.rich_component.data["data"][0]["type"] == "bar"
 
 
+def test_chart_keeps_null_category_as_a_labeled_group_without_changing_results() -> None:
+    import pandas as pd
+
+    contract = _contract("按品类统计 GMV，并生成柱状图")
+    frame = pd.DataFrame({"product_category_name": ["health_beauty", None], "gmv": [10, 5]})
+    component = build_server_chart_component(contract, frame)
+    trace = component.rich_component.data["data"][0]
+
+    assert trace["x"] == ["health_beauty", "（空值）"]
+    assert pd.isna(frame.iloc[1]["product_category_name"])
+    assert len(trace["y"]) == len(frame)
+
+
+@pytest.mark.parametrize("axis", ["metric", "time"])
+def test_chart_still_rejects_null_metrics_and_time(axis: str) -> None:
+    import pandas as pd
+    from data_analysis_agent.chart_contract import ChartContractError
+
+    contract = _contract("2017年按月统计 GMV，并生成折线图")
+    frame = pd.DataFrame({"time": ["2017-01-01", None if axis == "time" else "2017-02-01"],
+                          "gmv": [10, None if axis == "metric" else 5]})
+    with pytest.raises(ChartContractError, match="空值"):
+        build_server_chart_component(contract, frame)
+
+
+def test_chart_does_not_merge_a_null_group_with_an_existing_empty_value_label() -> None:
+    import pandas as pd
+    from data_analysis_agent.chart_contract import ChartContractError
+
+    contract = _contract("按品类统计 GMV，并生成柱状图")
+    with pytest.raises(ChartContractError, match="隐式聚合"):
+        build_server_chart_component(contract, pd.DataFrame({
+            "product_category_name": ["（空值）", None], "gmv": [10, 5],
+        }))
+
+
 def test_valid_chart_contract_prompt_reserves_rendering_for_the_server() -> None:
     """The model must not decide whether a valid requested chart is rendered."""
     contract = _contract("按州统计有效订单数并生成柱状图")

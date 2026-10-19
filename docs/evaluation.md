@@ -5,6 +5,10 @@
 前两层可以在本地或 CI 中重复运行，在线模型评测需要本地模型密钥，不能在 GitHub Actions
 中运行，也不能用 SQL 可执行代替语义正确。
 
+当前在线产品的开发质量审查见 [product_release_dev_v1](../evals/results/product_release_dev_v1.md)：
+60 个场景、73 轮，行为差异和独立数值对照分开记录。下方有日期的旧路由和在线批次保留为历史
+证据，不代表当前语义入口重新获得相同成绩。
+
 ## Text-to-SQL v2 确定性评测
 
 `evals/cases/text_to_sql_v2.yaml` 是当前版本化 golden 集，共 60 条用例，覆盖：

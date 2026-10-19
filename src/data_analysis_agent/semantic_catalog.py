@@ -1530,6 +1530,10 @@ class CatalogRetriever:
                         f"  默认过滤：{'；'.join(metric.default_filters)}；允许维度：{', '.join(metric.allowed_dimensions)}",
                     ]
                 )
+                if metric.result_value_constraints.get("maximum") == 1:
+                    lines.append(
+                        "  数值范围：输出 0 到 1 之间的小数比例；不要乘以 100，也不要输出百分数字面值。"
+                    )
                 for dimension, policy in metric.dimension_policies.items():
                     if policy.mode == "safe_direct":
                         action = "可按安全直连维度执行"

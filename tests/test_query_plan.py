@@ -213,6 +213,16 @@ def test_ranking_category_uses_top_n_instead_of_full_table() -> None:
     assert census_decision.estimated_max_rows == 73
 
 
+def test_online_category_budget_includes_null_group() -> None:
+    router = _router()
+    selection = router.retriever.retrieve("按品类统计 GMV", _user())
+    decision = QueryPlan.preflight(
+        selection.metrics, "按品类统计 GMV", full_results=True,
+    )
+    assert decision.allowed
+    assert decision.estimated_max_rows == 74
+
+
 def test_query_plan_can_use_online_execution_cap_above_display_budget() -> None:
     router = _router()
     selection = router.retriever.retrieve("2017年按月统计各州 GMV", _user())

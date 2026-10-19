@@ -82,7 +82,11 @@ _TOP_N_DIMENSIONS: dict[str, int] = {
 }
 _RANKING_CATEGORY_LIMIT = 20
 _NON_DISPLAYABLE_DIMENSIONS = frozenset({"seller_id"})
-_FULL_DIMENSION_CARDINALITY = {"customer_city": 4_119, "seller_city": 612}
+_FULL_DIMENSION_CARDINALITY = {
+    "customer_city": 4_119, "seller_city": 612,
+    # Complete online output includes the NULL category bucket.
+    "product_category_name": 74,
+}
 _EXPLICIT_TOP_N = re.compile(r"(?:前|top\s*)(\d+|[零〇一二两三四五六七八九十百千万]+)", re.IGNORECASE)
 
 

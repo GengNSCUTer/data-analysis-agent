@@ -110,6 +110,21 @@ def test_dimension_retrieval_closes_multi_hop_join_path(catalog) -> None:
     }
 
 
+def test_ratio_prompt_communicates_validator_units(catalog) -> None:
+    selection = CatalogRetriever(catalog).retrieve("按月统计好评率", _user("analyst"))
+    assert "输出 0 到 1 之间的小数比例" in selection.prompt
+    assert "不要乘以 100" in selection.prompt
+    assert catalog.metrics_by_id["positive_review_rate"].result_value_constraints["maximum"] == 1
+
+
+def test_online_catalog_preserves_fractional_delivery_days() -> None:
+    catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
+    selection = CatalogRetriever(catalog).retrieve("各州平均履约天数", _user("analyst"))
+    assert "EXTRACT(EPOCH FROM" in selection.prompt
+    assert "86400.0" in selection.prompt
+    assert "不用 EXTRACT(DAY)" in selection.prompt
+
+
 @pytest.mark.parametrize(
     ("question", "metric_id", "time_field", "grain", "result_column"),
     [

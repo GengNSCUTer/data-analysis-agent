@@ -264,3 +264,17 @@ probe 通过后，服务重新加载在 32013。下一次继续阅读 `SemanticI
 `vanna/core/agent/agent.py` 的 `_handle_streaming_response()`（收集分片与显示分片分开）；
 `tests/test_budget_streaming.py` 的 `test_blocked_answer_never_enters_rich_simple_or_sse()`
 （检查所有中间事件，而不只检查最终答案）。先复述这个先后关系，再进入业务质量用例。
+
+### 2026-10-19｜业务正确不能只看执行成功：待阅读小单元
+
+第二项工程审查已完成，结果见[质量报告](../../evals/results/product_release_dev_v1.md)，不把
+工程通过视为学习完成。本段只看三个位置：`result_validator.py:ResultValidator.validate()`
+如何区分 valid/degraded/refuse；`audit_product_release_dev.py:reference_sql()` 如何从独立业务
+定义计算参考；同文件 `compare_frames()` 如何比较原工件的实际值。
+
+本次真实错误是按州平均履约天数：SQL使用 `EXTRACT(DAY)` 去掉不足一天的小数，结果列名、
+正数范围和执行状态全部正确，却不等于“连续时长天数的平均值”。因此执行校验解决能否安全
+运行，结果校验解决形状和数值边界，独立口径核对才能发现这一类业务公式偏差。
+
+用户下一次读完后只复述两点：为什么按月列出12个订单数不等于已经完成上下半年比较；为什么
+分类NULL可以标为“空值”画出来，而指标NULL不能自动当0。尚未收到复述，不标记已掌握。

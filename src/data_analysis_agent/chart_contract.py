@@ -345,15 +345,16 @@ class ChartContract:
                 f"- 图表类型固定为 `{self.chart_type}`；标题由服务器固定为“{self.title}”。",
                 f"- 横轴固定为 `{self.x_column}`；指标列固定为 {', '.join(f'`{item}`' for item in self.y_columns)}。",
                 f"- 系列列：`{self.series_column}`。" if self.series_column else "- 本轮无系列拆分。",
-                "- 不得修改字段、图表类型、标题或在图表层重新聚合、求和、计数、去重或补值。",
+                "- 不得修改字段、图表类型、标题或在图表层重新聚合、求和、计数、去重或补指标值；分类空值仅标记为“（空值）”展示，原始结果不变。",
             ]
         )
 
     def validate_frame(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Return a canonical, bounded frame or reject before rendering.
 
-        The returned rows preserve SQL result values.  It can only sort a time
-        axis; it never groups, sums, counts, imputes, or deduplicates rows.
+        Metric values and rows are preserved. Categorical NULL groups receive
+        a display label on this copy; time axes may be sorted. No aggregation,
+        metric imputation, dropped groups or mutation of the source result.
         """
 
         if not self.safe_to_visualize or not self.chart_type or not self.x_column:
@@ -374,8 +375,12 @@ class ChartContract:
         if missing:
             raise ChartContractError(f"结果缺少图表合同字段：{', '.join(missing)}。")
         chart_frame = frame.loc[:, list(required)].copy()
-        if chart_frame.isnull().any().any():
-            raise ChartContractError("图表字段包含空值；系统不会在展示层补值或删除数据。")
+        numeric_and_time = (*self.y_columns, *((self.x_column,) if self.x_column == "time" else ()))
+        if chart_frame.loc[:, list(numeric_and_time)].isnull().any().any():
+            raise ChartContractError("指标或时间字段包含空值；系统不会补值或删除数据。")
+        for column in (self.x_column, self.series_column):
+            if column and column != "time" and chart_frame[column].isna().any():
+                chart_frame[column] = chart_frame[column].astype(object).fillna("（空值）")
         for column in self.y_columns:
             try:
                 chart_frame[column] = pd.to_numeric(chart_frame[column], errors="raise")

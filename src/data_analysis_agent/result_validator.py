@@ -276,8 +276,8 @@ class ResultValidator:
         )
         if null_metrics:
             return ResultValidation(
-                "refuse",
-                "结果中的指标值全部为空，未输出确定性数字。",
+                "degraded",
+                "本次查询没有可用的指标值，可能没有匹配记录或源值为空。请核对时间范围、筛选条件或指标口径。",
                 len(frame),
                 columns,
                 null_metric_columns=null_metrics,

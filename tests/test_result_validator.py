@@ -122,6 +122,19 @@ def test_validator_does_not_turn_empty_or_truncated_result_into_numbers() -> Non
     assert truncated.truncated is True
 
 
+def test_validator_treats_null_scalar_aggregate_as_empty_data() -> None:
+    validation = ResultValidator().validate(
+        pd.DataFrame({"gmv": [None]}),
+        required_columns=("gmv",),
+        metric_columns=("gmv",),
+    )
+
+    assert validation.state == "degraded"
+    assert validation.safe_to_display is True
+    assert validation.safe_to_answer is False
+    assert validation.null_metric_columns == ("gmv",)
+
+
 def test_validator_distinguishes_complete_execution_from_display_preview_budget() -> None:
     frame = pd.DataFrame({"gmv": list(range(250))})
 

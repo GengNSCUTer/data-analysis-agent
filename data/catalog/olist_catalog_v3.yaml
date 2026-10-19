@@ -200,7 +200,7 @@ metrics:
 
   - metric_id: average_delivery_days
     name: 平均履约天数
-    description: "实际送达时间减购买时间的平均值，仅纳入两端时间齐全的订单。"
+    description: "实际送达时间减购买时间的平均值，仅纳入两端时间齐全的订单。以连续天数计算：先用 EXTRACT(EPOCH FROM (order_delivered_customer_date - order_purchase_timestamp)) / 86400.0 得到每单天数，再取 AVG；保留不足一天的小数，不用 EXTRACT(DAY)、日期强转或整数天截断。"
     aliases: [平均履约天数, 履约时长, 配送时长, 送达速度, 发货速度]
     grain: order
     time_field: fact_orders.order_purchase_timestamp

@@ -38,6 +38,8 @@ jobs:
           tests/test_run_sql_tool.py \
           tests/test_project_evaluation.py \
           tests/test_visualization_policy.py \
+          tests/test_chart_contract.py \
+          tests/test_product_release_dev_contract.py \
           tests/test_trusted_workflow.py \
           tests/test_demo_session.py \
           tests/test_demo_scenarios.py \
