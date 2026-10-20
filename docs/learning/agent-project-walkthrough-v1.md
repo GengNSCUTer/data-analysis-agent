@@ -335,9 +335,48 @@ probe 通过后，服务重新加载在 32013。下一次继续阅读 `SemanticI
 设为`[product_category_name]`。应用后仍是GMV、SP筛选，只是按品类分组。`replace`返回新状态，
 没有被修改的指标、筛选保留；若模型给错修改清单，代码不会自动理解中文来纠正它。
 
-下一轮复述题（尚未回答）：
+下一轮复述题（已回答，见下）：
 
 1. “按商品品类展开”没有再提SP，为什么不应自动删除SP筛选？
 2. 再说“取消州限制”，应修改哪个字段？指标和品类分组需要一起清空吗？
 
 分组与筛选继续结合该例巩固，Day 1仍未完成，不自动进入新功能或训练。
+
+用户回答与纠正：第一题“继承第一轮，前提还是SP州，不能删除筛选”，理解正确。第二题
+“修改filter=sp，指标和品类分组不需要清空”，后半正确；操作应是从`filters`移除
+`customer_state=SP`，而非重新设置SP。如果还有其他筛选，应只移除州条件。
+
+### 2026-10-20｜LLM如何决定继承、修改或新开任务
+
+本单元只按现有代码解释，不改运行时、不发起新模型测试。输入是本轮问题、当前任务状态
+与预算内历史；输出是对实际prompt、状态操作和局限的理解。依据是
+`semantic_intent.py:SemanticIntentInterpreter.prompt()`、`resolve_state_intent()`以及
+`analysis_state.py:AnalysisState.apply_patch()`；Day 1仍等待最终整链口述。
+
+`chat_runtime.py`先恢复当前`AnalysisState`、构建context packet，再调用语义解释器。
+解释器组装本轮问题、当前角色可见Catalog（指标名称/别名/说明及允许维度）、结构化状态
+（指标、分组、筛选、时间、Top-N、澄清与执行状态等）、近期叙事对话、可用的历史摘要、
+结果引用元信息和输出JSON schema。`server.py:complete_semantic_intent()`将这些内容作为
+一次专用LLM请求发送，temperature=0、tools=None；该调用只返回语义JSON，不生成SQL。
+结果引用不包含可直接采用的实体值；“这个州”等需要由服务端从可信工件解析。
+
+继承判定依靠LLM理解上述输入与prompt中的任务说明，没有另一个关键词分类器或学出来的
+独立任务分类模型。说明要求：省略条件的承接追问默认修改当前任务；独立新分析不继承旧
+范围；仅解释/换图用keep；清空用clear_task。模型输出`action`与`state_patch.operations`，
+代码按它们应用。update_task只改patch指定字段，未改字段从当前状态保留；new_task在patch
+前加replace_task，创建新task并重置业务范围，保留workspace/版本，不删除会话记录。
+
+例：当前GMV、按品类分组、SP筛选。用户说“取消州限制”，合理输出是data_query、
+update_task，以及`remove filters [{dimension: customer_state, value: SP}]`。品类与GMV不需要
+在patch里重写。“换个问题，统计全部时间总订单数”则可new_task，并设置Catalog对应订单
+指标；不能仅因指标变化就断定换任务，“销售额换成订单数，其他不变”仍是update_task。
+
+`resolve_state_intent()`应用后会用当前Catalog重新验证完整范围。校验能发现未知/不可见
+指标与非法结构，不能保证“这句话到底算不算新任务”判对。LLM若误把追问标成new_task，
+合法范围仍可能被重置；误标update_task则可能残留旧条件。temperature=0不消除这种错误。
+历史和摘要虽随prompt提供以理解承接关系，执行条件按设计应来自本轮明确修改、受控状态
+或可信工件；摘要禁用为SQL事实是信任边界与提示约束，不能据此宣称LLM永远不受叙事误导。
+
+建议本轮只读`prompt()`中的action/patch几行（当前334–345行），对照
+`resolve_state_intent()`的new_task分支。待复述：同样改成订单数，为什么“其他不变”和
+“换个问题，全部时间总订单数”需要不同的状态处理？
