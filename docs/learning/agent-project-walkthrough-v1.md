@@ -306,9 +306,38 @@ probe 通过后，服务重新加载在 32013。下一次继续阅读 `SemanticI
 理解JSON、允许使用的业务对象、SQL可以安全执行、答案业务正确，是不同层次。示例提案
 没有执行权；调用方还要处理状态、计划及后续SQL/结果检查。
 
-本轮复述题（尚未回答）：
+本轮复述题（已回答，纠正见下）：
 
 1. “按州比较销售额”与“只看SP州的总销售额”，`dimensions` 和 `filters` 有什么区别？
 2. 模型生成合法JSON并通过Catalog校验后，为什么还不能直接说“查出的销售额一定正确”？
 
-用户读完并作答后记录纠正，再补Day 1整条链路口述；不把本段标成已掌握。
+用户回答与纠正：
+
+- 第一题回答“dimension分别使用state，以及商品种类；第一个不用filter，第二个只看SP州”。
+  筛选判断正确，第二个问题的分组需纠正：单独看“只看SP州的总销售额”，并没有按品类
+  展开的要求，`dimensions=[]`，`filters=[{dimension: customer_state, value: SP}]`，返回一个
+  总额。“按州比较”才是`dimensions=[customer_state]`；如果问“SP州各品类销售额”，才同时
+  使用`dimensions=[product_category_name]`和SP筛选。这里比较的是两个独立问题；多轮承接
+  已有任务时还要看明确变更和既有状态。
+- 第二题回答“这里只是分析，还没有真正生成SQL”。抓住了阶段区别。补充：即使指标ID和
+  JSON都合法，也可能误解用户要的指标或范围；后续SQL还可能算错分母、状态或Join粒度。
+  可解析、可访问、可执行与业务正确须分别判断。
+
+下一小单元：本轮意图如何更新当前分析状态。
+
+只读`analysis_state.py:AnalysisState.apply_patch()`，重点看`state=self`、列表字段的`set`
+分支与`replace(state, **{name: value})`；再对照
+`tests/test_analysis_state.py:test_scope_changes_preserve_untouched_fields_and_new_task_resets`。
+`SemanticIntent`描述本轮想做什么，`AnalysisState`记录当前任务已经确认的指标、维度和筛选。
+`StatePatch`是本轮修改清单，应用清单本身不调用模型或数据库，更新后的范围还要经过调用方校验。
+
+示例：已有GMV、无分组、SP筛选；用户追问“按商品品类展开”，修改清单只将`dimensions`
+设为`[product_category_name]`。应用后仍是GMV、SP筛选，只是按品类分组。`replace`返回新状态，
+没有被修改的指标、筛选保留；若模型给错修改清单，代码不会自动理解中文来纠正它。
+
+下一轮复述题（尚未回答）：
+
+1. “按商品品类展开”没有再提SP，为什么不应自动删除SP筛选？
+2. 再说“取消州限制”，应修改哪个字段？指标和品类分组需要一起清空吗？
+
+分组与筛选继续结合该例巩固，Day 1仍未完成，不自动进入新功能或训练。
