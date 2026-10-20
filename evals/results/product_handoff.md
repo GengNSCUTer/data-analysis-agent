@@ -27,9 +27,11 @@
 | 静态检查 | **passed** | 本轮改动Python文件的Ruff、compileall及diff检查 |
 
 本机为Ubuntu20.04，浏览器验证使用Playwright1.62.0；1.64.0在该宿主安装Chromium时明确
-不支持。CI为ubuntu-latest，使用其支持的版本。本轮本地重放成功不等于GitHub托管job或
-PG16容器已经执行成功；远端结果需查看Actions。本机Docker实运行和外部开发者独立部署
-仍未验证。新依赖下TestClient产生一个httpx接口弃用警告，未导致测试失败。
+不支持。CI为ubuntu-latest，使用其支持的版本。本地重放与托管执行分开记录：随后实现提交
+`17a0824` 的[GitHub Actions](https://github.com/GengNSCUTer/data-analysis-agent/actions/runs/39387049446)
+两个job均实际通过，包含PG16容器、合成初始化、集成测试及Chromium，不只检查配置。
+仍未验证的是项目完整Compose部署在本机运行，以及外部开发者独立部署。新依赖下TestClient
+产生一个httpx接口弃用警告，未导致测试失败。
 
 ## 本轮实际发现与处理
 

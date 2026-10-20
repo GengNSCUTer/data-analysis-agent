@@ -1699,3 +1699,8 @@ SFT、定向复测和未验证能力。保留历史实验、原始失败和用�
 正式tag/release；学习仍按四周计划逐段审阅复述，本轮不标记已掌握，不继续启动训练。
 
 飞书项目文档已追加并回读同一记录，revision 294；贡献/安全/许可与面试说明均有本地入口。
+
+随后核对实现提交 `17a0824` 的[托管Actions运行](https://github.com/GengNSCUTer/data-analysis-agent/actions/runs/39387049446)：
+build和postgres-and-browser均为success，PG16容器、合成初始化、实际集成与Chromium全部
+运行通过。本机完整Compose部署和外部独立试用仍未验证；此条补充不修改业务质量分母。
+飞书远端验收补充已追加并回读，revision 295。
