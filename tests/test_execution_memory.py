@@ -231,7 +231,7 @@ async def test_chart_only_followup_uses_bounded_verified_csv(tmp_path, chart_typ
     from data_analysis_agent.analysis_state import AnalysisState
     from data_analysis_agent.budget import BudgetUsage, RequestBudget
     from data_analysis_agent.chat_runtime import BudgetedChatHandler
-    from data_analysis_agent.metric_context import OLIST_RUNTIME_WORKSPACE
+    from data_analysis_agent.runtime_workspace import load_runtime_workspace
     from data_analysis_agent.question_router import QuestionRouter
     from data_analysis_agent.result_artifact import ResultArtifact
     from data_analysis_agent.result_artifact_store import ResultArtifactStore
@@ -239,7 +239,7 @@ async def test_chart_only_followup_uses_bounded_verified_csv(tmp_path, chart_typ
     from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
     from data_analysis_agent.semantic_intent import SemanticIntent
 
-    workspace = OLIST_RUNTIME_WORKSPACE
+    workspace = load_runtime_workspace().profile
     store = ResultArtifactStore(tmp_path)
     manifest = store.save_result_csv(
         artifact_id="rta-chart", user_id="owner", workspace_id=workspace.workspace_id,

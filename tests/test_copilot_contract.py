@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import os
 from pydantic import ValidationError
 from vanna.core.user import User
 
@@ -107,6 +108,8 @@ def test_local_account_membership_requires_an_explicit_grant() -> None:
     assert response.subject_id == "local:analyst"
 
 
+@pytest.mark.postgres
+@pytest.mark.skipif(os.getenv("RUN_PROJECT_DB") != "1", reason="needs project PostgreSQL")
 def test_demo_bootstrap_route_preserves_server_authority(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
 

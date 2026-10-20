@@ -152,8 +152,24 @@ async def test_runner_executes_allowed_query_and_audits_policy_rejection() -> No
         context,
     )
 
-    assert dataframe.iloc[0]["customer_state"] == "SP"
-    assert len(dataframe) == 5
+    # Check against this fixture's facts, not the real Olist snapshot's top state.
+    # The bundled synthetic database has three states; LIMIT 5 need not yield five.
+    with psycopg2.connect(
+        host=runner.settings.host, port=runner.settings.port,
+        database=runner.settings.database, user=runner.settings.reader_user,
+    ) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT c.customer_state, COUNT(DISTINCT o.order_id) "
+                "FROM analytics.fact_orders o JOIN analytics.dim_customers c "
+                "ON c.customer_id=o.customer_id "
+                "WHERE o.order_status NOT IN ('canceled', 'unavailable') "
+                "GROUP BY c.customer_state"
+            )
+            expected = dict(cursor.fetchall())
+    assert len(dataframe) == min(5, len(expected))
+    assert dataframe['paid_order_count'].tolist() == sorted(expected.values(), reverse=True)[:5]
+    assert all(expected[row.customer_state] == row.paid_order_count for row in dataframe.itertuples())
     assert context.metadata["result_budget_check"]["state"] == "validated"
 
     with pytest.raises(PolicyViolation, match="only SELECT"):
@@ -231,9 +247,9 @@ async def test_empty_query_preserves_database_column_metadata():
 
 
 @pytest.mark.asyncio
-async def test_runner_treats_the_online_execution_cap_as_possible_truncation() -> None:
-    """The online 1,000-row Policy cap remains authoritative for completeness."""
-    runner = SecurePostgresRunner()
+async def test_runner_treats_resource_cap_as_possible_truncation() -> None:
+    """An unplanned query's resource cap cannot prove result completeness."""
+    runner = SecurePostgresRunner(replace(PostgresConnectionSettings.from_environment(), max_rows=2))
     context = make_context(f"policy-limit-{uuid.uuid4().hex[:12]}")
 
     frame = await runner.run_sql(
@@ -243,8 +259,8 @@ async def test_runner_treats_the_online_execution_cap_as_possible_truncation() -
     validation = context.metadata["result_validation"]
     assert validation["state"] == "degraded"
     assert validation["truncated"] is True
-    assert validation["row_count"] == 1_000
-    assert len(frame) == 1_000
+    assert validation["row_count"] == 2
+    assert len(frame) == 2
     assert context.metadata.get("result_contract_satisfied") is None
 
 

@@ -4,13 +4,22 @@ on:
   push:
     branches:
       - main
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATA_ANALYSIS_ENV_FILE: /dev/null
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python 3.12
@@ -34,7 +43,7 @@ jobs:
         python -m pip install -e ".[test,product]"
     - name: Run deterministic Python tests
       run: |
-        python -m pytest -v -m "not integration" \
+        python -m pytest -v -m "not integration and not postgres" \
           tests/test_tool_permissions.py \
           tests/test_llm_context_enhancer.py \
           tests/test_workflow.py \
@@ -50,6 +59,22 @@ jobs:
           tests/test_runtime_paths.py \
           tests/test_runtime_workspace.py \
           tests/test_workspace_onboarding.py \
+          tests/test_semantic_catalog.py \
+          tests/test_semantic_intent.py \
+          tests/test_query_plan.py \
+          tests/test_analysis_state.py \
+          tests/test_analysis_lifecycle.py \
+          tests/test_analysis_context.py \
+          tests/test_working_memory.py \
+          tests/test_execution_memory.py \
+          tests/test_result_reference.py \
+          tests/test_copilot_contract.py \
+          tests/test_result_artifact.py \
+          tests/test_result_presentation.py \
+          tests/test_result_validator.py \
+          tests/test_result_budget_contract.py \
+          tests/test_result_budget_runtime.py \
+          tests/test_local_auth.py \
           tests/test_trusted_workflow.py \
           tests/test_demo_session.py \
           tests/test_demo_scenarios.py \
@@ -74,3 +99,69 @@ jobs:
         /tmp/copilot-install/bin/pip install '/tmp/copilot-wheels/vanna-2.0.2-py3-none-any.whl[product]'
         cd /tmp
         env -u PYTHONPATH /tmp/copilot-install/bin/python -c 'from data_analysis_agent.runtime_paths import RESOURCES; from data_analysis_agent.semantic_catalog import CatalogLoader; import data_analysis_agent.server; assert (RESOURCES / "static/vanna-components.js").is_file(); assert CatalogLoader().load().metrics'
+    - name: Upload wheel for isolated PostgreSQL tests
+      uses: actions/upload-artifact@v4
+      with:
+        name: product-wheel
+        path: /tmp/copilot-wheels/*.whl
+        retention-days: 7
+
+  postgres-and-browser:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: data_analysis_agent
+          POSTGRES_USER: app_admin
+          POSTGRES_PASSWORD: ci-admin-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app_admin -d data_analysis_agent"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATA_ANALYSIS_ENV_FILE: /dev/null
+      DATA_ANALYSIS_POSTGRES_HOST: 127.0.0.1
+      DATA_ANALYSIS_POSTGRES_PORT: '5432'
+      DATA_ANALYSIS_POSTGRES_DB: data_analysis_agent
+      DATA_ANALYSIS_STATE_DIR: /tmp/copilot-ci-state
+      PGPASSFILE: /tmp/copilot-ci-state/pgpass
+      # Dummy credential: route tests never call the public provider.
+      SILICONFLOW_API_KEY: ci-no-network
+      SILICONFLOW_BASE_URL: http://127.0.0.1:1
+      RUN_PROJECT_DB: '1'
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: pip
+    - uses: actions/download-artifact@v4
+      with:
+        name: product-wheel
+        path: /tmp/copilot-wheels
+    - name: Install product and test tools from the wheel
+      run: python -m pip install '/tmp/copilot-wheels/vanna-2.0.2-py3-none-any.whl[product,test,browser-test]'
+    - name: Initialize only the disposable synthetic database
+      env:
+        DATA_ANALYSIS_ADMIN_DSN: postgresql://app_admin:ci-admin-password@127.0.0.1:5432/data_analysis_agent
+        DATA_ANALYSIS_READER_PASSWORD: ci-reader-password
+        DATA_ANALYSIS_WRITER_PASSWORD: ci-writer-password
+      run: data-analysis-agent-init --synthetic
+    - name: Run PostgreSQL, identity and artifact route tests
+      run: |
+        python -m pytest -v -m postgres \
+          tests/test_postgres_runner.py \
+          tests/test_postgres_conversation_store.py \
+          tests/test_postgres_run_recorder.py \
+          tests/test_trusted_routes.py \
+          tests/test_local_auth.py \
+          tests/test_copilot_contract.py \
+          tests/test_result_artifact_routes.py
+    - name: Install Chromium
+      run: python -m playwright install --with-deps chromium
+    - name: Test the browser with a controlled provider and real PostgreSQL
+      run: python scripts/verify_runtime_capacity.py --browser-only --output /tmp/copilot-browser-evidence

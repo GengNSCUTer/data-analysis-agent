@@ -42,6 +42,7 @@ async def test_starter_actions_match_the_versioned_demo_scenarios() -> None:
     ]
 
 
+@pytest.mark.postgres
 @pytest.mark.skipif(os.getenv("RUN_PROJECT_DB") != "1", reason="set RUN_PROJECT_DB=1 for local golden verification")
 def test_demo_scenarios_match_the_loaded_postgres_dataset() -> None:
     result = run(ROOT / "evals/cases/demo_scenarios.yaml", verify_database=True)

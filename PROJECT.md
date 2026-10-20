@@ -2,6 +2,15 @@
 
 > 文档导航：先看 [`docs/README.md`](docs/README.md)。本文是项目需求、架构、技术决策和当前阶段的本地基线；后训练学习材料统一从 [`docs/post-training/README.md`](docs/post-training/README.md) 进入。
 
+当前交付状态（2026-10-20）：[六项产品工程](plan/process-agent-product-readiness-v1.md)已收口。
+当前是可自托管的单进程PostgreSQL分析Copilot；在线使用DeepSeek-V3.2，本地Adapter仍为
+离线实验。Olist/TheLook已验证配置接入、中文连续分析、可信工件/图表、身份隔离、停止和
+恢复；业务质量仍有已记录失败，不宣称稳定全对或生产SLA。
+安装见[部署](docs/deployment.md)，测试见[分层说明](docs/testing.md)，贡献/安全/数据模型
+许可见[贡献](CONTRIBUTING.md)、[安全](SECURITY.md)、[资产](THIRD_PARTY.md)，可讲述事实见
+[面试材料](docs/interview/project-release-facts-v1.md)。Docker实运行和外部独立部署尚未验证。
+后续回到[四周学习计划](plan/process-agent-internship-improvement-v1.md)，下面保留历史实验与阶段记录。
+
 ## 0. 本地数据边界
 
 仓库内的 `data/` 只保存可提交、可审查的小型资产：指标 Catalog、数据 manifest、DDL/转换定义和合成 fixture。原始第三方数据、SQLite 数据库、模型权重、Adapter/checkpoint、预测和实验日志统一保存在仓库外的 `/disk2/gengnan/data-analysis-agent-data/`，这是本项目唯一的大型本地数据根，不进入 Git。
@@ -1669,3 +1678,24 @@ Docker实际运行及外部企业试用尚未验证。第六项尚未开始；�
 
 飞书项目文档已追加并回读相同记录，revision 293。核心容量/模型调用/工件确定性测试加入已有CI；
 Olist 32013与TheLook 32104均已更新并保持独立screen运行。
+
+## 2026-10-20｜第六项完成：分层CI、说明与交付收口
+
+扩展无凭据CI，覆盖语义解释、分析状态、历史/后台摘要、执行记忆、SQL策略、结果合同与
+工件。数据库/账号/工件路由和真实浏览器另设临时合成PostgreSQL job，在线模型与完整安装
+恢复保留显式手动入口。移除上游release自动发布PyPI流程，不改变模型或训练资产。
+
+新虚拟环境从wheel安装，按CI清单实测 **529 passed、10 deselected**，无模型key、数据库
+不可连接；独立PG18.3两次合成初始化与集成测试 **37 passed、13 deselected**。实际Chromium
+通过正常表/图、停止/断连资源归零、刷新同工件/CSV、跨用户404和断流不重发。前端构建、
+离源码导入两工作区、无Torch、pip check、清单及定向Ruff/compile/diff检查通过。
+这些是本地执行证据，不替代远端Actions状态、真实模型业务准确率或容器实运行。
+
+对齐README/请求架构/导航，整理贡献、安全、测试和第三方资产许可；将过时作品集说明
+收为入口，新建[面试事实](docs/interview/project-release-facts-v1.md)，区分在线产品、离线
+SFT、定向复测和未验证能力。保留历史实验、原始失败和用户原稿。详细证据见
+[交付报告](evals/results/product_handoff.md)，原始记录在仓库外
+`evals/product-readiness-stage6-WB0gppgI/`。当前无外部试用参与者，故不编造反馈、不创建
+正式tag/release；学习仍按四周计划逐段审阅复述，本轮不标记已掌握，不继续启动训练。
+
+飞书项目文档已追加并回读同一记录，revision 294；贡献/安全/许可与面试说明均有本地入口。

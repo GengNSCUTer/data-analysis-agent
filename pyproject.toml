@@ -38,8 +38,8 @@ data-analysis-agent = "data_analysis_agent.server:main"
 data-analysis-agent-init = "data_analysis_agent.deployment:main"
 
 [project.urls]
-"Homepage" = "https://github.com/vanna-ai/vanna"
-"Bug Tracker" = "https://github.com/vanna-ai/vanna/issues"
+"Homepage" = "https://github.com/GengNSCUTer/data-analysis-agent"
+"Bug Tracker" = "https://github.com/GengNSCUTer/data-analysis-agent/issues"
 
 [project.optional-dependencies]
 product = ["fastapi>=0.115", "uvicorn>=0.30", "openai>=1.0,<3", "python-dotenv>=1.0"]

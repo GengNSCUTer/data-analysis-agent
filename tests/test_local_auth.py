@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -82,6 +83,8 @@ def test_expired_embed_token_is_rejected() -> None:
         )
 
 
+@pytest.mark.postgres
+@pytest.mark.skipif(os.getenv("RUN_PROJECT_DB") != "1", reason="needs project PostgreSQL")
 def test_login_and_embed_route_keep_subject_on_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATA_ANALYSIS_BOOTSTRAP_USERNAME", "routeanalyst")
     monkeypatch.setenv("DATA_ANALYSIS_BOOTSTRAP_PASSWORD", "route-password")
@@ -155,6 +158,8 @@ def test_login_and_embed_route_keep_subject_on_the_server(monkeypatch: pytest.Mo
         assert client.get("/api/project/conversations").status_code == 401
 
 
+@pytest.mark.postgres
+@pytest.mark.skipif(os.getenv("RUN_PROJECT_DB") != "1", reason="needs project PostgreSQL")
 def test_login_rate_and_product_exposes_only_authenticated_sse(monkeypatch):
     monkeypatch.setenv('DATA_ANALYSIS_LOGIN_PER_MINUTE', '2')
     from data_analysis_agent.server import create_app
@@ -189,6 +194,8 @@ async def test_session_expiry_account_revocation_and_embed_workspace():
     assert (await resolver.resolve_user(RequestContext(headers=headers))).id == 'anonymous'
 
 
+@pytest.mark.postgres
+@pytest.mark.skipif(os.getenv("RUN_PROJECT_DB") != "1", reason="needs project PostgreSQL")
 def test_mutating_conversation_requires_current_turn_to_stop(monkeypatch):
     monkeypatch.setenv('DATA_ANALYSIS_BOOTSTRAP_USERNAME', 'mutationtester')
     monkeypatch.setenv('DATA_ANALYSIS_BOOTSTRAP_PASSWORD', 'mutation-test-password')

@@ -7,12 +7,15 @@
 | 目的 | 入口 | 文档性质 |
 | --- | --- | --- |
 | 在新环境安装、初始化与重启恢复 | [`deployment.md`](deployment.md) | Compose / wheel、合成数据、持久化、排错与实测范围 |
+| 运行无凭据回归、数据库集成与浏览器验证 | [`testing.md`](testing.md) | CI分层及在线模型手动验证，不混算准确率 |
+| 参与开发、独立试用与核对资产许可 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) / [`../SECURITY.md`](../SECURITY.md) / [`../THIRD_PARTY.md`](../THIRD_PARTY.md) | 提交与脱敏反馈、实际安全边界、代码/数据/模型分开授权 |
+| 面试前核对项目贡献、证据与局限 | [`interview/project-release-facts-v1.md`](interview/project-release-facts-v1.md) | 当前事实入口，避免把研究模型或定向复测写成上线成果 |
 | 查看单实例并发、取消、登录失效与工件保留验证 | [`../evals/results/runtime_capacity.md`](../evals/results/runtime_capacity.md) | 1/5/10 并发实测、真实浏览器故障及在线模型时延分列 |
 | 了解项目目标、当前阶段和技术决策 | [`../PROJECT.md`](../PROJECT.md) | 当前项目基线 |
 | 查看新的四周产品完善、代码学习与实习面试路线 | [`../plan/process-agent-internship-improvement-v1.md`](../plan/process-agent-internship-improvement-v1.md) | 2026-10-10 计划；不重复计算机基础，不自动启动训练 |
 | 查看六项产品完善工作的实施顺序 | [`../plan/process-agent-product-readiness-v1.md`](../plan/process-agent-product-readiness-v1.md) | 四周计划的工程执行清单；逐项实现并记录证据 |
 | 按小段亲自阅读 Agent 代码并复述 | [`learning/agent-project-walkthrough-v1.md`](learning/agent-project-walkthrough-v1.md) | Day 1 请求入口；问答随用户学习更新 |
-| 核对 SQL-only 训练与真实候选输入的对齐改造 | [`../plan/refactor-runtime-candidate-sft-alignment-v1.md`](../plan/refactor-runtime-candidate-sft-alignment-v1.md) | 2026-10-11 正式数据 5,980 train / 1,500 validation、长度 4,096；完整两 epoch 已结束，best=step 2,500，产物回读与 fresh reload 通过。[v2 matching 入口和合同](post-training/data/runtime-candidate-v2-matching-contract-v1.md) 已通过 validation GPU/Gold smoke；r2正式1,500条输入封存，Base/Adapter在两个screen生成中，完成后自动Gold对照 |
+| 核对 SQL-only 训练与真实候选输入的对齐改造 | [`../plan/refactor-runtime-candidate-sft-alignment-v1.md`](../plan/refactor-runtime-candidate-sft-alignment-v1.md) | 5,980 train / 1,500 validation、长度4,096、best=step2,500；训练与matching已完成。端点语义使旧Gold口径不一致，结论见[r3报告](post-training/experiments/runtime-candidate-matching-v2-r3.md)，不将一致子集当整体100% |
 | 了解本周已核实的用户请求/可信执行链 | [`architecture/project-v1-baseline-review.md`](architecture/project-v1-baseline-review.md) | Week 1 当前审查基线 |
 | 查看有证据支持的产品优化候选与暂不处理项 | [`architecture/project-v1-gap-map.md`](architecture/project-v1-gap-map.md) | Week 1 缺口地图，不是实时任务台账 |
 | 查看嵌入式 Copilot 与长对话状态的目标架构 | [`architecture/embedded-copilot-and-memory-design-v1.md`](architecture/embedded-copilot-and-memory-design-v1.md) | M1 宿主合同入口；按 M1–M7 状态阅读 |

@@ -1,7 +1,7 @@
 # 产品请求架构 v1
 
 > **状态：** 当前在线路径。本地 Adapter 不在这条路径上。  
-> **日期：** 2026-10-14（在线语义入口与分层结果预算已更新；下文 Day 1 请求保留历史证据）
+> **日期：** 2026-10-20（包含当前工作区装配、单实例容量与后台摘要；下文 Day 1 请求保留历史证据）
 
 页面是 `http://127.0.0.1:32013/embedded-copilot`。默认回答模型是 SiliconFlow 上的在线模型。`adapter_best` 只存在于离线评测。
 
@@ -9,17 +9,19 @@
 flowchart TD
   page["浏览器 /embedded-copilot"] --> chat["POST /api/vanna/v2/chat_sse"]
   chat --> auth["解析本地账号会话或嵌入令牌；加载所属会话"]
-  auth --> semantic["LLM 理解问题与受控 WorkingMemory，返回 SemanticIntent"]
+  auth --> capacity["有界执行/排队、同会话互斥与请求超时"]
+  capacity --> semantic["LLM 理解问题、选定历史与受控分析状态，返回 SemanticIntent"]
   semantic --> validate["服务端校验 Catalog、维度归属、时间与资源能力"]
   validate -->|澄清、定义、拒绝或已有结果解释| direct["对应分支回答；不执行 SQL"]
   validate -->|需要新查询且可执行| plan["生成 QueryPlan、ResultContract、ChartContract"]
   plan --> llm["在线模型生成 run_sql 工具调用中的候选 SQL"]
   llm --> guard["计划与 SQL 对照"]
   guard --> policy["SqlPolicy"]
-  policy --> reader["只读角色 daa_analytics_reader"]
+  policy --> reader["当前工作区配置的 PostgreSQL 只读角色"]
   reader --> validator["ResultContract / ResultValidator"]
   validator --> artifact["ResultArtifact 与服务器图表"]
   artifact --> ui["界面预览最多 200 行；完整文件另走下载"]
+  ui --> save["保存会话/状态；按token需要调度后台摘要"]
 ```
 
 身份由服务端解析。请求体里的 `user_id` 和角色不作为身份或授权依据；产品身份解析器也不接受旧演示角色 cookie。
@@ -30,12 +32,13 @@ flowchart TD
 
 ## 入口、输入输出与代码/模型分工
 
-`src/data_analysis_agent/server.py:create_app()` 在进程启动时装配模型服务、Catalog、Router、数据库 runner、会话存储和工具，再注册 HTTP 路由。每条消息到来时，由 `chat_sse()` 调用已经装配好的 `BudgetedChatHandler.handle_stream()`，不是每次重新创建整个应用。安装后的入口命令是 `data-analysis-agent`，详见 [部署说明](../deployment.md)。
+`src/data_analysis_agent/server.py:create_app()` 在进程启动时装配当前工作区、模型服务、Catalog、语义解释器、数据库runner、会话存储和工具，再注册HTTP路由。每条消息由 `chat_sse()` 调用 `ManagedChatHandler.handle_stream()` 管理容量与取消，再进入 `BudgetedChatHandler.handle_stream()` 执行分析，不是每次重建应用。安装入口是 `data-analysis-agent`，详见[部署说明](../deployment.md)。
 
 | 环节 | 代码入口 | 输入 → 输出 | 谁决定 |
 | --- | --- | --- | --- |
 | 发消息 | `frontends/webcomponent/src/services/api-client.ts:streamChat` | 问题、conversation/request ID → HTTP JSON 请求 | 前端代码；不确定权限 |
 | 流式 HTTP | `src/vanna/servers/fastapi/routes.py:chat_sse` | ChatRequest + HTTP cookies/headers → SSE 数据块 | 后端代码；不生成 SQL |
+| 容量与生命周期 | `runtime_control.py:ManagedChatHandler.handle_stream` | 身份、请求ID → 有界排队/执行、同会话互斥、取消及超时清理 | 后端代码；不决定用户能问什么业务问题 |
 | 身份、会话与预算 | `src/data_analysis_agent/chat_runtime.py:BudgetedChatHandler.handle_stream` | 请求与服务端认证状态 → 所属会话、run ID、预算状态 | 后端代码 |
 | 语义理解与准入 | `SemanticIntentInterpreter.interpret`、`parse_semantic_intent`、`route_semantic_intent` | 原问题 + 角色可见 Catalog + 受控状态 → 校验后的指标、维度、日期、请求类型 | LLM 理解；服务端校验，不调用旧 classify/admit 语言闸门 |
 | 精确 Catalog 切片 | `select_intent_catalog`、`CatalogRetriever.retrieve(metric_ids=...)` | 已校验指标与维度 ID → 表列、Join 和指标定义 | 服务端代码；不根据原问题关键词重新替换指标 |
