@@ -20,7 +20,9 @@ protected case -> Router/Catalog/QueryPlan/ResultContract -> candidate SQL model
 
 第一条说明模型在公开 Spider/SQLite 上能否提出更好候选；第二条检查这一能力能否迁移到当前中文 PostgreSQL 工作区。两条链都不替代生产安全执行链。
 
-审阅时只看规范实现位置：`scripts/post_training/`。根目录 `scripts/` 中的同名 Python 与 shell 文件是兼容包装，不应作为业务逻辑阅读对象。原始数据、训练 JSONL、模型、Adapter、预测 SQL、结果行和完整实验日志都在仓库外，因此也不应尝试从 Git 中寻找它们。
+审阅时只看规范实现位置：`scripts/post_training/`。根目录同名Python与shell转发包装已删除，
+调用方直接使用规范目录。原始数据、训练JSONL、模型、Adapter、预测SQL、结果行和完整
+实验日志都在仓库外，因此也不应尝试从Git中寻找它们。
 
 ## 2. 审阅方式
 
@@ -174,9 +176,11 @@ protected case -> Router/Catalog/QueryPlan/ResultContract -> candidate SQL model
 
 **结束标准：** 你能按代码顺序讲出一条 protected Olist case 如何从 question 走到安全报告，并能指出模型在哪些位置被服务器规则限制。
 
-## 9. 单元 F：启动器和历史兼容入口
+## 9. 单元 F：启动器
 
-最后才读 `scripts/post_training/launchers/*.sh`、根目录 `scripts/start_*` 包装器和 `scripts/_post_training_compat.py`。它们的职责是设置环境、记录逻辑/物理 GPU 映射、启动 `screen` 和转发历史命令，不应出现新的训练、评测或 SQL 业务逻辑。若发现启动器与规范 Python CLI 的参数不一致，应先修复这一一致性问题，再批准任何长任务。
+最后才读 `scripts/post_training/launchers/*.sh`。其职责是设置环境、记录逻辑/物理GPU映射与
+启动screen，不应实现训练、评测或SQL业务逻辑。2026-10-20已删除根目录同名转发层和
+`_post_training_compat.py`，调用方直接使用规范目录。历史报告中的旧命令只供溯源。
 
 ## 10. 当前可记录的结构性观察
 

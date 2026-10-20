@@ -49,7 +49,7 @@ and asset, not an official-package or current official leaderboard claim.
 
 ## Bridge Contract
 
-[`scripts/run_official_spider_test_suite.py`](../scripts/run_official_spider_test_suite.py)
+[`scripts/post_training/evaluation/run_official_spider_test_suite.py`](../scripts/post_training/evaluation/run_official_spider_test_suite.py)
 uses [`spider_test_suite.py`](../src/data_analysis_agent/spider_test_suite.py) to
 prepare one complete external run. It enforces these rules before the evaluator
 is started:

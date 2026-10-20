@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sqlite3
 
-from scripts.run_sqlite_benchmark import main
+from scripts.post_training.evaluation.run_sqlite_benchmark import main
 
 
 def _write_native_bird_fixture(tmp_path: Path) -> tuple[Path, Path]:

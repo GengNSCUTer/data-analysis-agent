@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("torch", reason="SFT dataset tests run in the isolated QLoRA environment")
 
-from scripts.run_post_training_sft_smoke import (
+from scripts.post_training.training.run_post_training_sft_smoke import (
     CausalSqlCollator,
     CausalSqlDataset,
     FinalAdapterSnapshotCallback,

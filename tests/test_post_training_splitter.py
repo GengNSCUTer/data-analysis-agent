@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.split_post_training_candidates import main
+from scripts.post_training.data.split_post_training_candidates import main
 
 
 def candidate(sample_id: str, database: str, shape: str) -> dict[str, object]:

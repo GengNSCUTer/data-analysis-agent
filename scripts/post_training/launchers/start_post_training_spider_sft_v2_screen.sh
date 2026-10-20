@@ -41,7 +41,7 @@ echo "[expected_gpu_uuid] ${EXPECTED_GPU_UUID}"
 echo "[split_directory] ${SPLIT_DIRECTORY}"
 nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total,utilization.gpu --format=csv,noheader
 
-"${QLORA_PYTHON}" "${ROOT}/scripts/run_post_training_sft_smoke.py" \
+"${QLORA_PYTHON}" "${ROOT}/scripts/post_training/training/run_post_training_sft_smoke.py" \
   --model-dir "${MODEL_DIR}" \
   --train-jsonl "${SPLIT_DIRECTORY}/train.jsonl" \
   --validation-jsonl "${SPLIT_DIRECTORY}/validation.jsonl" \
@@ -64,7 +64,7 @@ nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total,utilization.gpu 
   --expected-gpu-uuid "${EXPECTED_GPU_UUID}" \
   --experiment-label spider_sft_v2_bf16_lora_3k_train
 
-"${QLORA_PYTHON}" "${ROOT}/scripts/validate_post_training_adapter.py" \
+"${QLORA_PYTHON}" "${ROOT}/scripts/post_training/training/validate_post_training_adapter.py" \
   --model-dir "${MODEL_DIR}" \
   --adapter-dir "${RUN_DIRECTORY}/adapter_best" \
   --validation-jsonl "${SPLIT_DIRECTORY}/validation.jsonl" \

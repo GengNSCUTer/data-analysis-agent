@@ -2,7 +2,7 @@
 """Generate one frozen Ollama SQL candidate per native SQLite benchmark case.
 
 The script never executes generated SQL.  Feed its external JSONL output into
-``scripts/run_sqlite_benchmark.py`` for policy/execution diagnostics, then use
+``scripts/post_training/evaluation/run_sqlite_benchmark.py`` for policy/execution diagnostics, then use
 an unmodified official evaluator separately for a publishable benchmark score.
 """
 

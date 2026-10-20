@@ -4,7 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from scripts.build_spider_sft_candidates import main
+from scripts.post_training.data.build_spider_sft_candidates import main
 
 
 def test_candidate_builder_keeps_train_only_rows_external_and_checked(

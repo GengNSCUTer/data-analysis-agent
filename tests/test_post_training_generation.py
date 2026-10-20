@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("torch", reason="generation utilities run in the isolated QLoRA environment")
 
-from scripts.generate_post_training_text_to_sql import (
+from scripts.post_training.inference.generate_post_training_text_to_sql import (
     GenerationInputError,
     require_dev_cases_without_gold,
     table_mapping,

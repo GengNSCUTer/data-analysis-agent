@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sqlite3
 
-from scripts.run_spider_bounded_denotation_audit import main
+from scripts.post_training.evaluation.run_spider_bounded_denotation_audit import main
 
 
 def _diagnostic_report(final_sql: str, status: str = "executed") -> dict[str, object]:

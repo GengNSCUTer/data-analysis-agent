@@ -88,10 +88,11 @@ jobs:
       run: |
         python scripts/run_project_evaluation.py --output /tmp/project-evaluation.yaml
         python scripts/run_demo_scenario_evaluation.py --output /tmp/demo-scenarios.yaml
-    - name: Compile project demo entry points
-      run: python -m compileall -q \
-        examples/siliconflow_sqlite_web_demo.py \
-        src/data_analysis_agent/server.py
+    - name: Compile product entry points
+      run: |
+        python -m compileall -q \
+          src/data_analysis_agent/deployment.py \
+          src/data_analysis_agent/server.py
     - name: Verify the installed wheel outside the checkout
       run: |
         python -m pip wheel --no-deps --wheel-dir /tmp/copilot-wheels .

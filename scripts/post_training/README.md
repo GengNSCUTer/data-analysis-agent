@@ -12,9 +12,10 @@ production Vanna/PostgreSQL runtime in `src/data_analysis_agent/`.
 | `evaluation/` | Generate matching candidates, then run governed execution and post-generation Gold denotation. | `run_olist_medium_matching_evaluation.py`, `run_olist_medium_gold_denotation_audit.py`, `evaluate_thelook_matching_outputs.py` |
 | `launchers/` | Explicit `screen` launchers for approved long-running jobs. | `start_qwen25_multischema_v3_1_matching_evaluation_screen.sh` |
 
-The root-level names in `scripts/` are compatibility entry points. New code,
-new documentation and new imports should use this capability-based layout. New
-CLI invocations should use module mode, for example:
+The obsolete root-level forwarding scripts were removed on 2026-10-20. Imports,
+launchers and CLI invocations use this capability-based layout directly. Old
+experiment reports may retain their original command text as historical evidence.
+For example:
 
 ```bash
 python -m scripts.post_training.data.split_post_training_candidates --help

@@ -7,7 +7,7 @@ first LoRA Adapter comparison. It does not modify the production Vanna,
 FastAPI, PostgreSQL or trusted Text-to-SQL runtime.
 
 The reproducible analyzer is
-[`scripts/analyze_post_training_comparison.py`](../scripts/analyze_post_training_comparison.py).
+[`scripts/post_training/evaluation/analyze_post_training_comparison.py`](../scripts/post_training/evaluation/analyze_post_training_comparison.py).
 It reads the paired external SQLite diagnostic reports and emits only aggregate
 counts, distributions and bounded case IDs. It never writes question text, SQL,
 database/table/column identifiers, raw SQLite errors or result rows. Its first

@@ -195,7 +195,7 @@ def main() -> int:
     # 生成审计报告，完整记录拆分参数、统计数据、文件哈希，保证数据集可溯源复现
     audit = {
         "generated_at": generated_at,
-        "generator": "scripts/split_post_training_candidates.py",
+        "generator": "scripts/post_training/data/split_post_training_candidates.py",
         "generator_version": "1",
         "source": {
             "candidates_jsonl": str(args.candidates_jsonl),

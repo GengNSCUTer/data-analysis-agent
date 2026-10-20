@@ -50,7 +50,7 @@ if [[ -e "${RUN_DIRECTORY}/gold.txt" || -e "${RUN_DIRECTORY}/predictions.txt" ||
 fi
 
 set +e
-"${PYTHON}" "${ROOT}/scripts/run_official_spider_test_suite.py" \
+"${PYTHON}" "${ROOT}/scripts/post_training/evaluation/run_official_spider_test_suite.py" \
   --cases "${CASES}" \
   --predictions "${PREDICTIONS}" \
   --evaluator-root "${EVALUATOR_ROOT}" \

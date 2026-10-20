@@ -11,6 +11,12 @@
 [面试材料](docs/interview/project-release-facts-v1.md)。Docker实运行和外部独立部署尚未验证。
 后续回到[四周学习计划](plan/process-agent-internship-improvement-v1.md)，下面保留历史实验与阶段记录。
 
+2026-10-20清理任务卡：移除已由能力目录替代的后训练转发脚本、早期无正式治理的SQLite
+产品原型及重复样本；直接更新测试和启动器调用，不添加兼容入口。调研克隆、旧构建中间产物
+和原型生成库移到仓库外可恢复归档；保留当前服务资源、正式业务数据、模型和历史实验。
+验收采用依赖引用检查、相关回归与CLI/启动器静态检查。随后恢复四周学习的Day 1当前入口，
+只讲一个小单元并等待用户复述，不自动开启新功能或训练。
+
 ## 0. 本地数据边界
 
 仓库内的 `data/` 只保存可提交、可审查的小型资产：指标 Catalog、数据 manifest、DDL/转换定义和合成 fixture。原始第三方数据、SQLite 数据库、模型权重、Adapter/checkpoint、预测和实验日志统一保存在仓库外的 `/disk2/gengnan/data-analysis-agent-data/`，这是本项目唯一的大型本地数据根，不进入 Git。
@@ -111,9 +117,12 @@
 
 ## 5. 总体设计
 
-### 5.0 当前运行基线（Phase 1 与可信查询原型）
+### 5.0 早期运行基线（历史原型，已替代）
 
-基础冒烟入口仍是
+本节保留早期实现的历史说明。2026-10-20已移除下述SQLite原型；当前正式入口为
+`src/data_analysis_agent/server.py:create_app`，部署与端口配置见[部署说明](docs/deployment.md)。
+
+当时的基础冒烟入口是
 `examples/siliconflow_sqlite_web_demo.py`：它创建本地合成 SQLite fixture，使用
 Vanna 的 `Agent`、`ToolRegistry`、`SqliteRunner`、`OpenAILlmService` 和原生 FastAPI
 路由，页面由 Vanna 原生 `<vanna-chat>` 提供。模型通过 `.env` 中的
@@ -1704,3 +1713,25 @@ SFT、定向复测和未验证能力。保留历史实验、原始失败和用�
 build和postgres-and-browser均为success，PG16容器、合成初始化、实际集成与Chromium全部
 运行通过。本机完整Compose部署和外部独立试用仍未验证；此条补充不修改业务质量分母。
 飞书远端验收补充已追加并回读，revision 295。
+
+## 2026-10-20｜清理废弃入口，恢复代码学习
+
+删除17个根目录Python转发脚本、1个共用转发助手、3个shell转发入口、早期无正式治理的
+SQLite网页原型及其未被使用的CSV样本，共23个文件。对应实现保留在
+`scripts/post_training/{data,training,inference,evaluation,launchers}/`，9个测试模块与5个
+实质启动器直接引用规范位置；CI编译改为正式产品入口。历史实验报告保留原命令作为来源
+记录，当前目录说明和学习入口同步更新。
+
+约805MB调研克隆、旧build目录及原型生成库已移出项目目录，可从仓库外
+`/disk2/gengnan/data-analysis-agent-data/cleanup-20261020-BlC0evEZ/`恢复；这是归档而非释放
+磁盘空间。正式数据、模型、checkpoint、运行资源和用户原稿均保留。
+
+定向回归80项通过，训练环境CPU工具测试另16项通过；5个CLI的`--help`、5个启动器bash
+语法、定向Ruff、compileall与diff检查通过。Olist 32013、TheLook 32104的health均正常。
+这些检查覆盖入口替换及相关逻辑，不构成新的在线业务质量评测，本轮不启动训练。
+
+按[四周计划](plan/process-agent-internship-improvement-v1.md)恢复Day 1，当前小单元是
+`SemanticIntent`与`parse_semantic_intent()`；阅读提示和两道待回答题已记入
+[学习记录](docs/learning/agent-project-walkthrough-v1.md)。工程完成不标记用户学习完成。
+
+飞书项目文档已追加并回读同一清理与学习恢复记录，revision 296。

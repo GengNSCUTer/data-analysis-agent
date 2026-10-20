@@ -459,7 +459,7 @@ def main() -> int:
     # audit.json：审计报告，记录所有参数、统计指标、源文件哈希，保证数据集可复现、可溯源
     audit = {
         "generated_at": generated_at,
-        "generator": "scripts/build_spider_sft_candidates.py",
+        "generator": "scripts/post_training/data/build_spider_sft_candidates.py",
         "generator_version": "2",
         "source": {
             "train_json": str(args.train_json),

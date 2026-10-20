@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts.verify_post_training_sft_artifacts import verify_manifest
+from scripts.post_training.training.verify_post_training_sft_artifacts import verify_manifest
 
 
 def sha256(value: bytes) -> str:

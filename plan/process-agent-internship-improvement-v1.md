@@ -2,7 +2,7 @@
 goal: 可信数据分析 Agent 的产品完善、代码学习与后端及 Agent 实习面试准备
 version: 1.0
 date_created: 2026-10-10
-last_updated: 2026-10-19
+last_updated: 2026-10-20
 owner: 李耿楠
 status: In Progress
 tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
@@ -16,7 +16,12 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 
 两个简历项目分别承担不同主题：知识 Agent 平台解释非结构化检索、工具工作流和 Durable；本项目解释结构化数据分析、指标口径、只读执行、结果证据和小模型候选生成。计算机基础由另一个项目安排，这里只讨论它们在真实代码中的应用。
 
-**当前事实。** 在线产品为 Olist v3 Catalog + SiliconFlow；本地登录、来源绑定嵌入令牌、会话状态、CSV 下载和五种图表已实现。偏好仅保存尚未应用；Phase B 人工语义审核仍未完成。主模型是 Qwen2.5-Coder-1.5B Base 的 bf16 LoRA，双 workspace 训练/validation 为 6,000/1,500，最终测试各 750；ordered Gold 为 Olist 403/750、TheLook 396/750。训练已经包含 TheLook，因此本轮不是未见 Schema 泛化。Adapter 未接入在线页面，DPO 未训练。
+**当前事实（2026-10-20）。** 在线使用SiliconFlow DeepSeek-V3.2，Olist与TheLook已分别通过配置
+接入同一产品链路；六项工程补缺、隔离安装、业务开发场景、容量与CI已有记录，详见
+[工程清单](process-agent-product-readiness-v1.md)。偏好仍仅保存，历史Phase B标注不由后续
+新报告自动补齐。主模型是Qwen2.5-Coder-1.5B Base的bf16 LoRA，双workspace训练/validation
+为6,000/1,500，各750条已见Schema留出的ordered Gold为403/750、396/750。Adapter未接入
+在线页面，DPO未训练。工程与测试完成不等于用户已经掌握实现。
 
 **时间安排。** 默认每周五个主题单元、每单元 90–120 分钟，另外预留每周半天处理必要的小改动。遇到面试或另一项目占用时间，按完成条件顺延，不赶工。建议本项目时间约 60% 用于业务质量与工程补缺，25% 用于代码理解和面试复述，15% 用于后训练学习与有限验证；比例是执行建议，不是岗位统计结论。
 
@@ -43,21 +48,30 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 
 阶段间按 1 → 2 → 3 → 4 推进。阶段内 TASK 编号顺序表示依赖；每个 TASK 完成一次短复验即可，不重复跑大规模模型终测。第四周的模型服务实验有单独准入条件，不阻塞其他开源交付。
 
+2026-10-20说明：下面的完成列记录用户学习与复述情况，不代表工程尚未实现。原计划中的
+60题、安装恢复、新库接入和容量测试已有交付，分别回读`evals/results/`与工程清单即可；
+新库接入以已完成的TheLook配置实例为准，不再另造mini-shop或重复冻结用例。仅发现新的
+具体缺陷时做相应修改，正常学习以阅读、追踪与口述为主。
+
 ### Implementation Phase 1
 
 - **GOAL-001**: 第一周掌握现有系统，复核核心边界，产出面向产品的最小质量基线。
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-001 | Day 1：从 examples/trusted_olist_web_demo.py:create_app、QuestionRouter.classify/admit_sql_request 和 BudgetedChatHandler 跟踪一条“客户州有效订单前五”请求。补充 docs/architecture/product-request-architecture-v1.md 的输入/输出、代码/模型分工与一次真实请求 trace；用户闭卷画链路，说明离线 QuerySpec 与在线 QueryPlan 的区别。 | 否 | — |
+| TASK-001 | Day 1：从 src/data_analysis_agent/server.py:create_app、ManagedChatHandler、SemanticIntentInterpreter 和 BudgetedChatHandler 跟踪“客户州有效订单前五”请求。理解当前自然语言理解、状态和执行的分工；旧 classify/admit 只供历史离线协议。用户闭卷画链路，说明QuerySpec/QueryPlan区别与一次拒绝路径。 | 否 | — |
 | TASK-002 | Day 2：阅读 semantic_catalog.py、query_plan.py、plan_sql_guard.py 和十项/十九项指标合同，核对 GMV、订单数、客单价的 grain、状态与 join 放大风险。只为发现的真实口径缺陷补测试，不一口气读全部训练构造脚本。 | 否 | — |
-| TASK-003 | Day 3：阅读 sql_policy.py、SecurePostgresRunner 和 ResultValidator，执行只读角色、敏感列、空窗口、恰好 1,000 行/超过上限及展示 200 行的既有回归；补列当前计划一致性检查不能证明完整 SQL 语义的边界。 | 否 | — |
+| TASK-003 | Day 3：阅读 sql_policy.py、SecurePostgresRunner 和 ResultValidator，复核只读角色、敏感列、空窗口、计划结果预算与多读一行，以及预览200行/模型8行/完整工件的区别；说明执行与合同通过不能证明全部SQL业务语义。旧1,000行协议只供历史离线评测。 | 否 | — |
 | TASK-004 | Day 4：阅读 conversation_store.py、working_memory.py、context_builder.py、analysis_lifecycle.py 与 ResultArtifactStore。跟踪“查结果→结果解释→换维度→重载→清空分析”的会话，验证摘要不进入 SQL 条件、状态冲突可恢复、下载不能跨用户/workspace。 | 否 | — |
 | TASK-005 | Day 5：复用 scripts/run_product_capability_online.py 和 conversations.py 的结果记录，读取仓库外回答证据，完成已有 Phase B 的人工标注；若旧输出缺失，明确标缺失。另冻结 evals/cases/product_release_dev_v1.yaml 的 60 条新开发用例：单轮业务10、澄清10、两窗口比较/趋势10、多轮10、安全与范围10、图表/下载/空结果10。来源不复写既有 SFT 或 final test；输出当前 baseline 和第一周五分钟口述。 | 否 | — |
 
 第一周退出条件：能画出并解释请求链、身份链、结果链、会话链和离线模型链；已有 Phase B 审核有可回查状态；60 条新开发用例的目标行为、业务口径和来源记录齐全。没有证据的能力明确标记待测。
 
-Day 1 当前进行中：已复述启动装配、请求入口、Router、QueryPlan 与上下文分工。2026-10-14 结果预算插入任务已收尾，恢复“工具执行 → 结果校验 → 可信工件/回答依据”小段；暂不新增训练或长评测。TASK-001 仍为“否”，待用户阅读关键函数并闭卷复述整条请求链。代码学习与问答集中在 [`docs/learning/agent-project-walkthrough-v1.md`](../docs/learning/agent-project-walkthrough-v1.md)，进度与证据写入 PROJECT，不复制到后训练学习笔记。
+Day 1当前进行中：启动装配、旧路由、QueryPlan与结果预算已有用户复述。六项工程已完成后，
+2026-10-20恢复学习，先用当前 `SemanticIntent` → `parse_semantic_intent()` 小段校正旧入口，
+再闭卷串联请求/状态/执行链；不重开Day 1任务或新增训练。TASK-001仍为“否”，等用户实际
+阅读和复述后再完成。问答集中在[`agent-project-walkthrough-v1.md`](../docs/learning/agent-project-walkthrough-v1.md)，
+不会因工程验收自动进入Day 2。
 
 ### Implementation Phase 2
 
@@ -66,7 +80,7 @@ Day 1 当前进行中：已复述启动装配、请求入口、Router、QueryPla
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
 | TASK-006 | Day 6：运行 TASK-005 的开发集并按 Router/grounding、SQL 结构、时间/状态、指标 grain、ResultContract、回答/图表、多轮分类。保留 sample/request/model/prompt/SQL/artifact 标识；raw 内容在仓库外，脱敏统计进 evals/results/product_release_dev_v1.md。仅选择影响最大的前三类进入本周修复。 | 否 | — |
-| TASK-007 | Day 7：修复已复现的指标/维度/过滤误识别，代码落在 QuestionRouter.admit_sql_request、ConstrainedCatalogGrounder 和 QueryPlan。相对时间使用显式时间锚点和 workspace 时区/数据范围；不能把 Olist 历史数据冒充当前销售。未出现缺陷则补说明，不强制改路由。 | 否 | — |
+| TASK-007 | Day 7：复盘已复现的指标/维度/过滤误识别，阅读 SemanticIntentInterpreter、resolve_state_intent() 和 QueryPlan 的处理。相对时间使用显式时间锚点和 workspace 时区/数据范围；不能把 Olist 历史数据冒充当前销售。先复现当前行为，仅有新缺陷才修复，不恢复旧 classify/admit 语言闸门。 | 否 | — |
 | TASK-008 | Day 8：针对实际 join、grain、分母或结果列错误选择一项修复。优先使业务合同、Catalog 和候选校验表达一致；如需增强 plan_sql_guard，使用 sqlglot AST 进行该项验证并增加等价正确 SQL 与错误 SQL 的对照，不能声称规则检查证明所有业务语义。 | 否 | — |
 | TASK-009 | Day 9：完成已支持指标的两窗口比较与受控维度拆解演示；比较数值从验证结果确定性计算，回答标明口径与缺失数据。若当前工具链不支持两次查询，在 RequestBudget 与执行计划中明确上限后再扩展。展示已定义的时间、排行和比例图表；不能为“原因是什么”伪造因果。偏好是否应用展示，仅在不改变 SQL 语义的情况下作为一个独立小项。 | 否 | — |
 | TASK-010 | Day 10：仅重跑受影响类别并完成一次 60-case 最终开发回归，输出前后相同模型/Prompt/数据条件的统计、回退和限制；组织一次“为什么 SQL 可执行还会算错”的模拟追问。未达到首发能力的场景从支持清单移到澄清/不支持，不通过改题目隐藏失败。 | 否 | — |
@@ -79,7 +93,7 @@ Day 1 当前进行中：已复述启动装配、请求入口、Router、QueryPla
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-011 | Day 11：审查 examples/trusted_olist_web_demo.py、local_auth.py、pyproject.toml 和运行环境依赖。将产品必需依赖与后训练依赖分开，明确 data_analysis_agent 的安装方式；把 /disk2 下的账号/工件/tokenizer 路径改为统一配置。新增不含秘密的 .env.example，列必填项、默认值和启动失败提示。 | 否 | — |
+| TASK-011 | Day 11：审查 server.py、local_auth.py、runtime_paths.py、pyproject.toml 和运行环境依赖，解释现有产品/后训练依赖分离、环境配置及路径解析。按 .env.example 追踪必填项、默认值和启动失败提示；工程已有交付，不为学习重复改造。 | 否 | — |
 | TASK-012 | Day 12：复用 infra/postgres/compose.yaml 建立合成小电商数据和 app schema 初始化/迁移流程；新增应用容器和可执行 quickstart。在空白目录/隔离环境验证源码安装或容器启动、健康检查、重启后会话和工件恢复。现有服务器数据库不删除、不重建。 | 否 | — |
 | TASK-013 | Day 13：用自己构造、表列名不同于 Olist 的 mini-shop workspace 做接入 smoke。整理 Catalog、WorkspaceAccessRegistry、readonly role、ResultContract、版本与来源允许列表的配置方法；通过五条固定业务请求和两条越权请求，证明无需修改 Router 的 Olist 专用分支才可完成最小接入。先支持 PostgreSQL，不新增方言。 | 否 | — |
 | TASK-014 | Day 14：核对 AccountStore/ProductIdentityResolver、embed token、ExportAudit、会话 CAS 与取消处理。补测试会话过期/退出、来源不匹配、工件篡改、两用户隔离、同会话并发、断连及数据库超时。给单实例部署加有界模型并发与登录/请求速率限制；共享多实例限流与企业 SSO另列边界，不使用进程内 limiter 冒充跨实例方案。 | 否 | — |
@@ -119,11 +133,11 @@ Day 1 当前进行中：已复述启动装配、请求入口、Router、QueryPla
 
 ## 5. Files
 
-- **FILE-001**: examples/trusted_olist_web_demo.py、src/data_analysis_agent/question_router.py、query_plan.py、catalog_grounding.py：请求/身份/语义入口。
+- **FILE-001**: src/data_analysis_agent/server.py、runtime_control.py、semantic_intent.py、query_plan.py、catalog_grounding.py：当前请求/身份/语义入口；question_router.py只按当前调用职责阅读，不把旧语言闸门当作在线入口。
 - **FILE-002**: src/data_analysis_agent/sql_policy.py、postgres_runner.py、result_validator.py、plan_sql_guard.py：受控执行与正确性边界。
 - **FILE-003**: src/data_analysis_agent/conversation_store.py、working_memory.py、context_builder.py、analysis_lifecycle.py、result_artifact_store.py：状态、摘要和工件。
 - **FILE-004**: examples/embeddable_copilot_shell.html、frontends/webcomponent/、infra/postgres/、pyproject.toml：交互与部署接入。
-- **FILE-005**: evals/cases/product_release_dev_v1.yaml、evals/results/product_release_dev_v1.md、docs/interview/project-release-facts-v1.md：未来阶段的开发评测、结果和面试事实产物；当前尚未创建。
+- **FILE-005**: evals/cases/product_release_dev_v1.yaml、evals/results/product_release_dev_v1.md、evals/results/thelook_product_queries.md、docs/interview/project-release-facts-v1.md：已有开发评测、结果和面试事实，学习时审阅证据与失败，不因文件存在标记已掌握。
 - **FILE-006**: docs/post-training/learning/、experiments/project-v1-model-card.md、project-v1-dpo-decision.md、scripts/post_training/training/：后训练学习与已冻结实验。
 
 ## 6. Testing

@@ -21,7 +21,7 @@
 | `.github/` | CI 任务及仓库自动化。 | 中；提交前或排查 CI 时阅读。 |
 | `plan/` | 历史或阶段性计划，不应替代 `PROJECT.md` 的当前事实。 | 低。 |
 | `papers/`、`notebooks/` | 背景研究与探索性材料，不是运行时依赖。 | 低。 |
-| `github-research-output/` | Git 忽略的调研中间产物；当前约数百 MB，不是项目源代码、测试或运行时资产。 | 不读代码时可忽略。 |
+| 仓库外调研归档 | 原 `github-research-output/`（793 MB）已移到仓库外可恢复归档，不参与运行或测试。 | 学习当前产品无需阅读。 |
 
 根目录 `pyproject.toml` 保留 fork 的发行名 `vanna` 和版本 `2.0.2`，安装包同时包含 `vanna` 与 `data_analysis_agent`。产品入口为 `data-analysis-agent`，管理员初始化入口为 `data-analysis-agent-init`；安装与资源打包见 [部署说明](../deployment.md)。运行时不再依赖从仓库根目录设置 `PYTHONPATH`。
 
@@ -56,16 +56,19 @@ data-analysis-agent -> src/data_analysis_agent/server.py:create_app()
 
 - `src/vanna/` 与 `src/data_analysis_agent/` 必须继续区分：前者是上游框架，后者才是项目的可信数据分析能力。将二者混合会让升级、问题归因和简历表述都变得模糊。
 - `scripts/post_training/` 与生产运行时必须继续分开：离线实验能够读取 Spider/模型资产，但不能拥有线上数据库执行权限或绕过结果合同。
-- 根目录 `scripts/` 下的同名文件目前是兼容入口。它们不应继续承载新逻辑，但在已有文档、历史命令和 `screen` 启动器仍可能引用它们时，不应直接删除。
+- 后训练只使用 `scripts/post_training/` 的规范入口。根目录17个同名Python转发器、辅助兼容模块和3个shell包装器已删除；测试与保留启动器直接调用规范位置。历史报告保留原命令，重跑时使用规范模块，不恢复兼容层。
 
 ### 先记录、暂不执行的整理建议
 
 | 优先级 | 建议 | 理由与前提 |
 | --- | --- | --- |
-| 高 | 将 `github-research-output/` 迁到仓库外的研究归档目录，或在 IDE 中排除索引。 | 它已被 Git 忽略但体积很大，会干扰搜索、备份和目录理解。迁移前需要确认不再有活动调研任务依赖其相对路径。 |
 | 中 | 为根目录 `scripts/` 增加总览 README，并在后训练审阅完成后决定是否将非后训练脚本分为 `scripts/evaluation/`、`scripts/data/`、`scripts/runtime/`。 | 当前后训练已经分层，其他项目脚本仍较平铺；先完成调用方审阅，避免移动后难以比对历史命令。 |
-| 中 | 逐步把根目录 `docs/` 的项目自有长文按 `architecture/`、`evaluation/`、`operations/` 分类，旧路径保留兼容页。 | 当前已有较多历史链接；只能分批移动并执行全量本地链接检查。 |
+| 中 | 有实际查找困难时，逐步把根目录 `docs/` 的项目自有长文按职责分类，同时直接更新引用。 | 当前已有较多历史链接；只能分批移动并检查受影响链接，不为目录整齐新增兼容页。 |
 | 低 | 将 `tests/` 后续按 `runtime/`、`post_training/`、`e2e/` 分组。 | 当前按模块名平铺仍可搜索；移动不会直接提高质量，等审阅明确稳定边界后再做。 |
 | 低 | 评估是否把 `src/data_analysis_agent/` 切分为 `runtime/`、`semantic/`、`offline/` 子包。 | 有约 70 个测试和多处相互导入；现在移动只会扩大回归面。应先完成模块依赖审阅并建立公开接口。 |
 
 `frontends/webcomponent/node_modules/`、`frontends/webcomponent/dist/`、Python `__pycache__/` 和各种模型/数据/实验目录均不应进入 Git；当前它们是本地构建或运行产物，不应作为源码目录重构对象。
+
+2026-10-20归档位置为仓库外 `data-analysis-agent-data/cleanup-20261020-BlC0evEZ/`：调研克隆、
+12 MB旧build产物和原型SQLite库分别存为 `research-clones/`、`build-output/`、`vanna_demo.sqlite`。
+它们可从归档恢复。当前服务使用的JS/resources、正式数据、模型和实验目录未清理。

@@ -9,6 +9,10 @@
 
 本机 `gh` 未登录，无法使用 GitHub Search API 的完整发现/排名流程。因此本轮采用公开仓库的只读浅克隆和实际源码阅读，不宣称“覆盖了全量产品”。克隆副本位于被 Git 忽略的 `github-research-output/agent-context-memory/`，以便日后按下表 revision 复核。
 
+2026-10-20位置更新：上述克隆完整迁至仓库外
+`/disk2/gengnan/data-analysis-agent-data/cleanup-20261020-BlC0evEZ/research-clones/agent-context-memory/`。
+下文保留原调研时间、源码revision与结论，不因迁移重新作结论。
+
 `openai/codex` 是公开的 Codex CLI 代码，能够说明该仓库的 thread/history/compaction 实现；它**不能**证明 ChatGPT 或托管 Codex 产品使用相同内部机制。
 
 | 仓库 | Revision | License | 本轮阅读的核心文件 | 价值 |

@@ -39,7 +39,7 @@ echo "[physical_nvidia_smi_device] ${PHYSICAL_NVIDIA_SMI_DEVICE}"
 echo "[expected_gpu_uuid] ${EXPECTED_GPU_UUID}"
 nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total,utilization.gpu --format=csv,noheader
 
-"${QLORA_PYTHON}" "${ROOT}/scripts/run_post_training_sft_smoke.py" \
+"${QLORA_PYTHON}" "${ROOT}/scripts/post_training/training/run_post_training_sft_smoke.py" \
   --model-dir "${MODEL_DIR}" \
   --train-jsonl "${SPLIT_DIRECTORY}/train.jsonl" \
   --validation-jsonl "${SPLIT_DIRECTORY}/validation.jsonl" \

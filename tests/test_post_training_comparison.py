@@ -9,7 +9,7 @@ from data_analysis_agent.post_training_comparison import (
     ComparisonInputError,
     analyze_paired_sqlite_diagnostics,
 )
-from scripts.analyze_post_training_comparison import main
+from scripts.post_training.evaluation.analyze_post_training_comparison import main
 
 
 SECRET_SQL = "SELECT sensitive_column FROM internal_table"

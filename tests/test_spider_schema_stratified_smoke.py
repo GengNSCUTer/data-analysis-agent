@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.build_spider_schema_stratified_smoke import (
+from scripts.post_training.data.build_spider_schema_stratified_smoke import (
     model_facing_case,
     select_schema_stratified_indices,
 )
