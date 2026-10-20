@@ -1,10 +1,13 @@
+# 按 docs/templates/workspace/ 填写；业务说明/复核见 docs/workspaces/thelook.md。
 workspace_id: thelook-demo
 dataset_id: thelook-ecommerce-kaggle-mirror
 display_name: TheLook 电商分析
 description: TheLook 公开电商 Kaggle 镜像快照，包含订单、库存、用户和行为事件；不是企业实时数据，币种未确认，不推断利润或转化率。
 catalog: ../catalog/thelook_catalog_v2.yaml
+analytics_schema: analytics
 reader_role: daa_thelook_reader
 writer_role: daa_thelook_app_writer
+additive_metric_ids: [completed_sale_amount, completed_item_count, completed_order_count, cancelled_order_count, returned_order_count, received_inventory_unit_count, sold_inventory_unit_count, current_unsold_inventory_unit_count, event_count, registered_user_count]
 shape_bounds: ../catalog/thelook_runtime_shape_bounds_v1.json
 starter_questions:
 - label: 完成订单概览

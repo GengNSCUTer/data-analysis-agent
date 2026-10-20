@@ -70,6 +70,7 @@ GitHub Actions 覆盖确定性回归、Web Component 构建和离开源码目录
 - [PROJECT.md](PROJECT.md)：项目事实与进度，历史实验按日期保留。
 - [文档导航](docs/README.md)：运行时架构、指标合同、评测与学习入口。
 - [部署说明](docs/deployment.md)：安装、合成数据初始化、持久化与重启恢复。
+- [新业务库填写模板](docs/templates/workspace/README.md)：需要准备的Schema、指标口径、关联与权限，附TheLook填写实例和检查命令。
 - [当前产品请求架构](docs/architecture/product-request-architecture-v1.md)：模型与代码的分工。
 - [后训练总览](docs/post-training/README.md)：当前主实验与历史实验的区别。
 - [目录与代码审阅地图](docs/architecture/repository-map.md)：各模块位置和职责。

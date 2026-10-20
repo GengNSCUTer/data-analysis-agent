@@ -45,6 +45,7 @@ def load_runtime_workspace(path: Path | None = None) -> RuntimeWorkspace:
         analyst_tables=frozenset(t["physical_name"] for t in tables if "analyst" in t["role_visibility"]),
         sensitive_projection_columns=frozenset(c["name"] for t in tables for c in t["columns"] if c["sensitive"]),
         catalog_path=catalog_path,
+        additive_metric_ids=frozenset(config.get("additive_metric_ids", ())),
         dimension_bindings={name: DimensionBinding(
             tuple(binding["aliases"]), tuple(tuple(source) for source in binding["sources"]),
             binding.get("max_cardinality", bounds.get("cardinalities", {}).get(name)),
@@ -70,6 +71,7 @@ metric_version={workspace.metric_version}; catalog_version={workspace.catalog_ve
 不得 SELECT *；COUNT(*) 是聚合计数。敏感标识仅用于关联或受控聚合，不展示明细。
 SQL 必须通过 AST 策略、对象白名单、敏感字段检查、reader role、超时和结果预算。
 尊重每个指标事实粒度；多对一维度关联保持原始公式，一对多事实先各自聚合再关联，避免放大金额或计数。
+默认只返回满足指标过滤条件的事实分组；没有事实的维度成员不自动补行或填0，除非用户明确要求完整维度补全。
 不自行分摊、修改默认状态过滤或改用商品行时间替代指标定义的时间字段。
 总体多指标概览只发起一次包含全部指标列的 SQL，不为口径或数据覆盖额外查询元数据。
 

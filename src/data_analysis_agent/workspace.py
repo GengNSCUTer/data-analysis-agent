@@ -49,6 +49,9 @@ class WorkspaceProfile:
     sensitive_projection_columns: frozenset[str] = frozenset()
     catalog_path: Path | None = None
     dimension_bindings: Mapping[str, DimensionBinding] = field(default_factory=dict)
+    # Business-approved additive measures for composition charts; never infer
+    # additivity from an integer result (distinct counts need not be additive).
+    additive_metric_ids: frozenset[str] = frozenset()
     # Frozen unfiltered fact-row counts per UTC date. Used only for conservative
     # preflight bounds, never rendered into model input or used as query results.
     fact_date_counts: Mapping[str, Mapping[str, int]] = field(default_factory=dict)

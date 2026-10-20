@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from data_analysis_agent.chart_contract import ChartContract
+from data_analysis_agent.runtime_workspace import load_runtime_workspace
+from data_analysis_agent.runtime_paths import RESOURCES
 from data_analysis_agent.query_plan import QueryPlan
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import (
@@ -15,7 +17,7 @@ from vanna.core.user import User
 
 def _chart_contract(question: str) -> ChartContract:
     user = User(id="chart-contract-user", group_memberships=["analyst"])
-    catalog = CatalogLoader().load()
+    catalog = CatalogLoader(load_runtime_workspace(RESOURCES / "workspaces/olist.yaml").profile).load()
     router = QuestionRouter(CatalogRetriever(catalog))
     selection = router.retriever.retrieve(question, user)
     route = router.classify(question, user=user, selection=selection)

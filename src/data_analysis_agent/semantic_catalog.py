@@ -258,6 +258,7 @@ class ResultContract:
     attribution_requirements: tuple[AttributionRequirement, ...] = ()
     requested_end_exclusive: bool = False
     result_budget: ResultBudget | None = None
+    additive_metric_ids: tuple[str, ...] = ()
 
     @classmethod
     def from_selection(
@@ -341,6 +342,8 @@ class ResultContract:
             ),
             attribution_requirements=attribution_requirements,
             result_budget=result_budget,
+            additive_metric_ids=tuple(metric_id for metric_id in metric_ids
+                                      if catalog.workspace and metric_id in catalog.workspace.additive_metric_ids),
         )
 
     @staticmethod

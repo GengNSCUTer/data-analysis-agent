@@ -49,6 +49,7 @@ jobs:
           tests/test_query_filters.py \
           tests/test_runtime_paths.py \
           tests/test_runtime_workspace.py \
+          tests/test_workspace_onboarding.py \
           tests/test_trusted_workflow.py \
           tests/test_demo_session.py \
           tests/test_demo_scenarios.py \

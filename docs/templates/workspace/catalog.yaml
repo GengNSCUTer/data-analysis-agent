@@ -1,0 +1,54 @@
+# 这是现有CatalogLoader直接读取的格式，无第二套在线协议。
+catalog_version: example-catalog-v1
+dataset_version: example-snapshot-v1
+metric_version: example-metrics-v1
+policy_version: sql-policy-v1
+description: 示例业务口径；请用实际Schema和业务确认的公式替换。
+# 币种确认后可添加 currency_code/currency_symbol/currency_name，未知则不声明。
+tables:
+  - table_id: orders
+    physical_name: orders
+    description: 一行一个订单，order_id唯一；不是商品行。
+    grain: order
+    aliases: [订单]
+    semantic_tags: [订单, 交易]
+    role_visibility: [analyst, admin]
+    context_columns: [order_id, customer_id, created_at, status]
+    columns:
+      - {name: order_id, type: bigint, description: 内部订单键，仅关联或聚合, aliases: [订单ID], sensitive: true}
+      - {name: customer_id, type: bigint, description: 内部客户键, aliases: [客户ID], sensitive: true}
+      - {name: created_at, type: timestamptz, description: 订单创建时间，按UTC统计, aliases: [下单时间], sensitive: false}
+      - {name: status, type: text, description: Complete为已完成；请确认实际枚举及业务含义, aliases: [订单状态], sensitive: false}
+  - table_id: customers
+    physical_name: customers
+    description: 一行一个客户，customer_id唯一；不包含姓名邮箱地址等原始明细。
+    grain: customer
+    aliases: [客户]
+    semantic_tags: [客户, 地域]
+    role_visibility: [analyst, admin]
+    context_columns: [customer_id, region]
+    columns:
+      - {name: customer_id, type: bigint, description: 内部客户键, aliases: [客户ID], sensitive: true}
+      - {name: region, type: text, description: 可展示的客户地区, aliases: [地区], sensitive: false}
+metrics:
+  - metric_id: completed_order_count
+    name: 已完成订单数
+    # description必须写公式，不能只填“订单指标”。比例说明分子分母和0–1单位；均值说明分母。
+    description: orders一行一订单，COUNT(*)，只计Complete状态；不关联商品行后直接COUNT(*)。
+    aliases: [完成订单数]
+    grain: order
+    time_field: orders.created_at
+    source_tables: [orders]
+    source_columns: [orders.order_id, orders.status, orders.created_at]
+    default_filters: ["orders.status = 'Complete'"]
+    allowed_dimensions: [date, customer_region]
+    result_value_constraints: {minimum: 0, integer_like: true}
+    recommended_chart: bar_or_line
+    role_visibility: [analyst, admin]
+joins:
+  - join_id: orders_customers
+    from_table: orders
+    to_table: customers
+    cardinality: many_to_one
+    "on": orders.customer_id = customers.customer_id
+    reason: 客户键唯一，给订单附加地区；必须检查目标键重复和未匹配记录。

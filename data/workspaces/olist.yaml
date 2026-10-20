@@ -5,6 +5,7 @@ description: 巴西 Olist 公开电商快照；不是中国真实平台交易。
 catalog: ../catalog/olist_catalog_v3.yaml
 reader_role: daa_analytics_reader
 writer_role: daa_app_writer
+additive_metric_ids: [gmv, paid_order_count, item_count, freight_amount, canceled_order_count, delivered_order_count, unavailable_order_count, review_count]
 starter_questions:
   - {label: 州前五, question: 按客户州统计有效订单数前五名，并生成柱状图}
   - {label: 品类 GMV, question: 按商品品类统计 GMV}

@@ -39,18 +39,6 @@ _HORIZONTAL_BAR_REQUEST = re.compile(r"横向条形图|横向柱状图|水平条
 _LINE_REQUEST = re.compile(r"折线图|曲线图")
 _AREA_REQUEST = re.compile(r"面积图|面积趋势图")
 _DONUT_REQUEST = re.compile(r"饼图|环形图|甜甜圈图|占比构成")
-_DONUT_COMPATIBLE_METRICS = frozenset(
-    {
-        "gmv",
-        "paid_order_count",
-        "item_count",
-        "freight_amount",
-        "canceled_order_count",
-        "delivered_order_count",
-        "unavailable_order_count",
-        "review_count",
-    }
-)
 _UNSUPPORTED_REQUESTS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"散点图"), "散点图"),
     (re.compile(r"热力图"), "热力图"),
@@ -220,7 +208,7 @@ class ChartContract:
                     allowed,
                     "环形图仅支持一个可汇总业务维度和一个指标，不能混用时间轴、多指标或多分组。",
                 )
-            if metric_ids[0] not in _DONUT_COMPATIBLE_METRICS:
+            if metric_ids[0] not in result_contract.additive_metric_ids:
                 return cls._blocked(
                     "unsupported",
                     allowed,

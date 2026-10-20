@@ -88,6 +88,8 @@
 ### 评测与验收
 
 - [`workspace-onboarding.md`](workspace-onboarding.md)：通过工作区配置接入第二个 PostgreSQL 业务库，包含 TheLook 示例、权限、安装包与真实验收方法。
+- [`templates/workspace/README.md`](templates/workspace/README.md)：新业务库填写清单与可复制workspace/Catalog模板；[`workspaces/thelook.md`](workspaces/thelook.md)为已填写实例。
+- [`../evals/results/thelook_product_queries.md`](../evals/results/thelook_product_queries.md)：TheLook新编60题、独立数值对照、模板实测与额外重复失败记录。
 
 - [`../evals/results/product_release_dev_v1.md`](../evals/results/product_release_dev_v1.md)：2026-10-19 的 60 场景在线开发复核、独立数值对照、三类修复与九项残余差异；不作为本地模型终测成绩。
 - [`evaluation.md`](evaluation.md)：当前评测分层、运行命令和证据边界。

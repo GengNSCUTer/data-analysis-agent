@@ -1,0 +1,21 @@
+# 复制本目录到自己的业务配置目录，再填写；示例是虚构订单库，不是数据导入脚本。
+workspace_id: example-shop
+dataset_id: example-shop
+display_name: 示例店铺分析
+description: 请填写来源、快照或更新时间、币种、数据限制及不支持的问题。
+catalog: catalog.yaml
+analytics_schema: analytics
+reader_role: example_shop_reader
+writer_role: example_shop_app_writer
+# 仅业务确认可在允许分组间相加的量启用构成图；不列均值、比例、去重会话数。
+additive_metric_ids: [completed_order_count]
+starter_questions:
+  - {label: 完成订单, question: 按客户地区统计已完成订单数}
+dimensions:
+  customer_region:
+    aliases: [客户地区, 地区]
+    # [表ID, 真实列]；同一维度多来源按优先顺序填写。事实自身有维度时优先用自身。
+    sources: [[customers, region]]
+    # 必填（或从shape_bounds读取）：示例虚构库有3个地区；实际应COUNT DISTINCT并计NULL组。
+    max_cardinality: 3
+# 可选 shape_bounds：版本匹配的基数/日期统计文件，不需要时不填。
