@@ -1,4 +1,4 @@
-"""Run the trusted Olist PostgreSQL Vanna prototype on 127.0.0.1:32010."""
+"""Installed FastAPI product entry point; serves its bundled Web Component."""
 
 from __future__ import annotations
 
@@ -8,6 +8,9 @@ import secrets
 from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
+from dataclasses import replace
+
+load_dotenv(Path(os.getenv("DATA_ANALYSIS_ENV_FILE", ".env")))
 from fastapi import FastAPI, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -80,6 +83,7 @@ from data_analysis_agent.result_artifact_store import (
     ResultArtifactStore,
 )
 from data_analysis_agent.semantic_catalog import (
+    CATALOG_VERSION,
     CatalogContextEnhancer,
     CatalogLoader,
     CatalogRetriever,
@@ -102,18 +106,18 @@ from data_analysis_agent.trusted_sql_tool import (
     LlmRepairCandidateProvider,
     TrustedRunSqlTool,
 )
+from data_analysis_agent.runtime_paths import RESOURCES, state_directory, session_secret
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-EMBEDDABLE_COPILOT_PATH = REPOSITORY_ROOT / "examples" / "embeddable_copilot_shell.html"
-WEB_COMPONENT_DIST = REPOSITORY_ROOT / "frontends" / "webcomponent" / "dist"
+EMBEDDABLE_COPILOT_PATH = RESOURCES / "embeddable_copilot_shell.html"
+WEB_COMPONENT_DIST = RESOURCES / "static"
 QUERY_RESULTS_DIRECTORY = Path(
-    os.getenv("VANNA_QUERY_RESULTS_DIR", "/tmp/data-analysis-agent-vanna-query-results")
+    os.getenv("VANNA_QUERY_RESULTS_DIR", str(state_directory() / "query-results"))
 )
 RESULT_ARTIFACT_DIRECTORY = Path(
     os.getenv(
         "DATA_ANALYSIS_RESULT_ARTIFACT_ROOT",
-        "/disk2/gengnan/data-analysis-agent-data/runtime/result-artifacts",
+        str(state_directory() / "result-artifacts"),
     )
 )
 DEMO_PORT = int(os.getenv("DATA_ANALYSIS_DEMO_PORT", "32010"))
@@ -168,11 +172,10 @@ def audit_response(audit: dict) -> dict:
 
 
 def create_app() -> FastAPI:
-    load_dotenv(REPOSITORY_ROOT / ".env")
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
     if not api_key:
         raise RuntimeError(
-            "SILICONFLOW_API_KEY is missing from the repository root .env file."
+            "SILICONFLOW_API_KEY is required; set it in the environment or DATA_ANALYSIS_ENV_FILE."
         )
     if not (WEB_COMPONENT_DIST / "vanna-components.js").is_file():
         raise RuntimeError(
@@ -181,11 +184,16 @@ def create_app() -> FastAPI:
 
     model_name = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V3.2")
     settings = PostgresConnectionSettings.from_environment()
+    workspace = replace(
+        OLIST_RUNTIME_WORKSPACE,
+        dataset_version=os.getenv("DATA_ANALYSIS_DATASET_VERSION", OLIST_RUNTIME_WORKSPACE.dataset_version),
+        catalog_path=Path(os.getenv("DATA_ANALYSIS_CATALOG_PATH", str(OLIST_RUNTIME_WORKSPACE.catalog_path))),
+    )
     runner = SecurePostgresRunner(
         settings=settings,
         model_name=model_name,
         result_validator=ResultValidator(settings.max_rows),
-        workspace=OLIST_RUNTIME_WORKSPACE,
+        workspace=workspace,
     )
     budget = RequestBudget.from_environment()
     conversation_store = PostgresConversationStore(settings)
@@ -193,7 +201,7 @@ def create_app() -> FastAPI:
     agent_memory = DemoAgentMemory()
     # A filtered category analysis needs orders, items, customers, products and
     # category translation together; four tables cannot express that scope.
-    catalog_retriever = CatalogRetriever(CatalogLoader(OLIST_RUNTIME_WORKSPACE).load(), max_tables=6)
+    catalog_retriever = CatalogRetriever(CatalogLoader(workspace).load(), max_tables=6)
     catalog_enhancer = CatalogContextEnhancer(
         catalog_retriever,
         base_enhancer=DefaultLlmContextEnhancer(agent_memory),
@@ -203,9 +211,7 @@ def create_app() -> FastAPI:
         max_result_rows=settings.max_aggregate_rows,
         full_results=True,
     )
-    # A process-local fallback keeps this public demo usable without adding a
-    # secret to source control. Restarts invalidate old cookies by design.
-    token_secret = os.getenv("DATA_ANALYSIS_DEMO_SESSION_SECRET", secrets.token_urlsafe(32))
+    token_secret = session_secret()
     session_signer = SignedToken(token_secret, max_age_seconds=LOCAL_SESSION_MAX_AGE_SECONDS)
     embed_signer = SignedToken(token_secret, max_age_seconds=5 * 60)
     embed_origins = allowed_embed_origins()
@@ -219,8 +225,8 @@ def create_app() -> FastAPI:
     ensure_bootstrap_account(account_store)
     copilot_access = WorkspaceAccessRegistry(
         {
-            OLIST_RUNTIME_WORKSPACE.workspace_id: WorkspaceGrant(
-                workspace=OLIST_RUNTIME_WORKSPACE,
+            workspace.workspace_id: WorkspaceGrant(
+                workspace=workspace,
                 allowed_subjects=frozenset(),
                 allowed_roles=frozenset({"analyst", "admin"}),
                 allow_local_accounts=True,
@@ -277,7 +283,12 @@ def create_app() -> FastAPI:
             idle_status_message="已就绪",
             idle_status_detail="选择示例问题或直接输入",
         ),
-        system_prompt_builder=DefaultSystemPromptBuilder(base_prompt=SYSTEM_PROMPT),
+        system_prompt_builder=DefaultSystemPromptBuilder(base_prompt=(
+            SYSTEM_PROMPT.replace(DATASET_VERSION, workspace.dataset_version)
+            .replace(METRIC_VERSION, workspace.metric_version)
+            .replace(CATALOG_VERSION, workspace.catalog_version)
+            + ("\n当前部署使用自构造合成数据，仅演示流程，不是真实 Olist 交易。" if workspace.dataset_version == "synthetic-olist-v1" else "")
+        )),
         workflow_handler=TrustedOlistWorkflowHandler(),
     )
     from contextlib import asynccontextmanager
@@ -317,6 +328,10 @@ def create_app() -> FastAPI:
         return await call_next(request)
 
     app.mount("/static", StaticFiles(directory=WEB_COMPONENT_DIST), name="static")
+
+    @app.get("/health", include_in_schema=False)
+    async def health():
+        return {"status": "ok"}
     async def complete_semantic_intent(prompt: str, user) -> str:
         response = await agent._send_llm_request(
             LlmRequest(
@@ -339,7 +354,7 @@ def create_app() -> FastAPI:
             budget,
             run_recorder,
             question_router,
-            workspace=OLIST_RUNTIME_WORKSPACE,
+            workspace=workspace,
             result_artifact_store=result_artifact_store,
             result_budget=ResultBudget.aggregate(
                 execution_max_rows=settings.max_aggregate_rows,
@@ -359,15 +374,21 @@ def create_app() -> FastAPI:
 
     @app.get("/api/project/evidence")
     async def evidence() -> dict:
-        return METRIC_EVIDENCE
+        return {
+            "dataset_version": workspace.dataset_version,
+            "metric_version": workspace.metric_version,
+            "metrics": [{"metric_id": metric.metric_id, "time_field": metric.time_field,
+                         "source_tables": list(metric.source_tables)}
+                        for metric in catalog_retriever.catalog.metrics],
+        }
 
     @app.get("/api/project/runtime-contract")
     async def runtime_contract() -> dict:
         """Expose only versioned, server-owned capability facts for diagnostics."""
         return {
-            "workspace_id": OLIST_RUNTIME_WORKSPACE.workspace_id,
-            "dataset_version": DATASET_VERSION,
-            "metric_version": METRIC_VERSION,
+            "workspace_id": workspace.workspace_id,
+            "dataset_version": workspace.dataset_version,
+            "metric_version": workspace.metric_version,
             "catalog_version": catalog_retriever.catalog.catalog_version,
             "policy_version": catalog_retriever.catalog.policy_version,
             "metric_ids": [metric.metric_id for metric in catalog_retriever.catalog.metrics],
@@ -440,8 +461,8 @@ def create_app() -> FastAPI:
         for ref, question in ordered[:8]:
             workspace_id = ref.workspace_id
             if workspace_id == "unknown":
-                workspace_id = OLIST_RUNTIME_WORKSPACE.workspace_id
-            elif workspace_id != OLIST_RUNTIME_WORKSPACE.workspace_id:
+                workspace_id = workspace.workspace_id
+            elif workspace_id != workspace.workspace_id:
                 continue
             try:
                 figure = result_artifact_store.load_verified_plotly(
@@ -477,22 +498,22 @@ def create_app() -> FastAPI:
             return JSONResponse({"detail": str(exc)}, status_code=400)
         if conversation is None:
             return JSONResponse({"detail": "conversation not found"}, status_code=404)
-        artifact = current_result_artifact(conversation, OLIST_RUNTIME_WORKSPACE)
+        artifact = current_result_artifact(conversation, workspace)
         scope_current = analysis_scope_is_current(
-            conversation.metadata, OLIST_RUNTIME_WORKSPACE
+            conversation.metadata, workspace
         )
         return JSONResponse(
             {
                 "conversation_id": conversation.id,
                 "title": conversation.metadata.get("title") or "未命名分析会话",
                 "dataset_version": conversation.metadata.get(
-                    "dataset_version_id", DATASET_VERSION
+                    "dataset_version_id", workspace.dataset_version
                 ),
                 "metric_version": conversation.metadata.get(
-                    "metric_version", METRIC_VERSION
+                    "metric_version", workspace.metric_version
                 ),
                 "workspace_id": conversation.metadata.get(
-                    "workspace_id", OLIST_RUNTIME_WORKSPACE.workspace_id
+                    "workspace_id", workspace.workspace_id
                 ),
                 "state_version": conversation.metadata.get("state_version", 0),
                 "analysis_scope_current": scope_current,
@@ -558,11 +579,11 @@ def create_app() -> FastAPI:
         conversation = await conversation_store.get_conversation(conversation_id, user)
         if conversation is None:
             return JSONResponse({"detail": "conversation not found"}, status_code=404)
-        artifact = current_result_artifact(conversation, OLIST_RUNTIME_WORKSPACE)
+        artifact = current_result_artifact(conversation, workspace)
         if artifact is None or artifact.artifact_id != artifact_id:
             return JSONResponse({"detail": "artifact not found"}, status_code=404)
         workspace_id = conversation.metadata.get(
-            "workspace_id", OLIST_RUNTIME_WORKSPACE.workspace_id
+            "workspace_id", workspace.workspace_id
         )
         if artifact.workspace_id != workspace_id:
             return JSONResponse({"detail": "artifact not found"}, status_code=404)
@@ -586,14 +607,14 @@ def create_app() -> FastAPI:
             conversation = await conversation_store.get_conversation(conversation_id, user)
         except InvalidConversationId as exc:
             return JSONResponse({"detail": str(exc)}, status_code=400)
-        artifact = current_result_artifact(conversation, OLIST_RUNTIME_WORKSPACE) if conversation else None
+        artifact = current_result_artifact(conversation, workspace) if conversation else None
         if artifact is None or artifact.artifact_id != artifact_id:
             return JSONResponse({"detail": "artifact not found"}, status_code=404)
         try:
             page = await asyncio.to_thread(
                 result_artifact_store.read_csv_page,
                 artifact_id=artifact_id, user_id=user.id,
-                workspace_id=OLIST_RUNTIME_WORKSPACE.workspace_id,
+                workspace_id=workspace.workspace_id,
                 cursor=cursor, page_size=page_size,
             )
         except FileNotFoundError:
@@ -608,7 +629,7 @@ def create_app() -> FastAPI:
     @app.get("/api/project/preferences")
     async def list_preferences(request: Request) -> JSONResponse:
         user = await role_resolver.resolve_user(_request_user_context(request))
-        return JSONResponse(user_memory.list_preferences(user.id, OLIST_RUNTIME_WORKSPACE.workspace_id))
+        return JSONResponse(user_memory.list_preferences(user.id, workspace.workspace_id))
 
     @app.put("/api/project/preferences")
     async def put_preference(body: PreferenceRequest, request: Request) -> JSONResponse:
@@ -616,7 +637,7 @@ def create_app() -> FastAPI:
         try:
             user_memory.put_preference(
                 user.id,
-                OLIST_RUNTIME_WORKSPACE.workspace_id,
+                workspace.workspace_id,
                 body.memory_kind,
                 body.value,
             )
@@ -630,7 +651,7 @@ def create_app() -> FastAPI:
         if memory_kind not in ALLOWED_PREFERENCES:
             return JSONResponse({"detail": "unsupported preference"}, status_code=400)
         deleted = user_memory.delete_preference(
-            user.id, OLIST_RUNTIME_WORKSPACE.workspace_id, memory_kind
+            user.id, workspace.workspace_id, memory_kind
         )
         if not deleted:
             return JSONResponse({"detail": "preference not found"}, status_code=404)
@@ -639,7 +660,7 @@ def create_app() -> FastAPI:
     @app.get("/api/project/saved-analyses")
     async def list_saved_analyses(request: Request) -> JSONResponse:
         user = await role_resolver.resolve_user(_request_user_context(request))
-        return JSONResponse(user_memory.list_analyses(user.id, OLIST_RUNTIME_WORKSPACE.workspace_id))
+        return JSONResponse(user_memory.list_analyses(user.id, workspace.workspace_id))
 
     @app.post("/api/project/saved-analyses")
     async def save_analysis(body: SaveAnalysisRequest, request: Request) -> JSONResponse:
@@ -647,12 +668,12 @@ def create_app() -> FastAPI:
         conversation = await conversation_store.get_conversation(body.conversation_id, user)
         if conversation is None:
             return JSONResponse({"detail": "conversation not found"}, status_code=404)
-        artifact = current_result_artifact(conversation, OLIST_RUNTIME_WORKSPACE)
+        artifact = current_result_artifact(conversation, workspace)
         if artifact is None:
             return JSONResponse({"detail": "no validated result to save"}, status_code=400)
         saved_id = user_memory.save_analysis(
             subject_id=user.id,
-            workspace_id=OLIST_RUNTIME_WORKSPACE.workspace_id,
+            workspace_id=workspace.workspace_id,
             dataset_version=artifact.dataset_version,
             metric_version=artifact.metric_version,
             artifact_id=artifact.artifact_id,
@@ -671,7 +692,7 @@ def create_app() -> FastAPI:
     async def delete_saved_analysis(saved_id: str, request: Request) -> JSONResponse:
         user = await role_resolver.resolve_user(_request_user_context(request))
         deleted = user_memory.delete_analysis(
-            user.id, OLIST_RUNTIME_WORKSPACE.workspace_id, saved_id
+            user.id, workspace.workspace_id, saved_id
         )
         if not deleted:
             return JSONResponse({"detail": "saved analysis not found"}, status_code=404)
@@ -732,7 +753,7 @@ def create_app() -> FastAPI:
         if conversation is None:
             return JSONResponse({"detail": "conversation not found"}, status_code=404)
         message_count = len(conversation.messages)
-        clear_active_analysis_state(conversation, OLIST_RUNTIME_WORKSPACE)
+        clear_active_analysis_state(conversation, workspace)
         try:
             await conversation_store.update_conversation(conversation)
         except ConversationStateConflict:
@@ -843,14 +864,14 @@ def create_app() -> FastAPI:
             username=str(user.username or user.id),
             role=role,
             origin=origin,
-            workspace_id=OLIST_RUNTIME_WORKSPACE.workspace_id,
+            workspace_id=workspace.workspace_id,
         )
         return JSONResponse(
             {
                 "token": token,
                 "expires_in": 300,
                 "origin": origin,
-                "workspace_id": OLIST_RUNTIME_WORKSPACE.workspace_id,
+                "workspace_id": workspace.workspace_id,
             }
         )
 
@@ -862,7 +883,7 @@ def create_app() -> FastAPI:
         except InvalidConversationId as exc:
             return JSONResponse({"detail": str(exc)}, status_code=400)
         artifact = (
-            current_result_artifact(conversation, OLIST_RUNTIME_WORKSPACE)
+            current_result_artifact(conversation, workspace)
             if conversation is not None
             else None
         )
@@ -872,12 +893,12 @@ def create_app() -> FastAPI:
             manifest = result_artifact_store.verify_manifest(
                 artifact_id=artifact.artifact_id,
                 user_id=user.id,
-                workspace_id=OLIST_RUNTIME_WORKSPACE.workspace_id,
+                workspace_id=workspace.workspace_id,
             )
             csv_path = result_artifact_store.verified_csv_path(
                 artifact_id=artifact.artifact_id,
                 user_id=user.id,
-                workspace_id=OLIST_RUNTIME_WORKSPACE.workspace_id,
+                workspace_id=workspace.workspace_id,
             )
         except FileNotFoundError:
             return JSONResponse({"detail": "validated result file is missing"}, status_code=404)
@@ -888,7 +909,7 @@ def create_app() -> FastAPI:
             artifact_id=artifact.artifact_id,
             user_id=user.id,
             user_role=role,
-            workspace_id=OLIST_RUNTIME_WORKSPACE.workspace_id,
+            workspace_id=workspace.workspace_id,
             row_count=int(manifest["row_count"]),
             csv_sha256=str(manifest["csv_sha256"]),
         )
@@ -949,9 +970,13 @@ def create_app() -> FastAPI:
     return app
 
 
-if __name__ == "__main__":
+def main():
     uvicorn.run(
         create_app(),
         host=os.getenv("DATA_ANALYSIS_DEMO_HOST", "127.0.0.1"),
         port=DEMO_PORT,
     )
+
+
+if __name__ == "__main__":
+    main()

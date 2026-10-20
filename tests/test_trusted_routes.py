@@ -14,7 +14,7 @@ from vanna.core.user import User
 from data_analysis_agent.conversation_store import PostgresConversationStore
 from data_analysis_agent.local_auth import AccountStore
 from data_analysis_agent.postgres_runner import PostgresConnectionSettings
-from examples.trusted_olist_web_demo import create_app
+from data_analysis_agent.server import create_app
 
 
 pytestmark = pytest.mark.postgres

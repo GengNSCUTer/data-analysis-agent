@@ -1524,3 +1524,39 @@ Python/数据库回归 **231 passed、5 skipped**；定向Ruff与diff检查通�
 本项以明确能力与缺口收束，不宣称上线就绪。下一项是隔离环境部署，本轮未开始；四周学习
 继续按 `docs/learning/agent-project-walkthrough-v1.md` 阅读，不因工程完成自动标为掌握。
 飞书项目文档已追加同一事实记录，revision 288。
+
+## 2026-10-20｜九项差异定向修复与第三项隔离部署
+
+完成 [产品完善计划第三项](plan/process-agent-product-readiness-v1.md#implementation-phase-3)。
+先修复同维度多值筛选误拦截、分组时Top-N继承及排名实体下钻边界，补充澄清已确认指标和
+敏感明细的语义提示，修复结果解释中中文相邻数字漏检。九个遗留场景中五项定向复测通过，
+更新后的混合证据为 **56/60**，独立数值对照仍为 **23/24**。四项缺口保留：半年度对比、未给
+指标时擅自选GMV、未给具体月份时猜测窗口、无既有州筛选时取消限制的歧义。不是全量新跑。
+
+产品入口移至 `src/data_analysis_agent/server.py`，安装命令为 `data-analysis-agent`，单独的
+`data-analysis-agent-init` 使用管理员完成Schema、角色和可重复合成数据初始化。wheel包含
+两个Python包、Catalog、SQL、HTML与前端JS，`[product]`不安装训练框架。状态目录保存工件、
+受限passfile和登录签名密钥；应用本身不需要管理员凭据。Dockerfile/Compose提供db/init/app
+和持久卷；安装、启动、重启与排错集中在 [部署说明](docs/deployment.md)。
+
+实际隔离验收使用新虚拟环境中的wheel、空工作目录和独立PostgreSQL **18.3**，没有设置
+`PYTHONPATH`，没有操作现有业务库。自构造的 **1,200笔订单** 初始化两次行数不变；reader
+写操作被拒绝，writer不能读取业务表。真实浏览器完成登录、在线模型查询、柱状图、**285行**
+城市结果的200+85分页和完整CSV下载，数值与独立SQL一致。应用与数据库均停止重启后，原
+登录、会话、工件和CSV恢复，继续追问有效订单数生成新结果。该数据不是Olist原始交易，也
+不是新Schema泛化证据。
+
+证据在仓库外 `evals/product-readiness-stage3-20261020/isolated-ju4eff6t/report.json`，含七项
+通过步骤、安装模块路径、Python与PG版本，原始SSE/SQL/截图保留在同目录。另有定向回归
+**243 passed、5 skipped**，实际PostgreSQL/认证/工件路由 **44 passed**，页面回归5项和真实
+模型三轮排名下钻通过；前端构建、wheel构建/安装与依赖检查通过。
+
+当前账号无Docker daemon权限，**只验证Compose配置，没有实际构建或运行容器**。这不影响
+上述原生安装证据，但不能据此说Docker部署已经通过。尚无外部开发者试用，不声称生产就绪。
+下一项是第二业务库在线接入，本轮未开始；学习节奏仍以四周计划与学习记录为主。
+
+CI指定的确定性测试在本地为 **212 passed、1 skipped、5 deselected**，两项确定性用例清单
+生成通过。当前主服务已切换为 `python -m data_analysis_agent.server`，仍在screen
+`data-analysis-agent-m4`、`http://127.0.0.1:32013/embedded-copilot`，沿用原业务库和结果目录。
+旧服务的随机登录密钥无法跨升级保留，本次需重新登录一次；此后使用仓库外状态目录中的
+持久化密钥。飞书项目文档已追加同一工程事实并回读，revision 289。

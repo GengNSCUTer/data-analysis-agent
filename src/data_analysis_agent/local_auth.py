@@ -27,6 +27,7 @@ import psycopg2.extras
 from vanna.core.user import RequestContext, User, UserResolver
 
 from .postgres_runner import PostgresConnectionSettings
+from .runtime_paths import state_directory
 
 
 LOCAL_SESSION_COOKIE = "daa_session"
@@ -36,7 +37,7 @@ EMBED_AUDIENCE = "copilot-embed"
 _USERNAME = re.compile(r"^[a-z][a-z0-9_-]{2,31}$")
 _PBKDF2_ITERATIONS = 200_000
 BOOTSTRAP_PASSWORD_PATH = Path(
-    "/disk2/gengnan/data-analysis-agent-data/local-auth/bootstrap-password.txt"
+    os.getenv("DATA_ANALYSIS_BOOTSTRAP_PASSWORD_PATH", str(state_directory() / "bootstrap-password.txt"))
 )
 
 

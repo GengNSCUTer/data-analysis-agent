@@ -2,7 +2,7 @@
 goal: 补齐数据分析 Agent 的业务质量、可部署性、业务库接入和运行保障
 version: 1.0
 date_created: 2026-10-19
-last_updated: 2026-10-19
+last_updated: 2026-10-20
 owner: 李耿楠
 status: In progress
 tags: [Agent, 产品完善, 部署, 泛化, 测试, 面试]
@@ -18,9 +18,10 @@ tags: [Agent, 产品完善, 部署, 泛化, 测试, 面试]
 首发目标是可自托管、单实例、接入一个受控 PostgreSQL 业务库的分析 Copilot。
 “可泛化”指配置新库的 schema、指标与权限后复用核心流程，不承诺从裸 DDL 自动推导业务口径。
 
-当前状态：第一项可信流式时序与第二项业务质量审查已完成。第二项输入为 60 个独立产品开发
-场景，输出为逐项证据、24 项独立数值对照及三类最小修复。最终混合证据 51/60，仍有九项
-差异，不宣称上线就绪。下一工程为第三项隔离环境部署，本轮不提前实施。
+当前状态：前三项已完成，第三项以全新虚拟环境和独立 PostgreSQL 的真实链路验收为证据。
+第二项九个遗留场景中有五项定向复测通过，更新后混合证据为56/60，独立数值对照23/24；
+这不是修复后完整重跑的准确率。Docker Compose 配置通过检查，但本机无 Docker daemon
+权限，未实际运行容器。下一工程为第四项第二业务库在线接入，尚未开始。
 
 ## 1. Requirements & Constraints
 
@@ -85,11 +86,20 @@ tags: [Agent, 产品完善, 部署, 泛化, 测试, 面试]
 
 - **GOAL-003**: 形成不依赖当前服务器目录和 Conda 的可部署版本。
 
+本轮任务卡：修复有复现证据的多值筛选误拦截与语义状态继承；将产品装入 wheel，提供持久化的合成数据启动流程。输入为现有 Catalog、应用和安全 SQL；输出为可安装包、容器配置和从空目录执行的部署说明。保留只读角色、账号与 workspace 隔离，不改训练或新增业务库。验收以离仓库 wheel 安装、独立 PostgreSQL 初始化、真实浏览器查询/图表/分页/下载及重启后恢复为准；当前用户无 Docker socket 权限，容器配置检查与实际运行证据分别记录。
+
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-007 | 调整 pyproject.toml 的产品安装内容，确保安装后可导入 data_analysis_agent；区分产品、测试、后训练依赖。统一 examples/trusted_olist_web_demo.py、local_auth.py 和工件/tokenizer 的运行路径配置，提供不含秘密的配置示例。用安装产物验证，不能只在带 PYTHONPATH=src 的仓库里测试。 | 否 | — |
-| TASK-008 | 扩展 infra/postgres/compose.yaml 形成应用+数据库启动方式，复用现有安全角色/schema 初始化与迁移；使用自构造合成数据，配置持久化、稳定会话密钥与健康检查。禁止重建当前服务器业务库。 | 否 | — |
-| TASK-009 | 在隔离环境从空目录启动，完成登录、查询、图表、分页/下载和重启恢复；补 README 的安装与排错说明，记录所用代码版本和实际步骤。 | 否 | — |
+| TASK-007 | 将产品入口移至 src/data_analysis_agent/server.py，wheel 同时打包两个 Python 包和生成的产品资源；product/browser-test/post-training 依赖分离。runtime_paths.py 统一状态目录，.env.example 提供配置。安装至仓库外全新环境，不设置 PYTHONPATH。 | 是 | 2026-10-20 |
+| TASK-008 | Dockerfile 与 Compose 提供 db/init/app；复用既有 SQL，独立管理员初始化、受限 reader/writer passfile、合成数据、持久化卷、签名密钥与健康检查。配置检查通过；容器实运行因本机权限限制尚未验证，数据库初始化已在独立 PostgreSQL 实测。 | 是 | 2026-10-20 |
+| TASK-009 | 全新环境的已安装 wheel + PostgreSQL 18.3 完成真实登录、模型查询/图表、285行独立数值核对、分页/下载，重启应用与数据库后恢复登录/会话/工件及追问。更新 README 与 docs/deployment.md，保留原始证据。 | 是 | 2026-10-20 |
+
+阶段3实际证据：仓库外 `evals/product-readiness-stage3-20261020/isolated-ju4eff6t/report.json`。
+两次初始化均为1,200订单；未修改现有真实分析库。应用运行于空目录，模块来自新环境
+`site-packages`，使用安装包资源，未安装训练框架。243项定向回归通过、5项跳过；另外显式运行
+44项 PostgreSQL/认证/工件路由集成测试通过。页面回归5项及真实模型三轮排名下钻通过。
+早期测试脚本错误和启动失败记录保留，不作为成功证据。说明和限制见
+[部署文档](../docs/deployment.md)。下一阶段不在本轮启动。
 
 ### Implementation Phase 4
 
@@ -139,7 +149,7 @@ tags: [Agent, 产品完善, 部署, 泛化, 测试, 面试]
 - **FILE-001**: src/vanna/core/agent/agent.py、core/middleware/base.py、src/data_analysis_agent/budget.py：阶段 1 流式可见性与已有结果拒答。
 - **FILE-002**: tests/test_budget_streaming.py、tests/e2e/test_trusted_embedded_window.py、.github/workflows/tests.yml：流式、浏览器与 CI 回归。
 - **FILE-003**: evals/cases/product_release_dev_v1.yaml、evals/results/product_release_dev_v1.md：阶段 2 开发用例和业务质量汇总。
-- **FILE-004**: pyproject.toml、infra/postgres/compose.yaml、examples/trusted_olist_web_demo.py、local_auth.py、workspace.py、metric_context.py：部署、配置与工作区接入。
+- **FILE-004**: pyproject.toml、Dockerfile、infra/postgres/compose.yaml、src/data_analysis_agent/server.py、deployment.py、runtime_paths.py、local_auth.py、workspace.py、metric_context.py：部署、配置与工作区接入。
 - **FILE-005**: src/data_analysis_agent/postgres_runner.py、conversation_store.py、result_artifact_store.py、llm_observability.py：按实际瓶颈修改执行/资源/生命周期和观测。
 - **FILE-006**: README.md、PROJECT.md、docs/README.md、docs/architecture/product-request-architecture-v1.md：当前事实；docs/learning/agent-project-walkthrough-v1.md：用户学习记录。
 

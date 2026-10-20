@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 import psycopg2
 import psycopg2.extras
 
-from examples.trusted_olist_web_demo import create_app
+from data_analysis_agent.server import create_app
 from data_analysis_agent.local_auth import BOOTSTRAP_PASSWORD_PATH
 from data_analysis_agent.postgres_runner import PostgresConnectionSettings
 

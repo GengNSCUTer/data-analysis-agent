@@ -57,7 +57,7 @@ Router / QueryPlan：确定指标、维度、时间、明确 Top-N、结果预�
 - `postgres_runner.py:read_bounded_rows/_run_sql_sync`：分批读取、完整性及资源边界。
 - `result_validator.py:validate`：完整 aggregate 超界拒绝；旧离线 degraded 语义不变。
 - `result_artifact_store.py:save_result_csv/read_csv_page`：每 200 行索引与稳定页读取，旧无索引工件仍可读取。
-- `examples/trusted_olist_web_demo.py`：鉴权 `/artifacts/{id}/rows` 和 `/result.csv`。
+- `src/data_analysis_agent/server.py`：鉴权 `/artifacts/{id}/rows` 和 `/result.csv`。
 - `examples/embeddable_copilot_shell.html`：更多 → 分页查看完整结果；当前范围、总行数和翻页操作。
 
 分页和下载都要求当前登录用户拥有会话及当前 workspace/version 的工件，并验证文件完整性。完整 CSV 内部保存不等于开放 raw SQL、隐藏敏感字段或未鉴权下载。

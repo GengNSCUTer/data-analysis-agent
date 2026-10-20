@@ -278,6 +278,8 @@ def test_new_question_does_not_inherit_previous_metric(router) -> None:
 
 
 def test_result_followup_cannot_keep_numbers_missing_from_the_summary() -> None:
+    assert followup_adds_numbers("GMV为999999", "GMV为42") is True
+    assert followup_adds_numbers("成交额为999999元", "成交额为42元") is True
     summary = "SP 41127；RJ 12698"
     assert followup_adds_numbers("SP 是 41127，大约还有 5000 未统计。", summary) is True
     assert followup_adds_numbers("SP 41127 高于 RJ 12698。", summary) is False

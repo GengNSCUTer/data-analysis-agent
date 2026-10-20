@@ -55,7 +55,7 @@ def test_summary_failure_restart_preserves_raw_history_and_result(page):
 
     def start(fail):
         nonlocal process, logfile
-        script = "import uvicorn\nimport examples.trusted_olist_web_demo as demo\n"
+        script = "import uvicorn\nimport data_analysis_agent.server as demo\n"
         if fail:
             script += (
                 "async def fail_summary(turns, source):\n"

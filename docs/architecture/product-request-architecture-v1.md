@@ -30,7 +30,7 @@ flowchart TD
 
 ## 入口、输入输出与代码/模型分工
 
-`examples/trusted_olist_web_demo.py:create_app()` 在进程启动时装配模型服务、Catalog、Router、数据库 runner、会话存储和工具，再注册 HTTP 路由。每条消息到来时，由 `chat_sse()` 调用已经装配好的 `BudgetedChatHandler.handle_stream()`，不是每次重新创建整个应用。
+`src/data_analysis_agent/server.py:create_app()` 在进程启动时装配模型服务、Catalog、Router、数据库 runner、会话存储和工具，再注册 HTTP 路由。每条消息到来时，由 `chat_sse()` 调用已经装配好的 `BudgetedChatHandler.handle_stream()`，不是每次重新创建整个应用。安装后的入口命令是 `data-analysis-agent`，详见 [部署说明](../deployment.md)。
 
 | 环节 | 代码入口 | 输入 → 输出 | 谁决定 |
 | --- | --- | --- | --- |

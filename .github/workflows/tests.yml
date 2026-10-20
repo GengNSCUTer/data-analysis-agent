@@ -22,10 +22,16 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: "22"
+    - name: Build embedded chat component and product assets
+      working-directory: frontends/webcomponent
+      run: |
+        python -m pip install setuptools wheel
+        npm install --package-lock=false
+        npm run build
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install -e ".[test]"
+        python -m pip install -e ".[test,product]"
     - name: Run deterministic Python tests
       run: |
         python -m pytest -v -m "not integration" \
@@ -40,6 +46,8 @@ jobs:
           tests/test_visualization_policy.py \
           tests/test_chart_contract.py \
           tests/test_product_release_dev_contract.py \
+          tests/test_query_filters.py \
+          tests/test_runtime_paths.py \
           tests/test_trusted_workflow.py \
           tests/test_demo_session.py \
           tests/test_demo_scenarios.py \
@@ -53,9 +61,11 @@ jobs:
     - name: Compile project demo entry points
       run: python -m compileall -q \
         examples/siliconflow_sqlite_web_demo.py \
-        examples/trusted_olist_web_demo.py
-    - name: Build embedded chat component
-      working-directory: frontends/webcomponent
+        src/data_analysis_agent/server.py
+    - name: Verify the installed wheel outside the checkout
       run: |
-        npm install --package-lock=false
-        npm run build
+        python -m pip wheel --no-deps --wheel-dir /tmp/copilot-wheels .
+        python -m venv /tmp/copilot-install
+        /tmp/copilot-install/bin/pip install '/tmp/copilot-wheels/vanna-2.0.2-py3-none-any.whl[product]'
+        cd /tmp
+        env -u PYTHONPATH /tmp/copilot-install/bin/python -c 'from data_analysis_agent.runtime_paths import RESOURCES; from data_analysis_agent.semantic_catalog import CatalogLoader; import data_analysis_agent.server; assert (RESOURCES / "static/vanna-components.js").is_file(); assert CatalogLoader().load().metrics'

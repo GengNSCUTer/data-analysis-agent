@@ -19,7 +19,7 @@ from vanna.core.user import User
 @pytest.mark.postgres
 @pytest.mark.skipif(os.getenv("RUN_PROJECT_DB") != "1", reason="needs project PostgreSQL")
 def test_pages_download_and_scope_use_the_same_verified_artifact(monkeypatch, tmp_path):
-    from examples import trusted_olist_web_demo as demo
+    from data_analysis_agent import server as demo
 
     username = "budgetroutes"
     monkeypatch.setenv("DATA_ANALYSIS_BOOTSTRAP_USERNAME", username)

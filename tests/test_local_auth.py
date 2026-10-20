@@ -81,7 +81,7 @@ def test_login_and_embed_route_keep_subject_on_the_server(monkeypatch: pytest.Mo
     monkeypatch.setenv("DATA_ANALYSIS_BOOTSTRAP_USERNAME", "routeanalyst")
     monkeypatch.setenv("DATA_ANALYSIS_BOOTSTRAP_PASSWORD", "route-password")
     monkeypatch.setenv("DATA_ANALYSIS_EMBED_ORIGINS", "http://127.0.0.1:32014")
-    from examples.trusted_olist_web_demo import create_app
+    from data_analysis_agent.server import create_app
 
     with TestClient(create_app()) as client:
         denied = client.post(

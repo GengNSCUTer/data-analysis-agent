@@ -20,7 +20,7 @@ DATASET_VERSION = "olist-kaggle-v2-2026-08-03"
 PROMPT_VERSION = "trusted-olist-prompt-v2"
 METRIC_V3_VERSION = "0.3-proposal"
 CATALOG_V3_VERSION = "olist-catalog-v3"
-OLIST_V3_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "catalog" / "olist_catalog_v3.yaml"
+OLIST_V3_CATALOG_PATH = Path(__file__).resolve().parent / "resources/catalog/olist_catalog_v3.yaml"
 
 # Olist is the first adapter used by the demo and regression fixtures.  The
 # policy, catalog, memory, contract and validation components consume the

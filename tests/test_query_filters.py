@@ -69,6 +69,29 @@ FILTERS = [
 BASE = "SELECT SUM(i.price) AS gmv FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id JOIN analytics.dim_customers c ON c.customer_id=o.customer_id JOIN analytics.dim_products p ON p.product_id=i.product_id JOIN analytics.dim_category_translation t ON t.product_category_name=p.product_category_name "
 
 
+@pytest.mark.parametrize("condition", [
+    "c.customer_state IN ('SP', 'RJ')",
+    "(c.customer_state='SP' OR c.customer_state='RJ')",
+    "LOWER(c.customer_state) IN ('sp', 'rj')",
+])
+def test_multiple_values_on_one_dimension_are_one_allowed_set(condition):
+    filters = [FILTERS[0], {**FILTERS[0], "value": "RJ"}]
+    assert sql_plan_mismatch(BASE + "WHERE " + condition, {"metric_ids": ["gmv"], "filters": filters}) is None
+
+
+@pytest.mark.parametrize("condition", [
+    "c.customer_state='SP'",
+    "c.customer_state IN ('SP','RJ','MG')",
+    "c.customer_state='SP' OR c.customer_state='RJ' OR i.price>0",
+    "c.customer_state='SP' AND c.customer_state='RJ'",
+    "c.customer_city IN ('SP','RJ')",
+    "COALESCE(c.customer_state,'SP') IN ('SP','RJ')",
+])
+def test_multiple_value_check_rejects_missing_extra_or_wrong_source(condition):
+    filters = [FILTERS[0], {**FILTERS[0], "value": "RJ"}]
+    assert sql_plan_mismatch(BASE + "WHERE " + condition, {"metric_ids": ["gmv"], "filters": filters})
+
+
 @pytest.mark.parametrize("sql", [
     BASE + "WHERE c.customer_state='SP' AND t.product_category_name_english='bed_bath_table'",
     BASE + "WHERE 'SP'=c.customer_state AND t.product_category_name_english IN ('bed_bath_table')",

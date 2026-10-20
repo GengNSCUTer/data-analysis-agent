@@ -1,6 +1,6 @@
 [build-system]
-requires = ["flit_core >=3.2,<4"]
-build-backend = "flit_core.buildapi"
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "vanna"
@@ -11,7 +11,7 @@ authors = [
 
 description = "Generate SQL queries from natural language"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -34,12 +34,17 @@ dependencies = [
 
 [project.scripts]
 vanna = "vanna.servers.cli.server_runner:main"
+data-analysis-agent = "data_analysis_agent.server:main"
+data-analysis-agent-init = "data_analysis_agent.deployment:main"
 
 [project.urls]
 "Homepage" = "https://github.com/vanna-ai/vanna"
 "Bug Tracker" = "https://github.com/vanna-ai/vanna/issues"
 
 [project.optional-dependencies]
+product = ["fastapi>=0.115", "uvicorn>=0.30", "openai>=1.0,<3", "python-dotenv>=1.0"]
+browser-test = ["pytest>=8", "pytest-asyncio>=0.24", "playwright>=1.50"]
+post-training = ["torch", "transformers", "datasets", "peft", "accelerate"]
 flask = ["flask>=2.0.0", "flask-cors>=4.0.0"]
 fastapi = ["fastapi>=0.68.0", "uvicorn>=0.15.0"]
 servers = ["vanna[flask,fastapi]"]
@@ -82,18 +87,15 @@ hive = ["pyhive", "thrift"]
 presto = ["pyhive", "thrift"]
 mssql = ["pyodbc"]
 
-[tool.flit.module]
-name = "vanna"
-path = "src/vanna"
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["vanna*", "data_analysis_agent*"]
 
-[tool.flit.sdist]
-exclude = [
-    "frontends/",
-    "tests/",
-    "notebooks/",
-    ".github/",
-    "tox.ini",
-]
+[tool.setuptools.package-data]
+data_analysis_agent = ["resources/**/*"]
+
+[tool.setuptools.cmdclass]
+build_py = "data_analysis_agent._build.ProductBuild"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

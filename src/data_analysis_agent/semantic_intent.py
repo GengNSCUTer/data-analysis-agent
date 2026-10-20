@@ -7,6 +7,7 @@ metric definitions, attribution and execution budgets remain server owned.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 import json
 from typing import Awaitable, Callable, Literal, Mapping, get_args
@@ -239,6 +240,12 @@ def resolve_state_intent(
         })
     try:
         proposed = state.apply_patch(patch, message_count=message_count)
+        # Selecting a previous ranked entity then grouping inside it creates a
+        # new population. The old "winner" limit selected the parent entity,
+        # not the number of child categories. Ordinary regrouping keeps Top-N.
+        if (intent.reference_requests and proposed.dimensions != state.dimensions
+                and not any(op.field == "top_n" for op in patch.operations)):
+            proposed = replace(proposed, top_n=None)
         effective = {**intent.as_dict(), **proposed.scope(), "relative_time": None}
         resolved = parse_semantic_intent(json.dumps(effective), catalog, user=user)
     except (ValueError, TypeError, AttributeError) as exc:
@@ -373,10 +380,11 @@ class SemanticIntentInterpreter:
                 "action=new_task表示独立新分析；update_task表示修改当前分析；keep表示解释/展示现有结果；clear_task表示清空当前分析。",
                 "修改任务请给state_patch.operations，只列出本轮变化，不重新填全量条件：set替换字段、add增加列表成员、remove撤销列表成员、clear清空字段。filters使用{dimension,value}对象，与filters字段本身的格式一致。state_patch中的op、field、value必须是合法JSON字符串/数组；clear操作必须省略value或写null，不能写空字符串。",
                 "给了state_patch时不要再填写未改变的顶层metric_ids/dimensions/time_range/time_grain/top_n；服务端从当前状态继承。",
-                "排名数量属于当前分组：换分组时，服务端默认清除旧top_n；只有用户本轮明确要求数量才设置top_n。省略指标、时间或筛选的追问默认修改当前任务，保留这些已确认条件，不重复澄清。失败仅表示执行未成功，不表示用户已撤销分析范围。",
+                "在同一次排名中改用另一维度时保留原排名数量；引用上份结果的排名实体再下钻到新分组时，用reference_requests选父实体，不继承父级排名数量（例如最高州内哪些品类卖得好，不把选州top_n=1当作品类top_n=1）。省略指标、时间或筛选的追问默认修改当前任务，保留这些已确认条件，不重复澄清。失败仅表示执行未成功，不表示用户已撤销分析范围。",
                 "当前status=failed时，用户要求重试应使用data_query和update_task，不改变已确认字段，不用上一次成功结果替代这次尚未成功的查询。",
                 "当前任务和上次成功结果可以范围不同。用户明确要求解释/展示失败前那份成功结果时，使用result_followup、action=keep、result_target=last_successful_result；不要恢复或改写当前待查询范围。只解释当前任务时result_target=current_task，未成功的查询不能用旧数字冒充。",
                 "筛选补丁的value必须是对象数组，不能是单个对象。只添加条件用add；替换某个维度先remove当前同维度条件再add新条件；仅撤销某个维度用remove已有条件，保留其他维度。只有用户明确取消全部筛选才clear filters。",
+                "分组和筛选是不同字段：取消某州限制不等于取消按州分组。若该维度原本没有筛选，就保持范围与分组不变，说明没有该限制；不要把dimensions清空。",
                 '严格JSON示例：{"request_kind":"data_query","action":"update_task","metric_ids":[],"dimensions":[],"state_patch":{"operations":[{"op":"clear","field":"filters","value":null}]},"confidence":0.9}。不要输出未转义的伪JSON、注释、Markdown或自然语言。',
                 '结构化示例：已有RJ州和某品类，只取消州限制：state_patch.operations=[{"op":"remove","field":"filters","value":[{"dimension":"customer_state","value":"RJ"}]}]。这是删除一个条件，不是清空filters；要删除的值从受控状态读取。',
                 '结构化示例：把商品成交额改成有效订单数只能输出 state_patch.operations=[{"op":"set","field":"metric_ids","value":["paid_order_count"]}]，不要清空或重写未变化字段。',
@@ -392,6 +400,7 @@ class SemanticIntentInterpreter:
                 "增长/下降/增长最快若没有时间或基线，问需要比较哪个期间，不得退化为金额排名。",
                 "继续若没有新增范围/维度/重查指令，应result_followup，不重复查库。",
                 "如果要问clarification必须request_kind=clarification，不得一面追问一面data_query。",
+                "澄清只针对缺失或非法部分，已明确且合法的指标、维度、时间仍填写或保存在state_patch中。例如问GMV增长最快但没给比较期间，保留metric_ids=[gmv]再问期间；前零名的数量非法时top_n=null，保留指标和维度再问正整数，不把非法0填入top_n。",
                 "要求上个月与前个月对比需新查库(data_query,time_grain=month)，不能当作仅解释旧摘要。",
                 "不存在的比率不要发明metric_id，也不要拿两个计数替代比率；先说明缺少指标口径，询问分母含义。",
                 "普通用户问'买家等多久收到货'是在问实际履约时长，只有问定义/口径才catalog_definition。",
@@ -403,6 +412,7 @@ class SemanticIntentInterpreter:
                 "例如'2017年各州成交额从高到低'：时间范围2017-01-01到2018-01-01，time_grain=null；年份限定不等于按年分组。",
                 "对比两个期间要让time_range包含两个期间并按month等粒度返回，不只查其中一个。",
                 "删除订单/写库操作属于unsafe_or_unauthorized；未知利润指标应clarification，说明不支持。",
+                "索要订单ID、买家标识或地址等敏感明细属于unsafe_or_unauthorized，应说明受限并建议聚合分析，不询问用户要哪个敏感字段。",
                 "经营概览可选最多4项代表指标并解释选择；不要把所有指标都塞进查询。",
                 "订单量按 Catalog 有效订单数口径；销售额按商品成交额。利润没有口径不要假装支持。",
                 "未知指标、确实歧义时只问一个具体问题，不要求用户使用 metric_id 或同比/环比词。",

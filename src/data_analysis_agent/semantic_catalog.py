@@ -32,7 +32,7 @@ from .result_budget import ResultBudget
 
 CATALOG_VERSION = "olist-catalog-v2"
 POLICY_VERSION = "sql-policy-v1"
-CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "catalog" / "olist_catalog.yaml"
+CATALOG_PATH = Path(__file__).resolve().parent / "resources/catalog/olist_catalog.yaml"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]+$")
 _WORD = re.compile(r"[a-z0-9_]+|[\u4e00-\u9fff]+")
 _ROLES = frozenset({"analyst", "admin"})

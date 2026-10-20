@@ -110,7 +110,7 @@ def test_local_account_membership_requires_an_explicit_grant() -> None:
 def test_demo_bootstrap_route_preserves_server_authority(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
 
-    from examples.trusted_olist_web_demo import create_app
+    from data_analysis_agent.server import create_app
 
     monkeypatch.setenv("DATA_ANALYSIS_BOOTSTRAP_USERNAME", "bootstrapuser")
     monkeypatch.setenv("DATA_ANALYSIS_BOOTSTRAP_PASSWORD", "bootstrap-password")

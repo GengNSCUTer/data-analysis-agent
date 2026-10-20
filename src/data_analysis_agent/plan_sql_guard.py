@@ -37,10 +37,12 @@ def sql_plan_mismatch(sql: str, plan: Mapping[str, Any] | None) -> str | None:
             # SqlPolicy owns malformed SQL; this check owns plan omissions.
             return None
         if root is not None:
-            for item in filters:
-                check = _FilterCheck(item)
+            dimensions = dict.fromkeys(item['dimension'] for item in filters)
+            for dimension in dimensions:
+                items = [item for item in filters if item['dimension'] == dimension]
+                check = _FilterCheck(items)
                 if not all(check.enforced(root, metric) for metric in plan.get("metric_ids", ()) or (None,)):
-                    return f"SQL 遗漏或改变了已确认筛选：{item['dimension']} = {item['value']!r}。请按计划中的来源字段保留条件。"
+                    return f"SQL 遗漏或改变了已确认筛选：{dimension} IN {[item['value'] for item in items]!r}。请按计划中的来源字段保留条件。"
             mismatch = _lookup_join_mismatch(root, plan.get("lookup_joins") or [])
             if mismatch:
                 return mismatch
@@ -225,43 +227,74 @@ class _FilterCheck:
     branches cannot supply evidence for a missing condition.
     """
 
-    def __init__(self, item):
-        self.value = item["value"]
-        self.sources = {(source["table"], source["column"]) for source in item["sources"]}
-        self.value_sources = {(source["table"], source["column"]) for source in item.get("value_sources", item["sources"])}
+    def __init__(self, items):
+        item = items[0]
+        self.values = frozenset(item['value'] for item in items)
+        self.value = item["value"] if len(self.values) == 1 else None
+        self.sources = {(source["table"], source["column"]) for item in items for source in item["sources"]}
+        self.value_sources = {
+            item["value"]: {(source["table"], source["column"]) for source in item.get("value_sources", item["sources"])}
+            for item in items
+        }
 
     def lineage(self, node, scope):
-        return _column_lineage(node, scope, self.sources, self.value)
+        sources = None
+        for value in self.values:
+            found = _column_lineage(node, scope, self.sources, value)
+            sources = found if sources is None else sources & found
+        return sources or set()
 
     def equality(self, left, right, scope):
         if not isinstance(right, exp.Literal) or not right.is_string:
             return False
-        expected = self.value
-        if isinstance(left, exp.Lower):
-            expected = expected.lower()
-        elif isinstance(left, exp.Upper):
-            expected = expected.upper()
+        expected = {value for value in self.values if right.this == (
+            value.lower() if isinstance(left, exp.Lower) else value.upper() if isinstance(left, exp.Upper) else value)}
         sources = self.lineage(left, scope)
-        if right.this != expected:
+        if not expected:
             return False
+        value_sources = set().union(*(self.value_sources[value] for value in expected))
         if isinstance(left, exp.Coalesce):
             first = self.lineage(left.this, scope)
             # A known matching display column may legitimately fall back to
             # another authorized encoding. Do not reject that normal SQL form.
-            return bool(sources) and sources <= self.sources and bool(first) and first <= self.value_sources
-        return bool(sources) and sources <= self.value_sources
+            return bool(sources) and sources <= self.sources and bool(first) and first <= value_sources
+        return bool(sources) and sources <= value_sources
+
+    def literal_values(self, node, scope):
+        """Recognize the complete allowed set, including IN and equivalent OR."""
+        if isinstance(node, (exp.Where, exp.Having, exp.Paren)):
+            return self.literal_values(node.this, scope)
+        if isinstance(node, exp.And):
+            left = self.literal_values(node.this, scope)
+            right = self.literal_values(node.expression, scope)
+            return left & right if left is not None and right is not None else (left if left is not None else right)
+        if isinstance(node, exp.Or):
+            left = self.literal_values(node.this, scope)
+            right = self.literal_values(node.expression, scope)
+            return left | right if left is not None and right is not None else None
+        pairs = []
+        if isinstance(node, exp.EQ):
+            pairs = [(node.this, node.expression), (node.expression, node.this)]
+        elif isinstance(node, exp.In) and node.expressions:
+            pairs = [(node.this, value) for value in node.expressions]
+            if not all(self.equality(left, right, scope) for left, right in pairs):
+                return None
+        values = {value for value in self.values
+                  for left, right in pairs
+                  if self.equality(left, right, scope)
+                  and right.this == (value.lower() if isinstance(left, exp.Lower) else value.upper() if isinstance(left, exp.Upper) else value)}
+        return values if values else None
 
     def predicate(self, node, scope):
+        values = self.literal_values(node, scope)
+        if values is not None:
+            return values == self.values
         if isinstance(node, (exp.Where, exp.Having, exp.Paren)):
             return self.predicate(node.this, scope)
         if isinstance(node, exp.And):
             return self.predicate(node.this, scope) or self.predicate(node.expression, scope)
         if isinstance(node, exp.Or):
             return self.predicate(node.this, scope) and self.predicate(node.expression, scope)
-        if isinstance(node, exp.EQ):
-            return self.equality(node.this, node.expression, scope) or self.equality(node.expression, node.this, scope)
-        if isinstance(node, exp.In) and len(node.expressions) == 1:
-            return self.equality(node.this, node.expressions[0], scope)
         if isinstance(node, exp.In) and isinstance(node.args.get("query"), exp.Subquery):
             child = next((s for s in scope.subquery_scopes if s.expression is node.args["query"].this), None)
             if child is not None and len(child.expression.selects) == 1:

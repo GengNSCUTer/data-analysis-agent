@@ -149,10 +149,9 @@ class AnalysisState(WorkingMemory):
                 else:
                     value = tuple(v for v in getattr(state, name) if v not in values)
             state = replace(state, **{name: value})
-        # A rank limit belongs to the population being grouped. Changing that
-        # population is not a request for the same number of groups. An explicit
-        # limit in this patch always wins, irrespective of operation order.
-        if state.dimensions != self.dimensions and not any(
+        # Editing a ranking retains its quantity. A scalar has no ranked
+        # population; entity drilldowns are handled by resolve_state_intent.
+        if not state.dimensions and state.dimensions != self.dimensions and not any(
             op.field == "top_n" for op in patch.operations
         ):
             state = replace(state, top_n=None)

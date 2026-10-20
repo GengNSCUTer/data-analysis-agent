@@ -1,0 +1,14 @@
+.git
+.env*
+**/__pycache__
+**/node_modules
+**/dist
+**/resources
+data/*
+!data/catalog
+!data/catalog/**
+docs
+tests
+plan
+build
+*.egg-info

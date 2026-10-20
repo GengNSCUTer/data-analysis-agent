@@ -112,7 +112,7 @@ def test_demo_script_login_rejects_anonymous_and_injected_identity(monkeypatch: 
     monkeypatch.setenv("DATA_ANALYSIS_BOOTSTRAP_PASSWORD", "demo-script-password")
     from fastapi.testclient import TestClient
 
-    from examples.trusted_olist_web_demo import create_app
+    from data_analysis_agent.server import create_app
 
     with TestClient(create_app()) as client:
         anonymous = client.post("/api/copilot/bootstrap", json={"surface_id": "embedded-copilot"})

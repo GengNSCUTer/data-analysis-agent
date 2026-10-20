@@ -6,9 +6,9 @@
 
 ## 当前能力
 
-- **业务查询与澄清**：QuestionRouter、Semantic Catalog、运行时 QueryPlan 和 WorkingMemory 约束指标、时间、分组与追问；缺少必要条件时先澄清。
+- **业务查询与澄清**：结构化语义解释器理解问题与上下文，AnalysisState 保存当前分析；Semantic Catalog 和 QueryPlan 校验指标、时间、分组与追问。缺少必要条件时做最小澄清。
 - **可信执行**：`sqlglot` AST Policy 校验单条只读查询、Schema/表/列白名单、敏感字段投影和函数；PostgreSQL reader role、超时与行数预算提供数据库层约束；ResultValidator 校验结果合同。合同通过不等于业务语义已被证明。
-- **结果与图表**：执行最多 1,000 行，页面预览最多 200 行；支持柱状图、横向柱状图、折线图、面积图和环形图，服务端基于有效 ChartContract 直接绘图。
+- **结果与图表**：聚合结果按查询计划派生预算，另有进程行数/字节/超时上限；页面预览最多 200 行、模型摘要最多 8 行。支持柱状图、横向柱状图、折线图、面积图和环形图，服务端基于有效 ChartContract 直接绘图。
 - **会话与上下文**：PostgreSQL 会话存储、workspace 隔离、状态版本冲突检测、可信结果追问与回答后后台摘要；历史按 token 读取，24K 触发压缩、约 16K 保留原文，摘要失败保留未压缩历史；摘要不能成为 SQL 条件或权限依据。
 - **工件与下载**：完整 CSV/Plotly 工件保存在仓库外，绑定用户、工作区和版本；完整 CSV 下载检查归属与完整性并记录导出审计。通用预览导出按钮关闭。
 - **嵌入与身份**：`/embedded-copilot` 提供会话列表、保存分析、查看依据和移动端适配；支持本地账号会话和绑定允许来源的 5 分钟嵌入令牌。产品身份解析器不接受旧演示角色 cookie。
@@ -32,27 +32,16 @@
 
 ## 本地运行
 
-前置条件：Python 3.12、Node.js 22、已初始化并加载分析表的 PostgreSQL，以及 OpenAI-compatible 模型凭据。以下流程用于既有开发环境；从全新机器一键安装仍是后续交付任务。
+新环境优先使用 Compose，初始化独立 PostgreSQL 和自构造合成电商数据，不分发真实 Olist 数据。需要 Docker Compose v2、Docker 权限和模型 API key：
 
 ```bash
-conda activate data-analysis-agent
-pip install -e ".[test,fastapi,openai]" python-dotenv
-cd frontends/webcomponent
-npm install --package-lock=false
-npm run build
-cd ../..
-PYTHONPATH=src DATA_ANALYSIS_DEMO_PORT=32013 python examples/trusted_olist_web_demo.py
+cp .env.example .env
+# 填入模型 key 与三个不同的随机数据库密码
+docker compose --env-file .env -f infra/postgres/compose.yaml up -d --build
+curl -f http://127.0.0.1:32013/health
 ```
 
-本地 .env 配置模型，数据库连接、bootstrap 账号和会话密钥由服务端环境配置。不要提交真实值。长期运行应显式设置稳定的 DATA_ANALYSIS_DEMO_SESSION_SECRET；缺省随机密钥会使旧会话在重启后失效。
-
-```dotenv
-SILICONFLOW_API_KEY=your_key
-SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
-SILICONFLOW_MODEL=deepseek-ai/DeepSeek-V3.2
-```
-
-打开 http://127.0.0.1:32013/embedded-copilot；/embedded-demo 重定向到产品页。登录和演示顺序见 [演示脚本](docs/demo-script.md)，数据库准备见 [PostgreSQL 基础设施](infra/postgres/)。
+打开 http://127.0.0.1:32013/embedded-copilot。首次密码读取、无 Docker 的 wheel 安装、配置、持久化、重启与排错见 [部署说明](docs/deployment.md)。安装后的命令是 `data-analysis-agent`，不需要 Conda、`PYTHONPATH=src` 或前端开发服务器。默认签名密钥持久化在应用状态目录，重启保留未过期登录。
 
 ## 评测与后训练证据
 
@@ -74,12 +63,13 @@ RUN_PROJECT_DB=1 pytest -q tests/test_postgres_runner.py tests/test_postgres_con
 RUN_VANNA_LIVE=1 pytest -q tests/test_w4_04_product_demo.py
 ```
 
-GitHub Actions 当前覆盖一组确定性回归与 Web Component 构建，尚未覆盖全部新增产品路径。
+GitHub Actions 覆盖确定性回归、Web Component 构建和离开源码目录的 wheel 安装检查；真实模型与数据库重启验收需显式运行，不纳入无凭据的 CI。
 
 ## 文档入口
 
 - [PROJECT.md](PROJECT.md)：项目事实与进度，历史实验按日期保留。
 - [文档导航](docs/README.md)：运行时架构、指标合同、评测与学习入口。
+- [部署说明](docs/deployment.md)：安装、合成数据初始化、持久化与重启恢复。
 - [当前产品请求架构](docs/architecture/product-request-architecture-v1.md)：模型与代码的分工。
 - [后训练总览](docs/post-training/README.md)：当前主实验与历史实验的区别。
 - [目录与代码审阅地图](docs/architecture/repository-map.md)：各模块位置和职责。

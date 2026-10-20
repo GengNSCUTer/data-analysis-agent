@@ -1,6 +1,6 @@
 # 项目代码目录地图
 
-**状态：** 2026-08-30 基于当前 `main` 代码树整理。本文只描述职责和审阅顺序，不代表启动了新训练、新评测或重构。
+**状态：** 2026-08-30 初稿，2026-10-20 更新产品安装和启动入口。本文描述职责和审阅顺序，不代表启动了新训练。
 
 ## 1. 根目录先分三类
 
@@ -11,7 +11,7 @@
 | `src/vanna/` | 上游 Vanna 2.0.2 框架：Agent、工具、SSE、模型集成等。项目通过其扩展点接入，不把它误当作自研业务逻辑。 | 中；先理解调用边界，再按需深入。 |
 | `src/data_analysis_agent/` | 本项目自有 Python 核心：可信 Text-to-SQL、语义 Catalog、SQL Policy、PostgreSQL、审计、图表、离线后训练评测。 | 最高。 |
 | `frontends/webcomponent/` | Vanna 原生 `<vanna-chat>` Web Component 的 TypeScript 源码、Storybook 和前端测试。 | 中；后端链路读清后再看。 |
-| `examples/` | 可运行 Demo 入口，例如可信 Olist Web Demo。 | 高；用于从启动脚本反向定位运行时装配。 |
+| `examples/` | 示例页面和上游示例；产品 Python 入口已迁到 `src/data_analysis_agent/server.py`。 | 中；先从已安装的产品入口理解运行时装配。 |
 | `data/` | 可提交的数据 manifest、Catalog、DDL/转换逻辑与小型 fixture；不含 Olist 原始数据或数据库 dump。 | 高；语义和数据版本的事实来源。 |
 | `evals/` | 版本化用例、manifest、golden SQL、评测脚本输入和安全聚合报告。 | 高；每一项质量主张都应能回到这里。 |
 | `scripts/` | 项目 CLI、评测入口、数据转换与运维脚本。`scripts/post_training/` 是后训练的规范实现位置。 | 高。 |
@@ -23,7 +23,7 @@
 | `papers/`、`notebooks/` | 背景研究与探索性材料，不是运行时依赖。 | 低。 |
 | `github-research-output/` | Git 忽略的调研中间产物；当前约数百 MB，不是项目源代码、测试或运行时资产。 | 不读代码时可忽略。 |
 
-根目录的 `pyproject.toml` 仍是上游 Vanna 的包配置，发布模块为 `vanna`。项目自有的 `data_analysis_agent` 是同一仓库中的内部包，而不是独立发布包；这解释了为什么两者都位于 `src/`。
+根目录 `pyproject.toml` 保留 fork 的发行名 `vanna` 和版本 `2.0.2`，安装包同时包含 `vanna` 与 `data_analysis_agent`。产品入口为 `data-analysis-agent`，管理员初始化入口为 `data-analysis-agent-init`；安装与资源打包见 [部署说明](../deployment.md)。运行时不再依赖从仓库根目录设置 `PYTHONPATH`。
 
 ## 2. 本项目 Python 核心：`src/data_analysis_agent/`
 
@@ -31,7 +31,8 @@
 
 | 逻辑组 | 主要文件 | 职责 |
 | --- | --- | --- |
-| 请求与会话 | `chat_runtime.py`、`question_router.py`、`working_memory.py`、`conversation_store.py`、`budget.py`、`llm_observability.py` | 决定是否查库、维护受控上下文、限制调用预算并记录模型观测。 |
+| 启动与安装 | `server.py`、`deployment.py`、`runtime_paths.py`、`_build.py` | 应用装配、独立管理员初始化、持久状态路径与安装包资源。 |
+| 请求与会话 | `chat_runtime.py`、`semantic_intent.py`、`analysis_state.py`、`conversation_store.py`、`analysis_context.py`、`budget.py`、`llm_observability.py` | 解释当前意图、维护分析状态和历史摘要、限制预算并记录模型观测；旧语言分类不作为在线入口。 |
 | 语义与计划 | `semantic_catalog.py`、`metric_context.py`、`query_plan.py`、`workspace.py` | 从工作区配置和 Catalog 得到指标、可见表列/Join、查询粒度和版本化结果合同。 |
 | 安全执行与审计 | `sql_policy.py`、`postgres_runner.py`、`result_validator.py`、`sql_repair.py`、`trusted_sql_tool.py`、`run_recorder.py` | AST 约束、PostgreSQL 双角色执行、结果合同、一次受控修复和审计证据。 |
 | 呈现与 Demo | `chart_contract.py`、`visualization.py`、`trusted_workflow.py`、`demo_session.py` | 约束图表和结果呈现，定制 Demo 工作流与演示身份。 |
@@ -40,9 +41,9 @@
 产品运行时最值得先掌握的一条线是：
 
 ```text
-examples/trusted_olist_web_demo.py
+data-analysis-agent -> src/data_analysis_agent/server.py:create_app()
 -> chat_runtime.py
--> question_router.py / semantic_catalog.py / query_plan.py
+-> semantic_intent.py / analysis_state.py / semantic_catalog.py / query_plan.py
 -> trusted_sql_tool.py / sql_policy.py / postgres_runner.py / result_validator.py
 -> chart_contract.py / visualization.py / run_recorder.py
 ```

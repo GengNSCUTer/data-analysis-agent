@@ -1,0 +1,5 @@
+include examples/embeddable_copilot_shell.html
+include data/catalog/olist_catalog.yaml data/catalog/olist_catalog_v3.yaml
+include infra/postgres/analytics.sql infra/postgres/security.sql
+include infra/postgres/synthetic.sql
+include frontends/webcomponent/dist/vanna-components.js

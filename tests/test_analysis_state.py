@@ -123,13 +123,13 @@ def test_patch_cannot_introduce_hidden_metric_or_multiple_state_filters():
 
 
 @pytest.mark.parametrize("dimensions,explicit_limit,expected", [
-    (["product_category_name"], None, None),
+    (["product_category_name"], None, 1),
     ([], None, None),
     (["customer_state"], None, 1),
     (["product_category_name"], 10, 10),
 ])
 @pytest.mark.parametrize("limit_first", [True, False])
-def test_rank_limit_belongs_to_grouping_population(dimensions, explicit_limit, expected, limit_first):
+def test_regrouping_retains_ranking_quantity_except_scalar(dimensions, explicit_limit, expected, limit_first):
     state = replace(AnalysisState.new(WORKSPACE), metric_ids=("gmv",),
                     dimensions=("customer_state",), filters=("customer_state=SP",), top_n=1)
     operations = [{"op": "set", "field": "dimensions", "value": dimensions}]
@@ -138,3 +138,15 @@ def test_rank_limit_belongs_to_grouping_population(dimensions, explicit_limit, e
     proposed = apply(state, operations)
     assert proposed.top_n == expected
     assert proposed.metric_ids == ("gmv",) and proposed.filters == ("customer_state=SP",)
+
+
+def test_ranked_entity_drilldown_does_not_apply_parent_limit_to_children():
+    state = replace(AnalysisState.new(WORKSPACE), metric_ids=("gmv",), dimensions=("customer_state",), top_n=1)
+    catalog = CatalogLoader(WORKSPACE).load()
+    intent = parse_semantic_intent(json.dumps({
+        "request_kind": "data_query", "action": "update_task",
+        "state_patch": {"operations": [{"op": "set", "field": "dimensions", "value": ["product_category_name"]}]},
+        "reference_requests": [{"kind": "previous_ranked_entity", "dimension": "customer_state", "rank": 1}],
+    }), catalog, user=USER)
+    resolved, proposed = resolve_state_intent(intent, state, catalog, USER, message_count=8)
+    assert proposed.top_n is None and resolved.top_n is None

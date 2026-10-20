@@ -72,7 +72,7 @@ def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
     return {key: manifest[key] for key in allowed if key in manifest}
 
 
-_FOLLOWUP_NUMBER = re.compile(r"(?<![\w.])-?\d+(?:,\d{3})*(?:\.\d+)?%?")
+_FOLLOWUP_NUMBER = re.compile(r"(?<![a-zA-Z0-9_.])-?\d+(?:,\d{3})*(?:\.\d+)?%?")
 _FOLLOWUP_PRESENTATION_PREFIX = re.compile(r"(?:第|排名第|前|top\s*)\s*$", re.IGNORECASE)
 _FOLLOWUP_PRESENTATION_UNIT = re.compile(
     r"^\s*(?:名|位|个|项|条|行|组|页|的|是|为)"
