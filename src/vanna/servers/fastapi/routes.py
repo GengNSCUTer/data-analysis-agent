@@ -4,6 +4,7 @@ FastAPI route implementations for Vanna Agents.
 
 import json
 import traceback
+import anyio
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -53,8 +54,9 @@ def register_chat_routes(
 
         async def generate() -> AsyncGenerator[str, None]:
             """Generate SSE stream."""
+            stream = chat_handler.handle_stream(chat_request)
             try:
-                async for chunk in chat_handler.handle_stream(chat_request):
+                async for chunk in stream:
                     chunk_json = chunk.model_dump_json()
                     yield f"data: {chunk_json}\n\n"
                 yield "data: [DONE]\n\n"
@@ -63,11 +65,14 @@ def register_chat_routes(
                 traceback.print_exc()
                 error_data = {
                     "type": "error",
-                    "data": {"message": str(e)},
+                    "data": {"message": "本次请求未完成，请稍后重试。"},
                     "conversation_id": chat_request.conversation_id or "",
                     "request_id": chat_request.request_id or "",
                 }
                 yield f"data: {json.dumps(error_data)}\n\n"
+            finally:
+                with anyio.CancelScope(shield=True):
+                    await stream.aclose()
 
         return StreamingResponse(
             generate(),
@@ -78,6 +83,11 @@ def register_chat_routes(
                 "X-Accel-Buffering": "no",  # Disable nginx buffering
             },
         )
+
+    # The product uses one transport: a failed SSE must not replay a query
+    # through polling, and WebSocket must not bypass its HTTP authentication.
+    if config.get("sse_only"):
+        return
 
     @app.websocket("/api/vanna/v2/chat_websocket")
     async def chat_websocket(websocket: WebSocket) -> None:

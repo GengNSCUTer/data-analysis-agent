@@ -57,7 +57,6 @@ export class VannaApiClient {
     this.timeout = config.timeout || 30000;
     this.customHeaders = config.customHeaders || {};
 
-    console.log('[VannaApiClient] Constructor called with config:', config);
     console.log('[VannaApiClient] Endpoint configuration:');
     console.log('  - SSE endpoint:', this.sseEndpoint, config.sseEndpoint ? '(custom)' : '(default)');
     console.log('  - WS endpoint:', this.wsEndpoint, config.wsEndpoint ? '(custom)' : '(default)');
@@ -82,7 +81,7 @@ export class VannaApiClient {
   /**
    * Send message using Server-Sent Events (SSE) streaming
    */
-  async *streamChat(request: ChatRequest): AsyncGenerator<ChatStreamChunk, void, unknown> {
+  async *streamChat(request: ChatRequest, signal?: AbortSignal): AsyncGenerator<ChatStreamChunk, void, unknown> {
     const url = this.sseEndpoint.startsWith('http')
       ? this.sseEndpoint
       : `${this.baseUrl}${this.sseEndpoint}`;
@@ -102,6 +101,7 @@ export class VannaApiClient {
         ...this.customHeaders,
       },
       body: JSON.stringify(request),
+      signal,
     });
 
     if (!response.ok) {
@@ -115,6 +115,7 @@ export class VannaApiClient {
 
     const decoder = new TextDecoder();
     let buffer = '';
+    let completed = false;
 
     try {
       while (true) {
@@ -129,6 +130,7 @@ export class VannaApiClient {
           if (line.startsWith('data: ')) {
             const data = line.slice(6).trim();
             if (data === '[DONE]') {
+              completed = true;
               return;
             }
 
@@ -141,9 +143,20 @@ export class VannaApiClient {
           }
         }
       }
+      throw new Error('连接提前关闭，本次请求不会自动重发');
     } finally {
+      if (!completed) await reader.cancel().catch(() => {});
       reader.releaseLock();
     }
+  }
+
+  async cancelChat(request: ChatRequest): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/api/vanna/v2/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.customHeaders },
+      body: JSON.stringify({ conversation_id: request.conversation_id, request_id: request.request_id }),
+    });
+    if (!response.ok) throw new Error(`停止请求失败 (${response.status})`);
   }
 
   /**

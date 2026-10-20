@@ -13,8 +13,9 @@ import psycopg2.extras
 
 from vanna.core.user import User
 
-from .budget import BudgetUsage, RequestBudget
-from .postgres_runner import PostgresConnectionSettings
+from .budget import BudgetUsage, RequestBudget, CURRENT_BUDGET
+from .postgres_runner import PostgresConnectionSettings, complete_database_io
+from .runtime_control import CURRENT_REQUEST
 from .result_artifact import ChartReplayRef, chart_replay_from_trace
 from .execution_memory import ExecutionMemory
 
@@ -49,25 +50,26 @@ class PostgresRunRecorder:
         metric_version: str,
     ) -> AgentRun:
         run = AgentRun(str(uuid.uuid4()), request_id, conversation_id)
-        await asyncio.to_thread(
-            self._start_sync,
-            run,
-            user,
-            question,
-            budget,
-            dataset_version_id,
-            metric_version,
-        )
+        try:
+            await complete_database_io(self._start_sync, run, user, question, budget, dataset_version_id, metric_version)
+        except asyncio.CancelledError:
+            # start() has not yet returned run to its caller. Finalize the row
+            # here so cancellation during INSERT cannot leave a running run.
+            usage = CURRENT_BUDGET.get() or BudgetUsage(budget)
+            active = CURRENT_REQUEST.get()
+            usage.terminate(active.cancel_reason if active and active.cancel_reason else 'client_disconnected')
+            await self.finish(run, usage)
+            raise
         return run
 
     async def finish(self, run: AgentRun, usage: BudgetUsage) -> None:
-        await asyncio.to_thread(self._finish_sync, run, usage)
+        await complete_database_io(self._finish_sync, run, usage)
 
     async def list_rendered_charts(
         self, *, conversation_id: str, user_id: str
     ) -> list[tuple[ChartReplayRef, str | None]]:
         """Return saved chart pointers for this user, oldest question first."""
-        return await asyncio.to_thread(
+        return await complete_database_io(
             self._list_rendered_charts_sync, conversation_id, user_id
         )
 
@@ -77,7 +79,7 @@ class PostgresRunRecorder:
         """Return safe execution evidence for one already-authorized conversation."""
         if not isinstance(limit, int) or not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")
-        rows = await asyncio.to_thread(
+        rows = await complete_database_io(
             self._list_execution_memory_sync, conversation_id, user_id, limit
         )
         return [ExecutionMemory.from_row(row) for row in reversed(rows)]

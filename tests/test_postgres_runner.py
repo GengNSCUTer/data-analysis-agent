@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import os
+import asyncio
+import time
+import threading
+from dataclasses import replace
 import uuid
 
 import psycopg2
@@ -11,6 +15,7 @@ import pytest
 from data_analysis_agent.postgres_runner import (
     PostgresConnectionSettings,
     SecurePostgresRunner,
+    _cancellable_query,
 )
 from data_analysis_agent.budget import BudgetedToolRegistry, BudgetUsage, RequestBudget
 from data_analysis_agent.budget import BudgetSafetyMiddleware
@@ -22,6 +27,7 @@ from data_analysis_agent.run_recorder import PostgresRunRecorder
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
 from data_analysis_agent.sql_policy import PolicyViolation
+from data_analysis_agent.sql_repair import SafeSqlExecutionError
 from data_analysis_agent.query_filters import QueryFilter
 from data_analysis_agent.trusted_sql_tool import TrustedRunSqlTool
 from vanna import Agent
@@ -54,6 +60,56 @@ def make_context(user_id: str, role: str = "analyst") -> ToolContext:
         agent_memory=DemoAgentMemory(),
         metadata={"question": "integration test"},
     )
+
+
+@pytest.mark.asyncio
+async def test_cancel_stops_actual_postgres_worker_and_closes_connection():
+    started = threading.Event()
+    connections = []
+    settings = PostgresConnectionSettings.from_environment()
+
+    def slow_query(cancellation):
+        connection = psycopg2.connect(host=settings.host, port=settings.port, database=settings.database,
+                                      user=settings.reader_user, application_name='stage5-cancel-test')
+        connections.append(connection)
+        try:
+            cancellation.attach(connection)
+            with connection.cursor() as cursor:
+                cursor.execute("SET statement_timeout = '10s'")
+                started.set()
+                # Test the cancellation transport, not an online allowed function.
+                cursor.execute('SELECT pg_sleep(8)')
+        finally:
+            cancellation.close(connection)
+
+    worker = asyncio.create_task(_cancellable_query(slow_query))
+    assert await asyncio.to_thread(started.wait, 2)
+    await asyncio.sleep(.05)
+    begin = time.monotonic()
+    worker.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await worker
+    assert time.monotonic() - begin < 2
+    assert connections[0].closed
+    connection = psycopg2.connect(host=settings.host, port=settings.port, database=settings.database, user=settings.reader_user)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM pg_stat_activity WHERE application_name='stage5-cancel-test'")
+            assert cursor.fetchone()[0] == 0
+    finally:
+        connection.close()
+
+
+@pytest.mark.asyncio
+async def test_actual_reader_statement_timeout_is_audited_without_partial_result():
+    settings = replace(PostgresConnectionSettings.from_environment(), statement_timeout_ms=1)
+    runner = SecurePostgresRunner(settings=settings)
+    context = make_context('stage5-timeout-' + uuid.uuid4().hex[:8])
+    with pytest.raises(SafeSqlExecutionError):
+        await runner.run_sql(RunSqlToolArgs(sql="SELECT SUM(i.price) AS gmv FROM fact_order_items i JOIN fact_orders o ON o.order_id=i.order_id WHERE o.order_status NOT IN ('canceled','unavailable')"), context)
+    assert context.metadata['sql_error']['category'] == 'timeout'
+    assert not context.metadata.get('result_contract_satisfied')
+    assert runner.audit.list_recent(context.user.id, 'analyst')[0]['policy_status'] == 'execution_error'
 
 
 @pytest.mark.asyncio

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 
 import pytest
 
 from data_analysis_agent.result_artifact_store import (
     ResultArtifactIntegrityError,
+    ResultArtifactExpired,
     ResultArtifactStore,
 )
 
@@ -101,3 +104,43 @@ def test_result_artifact_store_detects_payload_tampering(tmp_path) -> None:
         store.verify_manifest(
             artifact_id="rta_test", user_id="user-a", workspace_id="olist_analytics"
         )
+
+
+def test_expiry_cleanup_is_scoped_and_open_download_can_finish(tmp_path):
+    store = ResultArtifactStore(tmp_path / 'runtime', retention_seconds=60)
+    identity = dict(artifact_id='rta_expire', user_id='user', workspace_id='olist')
+    store.save_result_csv(**identity, columns=['n'], rows=[{'n': 1}], row_count=1, dataset_version='v1', metric_version='m1')
+    handle = store.open_verified_csv(**identity)
+    scope = store._scope('user', 'olist', 'rta_expire')
+    manifest = scope / 'manifest.json'
+    os.utime(manifest, (time.time() - 120, time.time() - 120))
+    with pytest.raises(ResultArtifactExpired):
+        store.read_csv_page(**identity)
+    external = tmp_path / 'experiment'
+    external.mkdir()
+    (external / 'manifest.json').write_text('unrelated')
+    # A symlink under runtime must not authorize cleanup outside it.
+    linked = store.root / 'outside' / 'workspace'
+    linked.mkdir(parents=True)
+    (linked / 'artifact').symlink_to(external, target_is_directory=True)
+    result = store.cleanup_expired()
+    assert result['artifacts'] == 1 and result['bytes'] > 0
+    assert not manifest.exists()
+    assert (external / 'manifest.json').read_text() == 'unrelated'
+    assert handle.read().decode().splitlines() == ['n', '1']
+    handle.close()
+    assert store.cleanup_expired()['artifacts'] == 0
+
+
+def test_retention_survives_restart_and_skips_artifact_in_use(tmp_path):
+    store = ResultArtifactStore(tmp_path, retention_seconds=60)
+    identity = dict(artifact_id='rta_keep', user_id='user', workspace_id='olist')
+    store.save_result_csv(**identity, columns=['n'], rows=[{'n': 1}], row_count=1, dataset_version='v1', metric_version='m1')
+    restarted = ResultArtifactStore(tmp_path, retention_seconds=60)
+    assert restarted.read_csv_page(**identity)['rows'] == [{'n': '1'}]
+    scope = store._scope('user', 'olist', 'rta_keep')
+    os.utime(scope / 'manifest.json', (0, 0))
+    store._busy[scope] = 1
+    assert store.cleanup_expired()['artifacts'] == 0
+    del store._busy[scope]
+    assert store.cleanup_expired()['artifacts'] == 1

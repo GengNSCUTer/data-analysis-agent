@@ -78,6 +78,9 @@ class OpenAILlmService(LlmService):
 
         self._client = AsyncOpenAI(**client_kwargs)
 
+    async def aclose(self) -> None:
+        await self._client.close()
+
     async def send_request(self, request: LlmRequest) -> LlmResponse:
         """Send a non-streaming request to OpenAI and return the response."""
         payload = self._build_payload(request)

@@ -106,7 +106,8 @@ CREATE TABLE IF NOT EXISTS app.agent_runs (
         'running', 'completed', 'clarification_required', 'tool_budget_exhausted',
         'context_truncated', 'sql_policy_rejected', 'query_timeout',
         'execution_error', 'unsupported_request', 'catalog_answered', 'input_too_long',
-        'state_conflict'
+        'state_conflict', 'user_cancelled', 'client_disconnected', 'request_timeout',
+        'server_shutdown', 'capacity_exceeded'
     ))
 );
 
@@ -126,7 +127,8 @@ BEGIN
             'running', 'completed', 'clarification_required', 'tool_budget_exhausted',
             'context_truncated', 'sql_policy_rejected', 'query_timeout',
             'execution_error', 'unsupported_request', 'catalog_answered', 'input_too_long',
-            'state_conflict'
+            'state_conflict', 'user_cancelled', 'client_disconnected', 'request_timeout',
+            'server_shutdown', 'capacity_exceeded'
         ));
 END $$;
 
@@ -214,6 +216,7 @@ CREATE TABLE IF NOT EXISTS app.accounts (
     CHECK (role IN ('analyst', 'admin')),
     CHECK (subject_id LIKE 'local:%')
 );
+ALTER TABLE app.accounts ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS app.export_audits (
     export_id BIGSERIAL PRIMARY KEY,

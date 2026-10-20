@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import anyio
 from dataclasses import dataclass, replace
 import os
 import json
@@ -31,6 +33,57 @@ from .metric_context import DATASET_VERSION, METRIC_VERSION, OLIST_WORKSPACE
 from .workspace import WorkspaceProfile
 from .query_filters import QueryFilter
 from .result_budget import ResultBudget, ResultBudgetError, validate_runtime_result_budget
+
+
+class _QueryCancellation:
+    """Forward asyncio cancellation to the connection owned by the SQL thread."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.connection = None
+        self.cancelled = False
+
+    def attach(self, connection):
+        with self.lock:
+            self.connection = connection
+            if self.cancelled:
+                raise RuntimeError("query cancelled before execution")
+
+    def cancel(self):
+        with self.lock:
+            self.cancelled = True
+            if self.connection is not None and not self.connection.closed:
+                self.connection.cancel()
+
+    def close(self, connection):
+        with self.lock:
+            self.connection = None
+            connection.close()
+
+
+async def _cancellable_query(function, *args):
+    cancellation = _QueryCancellation()
+    worker = asyncio.create_task(asyncio.to_thread(function, *args, cancellation))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        # Cancelling to_thread alone leaves PostgreSQL running. Wait for its
+        # rollback/close before releasing the request capacity slot.
+        with anyio.CancelScope(shield=True):
+            await asyncio.to_thread(cancellation.cancel)
+            await asyncio.gather(worker, return_exceptions=True)
+        raise
+
+
+async def complete_database_io(function, *args):
+    """Let a short metadata transaction finish before reporting cancellation."""
+    worker = asyncio.create_task(asyncio.to_thread(function, *args))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        with anyio.CancelScope(shield=True):
+            await asyncio.gather(worker, return_exceptions=True)
+        raise
 
 
 def execution_probe(final_sql: str, row_limit: int, *, policy_limit_applied: bool) -> tuple[str, int]:
@@ -238,7 +291,7 @@ class SecurePostgresRunner(SqlRunner):
         self.result_validator = result_validator or ResultValidator(self.settings.max_rows)
 
     async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
-        return await asyncio.to_thread(self._run_sql_sync, args, context)
+        return await _cancellable_query(self._run_sql_sync, args, context)
 
     async def resolve_filter_sources(self, filters: tuple[QueryFilter, ...]) -> tuple[QueryFilter, ...]:
         """Locate display/raw values among already authorized Catalog columns.
@@ -248,14 +301,16 @@ class SecurePostgresRunner(SqlRunner):
         """
         if not any(len(item.sources) > 1 for item in filters):
             return filters
-        return await asyncio.to_thread(self._resolve_filter_sources_sync, filters)
+        return await _cancellable_query(self._resolve_filter_sources_sync, filters)
 
-    def _resolve_filter_sources_sync(self, filters):
+    def _resolve_filter_sources_sync(self, filters, cancellation=None):
         connection = psycopg2.connect(
             host=self.settings.host, port=self.settings.port,
             database=self.settings.database, user=self.settings.reader_user,
         )
         try:
+            if cancellation is not None:
+                cancellation.attach(connection)
             connection.set_session(readonly=True, autocommit=False)
             with connection.cursor() as cursor:
                 cursor.execute("SET LOCAL statement_timeout = %s", (self.settings.statement_timeout_ms,))
@@ -274,12 +329,12 @@ class SecurePostgresRunner(SqlRunner):
                     resolved.append(replace(item, value_sources=matched))
                 return tuple(resolved)
         finally:
-            connection.close()
+            cancellation.close(connection) if cancellation is not None else connection.close()
 
     def _role_for_context(self, context: ToolContext) -> str:
         return "admin" if "admin" in context.user.group_memberships else "analyst"
 
-    def _run_sql_sync(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+    def _run_sql_sync(self, args: RunSqlToolArgs, context: ToolContext, cancellation=None) -> pd.DataFrame:
         # Each attempt owns its own validation; a repair must not inherit it.
         context.metadata.pop("result_validation", None)
         context.metadata.pop("query_audit_id", None)
@@ -337,6 +392,8 @@ class SecurePostgresRunner(SqlRunner):
                 user=self.settings.reader_user,
             )
             try:
+                if cancellation is not None:
+                    cancellation.attach(connection)
                 connection.set_session(readonly=True, autocommit=False)
                 timeout = result_budget.statement_timeout_ms if result_budget else self.settings.statement_timeout_ms
                 with connection.cursor() as control:
@@ -365,7 +422,7 @@ class SecurePostgresRunner(SqlRunner):
                     )
                     frame = pd.DataFrame(rows, columns=[column.name for column in cursor.description])
             finally:
-                connection.close()
+                cancellation.close(connection) if cancellation is not None else connection.close()
         except ResultValidationError as exc:
             context.metadata["result_validation"] = exc.validation.as_dict()
             self.audit.record(

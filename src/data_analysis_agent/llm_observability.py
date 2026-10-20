@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
 from time import perf_counter
 from typing import Any, AsyncGenerator
@@ -81,6 +82,7 @@ class ObservedLlmService(LlmService):
         first_byte_timeout_seconds: float = 120.0,
         stream_idle_timeout_seconds: float = 30.0,
         timeout_seconds: float | None = None,
+        capacity=None,
     ):
         if timeout_seconds is not None:
             first_byte_timeout_seconds = timeout_seconds
@@ -98,6 +100,19 @@ class ObservedLlmService(LlmService):
         self.stream_idle_timeout_seconds = float(stream_idle_timeout_seconds)
         self.model = getattr(delegate, "model", "unknown")
         self.token_counter = TokenCounter()
+        self.capacity = capacity
+
+    @asynccontextmanager
+    async def _permit(self):
+        if self.capacity is None:
+            yield
+            return
+        async with self.capacity.slot() as wait_ms:
+            usage = CURRENT_BUDGET.get()
+            if usage is not None:
+                waits = list((usage.catalog_trace or {}).get("model_queue_ms", []))
+                usage.record_catalog({"model_queue_ms": [*waits, wait_ms]})
+            yield
 
     def _check_context(self, request: LlmRequest) -> None:
         usage = CURRENT_BUDGET.get()
@@ -141,6 +156,15 @@ class ObservedLlmService(LlmService):
 
     async def send_request(self, request: LlmRequest) -> LlmResponse:
         usage = CURRENT_BUDGET.get()
+        if usage is None or not usage.can_finalize_trusted_result():
+            # Compaction can itself call the model. Do not hold a provider
+            # permit while waiting for that nested summary call.
+            request = await self._ensure_context(self._query_request(request))
+        async with self._permit():
+            return await self._send_request(request)
+
+    async def _send_request(self, request: LlmRequest) -> LlmResponse:
+        usage = CURRENT_BUDGET.get()
         if usage is not None and usage.can_finalize_trusted_result():
             usage.mark_deterministic_result_finalized()
             usage.finish()
@@ -149,9 +173,7 @@ class ObservedLlmService(LlmService):
                 finish_reason="trusted_result_finalized",
                 metadata={"deterministic_result_finalized": True},
             )
-        request = self._query_request(request)
         started = perf_counter()
-        request = await self._ensure_context(request)
         try:
             response = await asyncio.wait_for(
                 self.delegate.send_request(request),
@@ -191,6 +213,18 @@ class ObservedLlmService(LlmService):
         self, request: LlmRequest
     ) -> AsyncGenerator[LlmStreamChunk, None]:
         usage = CURRENT_BUDGET.get()
+        if usage is None or not usage.can_finalize_trusted_result():
+            request = await self._ensure_context(self._query_request(request))
+        async with self._permit():
+            iterator = self._stream_request(request)
+            try:
+                async for chunk in iterator:
+                    yield chunk
+            finally:
+                await iterator.aclose()
+
+    async def _stream_request(self, request: LlmRequest) -> AsyncGenerator[LlmStreamChunk, None]:
+        usage = CURRENT_BUDGET.get()
         if usage is not None and usage.can_finalize_trusted_result():
             usage.mark_deterministic_result_finalized()
             usage.finish()
@@ -200,9 +234,7 @@ class ObservedLlmService(LlmService):
                 metadata={"deterministic_result_finalized": True},
             )
             return
-        request = self._query_request(request)
         started = perf_counter()
-        request = await self._ensure_context(request)
         iterator = self.delegate.stream_request(request).__aiter__()
         reported_usage = None
         try:

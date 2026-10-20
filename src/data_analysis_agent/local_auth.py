@@ -8,6 +8,7 @@ not accepted by the product resolver.
 from __future__ import annotations
 
 import base64
+import asyncio
 import binascii
 from dataclasses import dataclass
 import hashlib
@@ -51,6 +52,7 @@ class LocalAccount:
     username: str
     role: str
     password_hash: str
+    session_version: int = 1
 
 
 def hash_password(password: str, *, salt: bytes | None = None) -> str:
@@ -158,7 +160,7 @@ class AccountStore:
             with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
                 cursor.execute(
                     """
-                    SELECT subject_id, username, role, password_hash
+                    SELECT subject_id, username, role, password_hash, session_version
                     FROM app.accounts WHERE username = %s
                     """,
                     (username,),
@@ -173,7 +175,17 @@ class AccountStore:
             username=row["username"],
             role=row["role"],
             password_hash=row["password_hash"],
+            session_version=row["session_version"],
         )
+
+    def revoke_sessions(self, subject_id: str) -> None:
+        connection = self._connect()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("UPDATE app.accounts SET session_version = session_version + 1 WHERE subject_id = %s", (subject_id,))
+        finally:
+            connection.close()
 
     def create_account(self, username: str, password: str, role: str = "analyst") -> LocalAccount:
         if not _USERNAME.fullmatch(username):
@@ -227,7 +239,8 @@ def ensure_bootstrap_account(store: AccountStore | None = None) -> str:
 
 def issue_session(signer: SignedToken, account: LocalAccount) -> str:
     return signer.dumps(
-        {"kind": "local-session", "subject_id": account.subject_id, "username": account.username, "role": account.role}
+        {"kind": "local-session", "subject_id": account.subject_id, "username": account.username,
+         "role": account.role, "session_version": account.session_version}
     )
 
 
@@ -239,6 +252,7 @@ def issue_embed_token(
     role: str,
     origin: str,
     workspace_id: str,
+    session_version: int = 1,
 ) -> str:
     normalized = normalize_origin(origin)
     return signer.dumps(
@@ -250,6 +264,7 @@ def issue_embed_token(
             "role": role,
             "origin": normalized,
             "workspace_id": workspace_id,
+            "session_version": session_version,
             "nonce": secrets.token_urlsafe(16),
         }
     )
@@ -278,32 +293,44 @@ class ProductIdentityResolver(UserResolver):
         session_signer: SignedToken,
         embed_signer: SignedToken,
         allowed_origins: frozenset[str],
+        account_store: AccountStore,
+        workspace_id: str,
     ):
         self.session_signer = session_signer
         self.embed_signer = embed_signer
         self.allowed_origins = allowed_origins
+        self.account_store = account_store
+        self.workspace_id = workspace_id
 
     async def resolve_user(self, request_context: RequestContext) -> User:
         embed_user = self._embed_user(request_context)
-        if embed_user is not None:
+        if embed_user is not None and await self._current(embed_user):
             return embed_user
         session = self.session_signer.loads(request_context.get_cookie(LOCAL_SESSION_COOKIE))
         if session and session.get("kind") == "local-session":
             subject_id = str(session.get("subject_id") or "")
             role = str(session.get("role") or "")
             if subject_id.startswith("local:") and role in {"analyst", "admin"}:
-                return User(
+                user = User(
                     id=subject_id,
                     username=str(session.get("username") or subject_id),
                     group_memberships=[role],
-                    metadata={"auth_mode": "local_session"},
+                    metadata={"auth_mode": "local_session", "session_version": session.get("session_version")},
                 )
+                if await self._current(user):
+                    return user
         return User(
             id="anonymous",
             username="anonymous",
             group_memberships=["anonymous"],
             metadata={"auth_mode": "anonymous"},
         )
+
+    async def _current(self, user: User) -> bool:
+        account = await asyncio.to_thread(self.account_store.find_by_username, user.username)
+        return bool(account and account.subject_id == user.id
+                    and account.role in user.group_memberships
+                    and account.session_version == user.metadata.get("session_version"))
 
     def _embed_user(self, request_context: RequestContext) -> User | None:
         header = _header(request_context.headers, "authorization")
@@ -319,11 +346,17 @@ class ProductIdentityResolver(UserResolver):
             )
         except (AuthenticationError, ValueError):
             return None
+        if payload.get('workspace_id') != self.workspace_id:
+            return None
+        origin = _header(request_context.headers, "origin")
+        if origin and origin != payload["origin"]:
+            return None
         return User(
             id=str(payload["subject_id"]),
             username=str(payload.get("username") or payload["subject_id"]),
             group_memberships=[str(payload["role"])],
-            metadata={"auth_mode": "embed_token", "embed_origin": payload["origin"]},
+            metadata={"auth_mode": "embed_token", "embed_origin": payload["origin"],
+                      "session_version": payload.get("session_version")},
         )
 
 

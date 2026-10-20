@@ -55,6 +55,9 @@ jobs:
           tests/test_demo_scenarios.py \
           tests/test_budget.py \
           tests/test_budget_streaming.py \
+          tests/test_runtime_control.py \
+          tests/test_llm_observability.py \
+          tests/test_result_artifact_store.py \
           tests/test_context_builder.py
     - name: Run deterministic evaluation inventory
       run: |

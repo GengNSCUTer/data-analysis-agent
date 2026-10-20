@@ -28,6 +28,11 @@ TERMINATION_REASONS: Final[frozenset[str]] = frozenset(
         "catalog_answered",
         "input_too_long",
         "state_conflict",
+        "user_cancelled",
+        "client_disconnected",
+        "request_timeout",
+        "server_shutdown",
+        "capacity_exceeded",
     }
 )
 

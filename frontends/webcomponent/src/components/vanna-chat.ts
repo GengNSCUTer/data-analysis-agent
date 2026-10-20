@@ -834,7 +834,9 @@ export class VannaChat extends LitElement {
   @property() title = 'Vanna AI Chat';
   @property() placeholder = 'Ask me anything...';
   @property({ type: Boolean }) disabled = false;
-  private sendInFlight = false;
+  @state() private sendInFlight = false;
+  @state() private stopping = false;
+  private activeResponse: { request: any; controller: AbortController } | null = null;
   @property({ type: Boolean }) showProgress = true;
   @property({ type: Boolean }) allowMinimize = true;
   @property({ reflect: true }) theme = 'light';
@@ -1012,6 +1014,7 @@ export class VannaChat extends LitElement {
 
   /** Start a fresh server-side conversation and request the starter UI. */
   startNewConversation(): string {
+    void this.stopResponse();
     const conversationId = this.generateId();
     this.conversationId = conversationId;
     this.dispatchEvent(new CustomEvent('conversation-id-changed', {
@@ -1031,6 +1034,7 @@ export class VannaChat extends LitElement {
   }
 
   disconnectedCallback() {
+    this.activeResponse?.controller.abort();
     this.removeEventListener('replace-question', this.onReplaceQuestion as EventListener);
     super.disconnectedCallback();
     
@@ -1220,11 +1224,11 @@ export class VannaChat extends LitElement {
 
     } catch (error) {
       console.error('Error sending message:', error);
-      this.setStatus('error', 'Failed to send message', error instanceof Error ? error.message : 'Unknown error');
+      this.setStatus('error', '本次发送未完成', '不会自动重新执行，请确认后重试');
 
       // Add error message
       this.addMessage(
-        `Sorry, I encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `本次请求未完成：${error instanceof Error ? error.message : '连接异常'}。系统没有自动重新执行，请稍后重试。`,
         'assistant'
       );
       return false; // Failure
@@ -1375,9 +1379,11 @@ export class VannaChat extends LitElement {
     // Frontend only shows initial "Sending message..." status (set in _sendMessageInternal)
     // and handles connection errors below
 
+    const response = { request, controller: new AbortController() };
+    this.activeResponse = response;
     try {
       // Use SSE streaming by default
-      const stream = this.apiClient.streamChat(request);
+      const stream = this.apiClient.streamChat(request, response.controller.signal);
 
       for await (const chunk of stream) {
         await this.processChunk(chunk);
@@ -1386,24 +1392,28 @@ export class VannaChat extends LitElement {
       this.settleCompletedStream(request);
 
     } catch (error) {
-      console.warn('SSE streaming failed, falling back to polling:', error);
-
-      try {
-        // Fallback to polling - show user we're retrying
-        this.setStatus('working', 'Connection issue, retrying...', 'Using fallback method');
-        const response = await this.apiClient.sendPollMessage(request);
-
-        for (const chunk of response.chunks) {
-          await this.processChunk(chunk);
-        }
-
-        this.settleCompletedStream(request);
-
-      } catch (pollError) {
-        // Only set error status if polling also fails (connection error)
-        this.setStatus('error', 'Connection failed', 'Unable to reach server');
-        throw pollError;
+      if (response.controller.signal.aborted) {
+        if (request.conversation_id === this.conversationId) this.setStatus('idle', '本次请求已停止', '已保存的结果仍可查看');
+        return;
       }
+      this.setStatus('error', '连接已中断', '本次不会自动重发，请确认后再试');
+      throw error;
+    } finally {
+      if (this.activeResponse === response) this.activeResponse = null;
+    }
+  }
+
+  async stopResponse(): Promise<void> {
+    const response = this.activeResponse;
+    if (!response || this.stopping) return;
+    this.stopping = true;
+    try {
+      await this.apiClient.cancelChat(response.request);
+    } catch (error) {
+      console.warn('Cancel endpoint unavailable; closing the stream', error);
+    } finally {
+      response.controller.abort();
+      this.stopping = false;
     }
   }
 
@@ -1803,7 +1813,10 @@ export class VannaChat extends LitElement {
                 @keydown=${this.handleKeyPress}
                 rows="1"
               ></textarea>
-              <button
+              ${this.sendInFlight ? html`<button class="send-button" type="button"
+                aria-label="停止生成" .disabled=${this.stopping} @click=${() => this.stopResponse()}>
+                ${this.stopping ? '…' : '■'}
+              </button>` : html`<button
                 class="send-button"
                 type="button"
                 aria-label=${this.sendButtonLabel}
@@ -1813,7 +1826,7 @@ export class VannaChat extends LitElement {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
                 </svg>
-              </button>
+              </button>`}
             </div>
           </div>
         </div>

@@ -7,6 +7,7 @@
 | 目的 | 入口 | 文档性质 |
 | --- | --- | --- |
 | 在新环境安装、初始化与重启恢复 | [`deployment.md`](deployment.md) | Compose / wheel、合成数据、持久化、排错与实测范围 |
+| 查看单实例并发、取消、登录失效与工件保留验证 | [`../evals/results/runtime_capacity.md`](../evals/results/runtime_capacity.md) | 1/5/10 并发实测、真实浏览器故障及在线模型时延分列 |
 | 了解项目目标、当前阶段和技术决策 | [`../PROJECT.md`](../PROJECT.md) | 当前项目基线 |
 | 查看新的四周产品完善、代码学习与实习面试路线 | [`../plan/process-agent-internship-improvement-v1.md`](../plan/process-agent-internship-improvement-v1.md) | 2026-10-10 计划；不重复计算机基础，不自动启动训练 |
 | 查看六项产品完善工作的实施顺序 | [`../plan/process-agent-product-readiness-v1.md`](../plan/process-agent-product-readiness-v1.md) | 四周计划的工程执行清单；逐项实现并记录证据 |

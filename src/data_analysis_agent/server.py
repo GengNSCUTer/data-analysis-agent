@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import asyncio
 import secrets
+import logging
 from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
@@ -13,7 +14,7 @@ from dataclasses import replace
 load_dotenv(Path(os.getenv("DATA_ANALYSIS_ENV_FILE", ".env")))
 from fastapi import FastAPI, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from data_analysis_agent.demo_session import SESSION_COOKIE_NAME
@@ -73,9 +74,11 @@ from data_analysis_agent.postgres_runner import (
 from data_analysis_agent.result_validator import ResultValidator
 from data_analysis_agent.result_budget import ResultBudget
 from data_analysis_agent.result_artifact_store import (
+    ResultArtifactExpired,
     ResultArtifactIntegrityError,
     ResultArtifactStore,
 )
+from data_analysis_agent.runtime_control import RuntimeLimits, RuntimeControl, ManagedChatHandler, cleanup_query_files
 from data_analysis_agent.semantic_catalog import (
     CatalogContextEnhancer,
     CatalogLoader,
@@ -131,6 +134,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class CancelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    conversation_id: str
+    request_id: str
+
+
 class EmbedTokenRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     origin: str
@@ -164,9 +173,13 @@ def audit_response(audit: dict) -> dict:
     }
 
 
-def create_app() -> FastAPI:
+def create_app(*, llm_provider=None) -> FastAPI:
+    os.environ.setdefault("PGCONNECT_TIMEOUT", "5")
+    os.environ.setdefault("PGOPTIONS", "-c statement_timeout=10000 -c lock_timeout=5000")
+    limits = RuntimeLimits.from_environment()
+    control = RuntimeControl(limits)
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
-    if not api_key:
+    if not api_key and llm_provider is None:
         raise RuntimeError(
             "SILICONFLOW_API_KEY is required; set it in the environment or DATA_ANALYSIS_ENV_FILE."
         )
@@ -209,12 +222,14 @@ def create_app() -> FastAPI:
     session_signer = SignedToken(token_secret, max_age_seconds=LOCAL_SESSION_MAX_AGE_SECONDS)
     embed_signer = SignedToken(token_secret, max_age_seconds=5 * 60)
     embed_origins = allowed_embed_origins()
+    account_store = AccountStore(settings)
     role_resolver = ProductIdentityResolver(
         session_signer=session_signer,
         embed_signer=embed_signer,
         allowed_origins=embed_origins,
+        account_store=account_store,
+        workspace_id=workspace.workspace_id,
     )
-    account_store = AccountStore(settings)
     export_audit = ExportAudit(settings)
     ensure_bootstrap_account(account_store)
     copilot_access = WorkspaceAccessRegistry(
@@ -229,8 +244,8 @@ def create_app() -> FastAPI:
     )
     registry = BudgetedToolRegistry()
     query_file_system = LocalFileSystem(str(QUERY_RESULTS_DIRECTORY))
-    result_artifact_store = ResultArtifactStore(RESULT_ARTIFACT_DIRECTORY)
-    provider_llm_service = OpenAILlmService(
+    result_artifact_store = ResultArtifactStore(RESULT_ARTIFACT_DIRECTORY, retention_seconds=limits.artifact_retention_seconds)
+    provider_llm_service = llm_provider or OpenAILlmService(
         api_key=api_key,
         base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
         model=model_name,
@@ -241,6 +256,7 @@ def create_app() -> FastAPI:
         connect_timeout_seconds=budget.llm_connect_timeout_seconds,
         first_byte_timeout_seconds=budget.llm_first_byte_timeout_seconds,
         stream_idle_timeout_seconds=budget.llm_stream_idle_timeout_seconds,
+        capacity=control.models,
     )
     registry.register_local_tool(
         TrustedRunSqlTool(
@@ -288,10 +304,27 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        await context_builder.close()
+        async def cleanup():
+            while True:
+                try:
+                    result = await asyncio.to_thread(result_artifact_store.cleanup_expired)
+                    result['query_cache_files'] = await asyncio.to_thread(cleanup_query_files, QUERY_RESULTS_DIRECTORY, limits.artifact_retention_seconds)
+                    logging.getLogger(__name__).info("artifact_cleanup %s", result)
+                except OSError:
+                    logging.getLogger(__name__).exception("artifact_cleanup_failed")
+                await asyncio.sleep(limits.artifact_cleanup_seconds)
+        cleanup_task = asyncio.create_task(cleanup())
+        try:
+            yield
+        finally:
+            await control.close()
+            await context_builder.close()
+            cleanup_task.cancel()
+            await asyncio.gather(cleanup_task, return_exceptions=True)
+            await provider_llm_service.aclose()
 
     app = FastAPI(title=f"{runtime_workspace.display_name} | Data Analysis Agent", lifespan=lifespan)
+    app.state.runtime_control = control
     if embed_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -338,7 +371,7 @@ def create_app() -> FastAPI:
 
     register_chat_routes(
         app,
-        BudgetedChatHandler(
+        ManagedChatHandler(BudgetedChatHandler(
             agent,
             budget,
             run_recorder,
@@ -357,9 +390,16 @@ def create_app() -> FastAPI:
             context_builder=context_builder,
             filter_source_resolver=runner.resolve_filter_sources,
             require_semantic_interpreter=True,
-        ),
-        config={"cdn_url": "/static/vanna-components.js"},
+        ), control, workspace.workspace_id),
+        config={"cdn_url": "/static/vanna-components.js", "sse_only": True},
     )
+
+    @app.post("/api/vanna/v2/cancel")
+    async def cancel_analysis(body: CancelRequest, request: Request):
+        user = await role_resolver.resolve_user(_request_user_context(request))
+        cancelled = await control.cancel(user_id=user.id, workspace_id=workspace.workspace_id,
+                                         conversation_id=body.conversation_id, request_id=body.request_id)
+        return JSONResponse({"cancelled": cancelled})
 
     @app.get("/api/project/evidence")
     async def evidence() -> dict:
@@ -582,6 +622,8 @@ def create_app() -> FastAPI:
                 user_id=user.id,
                 workspace_id=workspace_id,
             )
+        except ResultArtifactExpired:
+            return JSONResponse({"detail": "保存的结果已到期，请重新运行分析。"}, status_code=410)
         except (FileNotFoundError, PermissionError, ResultArtifactIntegrityError, ValueError):
             return JSONResponse({"detail": "artifact not found"}, status_code=404)
         return JSONResponse(manifest)
@@ -606,6 +648,8 @@ def create_app() -> FastAPI:
                 workspace_id=workspace.workspace_id,
                 cursor=cursor, page_size=page_size,
             )
+        except ResultArtifactExpired:
+            return JSONResponse({"detail": "保存的结果已到期，请重新运行分析。"}, status_code=410)
         except FileNotFoundError:
             return JSONResponse({"detail": "artifact not found"}, status_code=404)
         except ResultArtifactIntegrityError:
@@ -691,9 +735,10 @@ def create_app() -> FastAPI:
     async def diagnostics(request: Request) -> JSONResponse:
         user = await role_resolver.resolve_user(_request_user_context(request))
         include_workspace = "admin" in user.group_memberships
-        return JSONResponse(
-            runtime_diagnostics.summary(subject_id=user.id, include_workspace=include_workspace)
-        )
+        result = await asyncio.to_thread(runtime_diagnostics.summary, subject_id=user.id, include_workspace=include_workspace)
+        if include_workspace:
+            result['capacity'] = control.snapshot()
+        return JSONResponse(result)
 
     @app.post("/api/project/conversations/{conversation_id}/replace-last-question")
     async def replace_last_question(
@@ -704,6 +749,8 @@ def create_app() -> FastAPI:
         user = await role_resolver.resolve_user(
             _request_user_context(request)
         )
+        if (user.id, workspace.workspace_id, conversation_id) in control.inflight:
+            return JSONResponse({'detail': '本会话正在处理，请先停止当前请求再编辑。'}, status_code=409)
         try:
             removed_index = await conversation_store.truncate_from_last_user_message(
                 conversation_id, user
@@ -733,6 +780,8 @@ def create_app() -> FastAPI:
         user = await role_resolver.resolve_user(
             _request_user_context(request)
         )
+        if (user.id, workspace.workspace_id, conversation_id) in control.inflight:
+            return JSONResponse({'detail': '本会话正在处理，请先停止当前请求再清空。'}, status_code=409)
         try:
             conversation = await conversation_store.get_conversation(
                 conversation_id, user
@@ -772,6 +821,8 @@ def create_app() -> FastAPI:
         user = await role_resolver.resolve_user(
             _request_user_context(request)
         )
+        if (user.id, workspace.workspace_id, conversation_id) in control.inflight:
+            return JSONResponse({'detail': '本会话正在处理，请先停止当前请求再删除。'}, status_code=409)
         try:
             deleted = await conversation_store.delete_conversation(
                 conversation_id, user
@@ -787,8 +838,11 @@ def create_app() -> FastAPI:
 
     @app.post("/api/auth/login")
     async def login(body: LoginRequest, request: Request) -> JSONResponse:
-        account = account_store.find_by_username(body.username.strip().lower())
-        if not password_matches(account, body.password) or account is None:
+        retry = control.rates.retry_after(('login', request.client.host if request.client else 'unknown'), limits.login_per_minute)
+        if retry:
+            return JSONResponse({"detail": "登录尝试过多，请稍后重试。"}, status_code=429, headers={"Retry-After": str(retry)})
+        account = await asyncio.to_thread(account_store.find_by_username, body.username.strip().lower())
+        if not await asyncio.to_thread(password_matches, account, body.password) or account is None:
             return JSONResponse({"detail": "用户名或密码不正确"}, status_code=401)
         response = JSONResponse(
             {
@@ -811,7 +865,11 @@ def create_app() -> FastAPI:
         return response
 
     @app.post("/api/auth/logout")
-    async def logout() -> JSONResponse:
+    async def logout(request: Request) -> JSONResponse:
+        user = await role_resolver.resolve_user(_request_user_context(request))
+        if user.metadata.get('auth_mode') != 'local_session':
+            return JSONResponse({'detail': 'logout requires local login'}, status_code=403)
+        await asyncio.to_thread(account_store.revoke_sessions, user.id)
         response = JSONResponse({"authenticated": False})
         response.delete_cookie(LOCAL_SESSION_COOKIE, path="/")
         response.delete_cookie(SESSION_COOKIE_NAME, path="/")
@@ -854,6 +912,7 @@ def create_app() -> FastAPI:
             role=role,
             origin=origin,
             workspace_id=workspace.workspace_id,
+            session_version=user.metadata['session_version'],
         )
         return JSONResponse(
             {
@@ -884,29 +943,37 @@ def create_app() -> FastAPI:
                 user_id=user.id,
                 workspace_id=workspace.workspace_id,
             )
-            csv_path = result_artifact_store.verified_csv_path(
+            csv_file = result_artifact_store.open_verified_csv(
                 artifact_id=artifact.artifact_id,
                 user_id=user.id,
                 workspace_id=workspace.workspace_id,
             )
+        except ResultArtifactExpired:
+            return JSONResponse({"detail": "保存的结果已到期，请重新运行分析。"}, status_code=410)
         except FileNotFoundError:
             return JSONResponse({"detail": "validated result file is missing"}, status_code=404)
         except ResultArtifactIntegrityError:
             return JSONResponse({"detail": "validated result file failed integrity check"}, status_code=409)
         role = "admin" if "admin" in user.group_memberships else "analyst"
-        export_audit.record(
-            artifact_id=artifact.artifact_id,
-            user_id=user.id,
-            user_role=role,
-            workspace_id=workspace.workspace_id,
-            row_count=int(manifest["row_count"]),
-            csv_sha256=str(manifest["csv_sha256"]),
-        )
-        return FileResponse(
-            csv_path,
+        try:
+            await asyncio.to_thread(export_audit.record,
+                artifact_id=artifact.artifact_id, user_id=user.id, user_role=role,
+                workspace_id=workspace.workspace_id, row_count=int(manifest["row_count"]),
+                csv_sha256=str(manifest["csv_sha256"]))
+        except BaseException:
+            csv_file.close()
+            raise
+        async def stream_csv():
+            try:
+                while chunk := await asyncio.to_thread(csv_file.read, 64 * 1024):
+                    yield chunk
+            finally:
+                csv_file.close()
+        return StreamingResponse(
+            stream_csv(),
             media_type="text/csv",
-            filename=f"{artifact.artifact_id}.csv",
-            headers={"X-Row-Count": str(manifest["row_count"])},
+            headers={"X-Row-Count": str(manifest["row_count"]),
+                     "Content-Disposition": f'attachment; filename="{artifact.artifact_id}.csv"'},
         )
 
     @app.get("/api/project/session")
@@ -960,10 +1027,13 @@ def create_app() -> FastAPI:
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
     uvicorn.run(
         create_app(),
         host=os.getenv("DATA_ANALYSIS_DEMO_HOST", "127.0.0.1"),
         port=DEMO_PORT,
+        timeout_graceful_shutdown=10,
+        proxy_headers=False,
     )
 
 

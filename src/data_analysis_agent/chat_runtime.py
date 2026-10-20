@@ -60,6 +60,7 @@ from .semantic_intent import (
 from .working_memory import WorkingMemory
 from .workspace import WorkspaceProfile
 from .visualization import build_server_chart_component
+from .runtime_control import CURRENT_REQUEST, CapacityExceeded
 
 
 def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
@@ -201,6 +202,7 @@ class BudgetedChatHandler(ChatHandler):
         }
         usage = request.request_context.metadata["budget_usage"]
         usage.set_input(request.message)
+        usage.record_catalog({"request_queue_ms": request.request_context.metadata.get("request_queue_ms", 0)})
         tracker_token = CURRENT_BUDGET.set(usage)
         run = None
         message_context_token = None
@@ -790,6 +792,7 @@ class BudgetedChatHandler(ChatHandler):
                 ):
                     frame = usage.take_validated_chart_frame()
                     if frame is not None:
+                        chart_started = perf_counter()
                         try:
                             component = build_server_chart_component(chart_contract, frame)
                         except (ChartContractError, ValueError) as exc:
@@ -821,6 +824,7 @@ class BudgetedChatHandler(ChatHandler):
                                     }
                                 }
                             )
+                            usage.record_timing('chart_render', int((perf_counter() - chart_started) * 1000))
                             yield ChatStreamChunk.from_component(
                                 component, conversation_id, request_id
                             )
@@ -855,6 +859,17 @@ class BudgetedChatHandler(ChatHandler):
             ):
                 usage.terminate("tool_budget_exhausted")
             usage.finish()
+        except asyncio.CancelledError:
+            active = CURRENT_REQUEST.get()
+            usage.terminate(active.cancel_reason if active and active.cancel_reason else "client_disconnected")
+            if run is not None and self.semantic_interpreter is not None:
+                await self._finish_analysis_attempt(conversation_id, user, run.run_id)
+            raise
+        except CapacityExceeded:
+            usage.terminate("capacity_exceeded")
+            if run is not None and self.semantic_interpreter is not None:
+                await self._finish_analysis_attempt(conversation_id, user, run.run_id)
+            raise
         except ContextCapacityError as exc:
             usage.terminate("context_truncated", "context_capacity")
             if run is not None and self.semantic_interpreter is not None:
@@ -876,12 +891,17 @@ class BudgetedChatHandler(ChatHandler):
         finally:
             try:
                 if run is not None:
+                    active = CURRENT_REQUEST.get()
+                    if active:
+                        usage.record_catalog({"first_effective_response_ms": active.first_effective_ms})
                     await self.run_recorder.finish(run, usage)
             finally:
                 CURRENT_BUDGET.reset(tracker_token)
                 if message_context_token is not None:
                     CURRENT_MESSAGE_CONTEXT.reset(message_context_token)
-                if run is not None and self.context_builder is not None:
+                if run is not None and self.context_builder is not None and usage.termination_reason not in {
+                    "user_cancelled", "client_disconnected", "request_timeout", "server_shutdown",
+                }:
                     self.context_builder.schedule(
                         conversation_id, user, self.agent.conversation_store
                     )
@@ -1171,6 +1191,7 @@ class BudgetedChatHandler(ChatHandler):
             self.result_artifact_store.read_csv_page, artifact_id=artifact.artifact_id,
             user_id=user.id, workspace_id=self.workspace.workspace_id, page_size=chart.max_rows,
         )
+        chart_started = perf_counter()
         try:
             component = build_server_chart_component(
                 chart, pd.DataFrame(page["rows"], columns=page["columns"]),
@@ -1184,6 +1205,7 @@ class BudgetedChatHandler(ChatHandler):
             figure=component.rich_component.data,
         )
         usage.mark_deterministic_chart_rendered()
+        usage.record_timing('chart_render', int((perf_counter() - chart_started) * 1000))
         usage.record_catalog({
             "result_artifact": _safe_artifact_manifest(manifest),
             "deterministic_chart": {"status": "rendered", "source": "validated_artifact"},

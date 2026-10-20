@@ -109,7 +109,38 @@ data-analysis-agent
 | 首次密码、受限数据库凭据 | `STATE_DIR/bootstrap-password.txt`、`pgpass`，权限 600 | 登录及 reader/writer 连接 |
 | 合成 Catalog | `STATE_DIR/synthetic-catalog.yaml` | 与合成数据版本对应 |
 
-可以显式设置 `DATA_ANALYSIS_DEMO_SESSION_SECRET`；未设置时服务生成并持久化密钥。首次账号密码只在创建账号时生效，修改环境变量不会给已有账号重置密码。Cookie 本身仍有有效期，不是永久登录。
+可以显式设置 `DATA_ANALYSIS_DEMO_SESSION_SECRET`；未设置时服务生成并持久化密钥。首次账号密码只在创建账号时生效，修改环境变量不会给已有账号重置密码。Cookie 最长 8 小时、嵌入令牌最长 5 分钟。退出会使该账号已签发的全部登录和嵌入凭证失效；不是只删除本机 Cookie。升级到账号会话版本机制后需重新登录一次。
+
+## 单实例容量、取消与结果保留
+
+当前运行方式是一个 Uvicorn 进程。下列限制是进程内协调，不用于多 worker/多实例部署；不要通过增加 worker 数绕过它们。
+Compose 和原生环境均可使用以下参数（也列在 `.env.example`）。
+
+| 环境变量 | 默认值 | 行为 |
+| --- | --- | --- |
+| `DATA_ANALYSIS_ACTIVE_REQUESTS` | 4 | 同时处理的分析请求 |
+| `DATA_ANALYSIS_QUEUED_REQUESTS` | 8 | 等待请求数量上限 |
+| `DATA_ANALYSIS_QUEUE_WAIT_SECONDS` | 15 | 请求/模型槽最长等待秒数 |
+| `DATA_ANALYSIS_MODEL_CALLS` | 4 | 包括后台摘要的模型调用上限 |
+| `DATA_ANALYSIS_REQUEST_TIMEOUT_SECONDS` | 180 | 取得请求槽后的整轮时间上限；清理事务还需短暂时间 |
+| `DATA_ANALYSIS_LOGIN_PER_MINUTE` | 10 | 每连接来源 IP 的登录次数 |
+| `DATA_ANALYSIS_QUESTIONS_PER_MINUTE` | 30 | 每用户的非空问题数 |
+| `DATA_ANALYSIS_ARTIFACT_RETENTION_SECONDS` | 604800 | 运行工件与重复查询 CSV 缓存保留时间，默认 7 天 |
+| `DATA_ANALYSIS_ARTIFACT_CLEANUP_SECONDS` | 3600 | 启动清理后，每次清理的间隔 |
+
+排队/忙/限速不修改业务查询规则。前端“停止生成”调用按身份和请求 ID 隔离的取消接口；SQL 线程接收数据库取消，关闭后释放请求槽。
+SSE 中断不会自动改用 polling 重发。处理中的会话需先停止才能编辑、清空或删除；其他会话可独立使用。
+服务关闭先等待最多 10 秒，然后取消请求并清理；Compose 为此留 20 秒停止时间。元数据连接默认等待最多 5 秒，
+元数据 SQL 默认 10 秒、锁等待 5 秒；reader 查询仍按既有 SQL/result 预算设置自己的语句超时。
+`PGCONNECT_TIMEOUT`/`PGOPTIONS` 已配置时尊重操作员值。
+
+来源限速不信任代理转发头。反向代理场景下多个用户可能共享代理 IP，应按实际登录入口调整；它不替代网关级限流。
+普通用户只能看自己的运行信息，管理员 diagnostics 增加当前进程的排队/占用与终态统计，不返回其他用户的问题或 SQL。
+
+完整结果按最后保存后 7 天过期，每小时清理，不因只读访问延长保留；已打开的 CSV 流可读完。
+过期尚未清理返回 410，清理后或文件缺失返回 404，需重新分析。数据库历史/摘要/审计继续保存，
+结果到期后历史文本还在，但不保证完整表格和图表继续回放。实验和训练目录不参与清理。
+实测证据、并发范围和真实模型时延见 [第五项验收](../evals/results/runtime_capacity.md)。
 
 ```bash
 # 同时重启应用和数据库，保留命名卷

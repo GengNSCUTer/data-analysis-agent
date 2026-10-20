@@ -16,7 +16,7 @@ from vanna.core.storage import Conversation, ConversationStore, Message
 from vanna.core.tool import ToolCall
 from vanna.core.user import User
 
-from .postgres_runner import PostgresConnectionSettings
+from .postgres_runner import PostgresConnectionSettings, complete_database_io
 from .budget import CURRENT_BUDGET
 
 
@@ -75,7 +75,7 @@ class PostgresConversationStore(ConversationStore):
         usage = CURRENT_BUDGET.get()
         packet = usage.context_packet if usage is not None else None
         start = packet["recent_start_index"] if packet is not None and recent_turns is not None else None
-        return await asyncio.to_thread(
+        return await complete_database_io(
             self._get_sync, conversation_id, user, workspace_id or self.default_workspace_id, recent_turns, start
         )
 
@@ -88,7 +88,7 @@ class PostgresConversationStore(ConversationStore):
         self._validate_conversation_id(conversation_id)
         if limit <= 0 or (before is not None and before < 0):
             raise ValueError("invalid history cursor or page size")
-        return await asyncio.to_thread(self._history_page_sync, conversation_id, user, before, min(limit, 200))
+        return await complete_database_io(self._history_page_sync, conversation_id, user, before, min(limit, 200))
 
     async def get_turn_range(
         self, conversation_id: str, user: User, *, start: int, before: int,
@@ -98,7 +98,7 @@ class PostgresConversationStore(ConversationStore):
         self._validate_conversation_id(conversation_id)
         if start < 0 or before < start or not 1 <= limit_turns <= 100:
             raise ValueError("invalid compaction range")
-        return await asyncio.to_thread(
+        return await complete_database_io(
             self._turn_range_sync, conversation_id, user, start, before, limit_turns
         )
 
@@ -109,7 +109,7 @@ class PostgresConversationStore(ConversationStore):
 
     async def update_conversation(self, conversation: Conversation) -> None:
         self._validate_conversation_id(conversation.id)
-        await asyncio.to_thread(self._update_sync, conversation)
+        await complete_database_io(self._update_sync, conversation)
 
     async def save_history_summary(
         self, conversation_id: str, user: User, *, scope: dict,
@@ -117,7 +117,7 @@ class PostgresConversationStore(ConversationStore):
     ) -> bool:
         """Compare-and-update derived memory without touching messages or state_version."""
         self._validate_conversation_id(conversation_id)
-        return await asyncio.to_thread(
+        return await complete_database_io(
             self._save_history_summary_sync, conversation_id, user, scope,
             expected_end, sources, summary, attempt,
         )
@@ -172,7 +172,7 @@ class PostgresConversationStore(ConversationStore):
         """
 
         self._validate_conversation_id(conversation_id)
-        return await asyncio.to_thread(
+        return await complete_database_io(
             self._truncate_from_last_user_sync,
             conversation_id,
             user,
@@ -181,7 +181,7 @@ class PostgresConversationStore(ConversationStore):
 
     async def delete_conversation(self, conversation_id: str, user: User) -> bool:
         self._validate_conversation_id(conversation_id)
-        return await asyncio.to_thread(
+        return await complete_database_io(
             self._delete_sync, conversation_id, user, self.default_workspace_id
         )
 
@@ -190,7 +190,7 @@ class PostgresConversationStore(ConversationStore):
     ) -> list[Conversation]:
         if limit <= 0 or offset < 0:
             raise ValueError("limit must be positive and offset must not be negative")
-        return await asyncio.to_thread(self._list_sync, user, min(limit, 50), offset)
+        return await complete_database_io(self._list_sync, user, min(limit, 50), offset)
 
     def _connect(self):
         return psycopg2.connect(
