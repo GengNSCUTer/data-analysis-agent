@@ -380,3 +380,40 @@ update_task，以及`remove filters [{dimension: customer_state, value: SP}]`。
 建议本轮只读`prompt()`中的action/patch几行（当前334–345行），对照
 `resolve_state_intent()`的new_task分支。待复述：同样改成订单数，为什么“其他不变”和
 “换个问题，全部时间总订单数”需要不同的状态处理？
+
+用户回答：因为“其他条件不变”表示遵循上一轮任务，所以是`update_task`，不是
+`new_task`。回答正确。
+
+### 当前问题对应的代码地图
+
+一次请求中，相关判断按这个顺序发生：
+
+1. `chat_runtime.py:262-315` 读取当前`AnalysisState`和上下文包，再调用
+   `_interpret_semantic_intent()`；这里把上一轮的指标、分组、筛选、时间和可信结果引用
+   放进本轮语义解释的输入。
+2. `server.py:357-370`定义专用语义请求：只发一个不带工具的LLM请求，
+   `temperature=0`、`max_tokens=800`、system prompt要求只输出JSON，不生成SQL。
+3. `semantic_intent.py:78-123`的`SemanticIntent`定义模型可以提出的结果：
+   `action`决定新任务/修改/保留/清空，`state_patch`写本轮具体字段变化。
+4. `semantic_intent.py:276-404`的`SemanticIntentInterpreter.prompt()`组装提示词。状态
+   位于293-319行；继承和patch规则位于328-345行。模型据此判断“其他不变”是
+   `update_task`，并把变化写成最小patch。
+5. `semantic_intent.py:406-434`的`interpret()`执行LLM调用并把文本交给
+   `parse_semantic_intent()`。后者在166-208行做JSON、字段、角色可见Catalog、指标和维度
+   校验。它只判断提案是否合法，不判断SQL业务结果是否正确。
+6. `semantic_intent.py:211-253`的`resolve_state_intent()`应用提案：`update_task`只处理
+   patch指定的字段；`new_task`会在patch前插入`replace_task`，重置业务范围并创建新的
+   `task_id`。应用后249-250行再次用完整范围做Catalog校验。
+7. `analysis_state.py:121-158`的`AnalysisState.apply_patch()`真正执行`set/add/remove/clear`
+   和`replace_task`。它从旧状态开始，只替换patch指定字段，返回一个新的不可变状态对象。
+8. `chat_runtime.py:497-522`把通过校验的状态用于当前路由；535-571行生成`QueryPlan`。
+   677-681行把更新后的`working_memory`写回会话。到这里仍然只是形成受控计划，之后才进入
+   候选SQL、Policy、数据库只读执行和结果验证。
+
+因此，真正的“继承/修改/新任务”决定来自LLM返回的`action + state_patch`，代码负责提供
+状态、约束格式、应用修改和重新校验；代码没有另一个隐藏的关键词分类器替它做语义判断。
+这也是当前系统的能力边界：LLM误判action时，合法的patch仍可能导致范围保留错误或任务被
+重置，所以必须靠多轮测试观察，而不能只看JSON解析成功。
+
+下一小步先不读更多文件：请你根据上面的代码地图，口述“换成订单数，其他条件不变”
+从LLM输出到`AnalysisState`写回的五步过程。口述完成后再进入`QueryPlan`如何消费这个状态。
