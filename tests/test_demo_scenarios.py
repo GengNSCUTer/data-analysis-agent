@@ -7,7 +7,8 @@ import os
 import pytest
 import yaml
 
-from data_analysis_agent.trusted_workflow import TrustedOlistWorkflowHandler
+from data_analysis_agent.trusted_workflow import AnalyticsWorkflowHandler
+from data_analysis_agent.runtime_workspace import load_runtime_workspace
 from scripts.run_demo_scenario_evaluation import ROOT, run
 from vanna.components import ButtonGroupComponent
 from vanna.core.user import User
@@ -26,7 +27,7 @@ def test_demo_scenario_contract_inventory_is_complete() -> None:
 @pytest.mark.asyncio
 async def test_starter_actions_match_the_versioned_demo_scenarios() -> None:
     suite = yaml.safe_load((ROOT / "evals/cases/demo_scenarios.yaml").read_text(encoding="utf-8"))
-    handler = TrustedOlistWorkflowHandler()
+    handler = AnalyticsWorkflowHandler(load_runtime_workspace())
     user = User(id="demo-analyst", username="demo-analyst", group_memberships=["analyst"])
     components = await handler.get_starter_ui(agent=None, user=user, conversation=None)
 

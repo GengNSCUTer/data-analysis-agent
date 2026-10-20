@@ -1,0 +1,11 @@
+workspace_id: olist-demo
+dataset_id: olist-brazilian-ecommerce
+display_name: Olist 电商分析
+description: 巴西 Olist 公开电商快照；不是中国真实平台交易。若使用 synthetic-olist-v1，则是自构造演示数据。
+catalog: ../catalog/olist_catalog_v3.yaml
+reader_role: daa_analytics_reader
+writer_role: daa_app_writer
+starter_questions:
+  - {label: 州前五, question: 按客户州统计有效订单数前五名，并生成柱状图}
+  - {label: 品类 GMV, question: 按商品品类统计 GMV}
+  - {label: 指标概览, question: 概览 GMV、有效订单数、平均履约天数和好评率，并说明统计口径}

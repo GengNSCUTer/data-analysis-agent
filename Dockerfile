@@ -10,6 +10,7 @@ WORKDIR /build
 COPY pyproject.toml MANIFEST.in README.md LICENSE ./
 COPY src/ src/
 COPY data/catalog/ data/catalog/
+COPY data/workspaces/ data/workspaces/
 COPY examples/embeddable_copilot_shell.html examples/
 COPY infra/postgres/*.sql infra/postgres/
 COPY --from=frontend /build/frontends/webcomponent/dist/ frontends/webcomponent/dist/

@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from data_analysis_agent.trusted_workflow import TrustedOlistWorkflowHandler
+from data_analysis_agent.trusted_workflow import AnalyticsWorkflowHandler
+from data_analysis_agent.runtime_workspace import load_runtime_workspace
 from vanna.components import ButtonGroupComponent, RichTextComponent
 from vanna.core.user import User
 
 
 @pytest.mark.asyncio
 async def test_starter_ui_is_chinese_and_uses_safe_demo_questions() -> None:
-    handler = TrustedOlistWorkflowHandler()
+    handler = AnalyticsWorkflowHandler(load_runtime_workspace())
     user = User(id="demo-analyst", username="demo-analyst", group_memberships=["analyst"])
 
     components = await handler.get_starter_ui(agent=None, user=user, conversation=None)
@@ -34,7 +35,7 @@ async def test_starter_ui_is_chinese_and_uses_safe_demo_questions() -> None:
 
 @pytest.mark.asyncio
 async def test_help_is_handled_without_an_llm_call() -> None:
-    handler = TrustedOlistWorkflowHandler()
+    handler = AnalyticsWorkflowHandler(load_runtime_workspace())
     user = User(id="demo-analyst", username="demo-analyst", group_memberships=["analyst"])
 
     result = await handler.try_handle(

@@ -21,8 +21,8 @@ tags: [Agent, 产品完善, 部署, 泛化, 测试, 面试]
 当前状态：前三项已完成，第三项以全新虚拟环境和独立 PostgreSQL 的真实链路验收为证据。
 第二项九个遗留场景中有五项定向复测通过，更新后混合证据为56/60，独立数值对照23/24；
 这不是修复后完整重跑的准确率。Docker Compose 配置通过检查，但本机无 Docker daemon
-权限，未实际运行容器。第四项已开始选型和接入差距审查：使用现有TheLook本地快照，
-以中文业务问题验证跨Schema在线复用；在线工作区装配与端到端验收尚未完成。
+权限，未实际运行容器。第四项已完成：TheLook以独立在线工作区复用产品链路，真实浏览器
+11/11轮通过、独立数值8/8，Olist九轮连续分析回归通过；详见阶段4验收记录。下一项是多人使用、安全和故障处理。
 
 ## 1. Requirements & Constraints
 
@@ -117,7 +117,7 @@ TheLook在线实例、接入说明及真实浏览器证据。原始快照是Kagg
 181,759行、行为事件2,431,963行；Catalog为20指标、7表、13个维度绑定。尚有四类在线接入障碍：
 `server.py`固定装配Olist；前端bootstrap固定请求`olist-demo`；系统/帮助/部分语义示例绑定
 Olist；TheLook的writer仍为`daa_thelook_writer_unconfigured`，缺少在线会话/审计的元数据配置。
-本次只记录只读审查结果，不将离线已有WorkspaceProfile或reader连接成功计作在线接入通过。
+上述是接入前的差距记录；本轮实施及真实验收结果见下表，不以离线WorkspaceProfile或reader连接成功代替在线接入证明。
 
 泛化边界：本阶段验证不同PostgreSQL业务库、物理表列、Join与指标口径的接入。直接连接
 MySQL、BigQuery等其他引擎还需要对应driver、方言、权限和超时实现及真实验证，不能由本轮
@@ -125,9 +125,14 @@ MySQL、BigQuery等其他引擎还需要对应driver、方言、权限和超时�
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-010 | 将create_app改为读取服务端工作区/连接配置，基于Catalog提供数据集说明、帮助和语义提示；复用现有类型、SqlPolicy、runner、状态、工件和图表链路。为TheLook配置独立的在线元数据writer及app表，不授予reader写权限，不把原表重命名为Olist表。前端bootstrap使用服务端已授权默认工作区。用独立小型Schema配置fixture验证无需增加核心数据集分支。 | 否 | — |
-| TASK-011 | 在TheLook独立在线实例运行至少5类业务：订单/金额概览、品类排行、月度趋势、库存分组、事件流量；另覆盖条件更换、排名实体下钻、只换图不重查及2类越权请求（原始/敏感数据、跨workspace引用）。使用新编产品问题和独立只读SQL核对数值，保留Olist回归；不用历史protected final题或renderer自证。 | 否 | — |
-| TASK-012 | 记录新业务库接入需要的连接、表列/Join、业务指标、维度、权限和页面说明配置及实际改动；解释业务方仍需提供指标口径。更新安装包资源与接入说明，写明只验证PostgreSQL跨Schema，不声称已支持其他引擎或真实企业上线。 | 否 | — |
+| TASK-010 | runtime_workspace.py加载配置，Catalog驱动系统提示/帮助/示例；应用Store、runner、账号与审计使用配置角色与版本。TheLook新建独立writer和app元数据；bootstrap不指定数据集。第三个工单Schema fixture通过，无数据集分支。 | 是 | 2026-10-20 |
+| TASK-011 | TheLook真实浏览器11/11轮、8/8独立reader数值对照，五类业务及下钻/取消筛选/换图复用/两类敏感拒答/跨workspace隔离。修复会话默认workspace和库存Join放大；Olist九轮真实连续分析及5项页面回归通过。 | 是 | 2026-10-20 |
+| TASK-012 | docs/workspace-onboarding.md说明配置、权限、metadata-only初始化和边界；打包TheLook资源，离仓库wheel可加载两套Catalog，独立PG18.3初始化两次通过。详细证据见evals/results/workspace_onboarding_thelook.md。 | 是 | 2026-10-20 |
+
+阶段4证据：仓库外 `evals/product-readiness-stage4-20261020/browser-r4/report.json` 与
+`trace-audit.json`；失败轮次保留，不混入最终11轮分母。Python联合回归293 passed、1 skipped；
+实际数据库/认证/工件路由24 passed。第三Schema为确定性配置测试，没有真实新业务库上线。
+本轮不训练、不重跑protected final，也不修改旧离线工作区与实验数据。下一阶段尚未开始。
 
 ### Implementation Phase 5
 
@@ -159,7 +164,7 @@ MySQL、BigQuery等其他引擎还需要对应driver、方言、权限和超时�
 
 - **DEP-001**: 阶段 1 使用现有产品 Conda 环境、pytest、Playwright 和已构建的 Web Component；不依赖 GPU 或在线模型返回特定错误。
 - **DEP-002**: 阶段 2 的真实业务评估需要 PostgreSQL 和现有模型额度；原始问题/SQL/回答/截图留在仓库外授权目录，Git 内保存脱敏汇总。
-- **DEP-003**: 阶段 3–4 使用隔离数据库/容器和合成数据，不占用或重建用户当前数据库。
+- **DEP-003**: 阶段3使用隔离数据库和合成数据；阶段4复用独立TheLook库的安全视图，只补应用元数据和专用writer，不重建或覆盖业务数据，不操作Olist业务表。
 - **DEP-004**: 阶段 6 的外部试用依赖实际参与者；其缺失不阻止记录其他已完成事项。
 
 ## 5. Files
@@ -184,7 +189,7 @@ MySQL、BigQuery等其他引擎还需要对应driver、方言、权限和超时�
 
 - **RISK-001**: 当前 worktree 含上一轮未提交修复和用户文件；只提交明确归属于项目迭代且已审阅的变更，不覆盖或顺手提交用户的上下文设计原稿。
 - **RISK-002**: 流式显示发生在最终中间件之前，最终回答测试无法发现短暂泄漏；阶段 1 必须验证事件顺序，并保留正常增量输出测试。
-- **RISK-003**: Olist-only 提示/装配与旧文档可能掩盖新库接入成本；以实际 mini-shop 在线请求为证据，不用接口命名证明泛化。
+- **RISK-003**: Olist-only 提示/装配与旧文档可能掩盖新库接入成本；以实际TheLook在线请求和独立数值为证据，不用接口命名证明泛化。
 - **ASSUMPTION-001**: 目标仍为后端/Agent 开发实习和小范围自托管；实施不承诺企业级 SLA 或任意数据库零配置接入。
 
 ## 8. Related Specifications / Further Reading

@@ -1,0 +1,128 @@
+workspace_id: thelook-demo
+dataset_id: thelook-ecommerce-kaggle-mirror
+display_name: TheLook 电商分析
+description: TheLook 公开电商 Kaggle 镜像快照，包含订单、库存、用户和行为事件；不是企业实时数据，币种未确认，不推断利润或转化率。
+catalog: ../catalog/thelook_catalog_v2.yaml
+reader_role: daa_thelook_reader
+writer_role: daa_thelook_app_writer
+shape_bounds: ../catalog/thelook_runtime_shape_bounds_v1.json
+starter_questions:
+- label: 完成订单概览
+  question: 统计全部时间的已完成订单数和已完成销售额，并说明口径
+- label: 品类排行
+  question: 按商品品类统计已完成销售额前五名，并画柱状图
+- label: 库存分布
+  question: 按商品部门统计当前未售库存单元数
+dimensions:
+  customer_state:
+    aliases:
+    - 客户州
+    - 各州
+    - 按州
+    - 每个州
+    - 地区
+    - 省份
+    sources:
+    - - users
+      - state
+  customer_city:
+    aliases:
+    - 客户城市
+    - 各城市
+    - 按城市
+    - 城市
+    sources:
+    - - users
+      - city
+  customer_traffic_source:
+    aliases:
+    - 客户注册流量来源
+    - 客户流量来源
+    sources:
+    - - users
+      - traffic_source
+  product_category:
+    aliases:
+    - 商品品类
+    - 商品类目
+    - 品类
+    - 类目
+    sources:
+    - - products
+      - category
+    - - inventory_items
+      - product_category
+  product_brand:
+    aliases:
+    - 商品品牌
+    - 品牌
+    sources:
+    - - products
+      - brand
+    - - inventory_items
+      - product_brand
+  product_department:
+    aliases:
+    - 商品部门
+    - 部门
+    sources:
+    - - products
+      - department
+    - - inventory_items
+      - product_department
+  distribution_center:
+    aliases:
+    - 配送中心
+    sources:
+    - - distribution_centers
+      - name
+  event_type:
+    aliases:
+    - 事件类型
+    - 行为类型
+    sources:
+    - - events
+      - event_type
+  event_browser:
+    aliases:
+    - 事件浏览器
+    - 浏览器
+    sources:
+    - - events
+      - browser
+  event_traffic_source:
+    aliases:
+    - 事件流量来源
+    sources:
+    - - events
+      - traffic_source
+  user_country:
+    aliases:
+    - 注册用户国家
+    - 注册用户所在国家
+    - 用户国家
+    - 国家
+    sources:
+    - - users
+      - country
+  user_traffic_source:
+    aliases:
+    - 注册用户流量来源
+    - 用户注册流量来源
+    - 用户流量来源
+    sources:
+    - - users
+      - traffic_source
+  user_state:
+    aliases:
+    - 注册用户州
+    - 注册用户所在州
+    - 用户注册州地区
+    - 用户注册州
+    - 用户州
+    - 用户所在州
+    - 各州
+    - 按州
+    sources:
+    - - users
+      - state

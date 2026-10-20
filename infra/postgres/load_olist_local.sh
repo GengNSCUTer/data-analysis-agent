@@ -58,4 +58,4 @@ SQL
   -v ON_ERROR_STOP=1 -v dataset_version_id="$dataset_version_id"
 
 "$psql_bin" -p "$postgres_port" -U "$postgres_user" -d "$postgres_database" \
-  -v ON_ERROR_STOP=1 -f "$repository_root/infra/postgres/security.sql"
+  -v ON_ERROR_STOP=1 -f "$repository_root/infra/postgres/app.sql" -f "$repository_root/infra/postgres/security.sql"

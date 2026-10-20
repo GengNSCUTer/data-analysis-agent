@@ -64,13 +64,7 @@ from data_analysis_agent.conversation_store import (
 from data_analysis_agent.run_recorder import PostgresRunRecorder
 from fastapi.staticfiles import StaticFiles
 
-from data_analysis_agent.metric_context import (
-    DATASET_VERSION,
-    METRIC_EVIDENCE,
-    METRIC_VERSION,
-    OLIST_RUNTIME_WORKSPACE,
-    SYSTEM_PROMPT,
-)
+from data_analysis_agent.runtime_workspace import load_runtime_workspace, build_runtime_system_prompt
 from data_analysis_agent.llm_observability import ObservedLlmService
 from data_analysis_agent.postgres_runner import (
     PostgresConnectionSettings,
@@ -83,7 +77,6 @@ from data_analysis_agent.result_artifact_store import (
     ResultArtifactStore,
 )
 from data_analysis_agent.semantic_catalog import (
-    CATALOG_VERSION,
     CatalogContextEnhancer,
     CatalogLoader,
     CatalogRetriever,
@@ -91,7 +84,7 @@ from data_analysis_agent.semantic_catalog import (
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.runtime_diagnostics import RuntimeDiagnostics
 from data_analysis_agent.user_memory import UserMemoryStore, ALLOWED_PREFERENCES
-from data_analysis_agent.trusted_workflow import TrustedOlistWorkflowHandler
+from data_analysis_agent.trusted_workflow import AnalyticsWorkflowHandler
 from vanna import Agent
 from vanna.core.agent.config import AgentConfig
 from vanna.core.enhancer import DefaultLlmContextEnhancer
@@ -183,12 +176,10 @@ def create_app() -> FastAPI:
         )
 
     model_name = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V3.2")
-    settings = PostgresConnectionSettings.from_environment()
-    workspace = replace(
-        OLIST_RUNTIME_WORKSPACE,
-        dataset_version=os.getenv("DATA_ANALYSIS_DATASET_VERSION", OLIST_RUNTIME_WORKSPACE.dataset_version),
-        catalog_path=Path(os.getenv("DATA_ANALYSIS_CATALOG_PATH", str(OLIST_RUNTIME_WORKSPACE.catalog_path))),
-    )
+    runtime_workspace = load_runtime_workspace()
+    workspace = runtime_workspace.profile
+    settings = replace(PostgresConnectionSettings.from_environment(),
+                       reader_user=workspace.reader_role, writer_user=workspace.writer_role)
     runner = SecurePostgresRunner(
         settings=settings,
         model_name=model_name,
@@ -196,7 +187,10 @@ def create_app() -> FastAPI:
         workspace=workspace,
     )
     budget = RequestBudget.from_environment()
-    conversation_store = PostgresConversationStore(settings)
+    conversation_store = PostgresConversationStore(
+        settings, default_workspace_id=workspace.workspace_id,
+        default_dataset_version=workspace.dataset_version, default_metric_version=workspace.metric_version,
+    )
     run_recorder = PostgresRunRecorder(settings, model_name=model_name)
     agent_memory = DemoAgentMemory()
     # A filtered category analysis needs orders, items, customers, products and
@@ -283,13 +277,8 @@ def create_app() -> FastAPI:
             idle_status_message="已就绪",
             idle_status_detail="选择示例问题或直接输入",
         ),
-        system_prompt_builder=DefaultSystemPromptBuilder(base_prompt=(
-            SYSTEM_PROMPT.replace(DATASET_VERSION, workspace.dataset_version)
-            .replace(METRIC_VERSION, workspace.metric_version)
-            .replace(CATALOG_VERSION, workspace.catalog_version)
-            + ("\n当前部署使用自构造合成数据，仅演示流程，不是真实 Olist 交易。" if workspace.dataset_version == "synthetic-olist-v1" else "")
-        )),
-        workflow_handler=TrustedOlistWorkflowHandler(),
+        system_prompt_builder=DefaultSystemPromptBuilder(base_prompt=build_runtime_system_prompt(runtime_workspace)),
+        workflow_handler=AnalyticsWorkflowHandler(runtime_workspace),
     )
     from contextlib import asynccontextmanager
 
@@ -302,7 +291,7 @@ def create_app() -> FastAPI:
         yield
         await context_builder.close()
 
-    app = FastAPI(title="Trusted Olist Data Analysis Agent", lifespan=lifespan)
+    app = FastAPI(title=f"{runtime_workspace.display_name} | Data Analysis Agent", lifespan=lifespan)
     if embed_origins:
         app.add_middleware(
             CORSMiddleware,

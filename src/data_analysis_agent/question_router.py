@@ -892,13 +892,12 @@ class QuestionRouter:
             )
         return "你希望比较或统计哪个指标？例如 GMV、有效订单数、平均履约天数或好评率。"
 
-    @staticmethod
-    def _format_capabilities() -> str:
+    def _format_capabilities(self) -> str:
         return "\n".join(
             [
                 "## 当前可用能力",
                 "",
-                "- 查询受控的只读 PostgreSQL 分析数据：GMV、有效订单数、履约时长、好评率等指标。",
+                "- 查询受控的只读 PostgreSQL 分析数据：" + "、".join(metric.name for metric in self.retriever.catalog.metrics) + "。",
                 "- 按时间、地区、品类等允许维度进行汇总、排名、趋势和对比。",
                 "- 解释指标定义、统计口径、时间字段、默认过滤和数据版本。",
                 "- 对 SQL 做只读权限、AST 策略、结果合同和审计校验。",

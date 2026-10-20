@@ -1,19 +1,11 @@
-# SQL 策略与数据库纵深防御
+# SQL 策略与数据库权限
 
-`src/data_analysis_agent/sql_policy.py` 是所有模型 SQL 的第一个执行关口。它以 PostgreSQL
-方言解析 AST，仅接受单条 `SELECT` 或只读 `WITH ... SELECT`，并执行：
+`sql_policy.py` 以 PostgreSQL 方言解析 AST，只允许单条 SELECT 或只读 WITH 查询。Schema、表列和敏感字段来自当前服务端 WorkspaceProfile/Catalog；不依赖模型保证权限，也不通过关键词黑名单识别 SQL。禁止写库、多语句、锁定查询、系统目录、文件/网络函数、任意表和 `SELECT *`；`COUNT(*)` 是合法聚合。
 
-- 强制 `analytics` Schema 和显式表白名单；
-- 物理列白名单，拒绝未知字段和跨 Schema 查询；
-- 拒绝 DML、DDL、多语句、锁定查询和 `pg_sleep` 等危险函数；
-- `analyst` 禁止投影原始订单、客户、卖家、商品、评价标识和邮编等敏感字段，允许
-  `COUNT(order_id)` 一类聚合；`admin` 可查看数据版本元信息；
-- 自动附加最大 `LIMIT`（`analyst` 200、`admin` 1000），超出时收紧。
+权限由数据库再次约束。reader 只获得明确安全业务表/视图的 SELECT、默认只读事务和超时；writer 只负责 `app` 的会话、账号、运行、审计和偏好等元数据。Olist 权限在 `infra/postgres/security.sql`，TheLook 安全视图权限在 `thelook_security.sql`；公共应用表定义位于 `app.sql`。新增已有业务库使用 `data-analysis-agent-init --metadata-only`，详见 [接入说明](workspace-onboarding.md)。
 
-第二层是 `infra/postgres/security.sql`。`daa_analytics_reader` 只有 `analytics` 的
-`SELECT` 权限，默认只读事务和 5 秒语句超时；`daa_app_writer` 只能写 `app.query_audits`。
-当前用户态开发集群通过 Unix Socket 的本地信任认证运行，生产部署必须改为独立密码/密钥
-和受控网络认证。`SecurePostgresRunner` 已是可信 Olist Demo 中 `RunSqlTool` 的唯一执行器：
-策略拒绝、允许执行和 PostgreSQL 失败均以 `daa_app_writer` 写入 `app.query_audits`；实际
-查询以 `daa_analytics_reader` 的只读事务和 5 秒超时执行。Demo 身份来自受控请求头，只用于
-演示角色策略，不能替代真实认证。
+在线聚合预算由 QueryPlan 的分组、时间范围和明确 Top-N 生成，受进程行数、字节与超时兜底。UI 初始预览 200 行，模型只接收最多 8 行/1,200 字符摘要；这两个展示限制不是数据库扫描量上限。策略添加执行 LIMIT 时多读一行检测溢出，探测行不进入工件、模型或页面；不返回截断的聚合统计。冻结离线评测继续使用原协议。完整设计见 [result-budget-v2](architecture/result-budget-v2.md)。
+
+`plan_sql_guard.py` 检查已确认的筛选、排名、归因及已知多对一关联键，发现遗漏先走现有修复流程。它能识别已经覆盖的错误，例如将商品汇总按商品 ID 关联到多行库存后放大金额；它不是 SQL 等价性证明，也无法保证任意业务公式正确。ResultValidator 检查返回列、空值、类型、数值约束与结果范围。业务准确性还需独立数值对照，不能由 AST 或结果合同通过推出。
+
+产品使用服务端验证的本地账号会话或受限嵌入凭证，身份、角色、workspace 和工件归属均由服务端解析；演示身份切换不是生产认证。开发 PostgreSQL 的 Unix socket 当前使用 trust；生产部署必须配置独立密码/密钥和受控网络。

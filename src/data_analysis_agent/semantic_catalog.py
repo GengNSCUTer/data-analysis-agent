@@ -1237,9 +1237,10 @@ class CatalogRetriever:
                     if score >= self.min_score:
                         candidates.append((score, table.table_id))
             if candidates:
+                source_order = {table: index for index, (table, _) in reversed(list(enumerate(binding.sources)))} if binding else {}
                 ranked = tuple(
                     (table_id, score)
-                    for score, table_id in sorted(candidates, key=lambda item: (-item[0], item[1]))
+                    for score, table_id in sorted(candidates, key=lambda item: (-item[0], source_order.get(item[1], 0), item[1]))
                 )
                 found.append((dimension, ranked))
         # A state code such as “只看 SP 客户” is a filter, not the word “州”.
@@ -1554,7 +1555,8 @@ class CatalogRetriever:
         columns_by_table = dict(selected_columns)
         for table in tables:
             columns = table.columns_by_name
-            lines.append(f"- `analytics.{table.physical_name}`（粒度：{table.grain}）：{table.description}")
+            schema = self.catalog.workspace.analytics_schema if self.catalog.workspace else "analytics"
+            lines.append(f"- `{schema}.{table.physical_name}`（粒度：{table.grain}）：{table.description}")
             for name in columns_by_table.get(table.table_id, ()):
                 column = columns[name]
                 visibility = "敏感，仅用于关联/聚合" if column.sensitive else "可用于受控展示/过滤"

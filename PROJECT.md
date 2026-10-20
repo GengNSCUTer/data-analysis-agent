@@ -1578,3 +1578,38 @@ CI指定的确定性测试在本地为 **212 passed、1 skipped、5 deselected**
 随后用新编中文问题做真实浏览器、独立数值和隔离验证。历史protected final题与本地Adapter
 评测不会作为本阶段产品验收。本次没有改运行时代码、数据库权限或当前32013服务。
 飞书项目文档已追加并回读同一选型与差距记录，revision 290。
+
+## 2026-10-20｜第四项完成：TheLook 在线工作区与跨业务接入验证
+
+完成 [产品完善计划第四项](plan/process-agent-product-readiness-v1.md#implementation-phase-4)。
+新增服务端 `runtime_workspace.py` 和两套工作区 YAML；连接使用私有环境配置，表列/敏感性、
+指标/Join来自Catalog，维度来源和页面说明来自配置。系统提示、帮助与示例不再固定Olist；
+bootstrap使用已授权默认工作区。会话、账号、审计、SQL runner均装配相同工作区与独立角色。
+公共应用DDL移至 `app.sql`，`--metadata-only`为已有业务库配置元数据writer，不导入Olist表。
+新接入方法见 [workspace-onboarding.md](docs/workspace-onboarding.md)。
+
+TheLook当前实例：screen `data-analysis-agent-thelook`，
+`http://127.0.0.1:32104/embedded-copilot`，独立 `thelook-demo` / `thelook_analytics`。
+复用7张安全视图、20项指标和13个维度；原始Kaggle镜像、历史离线身份与模型资产不迁移。
+真实浏览器最终完整重跑 **11/11轮通过，8/8独立reader数值核对**。覆盖订单/成交额概览、
+品类排行、月趋势、库存分组、事件来源；最高州下钻和取消筛选连续通过。换图保持工件ID，
+SQL调用为0。敏感明细/原始表两类为unauthorized且SQL调用0；匿名接口401，指定其他workspace
+403，同用户存在的其他workspace会话和下载404。角色检查确认reader不访问raw/app，writer不写业务。
+
+本轮独立核对发现并修复两个实际问题：Store初始化仍默认Olist导致会话保存冲突；模型把商品
+汇总按商品ID关联多行库存导致成交额放大。后者通过尊重配置的维度来源顺序，以及把现有
+多对一关联键检查扩展至无筛选查询解决；合法关联与派生聚合回归通过。不是新增通用语言闸门。
+
+另有 **293 passed、1 skipped** 定向联合回归、24项实际数据库/认证/工件路由、5项Olist页面
+回归与1组真实九轮连续分析通过。第三个自构造工单Schema验证不同表列/逻辑维度/物理Schema，
+没有核心数据集分支。wheel离仓库安装可读取两套配置/Catalog；独立PG18.3初始化两次均1,200
+合成订单，角色检查通过，临时数据库进程已停止。现有业务PG版本仍为12.20。
+
+原始证据位于仓库外 `evals/product-readiness-stage4-20261020/`，最终为
+`browser-r4/report.json`与`trace-audit.json`；早期失败保留。详细分母、修复与限制见
+[阶段4验收记录](evals/results/workspace_onboarding_thelook.md)。本阶段只验证PostgreSQL跨业务
+Schema及上述开发场景，不宣称20项指标穷举、其他数据库driver、企业SSO或真实上线；Docker
+实运行权限限制未变。下一阶段为多人使用、安全与故障处理，本轮尚未开始。
+
+飞书项目文档已同步并回读，revision 291。Olist主服务32013已更新，TheLook32104保持独立运行，
+两个实例的登录及默认workspace bootstrap均复核通过；临时Olist回归实例32105已停止。

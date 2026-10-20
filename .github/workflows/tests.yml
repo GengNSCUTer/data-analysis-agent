@@ -48,6 +48,7 @@ jobs:
           tests/test_product_release_dev_contract.py \
           tests/test_query_filters.py \
           tests/test_runtime_paths.py \
+          tests/test_runtime_workspace.py \
           tests/test_trusted_workflow.py \
           tests/test_demo_session.py \
           tests/test_demo_scenarios.py \

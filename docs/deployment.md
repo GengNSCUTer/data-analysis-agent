@@ -1,6 +1,6 @@
 # 安装、初始化与重启恢复
 
-本项目提供一个 FastAPI 服务，内含原生 Web Component 页面。当前自托管入口是 `data-analysis-agent`；无需另起前端开发服务器，也不需要 GPU 或模型训练环境。在线推理使用配置的 SiliconFlow API。
+本项目提供一个 FastAPI 服务，内含原生 Web Component 页面。当前自托管入口是 `data-analysis-agent`；无需另起前端开发服务器，也不需要 GPU 或模型训练环境。在线推理使用配置的 SiliconFlow API。已有 PostgreSQL 业务库接入见 [工作区配置说明](workspace-onboarding.md)；不向已有业务库运行合成数据初始化。
 
 首次演示使用仓库自构造的合成电商数据：1,200 笔订单、300 个客户城市、3 个品类，表结构沿用 Olist。版本标记为 `synthetic-olist-v1`，不是真实 Olist 数据，不代表业务准确率或新 Schema 泛化能力。真实业务库接入另行配置，不运行合成数据初始化。
 

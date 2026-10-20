@@ -7,6 +7,8 @@
 data/*
 !data/catalog
 !data/catalog/**
+!data/workspaces
+!data/workspaces/**
 docs
 tests
 plan

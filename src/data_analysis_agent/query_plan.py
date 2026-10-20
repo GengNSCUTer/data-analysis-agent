@@ -489,7 +489,7 @@ class QueryPlan:
             result_budget=result_budget,
             filters=filters,
             lookup_joins=tuple((join.to_table, join.on) for join in selection.joins
-                               if join.cardinality == "many_to_one") if filters else (),
+                               if join.cardinality == "many_to_one"),
         )
 
     @staticmethod

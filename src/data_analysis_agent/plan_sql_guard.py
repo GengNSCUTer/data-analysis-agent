@@ -30,7 +30,7 @@ def sql_plan_mismatch(sql: str, plan: Mapping[str, Any] | None) -> str | None:
         return None
     folded = sql.casefold()
     filters = plan.get("filters") or []
-    if filters:
+    if filters or plan.get("lookup_joins"):
         try:
             root = build_scope(parse_one(sql, read="postgres"))
         except (ParseError, TokenError, RecursionError):

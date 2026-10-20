@@ -45,11 +45,15 @@ class PostgresConversationStore(ConversationStore):
         settings: PostgresConnectionSettings | None = None,
         *,
         default_workspace_id: str = "olist-demo",
+        default_dataset_version: str = "olist-kaggle-v2-2026-08-03",
+        default_metric_version: str = "0.1-draft",
     ):
         self.settings = settings or PostgresConnectionSettings.from_environment()
         if not isinstance(default_workspace_id, str) or not default_workspace_id.strip():
             raise ValueError("default_workspace_id must be a non-empty string")
         self.default_workspace_id = default_workspace_id.strip()
+        self.default_dataset_version = default_dataset_version
+        self.default_metric_version = default_metric_version
 
     async def create_conversation(
         self, conversation_id: str, user: User, initial_message: str
@@ -276,9 +280,9 @@ class PostgresConversationStore(ConversationStore):
     def _update_sync(self, conversation: Conversation) -> None:
         role = self._role_for_user(conversation.user)
         dataset_version = conversation.metadata.get(
-            "dataset_version_id", "olist-kaggle-v2-2026-08-03"
+            "dataset_version_id", self.default_dataset_version
         )
-        metric_version = conversation.metadata.get("metric_version", "0.1-draft")
+        metric_version = conversation.metadata.get("metric_version", self.default_metric_version)
         workspace_id = conversation.metadata.get("workspace_id", self.default_workspace_id)
         if not isinstance(workspace_id, str) or not workspace_id.strip():
             raise ValueError("conversation workspace_id must be a non-empty string")
