@@ -2,7 +2,7 @@
 goal: 可信数据分析 Agent 的产品完善、代码学习与后端及 Agent 实习面试准备
 version: 1.0
 date_created: 2026-10-10
-last_updated: 2026-10-20
+last_updated: 2026-10-21
 owner: 李耿楠
 status: In Progress
 tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
@@ -59,7 +59,7 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-001 | Day 1：从 src/data_analysis_agent/server.py:create_app、ManagedChatHandler、SemanticIntentInterpreter 和 BudgetedChatHandler 跟踪“客户州有效订单前五”请求。理解当前自然语言理解、状态和执行的分工；旧 classify/admit 只供历史离线协议。用户闭卷画链路，说明QuerySpec/QueryPlan区别与一次拒绝路径。 | 否 | — |
+| TASK-001 | Day 1：从 src/data_analysis_agent/server.py:create_app、ManagedChatHandler、SemanticIntentInterpreter 和 BudgetedChatHandler 跟踪“客户州有效订单前五”请求。理解当前自然语言理解、状态和执行的分工；旧 classify/admit 只供历史离线协议。用户闭卷画链路，说明QuerySpec/QueryPlan区别与一次拒绝路径。 | 是 | 2026-10-21 |
 | TASK-002 | Day 2：阅读 semantic_catalog.py、query_plan.py、plan_sql_guard.py 和十项/十九项指标合同，核对 GMV、订单数、客单价的 grain、状态与 join 放大风险。只为发现的真实口径缺陷补测试，不一口气读全部训练构造脚本。 | 否 | — |
 | TASK-003 | Day 3：阅读 sql_policy.py、SecurePostgresRunner 和 ResultValidator，复核只读角色、敏感列、空窗口、计划结果预算与多读一行，以及预览200行/模型8行/完整工件的区别；说明执行与合同通过不能证明全部SQL业务语义。旧1,000行协议只供历史离线评测。 | 否 | — |
 | TASK-004 | Day 4：阅读 conversation_store.py、working_memory.py、context_builder.py、analysis_lifecycle.py 与 ResultArtifactStore。跟踪“查结果→结果解释→换维度→重载→清空分析”的会话，验证摘要不进入 SQL 条件、状态冲突可恢复、下载不能跨用户/workspace。 | 否 | — |
@@ -67,11 +67,12 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 
 第一周退出条件：能画出并解释请求链、身份链、结果链、会话链和离线模型链；已有 Phase B 审核有可回查状态；60 条新开发用例的目标行为、业务口径和来源记录齐全。没有证据的能力明确标记待测。
 
-Day 1当前进行中：启动装配、旧路由、QueryPlan与结果预算已有用户复述。六项工程已完成后，
-2026-10-20恢复学习，先用当前 `SemanticIntent` → `parse_semantic_intent()` 小段校正旧入口，
-再闭卷串联请求/状态/执行链；不重开Day 1任务或新增训练。TASK-001仍为“否”，等用户实际
-阅读和复述后再完成。问答集中在[`agent-project-walkthrough-v1.md`](../docs/learning/agent-project-walkthrough-v1.md)，
-不会因工程验收自动进入Day 2。
+2026-10-21完成Day 1：用户已分段阅读并复述语义理解、状态更新、QueryPlan、候选SQL、执行
+安全、结果保存与回答的主链；能说明遗漏SP筛选应拒绝、QuerySpec与QueryPlan的来源差异，
+以及服务端身份、角色白名单与数据库只读权限的区别。完成依据是代码阅读与复述，不是工程
+测试数量。Day 2开始核对GMV的商品行粒度、状态和品类筛选口径；TASK-002仍待完成。
+问答继续集中在[`agent-project-walkthrough-v1.md`](../docs/learning/agent-project-walkthrough-v1.md)，
+不启动新训练或重复终测。
 
 ### Implementation Phase 2
 
