@@ -440,3 +440,34 @@ ResultValidator按要求验收，而非结果回来才临时制定标准。Day 1
   供后续追问、换图、分页、下载和刷新恢复复用；不把完整表塞进对话上下文。
 
 本轮仅记录问答并核对现有代码，没有更改运行时或执行新在线评测。
+
+### 2026-10-21｜QueryPlan：把当前需求整理成查询计划
+
+本单元目标是读懂更新后的分析状态怎样进入查询计划；不修改运行时，不启动训练或新评测。
+输入是已经确认的当前范围、选中的Catalog指标与路由信息，输出是对计划字段和构造代码的
+理解。验收方式为用户阅读两个小片段后回答下面两题，未回答前不标记掌握或完成Day 1。
+
+业务例子：“只看SP州，按商品品类统计有效订单数”。当前状态记住订单指标、品类分组和SP
+筛选；`QueryPlan.from_selection()`再结合Catalog形成这次查询的计划：
+
+- `metric_ids`：`paid_order_count`。
+- `dimensions`：`product_category_name`。
+- `filters`：绑定到当前workspace真实表列的`customer_state=SP`条件。
+- `metric_plans`：携带Catalog规定的订单粒度、来源表、时间字段、默认状态过滤等。
+- `required_result_columns`：品类列和`paid_order_count`列；州只是筛选条件，不因此自动成为
+  必须返回的结果列。
+
+阅读入口为`query_plan.py:QueryPlan.from_selection()`，先看365–380行取指标、维度和时间，
+再重点读395–398行：先把分组维度放进结果列；存在时间粒度时加入`time`；最后追加指标列。
+然后看`MetricPlan.from_metric()`的194–202行：这里复制Catalog已有定义，不调用模型重新
+猜指标口径。当前Olist有效订单数会排除`canceled`和`unavailable`，来自Catalog定义，即使
+用户没有在问题里再次说明，也应遵循；筛选条件和指标默认过滤属于不同来源。
+
+`AnalysisState`服务于跨轮任务连续性，`QueryPlan`服务于本次查询的具体生成与验收。
+构造计划本身不生成完整SQL，也不执行数据库。计划提供给后续SQL生成，并用于确定
+ResultContract的必需结果列；计划正确仍不保证候选SQL已经正确实现了它。
+
+本轮复述题（待回答）：
+
+1. 该例是否必须返回`customer_state`列？为什么？
+2. 若改成“按月、按品类统计有效订单数”，`required_result_columns`应包含哪三列？
