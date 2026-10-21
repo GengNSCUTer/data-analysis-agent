@@ -592,3 +592,35 @@ A包含三条商品行，订单关联商品后出现三行：A/手机、A/手机
 再区分QueryPlan与离线QuerySpec：哪一个由当前用户问题与受控状态派生，用于在线链路；
 哪一个用于离线结构化样本及Gold生成。SQL遗漏SP筛选的拒绝路径已经过复述，可在整链中
 作为一次失败例子。用户完成口述后再核对Day 1完成条件，不因这条收尾安排自动勾选完成。
+
+用户收尾复述：生成前由模型理解问题，服务端更新状态并结合Catalog/问题生成计划；执行
+前检查QueryPlan偏差、SqlPolicy和PostgreSQL；结果由ResultValidator校验，随后保存到
+AnalysisState并基于返回结果回答，但明确表示不懂最后一段。前两段主线正确，补充数据库
+这层是reader账号权限和只读事务等，不是理解业务问题的另一次模型审查。结果保存与回答
+仍待补课；QuerySpec/QueryPlan区别本轮尚未回答，Day 1不标记完成。
+
+### 2026-10-21｜结果验收、保存与回答（补充学习）
+
+本单元只厘清结果去向，不改运行时、不启动评测。输入为数据库返回的DataFrame，目标是
+分清当前查询状态、可信结果摘要与完整结果文件；验收为用户阅读小片段后复述。
+
+- SecurePostgresRunner调用ResultValidator，对照提前形成的ResultContract检查列、指标
+  值和完整性等。只有满足相应回答条件，代码才调用`build_result_summary()`提取受控摘要；
+  这份摘要来自实际DataFrame，不是让LLM猜测或生成一组业务数字，也不同于对话压缩摘要。
+- TrustedRunSqlTool对valid结果调用`ResultArtifactStore.save_result_csv()`保存完整查询结果。
+  小型ResultArtifact包含摘要、查询范围、版本和文件引用。AnalysisState保留当前指标、
+  维度、筛选，并通过`with_result_artifact()`记住上一可信结果的摘要和引用，不把完整
+  DataFrame塞进状态或模型上下文。完整结果受执行预算约束，不等于业务数据库全部原始行。
+- 工具将受控摘要放进`result_for_llm`；Agent将其作为role=tool消息加入对话，再构造模型
+  请求生成中文解释。结果验收失败或不允许回答时，不能按正常成功路径输出确定数字。
+  UI预览、完整工件和模型摘要有各自用途及预算，不能彼此冒充。
+
+本轮只读两处：`analysis_state.py:168`中`previous_result_artifact`与
+`previous_result_summary`的赋值；`vanna/core/agent/agent.py:1006`中取
+`result_for_llm`并在1018行之后写入tool消息、重建模型请求的几行。完整CSV与会话结果
+引用分两步保存，后者由chat_runtime在本轮收尾写回，不要求背其持久化时序。
+
+本轮复述题（待回答）：
+
+1. 查回100行结果时，AnalysisState是否需要直接保存完整100行？后续下载从哪里读取？
+2. 生成最后中文回答时，模型使用的数字依据来自哪里？
