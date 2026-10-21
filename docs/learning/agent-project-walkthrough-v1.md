@@ -471,3 +471,37 @@ ResultContract的必需结果列；计划正确仍不保证候选SQL已经正确
 
 1. 该例是否必须返回`customer_state`列？为什么？
 2. 若改成“按月、按品类统计有效订单数”，`required_result_columns`应包含哪三列？
+
+用户回答与纠正：第一题“不需要，因为SP州只是filter”，正确。第二题回答“month、品类、
+有效订单数”，业务含义正确，需区分时间粒度和输出列名：当前QueryPlan的标准时间结果列
+叫`time`，`time_grain="month"`表达按月聚合；必需结果列为`product_category_name`、`time`、
+`paid_order_count`（当前构造顺序）。不是要求所有SQL时间列都命名为`month`。
+
+### 2026-10-21｜QueryPlan如何进入SQL生成提示词
+
+本小单元只追踪计划到模型输入的衔接，不修改运行时、不运行新模型评测。输入为已有
+QueryPlan和Catalog，输出为对提示词组装及其作用边界的理解；用户阅读下列两个小片段后
+复述，未回答前不标记掌握。
+
+1. `query_plan.py:QueryPlan.prompt_context()`把计划对象格式化成中文指令，例如必须返回
+   哪些列、按什么维度和时间粒度统计、保留哪些筛选及指标粒度要求。这里只拼字符串，
+   不调用LLM，也没有生成完整SQL。
+2. `semantic_catalog.py:CatalogContextEnhancer.enhance_system_prompt()`读取本次请求已经
+   准备的Catalog、状态和计划提示，追加到基础system prompt。重点读末尾返回表达式：
+   `system_prompt + catalog_prompt + state_prompt + query_plan_prompt`。Catalog提供受限
+   表列、Join和指标定义；计划说明本次要怎样查询。
+
+Vanna Agent在`agent.py`中调用enhancer，再将增强后的system prompt、预算内消息和工具定义
+组成模型请求。当前在线模型可以返回`run_sql`工具调用，SQL放在工具参数中；它不会因为
+返回工具调用就自行获得数据库执行权，仍由服务端治理和执行。runtime中的
+`build_runtime_candidate_request()`记录共享候选协议证据，不等于默认在线路径调用本地
+Adapter；不要把它误当成当前真正的LLM生成调用。
+
+提示词要求模型遵守计划，但不保证它一定遵守。SQL仍可能漏SP筛选、漏分组或使用错误
+Join，后续计划核对、安全策略、数据库权限和结果验收各自处理其能覆盖的行为；不能
+声称已有检查证明所有业务语义正确。
+
+本轮复述题（待回答）：
+
+1. `prompt_context()`返回字符串，是否意味着它已经调用模型生成SQL？
+2. Catalog与QueryPlan分别给SQL生成模型提供什么信息？
