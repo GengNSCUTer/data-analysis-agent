@@ -645,3 +645,28 @@ AnalysisState并基于返回结果回答，但明确表示不懂最后一段。�
 
 最后复述题（待回答）：哪个是离线造样本时预先设计的规格，哪个是理解真实用户问题后
 形成的在线计划？两者为什么不能仅因字段相似就当成同一种输入？
+
+用户回答：QuerySpec是预先规定好的查询要求，可以直接交给renderer生成Gold SQL，因此
+不能证明系统理解了中文。正确。它测试的是renderer把规格编译为SQL；中文理解必须用真实
+用户问题经在线语义理解得到计划，再独立检查计划与用户意图是否一致。Day 1的主要请求
+链和该区别已经完成复述；四周计划中的身份、会话与历史质量基线仍需按各自单元学习，
+不因完成这一条就把整周任务标记完成。
+
+### 2026-10-21｜聊天请求中的身份来自哪里
+
+本单元只读本地登录会话的解析，不展开嵌入式Bearer token，不改运行时或运行测试。
+`server.py:_request_user_context()`把HTTP请求的cookies与headers传入RequestContext；
+`ManagedChatHandler.handle_stream()`在处理用户问题时调用ProductIdentityResolver。
+resolver读取签名的`daa_session` cookie，检查会话类型、subject和角色，再通过AccountStore
+核对当前账号角色与session_version。验证成功才构造Vanna的User；缺少或过期会话得到
+anonymous身份，而ManagedChatHandler会在进入聊天处理前要求登录。
+
+因此，用户身份/角色不是信任浏览器请求体里自报的`user_id`或`role`。签名cookie证明
+服务器曾签发会话；再次核对AccountStore可让角色变化或已撤销的旧版本失效。这是当前项目
+的本地会话方案，不等同企业SSO。相关代码只看`server.py:836-837`、`runtime_control.py:199-208`
+以及`local_auth.py:305-333`。
+
+本轮复述题（待回答）：
+
+1. 为什么不直接相信浏览器请求里传来的role字段？
+2. 即使cookie签名有效，如果AccountStore里的session_version已经更新，旧会话会怎样？
