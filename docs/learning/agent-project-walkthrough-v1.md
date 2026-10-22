@@ -810,3 +810,25 @@ EXISTS只判断该订单有没有符合条件的支付记录。这里求的是�
 
 本轮复述题（待回答）：同一订单若有两条信用卡支付记录，EXISTS写法会让它的一件100元
 商品被累加一次还是两次？
+
+用户回答“一次”，正确。EXISTS只提供有无匹配的筛选判断，多条匹配不会展开外层商品行。
+
+### 2026-10-22｜Day 2：指标口径怎样进入QueryPlan
+
+本单元回到实现，只读`src/data_analysis_agent/query_plan.py:194-202`的
+`MetricPlan.from_metric()`及483行调用，不改代码、不运行训练或评测。输入是已从服务端
+Catalog选中的`MetricDefinition`；输出是本次QueryPlan中的一份`MetricPlan`。
+
+`from_metric()`复制metric_id、grain、time_field、source_tables、default_filters和
+allowed_dimensions，不调用LLM，也不生成或执行SQL。`QueryPlan.from_selection()`用
+`tuple(MetricPlan.from_metric(metric) for metric in metrics)`把每个选中指标的定义放进
+本次计划。这里的指标口径来自Catalog，不因每次用户换种问法就重新让模型定义。
+
+以GMV为例，计划带上商品行粒度、购买时间和排除canceled/unavailable的默认条件。
+保存这些要求不等于已经在SQL中执行过滤；实际候选SQL是否遵循要求仍需检查。尤其不能
+由“计划中有default_filters”推出后续校验已经完整证明所有默认条件和指标公式正确。
+
+本轮代码复述题（待回答）：
+
+1. `default_filters=metric.default_filters`中的默认条件，来自服务端Catalog还是模型临时生成？
+2. 把条件复制进MetricPlan，是否就意味着数据库已经自动排除了取消订单？为什么？
