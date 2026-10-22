@@ -865,3 +865,27 @@ Day 2剩余内容只看候选SQL与计划之间的检查：入口为
 `plan_sql_guard.py:26`的`sql_plan_mismatch()`。需要掌握调用位置、发现偏差时的处理，
 以及有限规则检查不能证明全部业务正确；不再追加一轮轮类似的金额计算题。
 本轮只调整学习安排与记录，不改运行时或运行评测。
+
+### 2026-10-22｜Day 2收尾：SQL计划检查的调用与边界
+
+本单元只阅读`TrustedRunSqlTool.execute()`和`sql_plan_mismatch()`的职责，运行已有筛选
+回归，不改运行时或新增检查。输入为`args.sql`模型候选和`context.metadata["query_plan"]`
+服务端计划；检查函数返回发现偏差的原因字符串，或返回None。
+
+代码入口为`src/data_analysis_agent/trusted_sql_tool.py:128`：发现偏差后记录审计，构造
+失败结果，当前候选不送入正常执行路径；未发现偏差时由139行`super().execute()`继续进入
+查询链路，后续安全与数据库检查仍然存在。后半段允许有界修复；修复候选在232行再次
+检查计划，不因已经修复就直接放行。本单元不展开修复提供方。
+
+`plan_sql_guard.py`检查已确认的筛选及来源路径、部分关联键、Top-N和归因要求。例如只在
+注释或未使用CTE写出某筛选，不能算该条件已约束真正参与结果的查询。它不是一般SQL
+等价证明器，也没有通用验证所有MetricPlan默认状态条件和聚合公式。返回None表示本检查
+未发现它所覆盖的偏差，不能推出SQL业务完全正确；解析错误也由后续SqlPolicy处理。
+
+已有筛选正反例定向回归通过：`tests/test_query_filters.py`中
+`test_valid_filter_shapes_are_not_blocked`与
+`test_ineffective_or_wrong_filter_cannot_supply_evidence`，共11个参数化用例，11 passed。
+这只验证被覆盖的筛选行为，不是线上业务准确率或全链路验收。Day 2待用户完成本轮复述。
+
+本轮复述题（待回答）：SQL保留了SP筛选，但由于重复关联把GMV算大；即使
+`sql_plan_mismatch()`返回None，能否说明SQL业务正确？这个None实际表示什么？
