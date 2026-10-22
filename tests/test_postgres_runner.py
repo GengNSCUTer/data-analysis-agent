@@ -192,7 +192,13 @@ async def test_runner_executes_allowed_query_and_audits_policy_rejection() -> No
     runner = SecurePostgresRunner()
     context = make_context(user_id)
     envelope = ResultBudget.aggregate().as_metadata()
-    context.metadata.update({**envelope, "query_plan": {**envelope, "top_n": {"customer_state": 5}}})
+    context.metadata.update({
+        **envelope,
+        "required_result_columns": ["customer_state", "paid_order_count"],
+        "metric_result_columns": ["paid_order_count"],
+        "additive_metric_ids": ["paid_order_count"],
+        "query_plan": {**envelope, "top_n": {"customer_state": 5}},
+    })
 
     dataframe = await runner.run_sql(
         RunSqlToolArgs(
@@ -225,6 +231,11 @@ async def test_runner_executes_allowed_query_and_audits_policy_rejection() -> No
     assert dataframe['paid_order_count'].tolist() == sorted(expected.values(), reverse=True)[:5]
     assert all(expected[row.customer_state] == row.paid_order_count for row in dataframe.itertuples())
     assert context.metadata["result_budget_check"]["state"] == "validated"
+    from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX
+    import json
+    evidence = json.loads(context.metadata["validated_result_summary"].removeprefix(RESULT_EVIDENCE_PREFIX))
+    assert evidence["coverage"] == "complete"
+    assert evidence["statistics"]["paid_order_count"]["sum_of_returned_rows"] == sum(expected.values())
 
     with pytest.raises(PolicyViolation, match="only SELECT"):
         await runner.run_sql(RunSqlToolArgs(sql="DELETE FROM fact_orders"), context)

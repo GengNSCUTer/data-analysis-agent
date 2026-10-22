@@ -54,6 +54,10 @@ def serve(args):
 
         async def send_request(self, request):
             await self.delay(request)
+            if request.metadata.get("purpose") == "result_explanation":
+                from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX, render_result_facts
+                text = request.messages[0].content.split(RESULT_EVIDENCE_PREFIX, 1)[1]
+                return LlmResponse(content=render_result_facts(json.loads(text)))
             assert request.metadata.get("purpose") == "semantic_intent"
             return LlmResponse(
                 content=json.dumps(

@@ -22,7 +22,7 @@ def test_trusted_result_artifact_is_bounded_and_replayable_without_sql() -> None
 
     assert restored.previous_result_artifact == artifact
     assert restored.previous_result_summary == artifact.summary
-    assert len(artifact.summary) == 1_200
+    assert artifact.summary.endswith("x" * 2_000)
     assert "不会重新执行 SQL" in artifact.replay_text()
     assert "SELECT" not in str(artifact.as_dict())
 

@@ -7,7 +7,7 @@ import pytest
 from data_analysis_agent.budget import RequestBudget
 from data_analysis_agent.chat_runtime import BudgetedChatHandler
 from data_analysis_agent.run_recorder import AgentRun
-from data_analysis_agent.chat_runtime import constrain_followup_answer, followup_adds_numbers
+from data_analysis_agent.result_evidence import constrain_followup_answer, followup_adds_numbers
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
 from data_analysis_agent.working_memory import WorkingMemory

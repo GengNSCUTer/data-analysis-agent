@@ -76,7 +76,7 @@
 - 每条训练行必须能追溯到 QuerySpec、Gold SQL、Prompt 版本、workspace 快照、split 和长度统计。
 - 不静默截断 Prompt 或 SQL；超长样本进入脱敏 exclusion manifest，除非合同明确允许并记录原因。
 - 中等规模数据必须同时报告行数、QuerySpec 数、family 数、程序族覆盖和每个 split 的哈希；行数不能替代独立语义能力。
-- 在线 aggregate 按服务端 QueryPlan 的维度/时间/明确 Top-N 派生结果行数预算，并服从进程行数、字节和超时兜底；不把全局 1,000 行当作业务完整性合同。资源 LIMIT 多读一行判断是否溢出，探测行不进入结果、工件或模型。聚合超界不返回部分统计；模型附加的顶层 LIMIT/OFFSET 不代替用户明确 Top-N。UI 初始预览固定 200，模型摘要最多 8 行/1,200 字符；分页与完整 CSV 读取同一已验证工件并检查用户/workspace/version。冻结离线数据和历史完整-denotation 合同保持原行数与协议，不随在线预算修改而重写。
+- 在线 aggregate 按服务端 QueryPlan 的维度/时间/明确 Top-N 派生结果行数预算，并服从进程行数、字节和超时兜底；不把全局 1,000 行当作业务完整性合同。资源 LIMIT 多读一行判断是否溢出，探测行不进入结果、工件或模型。聚合超界不返回部分统计；模型附加的顶层 LIMIT/OFFSET 不代替用户明确 Top-N。UI 初始预览固定 200；模型结果证据按 RequestBudget 的 token 预算组织，小结果尽量完整，大结果含服务端全量统计和选定行，保存与恢复不得再次按字符截断。计算由服务端完成，可加性须结合 Catalog 指标与分组维度，Top-N 合计不得冒充全业务总额。追问补读、分页与完整 CSV 都读取同一已验证工件并检查用户/workspace/version。冻结离线数据及历史 8 行/1,200 字符、完整-denotation 协议保留原样，不随在线预算修改而重写。
 - 自动生成的大批量样本使用确定性 renderer 和全量确定性契约检查；对高风险指标/粒度做分层人工或模型辅助抽样，不为低风险重复样本逐条制造昂贵人工流程。
 - Olist SQL-only 扩展必须按闸门推进：先冻结新增指标合同，再冻结 family/program 配额，再冻结受控中文 surface contract；只有小批 QuerySpec/Gold 准入、语义身份和 split 审计通过后，才允许物化完整 train/validation/test。中文改写不增加 family 计数，日期窗口不替代独立程序覆盖。
 

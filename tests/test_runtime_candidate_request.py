@@ -102,6 +102,8 @@ def test_server_execution_envelope_keeps_frozen_candidate_bytes_and_hash(retriev
     assert request.prompt_sha256 == legacy_request.prompt_sha256
     assert "result_budget" not in render_runtime_candidate_prompt(request)
     assert "query_mode" not in render_runtime_candidate_prompt(request)
+    assert "additive_metric_ids" not in render_runtime_candidate_prompt(request)
+    assert facts["result_contract"].as_tool_metadata()["additive_metric_ids"] == list(facts["result_contract"].additive_metric_ids)
 
 
 @pytest.mark.parametrize("change", ["half_present", "mode", "timeout"])

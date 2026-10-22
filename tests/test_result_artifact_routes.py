@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from data_analysis_agent.conversation_store import PostgresConversationStore
-from data_analysis_agent.metric_context import OLIST_RUNTIME_WORKSPACE
+from data_analysis_agent.runtime_workspace import load_runtime_workspace
 from data_analysis_agent.result_artifact import ResultArtifact
 from data_analysis_agent.result_artifact_store import ResultArtifactStore
 from vanna.core.storage import Conversation
@@ -27,7 +27,7 @@ def test_pages_download_and_scope_use_the_same_verified_artifact(monkeypatch, tm
     monkeypatch.setattr(demo, "RESULT_ARTIFACT_DIRECTORY", tmp_path)
     store = ResultArtifactStore(tmp_path)
     conversations = PostgresConversationStore()
-    workspace = OLIST_RUNTIME_WORKSPACE
+    workspace = load_runtime_workspace().profile
     artifact = ResultArtifact(
         artifact_id="budget-route-test", summary="已验证统计", metric_ids=("paid_order_count",),
         result_columns=("customer_city", "paid_order_count"),

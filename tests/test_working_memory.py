@@ -113,7 +113,9 @@ def test_working_memory_accepts_only_bounded_trusted_result_summary() -> None:
 
     assert updated.metric_ids == ("gmv",)
     assert updated.previous_result_summary is not None
-    assert len(updated.previous_result_summary) <= 1200
+    from data_analysis_agent.token_budget import DEFAULT_TOKEN_COUNTER
+    assert DEFAULT_TOKEN_COUNTER.count_text(updated.previous_result_summary) <= 4_000
+    assert updated.previous_result_summary.endswith("x" * 5000)
     assert memory.previous_result_summary is None
 
 

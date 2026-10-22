@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from .question_router import QuestionRoute
 from .result_artifact import ChartReplayRef, ResultArtifact
+from .result_evidence import bound_result_evidence
 from .query_time import copy_time_range, extract_absolute_range, time_range_instruction
 
 
@@ -57,7 +58,7 @@ class WorkingMemory:
             time_grain=value.get("time_grain") if value.get("time_grain") in {
                 "day", "week", "month", "quarter", "year"
             } else None,
-            previous_result_summary=text("previous_result_summary", 1_200),
+            previous_result_summary=bound_result_evidence(value.get("previous_result_summary")),
             previous_result_artifact=ResultArtifact.from_mapping(
                 value.get("previous_result_artifact")
             ),
@@ -132,7 +133,7 @@ class WorkingMemory:
         assistant prose and client metadata are never accepted as result
         evidence.
         """
-        value = summary.strip()[:1_200] if isinstance(summary, str) and summary.strip() else None
+        value = bound_result_evidence(summary)
         return WorkingMemory(
             metric_ids=self.metric_ids,
             time_range=self.time_range,

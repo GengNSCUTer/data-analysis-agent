@@ -44,6 +44,12 @@ RUN_PROJECT_DB=1 python -m pytest -q -m postgres \
 python -m pip install -e '.[browser-test]'
 python -m playwright install chromium
 python scripts/verify_runtime_capacity.py --browser-only --output /private/new-browser-run
+
+# 新初始化的独立合成库；ADMIN_DSN只用于构造并恢复测试数据，不交给产品。
+RUN_PROJECT_DB=1 RUN_VANNA_E2E=1 \
+  RESULT_EVIDENCE_TEST_ADMIN_DSN="$DATA_ANALYSIS_ADMIN_DSN" \
+  RESULT_EVIDENCE_BROWSER_OUTPUT=/private/result-evidence-run \
+  python -m pytest -q tests/e2e/test_result_evidence_flow.py
 ```
 
 受控脚本启动自己的临时 HTTP 进程、创建唯一测试账号和会话；结束后停止该进程，不触碰现有

@@ -22,6 +22,7 @@ from .semantic_catalog import Catalog, CatalogRetriever, CatalogSelection
 from .analysis_state import AnalysisState, StatePatch
 from .chart_contract import ChartType
 from .token_budget import ContextCapacityError
+from .result_evidence import ResultInspection
 
 
 class SemanticIntentError(ValueError):
@@ -110,6 +111,10 @@ class SemanticIntent(BaseModel):
     result_target: Literal["current_task", "last_successful_result"] = Field(
         default="current_task",
         description="默认解释当前任务结果；明确要求失败前那份成功结果时选择last_successful_result，不修改当前待查询条件。",
+    )
+    result_inspection: ResultInspection | None = Field(
+        default=None,
+        description="仅用于result_followup：从上一份完整结果选行或由服务端计算，不能扩大原查询范围。",
     )
     top_n: int | None = Field(default=None, ge=1, le=100_000)
     clarification: str | None = Field(
@@ -331,6 +336,8 @@ class SemanticIntentInterpreter:
                 "不要求用户说固定关键词。查实际数字属于 data_query；定义、一般建议无需查库。",
                 "catalog_definition必须填写当前Catalog中所问指标的metric_ids，不是空列表，不能只在assumptions写指标名。",
                 "解释已有结果属于 result_followup；修改范围、分组或重新统计属于 data_query。",
+                "已有结果内的补看、求和、比较属于result_followup，可填写result_inspection；服务端读取完整工件并计算，不能让解释模型自己心算。operation=overview提供全量概览；rows配合filters、offset/limit或row_numbers补看；sum需metric_id且仅允许Catalog可加指标；compare需metric_id和两个row_numbers，计算第一行减第二行及相对第二行的变化百分比。row_numbers从1开始，表示原结果中的行位置。filters只能选原结果已返回的维度值，不是新的数据库查询条件。",
+                "例如补看第9、10行用result_followup/result_inspection={operation:rows,row_numbers:[9,10]}；比较前两行金额用{operation:compare,metric_id:当前指标,row_numbers:[1,2]}；汇总当前完整结果用sum。修改日期、改分组或请求原结果无法支持的均值/比率/去重总体口径，使用data_query，不对分组比率求和或简单平均。",
                 "追问可明确继承受控状态；新问题未请求继承时不要带入旧范围或分组。",
                 "action=new_task表示独立新分析；update_task表示修改当前分析；keep表示解释/展示现有结果；clear_task表示清空当前分析。",
                 "修改任务请给state_patch.operations，只列出本轮变化，不重新填全量条件：set替换字段、add增加列表成员、remove撤销列表成员、clear清空字段。filters使用{dimension,value}对象，与filters字段本身的格式一致。state_patch中的op、field、value必须是合法JSON字符串/数组；clear操作必须省略value或写null，不能写空字符串。",

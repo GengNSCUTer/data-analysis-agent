@@ -51,7 +51,9 @@ query_audits / agent_runs / query-result artifact
   -> SQL 执行、合同、耗时与展示结果的审计证据
 ```
 
-`previous_result_summary` 目前只有最多 1,200 字符，且仅在 Router 已判定为 `result_followup` 时交给无工具模型。常规 SQL Prompt 不会自动包含它。这一 fail-closed 边界应保留。
+`previous_result_summary`只包含已验证结果证据，不自动变为SQL条件。2026-10-22起在线证据默认
+使用4K估算token预算，不再按1,200字符截断；小结果尽量完整，大结果提供服务端统计与选定行。
+结果追问可补读同一授权工件并请求受限计算，由无工具模型解释。详见[result-budget-v2](result-budget-v2.md)。
 
 ## 3. 产品目标与明确非目标
 

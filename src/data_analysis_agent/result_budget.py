@@ -98,9 +98,9 @@ class ResultBudget:
 
         ``as_metadata`` is the strict plan/contract payload and keeps its
         frozen field names. This view is only for logs and UI diagnostics, so
-        readers do not mistake the process ceiling, the aggregate cardinality
-        bound, the frontend preview, and the model summary sample for one
-        shared "row limit".
+        readers do not mistake the process ceiling, aggregate cardinality,
+        frontend preview and historical offline sample for one row limit.
+        Online result evidence is separately bounded by RequestBudget tokens.
         """
         return {
             "contract_id": self.contract_id,
@@ -109,8 +109,8 @@ class ResultBudget:
             "query_result_row_ceiling": self.aggregate_result_rows,
             "detail_page_row_limit": self.detail_page_rows,
             "frontend_preview_row_limit": self.preview_rows,
-            "model_summary_row_limit": self.llm_context_rows,
-            "model_summary_char_limit": self.llm_context_chars,
+            "offline_sample_row_limit": self.llm_context_rows,
+            "offline_sample_char_limit": self.llm_context_chars,
             "result_byte_ceiling": self.result_max_bytes,
             "statement_timeout_ms": self.statement_timeout_ms,
             "export_byte_limit": self.export_max_bytes,

@@ -171,6 +171,15 @@ class Catalog:
         except KeyError as exc:
             raise CatalogValidationError(f"unknown Catalog table: {table_id}") from exc
 
+    def additive_metrics_for(self, metric_ids: Sequence[str], dimensions: Sequence[str]) -> tuple[str, ...]:
+        """Multi-membership groups cannot be rolled up as disjoint populations."""
+        approved = self.workspace.additive_metric_ids if self.workspace else frozenset()
+        return tuple(metric_id for metric_id in metric_ids if metric_id in approved and all(
+            policy.mode in {"safe_direct", "payment_share"}
+            for dimension, policy in self.metrics_by_id[metric_id].dimension_policies.items()
+            if dimension in dimensions
+        ))
+
     def has_available_attribution_rule(self, rule_id: str | None) -> bool:
         """Whether a server implementation, not a prompt, owns the rule."""
 
@@ -342,8 +351,7 @@ class ResultContract:
             ),
             attribution_requirements=attribution_requirements,
             result_budget=result_budget,
-            additive_metric_ids=tuple(metric_id for metric_id in metric_ids
-                                      if catalog.workspace and metric_id in catalog.workspace.additive_metric_ids),
+            additive_metric_ids=catalog.additive_metrics_for(metric_ids, requested_dimensions),
         )
 
     @staticmethod
@@ -405,6 +413,9 @@ class ResultContract:
         }
         if include_result_budget and self.result_budget is not None:
             result.update(self.result_budget.as_metadata())
+            # Result-only rollups are not SQL inputs. Keep frozen candidate
+            # prompts and offline contracts unchanged.
+            result["additive_metric_ids"] = list(self.additive_metric_ids)
         return result
 
     def as_evidence(self) -> dict[str, Any]:

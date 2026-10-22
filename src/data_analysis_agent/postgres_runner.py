@@ -33,6 +33,7 @@ from .metric_context import DATASET_VERSION, METRIC_VERSION, OLIST_WORKSPACE
 from .workspace import WorkspaceProfile
 from .query_filters import QueryFilter
 from .result_budget import ResultBudget, ResultBudgetError, validate_runtime_result_budget
+from .result_evidence import RESULT_EVIDENCE_PREFIX, build_result_evidence
 
 
 class _QueryCancellation:
@@ -523,22 +524,41 @@ class SecurePostgresRunner(SqlRunner):
                 )
                 self._record_timing(context, "postgres_sql", started_at)
                 return validated_frame
-            result_summary = build_result_summary(
-                validated_frame,
-                validation,
+            usage = context.metadata.get("budget_usage")
+            summary_arguments = dict(
                 metric_ids=context.metadata.get("metric_result_columns", ()),
                 required_columns=context.metadata.get("required_result_columns", ()),
-                column_aliases=context.metadata.get(
-                    "required_result_column_aliases", {}
-                ),
+                column_aliases=context.metadata.get("required_result_column_aliases", {}),
                 column_labels=context.metadata.get("result_column_labels", {}),
-                max_rows=result_budget.llm_context_rows if result_budget else 8,
-                max_chars=result_budget.llm_context_chars if result_budget else 1_200,
             )
+            if result_budget is not None:
+                plan = context.metadata.get("query_plan") or {}
+                result_summary = build_result_evidence(
+                    validated_frame, **summary_arguments,
+                    additive_metric_ids=context.metadata.get("additive_metric_ids", ()),
+                    time_column="time" if plan.get("time_grain") else None,
+                    top_n=plan.get("top_n"),
+                    max_tokens=usage.budget.max_result_evidence_tokens if usage is not None else None,
+                )
+            else:
+                # Frozen offline callers retain their historical sample format.
+                result_summary = build_result_summary(
+                    validated_frame,
+                    validation,
+                    **summary_arguments,
+                )
             context.metadata["validated_result_summary"] = result_summary
-            usage = context.metadata.get("budget_usage")
             if usage is not None and hasattr(usage, "set_result_summary"):
                 usage.set_result_summary(result_summary)
+                if result_budget is not None:
+                    evidence = json.loads(result_summary.removeprefix(RESULT_EVIDENCE_PREFIX))
+                    usage.record_catalog({"result_evidence": {
+                        "token_limit": usage.budget.max_result_evidence_tokens,
+                        "source_row_count": len(validated_frame),
+                        "included_row_count": evidence["included_row_count"],
+                        "coverage": evidence["coverage"],
+                        "scope": evidence["scope"],
+                    }})
             if usage is not None and hasattr(usage, "mark_result_contract_satisfied"):
                 usage.mark_result_contract_satisfied()
             chart_metadata = context.metadata.get("chart_contract")

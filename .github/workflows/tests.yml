@@ -75,6 +75,7 @@ jobs:
           tests/test_result_artifact.py \
           tests/test_result_presentation.py \
           tests/test_result_validator.py \
+          tests/test_result_evidence.py \
           tests/test_result_budget_contract.py \
           tests/test_result_budget_runtime.py \
           tests/test_local_auth.py \
@@ -169,3 +170,11 @@ jobs:
       run: python -m playwright install --with-deps chromium
     - name: Test the browser with a controlled provider and real PostgreSQL
       run: python scripts/verify_runtime_capacity.py --browser-only --output /tmp/copilot-browser-evidence
+    - name: Test complete result explanations and artifact follow-ups
+      env:
+        RUN_VANNA_E2E: '1'
+        DATA_ANALYSIS_CATALOG_PATH: /tmp/copilot-ci-state/synthetic-catalog.yaml
+        DATA_ANALYSIS_DATASET_VERSION: synthetic-olist-v1
+        RESULT_EVIDENCE_TEST_ADMIN_DSN: postgresql://app_admin:ci-admin-password@127.0.0.1:5432/data_analysis_agent
+        RESULT_EVIDENCE_BROWSER_OUTPUT: /tmp/copilot-result-evidence
+      run: python -m pytest -v tests/e2e/test_result_evidence_flow.py

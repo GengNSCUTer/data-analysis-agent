@@ -231,6 +231,28 @@ class ResultArtifactStore:
         """Open before streaming: an ongoing download survives retention cleanup."""
         return self.verified_csv_path(**scope).open('rb')
 
+    @_artifact_access
+    def read_result_frame(
+        self, *, artifact_id: str, user_id: str, workspace_id: str,
+        dataset_version: str, metric_version: str, dimensions: Iterable[str] = (),
+    ):
+        """Read one owner/version-verified result for bounded server calculations."""
+        import pandas as pd
+
+        manifest = self.verify_manifest(
+            artifact_id=artifact_id, user_id=user_id, workspace_id=workspace_id,
+        )
+        if (manifest["dataset_version"], manifest["metric_version"]) != (dataset_version, metric_version):
+            raise ResultArtifactIntegrityError("result versions no longer match the workspace")
+        path = self._scope(user_id, workspace_id, artifact_id) / "result.csv"
+        # Preserve dimension values such as "01" and "NA" exactly; they are
+        # business keys, not numeric values or pandas' default null markers.
+        dtype = {name: str for name in dimensions if name in manifest["columns"]}
+        frame = pd.read_csv(path, dtype=dtype, keep_default_na=False, na_values=[""])
+        if len(frame) != manifest["row_count"]:
+            raise ResultArtifactIntegrityError("result row count no longer matches the manifest")
+        return frame
+
     def cleanup_expired(self, *, now: float | None = None) -> dict[str, int]:
         """Delete only known runtime payloads, never experiment directories."""
         removed = removed_bytes = 0

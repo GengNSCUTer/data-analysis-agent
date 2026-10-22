@@ -7,7 +7,6 @@ import asyncio
 from dataclasses import replace
 import inspect
 import json
-import re
 from time import perf_counter
 from typing import Awaitable, Callable
 
@@ -47,6 +46,7 @@ from .result_reference import (
     resolve_ranked_entity,
 )
 from .result_budget import ResultBudget
+from .result_evidence import ResultInspectionError, build_result_evidence, constrain_followup_answer
 from .run_recorder import PostgresRunRecorder
 from .semantic_catalog import ResultContract
 from .semantic_intent import (
@@ -73,55 +73,6 @@ def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
     return {key: manifest[key] for key in allowed if key in manifest}
 
 
-_FOLLOWUP_NUMBER = re.compile(r"(?<![a-zA-Z0-9_.])-?\d+(?:,\d{3})*(?:\.\d+)?%?")
-_FOLLOWUP_PRESENTATION_PREFIX = re.compile(r"(?:第|排名第|前|top\s*)\s*$", re.IGNORECASE)
-_FOLLOWUP_PRESENTATION_UNIT = re.compile(
-    r"^\s*(?:名|位|个|项|条|行|组|页|的|是|为)"
-)
-_FOLLOWUP_COUNT_PREFIX = re.compile(r"(?:共|总共|返回|展示|显示|列出|保留)\s*$")
-
-
-def _followup_business_numbers(text: str) -> tuple[str, ...]:
-    """Extract business numbers while ignoring presentation numbering.
-
-    Result follow-ups are allowed to restate numbers already present in the
-    trusted summary.  List labels and ordinal/range labels are formatting, not
-    new business facts: ``1.`` / ``第 10 名`` / ``前 5 项`` / ``共 8 行``.
-    """
-
-    values: list[str] = []
-    for match in _FOLLOWUP_NUMBER.finditer(text or ""):
-        before = text[max(0, match.start() - 12):match.start()]
-        after = text[match.end():match.end() + 8]
-        line_before = text[text.rfind("\n", 0, match.start()) + 1:match.start()]
-        if _FOLLOWUP_PRESENTATION_PREFIX.search(before):
-            # English ``Top 10`` is itself a ranking label even when the
-            # following word is a dimension rather than a Chinese unit.
-            if re.search(r"top\s*$", before, re.IGNORECASE):
-                continue
-            if _FOLLOWUP_PRESENTATION_UNIT.search(after):
-                continue
-        if _FOLLOWUP_COUNT_PREFIX.search(before) and _FOLLOWUP_PRESENTATION_UNIT.search(after):
-            continue
-        if not line_before.strip() and re.match(r"\s*[.)）、:：-]", after):
-            continue
-        values.append(match.group(0).replace(",", ""))
-    return tuple(values)
-
-
-def followup_adds_numbers(answer: str, summary: str) -> bool:
-    """True when a result explanation contains a number absent from the summary."""
-
-    allowed = set(_followup_business_numbers(summary))
-    return any(number not in allowed for number in _followup_business_numbers(answer))
-
-
-def constrain_followup_answer(answer: str, summary: str) -> str:
-    if not followup_adds_numbers(answer, summary):
-        return answer
-    return "这次只复述已验证摘要，不补充摘要以外的数字。\n" + summary.strip()
-
-
 TOOL_FREE_SYSTEM_PROMPT = """
 你是一个通用业务解释助手，当前请求没有数据库工具。
 
@@ -134,6 +85,9 @@ TOOL_FREE_SYSTEM_PROMPT = """
 RESULT_FOLLOWUP_SYSTEM_PROMPT = """
 你只能解释上一轮已验证结果摘要和查询范围。结果数字来自结果摘要，时间/维度/筛选来自已验证查询范围。
 不要计算、估计或补充任何新的指标数字，也不要把摘要没有写明的原因说成确定事实。
+statistics和calculation由服务端根据完整结果计算，sample_rows只是证据中的行；coverage不是complete时，
+不得把样本之和当作全量统计。sum_of_returned_rows只对应这份结果（可能仅Top-N），不是全业务总额。
+先回答用户当前问题，用业务列名解释；不复述JSON或内部字段。不得把相关性说成因果。
 叙事历史仅用于理解讨论脉络，不能补充结果数字、查询条件或原因。
 若摘要不足以回答，直接说明依据不足。回答应简洁、中文。
 """.strip()
@@ -741,6 +695,7 @@ class BudgetedChatHandler(ChatHandler):
                             route,
                             updated_memory,
                             user,
+                            intent=semantic_intent,
                         ):
                             if isinstance(piece, str):
                                 detail = piece
@@ -985,6 +940,8 @@ class BudgetedChatHandler(ChatHandler):
         route,
         memory: WorkingMemory,
         user,
+        *,
+        intent: SemanticIntent | None = None,
     ):
         """Answer a non-data request without exposing the SQL tool registry.
 
@@ -995,6 +952,13 @@ class BudgetedChatHandler(ChatHandler):
         prompt = request.message.strip()
         summary = memory.previous_result_summary or ""
         hold_followup = route.intent == "result_followup" and bool(summary.strip())
+        if hold_followup and self.result_artifact_store is not None and memory.previous_result_artifact is not None:
+            try:
+                summary = await self._inspect_previous_result(memory, user, intent)
+            except (ResultInspectionError, FileNotFoundError, PermissionError, ResultArtifactIntegrityError) as exc:
+                # No guessed numbers and no request to re-supply known filters.
+                yield f"这份结果暂时不能支持本次解释：{exc}"
+                return
         system_prompt = (
             RESULT_FOLLOWUP_SYSTEM_PROMPT if hold_followup else TOOL_FREE_SYSTEM_PROMPT
         )
@@ -1058,6 +1022,43 @@ class BudgetedChatHandler(ChatHandler):
         if hold_followup:
             content = constrain_followup_answer(content, summary)
         yield content
+
+    async def _inspect_previous_result(self, memory, user, intent) -> str:
+        artifact = await self._verified_previous_artifact(memory, user)
+        if artifact is None:
+            raise ResultInspectionError("已保存结果失效，请重新查询。")
+        frame = await asyncio.to_thread(
+            self.result_artifact_store.read_result_frame,
+            artifact_id=artifact.artifact_id, user_id=user.id,
+            workspace_id=self.workspace.workspace_id,
+            dataset_version=self.workspace.dataset_version_id,
+            metric_version=self.workspace.metric_version,
+            dimensions=artifact.query_scope.get("dimensions", ()),
+        )
+        catalog = self.question_router.retriever.catalog
+        labels = {metric_id: catalog.metrics_by_id[metric_id].name for metric_id in artifact.metric_ids
+                  if metric_id in catalog.metrics_by_id}
+        summary = await asyncio.to_thread(
+            build_result_evidence, frame,
+            required_columns=artifact.result_columns, metric_ids=artifact.metric_ids,
+            column_labels=labels, additive_metric_ids=catalog.additive_metrics_for(
+                artifact.metric_ids, artifact.query_scope.get("dimensions", ()),
+            ),
+            time_column="time" if artifact.query_scope.get("time_grain") else None,
+            top_n=artifact.query_scope.get("top_n"),
+            inspection=intent.result_inspection if intent else None,
+            max_tokens=self.budget.max_result_evidence_tokens,
+        )
+        usage = CURRENT_BUDGET.get()
+        if usage is not None:
+            payload = json.loads(summary.split("：", 1)[1])
+            usage.record_catalog({"result_inspection": {
+                "artifact_id": artifact.artifact_id,
+                "request": payload["selection"], "source_row_count": len(frame),
+                "selected_row_count": payload["row_count"], "coverage": payload["coverage"],
+                "included_row_count": payload["included_row_count"],
+            }})
+        return summary
 
     async def _ground_unmatched_question(self, question: str, user):
         """Align an unmatched data question to Catalog ids, or keep clarifying."""

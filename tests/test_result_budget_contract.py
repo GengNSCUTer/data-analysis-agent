@@ -61,7 +61,8 @@ def test_budget_evidence_names_each_layer_without_changing_contract_payload() ->
     assert evidence["process_row_ceiling"] == 100_000
     assert evidence["query_result_row_ceiling"] == 100_000
     assert evidence["frontend_preview_row_limit"] == 200
-    assert evidence["model_summary_row_limit"] == 8
+    assert evidence["offline_sample_row_limit"] == 8
+    assert "model_summary_row_limit" not in evidence
     assert set(budget.as_metadata()["result_budget"]) != set(evidence)
 
 

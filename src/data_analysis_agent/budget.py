@@ -13,6 +13,8 @@ from vanna.core.middleware import LlmMiddleware
 from vanna.core.registry import ToolRegistry
 from vanna.core.tool import ToolCall, ToolContext, ToolResult
 
+from .result_evidence import DEFAULT_RESULT_EVIDENCE_TOKENS, bound_result_evidence
+
 
 TERMINATION_REASONS: Final[frozenset[str]] = frozenset(
     {
@@ -60,6 +62,7 @@ class RequestBudget:
     max_context_chars: int = 192_000  # legacy observability ceiling
     max_context_messages: int = 160
     max_output_tokens: int = 4_000
+    max_result_evidence_tokens: int = DEFAULT_RESULT_EVIDENCE_TOKENS
     # Connection is TCP/TLS/HTTP setup. First byte is the wait until the model
     # emits anything. Stream idle is the gap allowed between later tokens.
     llm_connect_timeout_seconds: float = 10.0
@@ -136,6 +139,9 @@ class RequestBudget:
             ),
             max_output_tokens=read(
                 "DATA_ANALYSIS_MAX_OUTPUT_TOKENS", cls.max_output_tokens
+            ),
+            max_result_evidence_tokens=read(
+                "DATA_ANALYSIS_MAX_RESULT_EVIDENCE_TOKENS", cls.max_result_evidence_tokens
             ),
             llm_connect_timeout_seconds=float(
                 os.getenv(
@@ -431,7 +437,7 @@ class BudgetUsage:
         if summary is None:
             self.result_summary = None
             return
-        self.result_summary = str(summary).strip()[:1_200] or None
+        self.result_summary = bound_result_evidence(summary, self.budget.max_result_evidence_tokens)
 
     def mark_result_contract_satisfied(self) -> None:
         """Mark that a server-validated result is available for this request."""

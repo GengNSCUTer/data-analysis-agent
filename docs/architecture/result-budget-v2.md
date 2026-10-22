@@ -2,7 +2,7 @@
 title: Result Budget Contract v2
 status: implemented
 date: 2026-10-12
-last_updated: 2026-10-14
+last_updated: 2026-10-22
 ---
 
 # Result Budget Contract v2
@@ -29,7 +29,7 @@ last_updated: 2026-10-14
 | `result_max_bytes` | 32 MiB，可配置 | 读取时估算 JSON UTF-8 字节并拒绝超界；不是精确 Python RSS 预算 |
 | 前端初始预览 | 200 行 | 不把完整结果一次塞入组件 |
 | 工件分页 | 默认 200，硬上限 500 | 每次仅读取/返回一页，稀疏 CSV 索引避免深页逐行跳过 |
-| 模型摘要 | 最多 8 行 / 1,200 字符 | 样例用于解释与追问，不代表完整统计明细 |
+| 在线模型结果证据 | 默认 4,000 估算 tokens，由 `RequestBudget.max_result_evidence_tokens` 配置 | 小结果尽量完整；大结果提供全量统计、时间端点和预算内的行，明确覆盖范围 |
 
 例如“2017 年按日统计各州有效订单数”最多 365 × 27 = 9,855 组，不再因超过 1,000 被预检拦截。“按客户城市统计有效订单数”使用当前 Olist 快照的 4,119 城市边界，不能擅自改成前 20 名；用户明确说“前五名”才使用 Top-N=5。其他 workspace 使用自己的 DimensionBinding 基数配置。
 
@@ -47,7 +47,8 @@ Router / QueryPlan：确定指标、维度、时间、明确 Top-N、结果预�
 → SqlPolicy：AST、表/列白名单、敏感投影和本请求 LIMIT
 → PostgreSQL reader：named cursor、分批、时间/字节/行数边界
 → ResultValidator：列、时间、数值、粒度与完整性
-→ 完整 CSV 工件 + 200 行 Presenter + 8 行/1,200 字符摘要
+→ 完整 CSV 工件 + 200 行 Presenter + 有 token 预算的结果证据
+→ 无工具模型解释（数字来自证据，不自行计算）
 → 工件分页或鉴权 CSV 下载（不调用模型、不重跑 SQL）
 ```
 
@@ -61,6 +62,32 @@ Router / QueryPlan：确定指标、维度、时间、明确 Top-N、结果预�
 - `examples/embeddable_copilot_shell.html`：更多 → 分页查看完整结果；当前范围、总行数和翻页操作。
 
 分页和下载都要求当前登录用户拥有会话及当前 workspace/version 的工件，并验证文件完整性。完整 CSV 内部保存不等于开放 raw SQL、隐藏敏感字段或未鉴权下载。
+
+## 服务端计算、模型解释（2026-10-22）
+
+`result_evidence.py:build_result_evidence()`只选 ResultContract 允许的列。Top-10、常见州分组和
+12个月等小结果在预算内完整提供；大结果包含基于完整返回结果计算的极值、对应行、并列数量、
+时间首尾及允许的合计，随后按原顺序加入能放下的行。`coverage`、完整行数和提供行数均明确标注，
+不能把前缀行误当全量。Top-N 的合计仅代表返回的前N项，不是全业务总额。
+
+可加性来自 Catalog/workspace，且取决于当前分组：同一订单可能属于多个品类，分品类的去重
+订单数不能再相加；客单价、比率和均值也不能通过简单相加或平均还原总体。`ResultInspection`
+仅允许 overview、指定行/维度筛选、已批准指标求和、两行差额/相对变化，不开放 Python 或 SQL。
+超出这份结果范围的需求应重新进入受控查询。
+
+`chat_runtime.py:_inspect_previous_result()`在解释追问时校验工件归属、workspace、数据及指标
+版本和文件完整性，再由服务端读取完整 CSV 并生成本次证据。解释/求和/比较不新增 SQL、不改
+当前筛选。`llm_observability.py:_explain_result()`在首次查询成功后只将问题、计划范围与证据交给
+无工具模型解释；不再默认只复述前三行。解释中的证据外数字会替换为可读的服务端事实，检查不是
+完整语义证明器，也不保证识别错误归因或把正确数字引用到错误指标的情况。
+
+结果证据在 BudgetUsage、ResultArtifact、WorkingMemory 中使用同一 token 边界，保存/刷新不再
+按1,200字符截断。`DATA_ANALYSIS_MAX_RESULT_EVIDENCE_TOKENS=4000`可调整；最终完整模型请求
+仍受总上下文预算限制。当前token计数是本地估算，不等于提供方精确计费。
+
+历史离线的8行/1,200字符样本、既有预算DTO字段与候选SQL Prompt保持原协议；诊断中的
+`offline_sample_*`只指历史样本，在线实际覆盖量见`catalog_trace.result_evidence`或
+`result_inspection`。没有重写历史数据、hash或评测成绩。
 
 ## 验证与边界
 

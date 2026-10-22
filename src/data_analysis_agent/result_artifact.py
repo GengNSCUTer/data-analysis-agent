@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any, Mapping
 
+from .result_evidence import bound_result_evidence
+
 
 @dataclass(frozen=True)
 class ResultArtifact:
@@ -85,7 +87,7 @@ class ResultArtifact:
         query_scope = _query_scope(trace, state, plan, external)
         return cls(
             artifact_id="rta_" + sha256(request_id.encode("utf-8")).hexdigest()[:20],
-            summary=_bounded_text(summary, 1_200) or "",
+            summary=bound_result_evidence(summary) or "",
             metric_ids=metric_ids,
             result_columns=result_columns,
             dataset_version=dataset_version,
@@ -107,7 +109,7 @@ class ResultArtifact:
         if not isinstance(value, Mapping):
             return None
         artifact_id = _bounded_text(value.get("artifact_id"), 64)
-        summary = _bounded_text(value.get("summary"), 1_200)
+        summary = bound_result_evidence(value.get("summary"))
         if not artifact_id or not summary:
             return None
         chart_state = _bounded_text(value.get("chart_state"), 32) or "not_rendered"
