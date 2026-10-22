@@ -2,7 +2,7 @@
 goal: 可信数据分析 Agent 的产品完善、代码学习与后端及 Agent 实习面试准备
 version: 1.0
 date_created: 2026-10-10
-last_updated: 2026-10-21
+last_updated: 2026-10-22
 owner: 李耿楠
 status: In Progress
 tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
@@ -26,6 +26,10 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 **时间安排。** 默认每周五个主题单元、每单元 90–120 分钟，另外预留每周半天处理必要的小改动。遇到面试或另一项目占用时间，按完成条件顺延，不赶工。建议本项目时间约 60% 用于业务质量与工程补缺，25% 用于代码理解和面试复述，15% 用于后训练学习与有限验证；比例是执行建议，不是岗位统计结论。
 
 **每日方式。** 一个真实场景 → 用户先口述 → 阅读 1–3 个关键函数 → 跟踪输入/状态/输出 → 做一个测试或小改动 → 记录证据与边界 → 再次口述。发现缺陷立即列明影响；只修本单元需要的问题。通用学习材料不复制另一个项目，后训练概念沿用既有学习目录。2026-10-10 用户授权开始 Day 1；后续功能任务未自动启动。
+
+2026-10-22学习范围调整：按实现机制组织学习，用GMV等少量代表例子理解统计粒度、
+关联放大和口径传递；不逐个遍历业务指标，不以做完全部指标算例作为阶段完成条件。
+重复机制掌握后继续代码主线；其余指标定义按实际问题查阅。
 
 2026-10-19 补充：[六项产品完善执行清单](process-agent-product-readiness-v1.md)按“可信流式回答 → 业务质量 → 部署 → 新库接入 → 多人/故障 → 开源收口”逐项落实本计划。工程修复不自动标记学习完成，代码阅读与复述仍记录在既有学习文档。
 
@@ -60,7 +64,7 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
 | TASK-001 | Day 1：从 src/data_analysis_agent/server.py:create_app、ManagedChatHandler、SemanticIntentInterpreter 和 BudgetedChatHandler 跟踪“客户州有效订单前五”请求。理解当前自然语言理解、状态和执行的分工；旧 classify/admit 只供历史离线协议。用户闭卷画链路，说明QuerySpec/QueryPlan区别与一次拒绝路径。 | 是 | 2026-10-21 |
-| TASK-002 | Day 2：阅读 semantic_catalog.py、query_plan.py、plan_sql_guard.py 和十项/十九项指标合同，核对 GMV、订单数、客单价的 grain、状态与 join 放大风险。只为发现的真实口径缺陷补测试，不一口气读全部训练构造脚本。 | 否 | — |
+| TASK-002 | Day 2：以GMV为代表，阅读Catalog定义、MetricPlan.from_metric()及plan_sql_guard.py，理解统计粒度、默认条件、join放大，以及计划校验的覆盖与盲区。不逐项学习全部指标；其余合同按需查阅。只为发现的真实口径缺陷补测试，不展开全部训练构造脚本。 | 否 | — |
 | TASK-003 | Day 3：阅读 sql_policy.py、SecurePostgresRunner 和 ResultValidator，复核只读角色、敏感列、空窗口、计划结果预算与多读一行，以及预览200行/模型8行/完整工件的区别；说明执行与合同通过不能证明全部SQL业务语义。旧1,000行协议只供历史离线评测。 | 否 | — |
 | TASK-004 | Day 4：阅读 conversation_store.py、working_memory.py、context_builder.py、analysis_lifecycle.py 与 ResultArtifactStore。跟踪“查结果→结果解释→换维度→重载→清空分析”的会话，验证摘要不进入 SQL 条件、状态冲突可恢复、下载不能跨用户/workspace。 | 否 | — |
 | TASK-005 | Day 5：复用 scripts/run_product_capability_online.py 和 conversations.py 的结果记录，读取仓库外回答证据，完成已有 Phase B 的人工标注；若旧输出缺失，明确标缺失。另冻结 evals/cases/product_release_dev_v1.yaml 的 60 条新开发用例：单轮业务10、澄清10、两窗口比较/趋势10、多轮10、安全与范围10、图表/下载/空结果10。来源不复写既有 SFT 或 final test；输出当前 baseline 和第一周五分钟口述。 | 否 | — |
@@ -70,7 +74,8 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 2026-10-21完成Day 1：用户已分段阅读并复述语义理解、状态更新、QueryPlan、候选SQL、执行
 安全、结果保存与回答的主链；能说明遗漏SP筛选应拒绝、QuerySpec与QueryPlan的来源差异，
 以及服务端身份、角色白名单与数据库只读权限的区别。完成依据是代码阅读与复述，不是工程
-测试数量。Day 2开始核对GMV的商品行粒度、状态和品类筛选口径；TASK-002仍待完成。
+测试数量。Day 2已完成GMV的商品行粒度、关联放大、EXISTS筛选及MetricPlan口径传递复述；
+2026-10-22收住逐指标讲解，余下只阅读SQL计划校验的实现与边界，TASK-002仍待完成。
 问答继续集中在[`agent-project-walkthrough-v1.md`](../docs/learning/agent-project-walkthrough-v1.md)，
 不启动新训练或重复终测。
 
