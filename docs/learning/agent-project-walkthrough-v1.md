@@ -941,3 +941,30 @@ PostgreSQL的GROUP BY错误优先按SQLSTATE识别；修复服务异常、没有
 另覆盖提供方失败、取消、修复候选越权和修复后二次执行失败。浏览器检查查询图表、停止、
 刷新和CSV恢复；候选提供方受控，不代表已测量在线模型修复成功率，也不是全业务正确性
 认证。当前单元收口，下一次按Day 3学习执行安全与结果校验，不再扩展此处规则清单。
+
+### 2026-10-22｜Day 3开始：只读SQL也有访问范围
+
+用户确认Day 2结束并要求进入Day 3。本日依次阅读SqlPolicy的对象访问、reader只读执行、
+结果预算及ResultValidator；每次只讲一个单元，用户复述后再继续，TASK-003暂不标记完成。
+本轮目标是理解表白名单如何限制只读查询，输入为SQL和服务端role/workspace，输出为允许
+或PolicyViolation；不改运行时、不增加规则、不启动模型或训练，验收为阅读和两题复述。
+
+先看`sql_policy.py:113-130`，允许的表、列和敏感字段来自服务端workspace配置；随后看
+`evaluate()`的170-189行。它先按role选择允许表，再遍历AST中的真实表引用，检查schema
+与表白名单。普通CTE名称单独处理，不能因为写了WITH就把CTE误当成物理业务表。只读查询
+也可能访问账户、会话等应用数据，故“没有DELETE”不是完整权限检查。
+
+例子：`SELECT COUNT(*) FROM analytics.fact_orders`可通过本单元的对象权限检查；
+`SELECT COUNT(*) FROM app.accounts`是合法只读语句，但schema不在分析范围，拒绝。
+admin可访问的表范围比analyst大，仍不是任意SQL权限；134-157行的单语句/只读规则对两种
+角色都生效，因此admin的`DELETE FROM analytics.fact_orders`同样拒绝。数据库reader的
+职责放到下一单元结合连接代码阅读，本轮不展开。
+
+验证：已有SQL策略定向回归11 passed、16 deselected；另直接调用evaluate复核上述三条
+SQL分别为允许、schema拒绝和写操作拒绝。没有向数据库实际执行这些语句，不代表验证了
+对应统计口径或数据库权限配置。
+
+本轮复述题（待回答）：
+
+1. `SELECT COUNT(*) FROM app.accounts`没有写操作，为什么仍然必须拒绝？
+2. 在当前项目里，admin身份能否通过这条分析查询链执行DELETE？哪类规则仍然限制它？
