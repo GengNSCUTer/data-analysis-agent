@@ -832,3 +832,24 @@ allowed_dimensions，不调用LLM，也不生成或执行SQL。`QueryPlan.from_s
 
 1. `default_filters=metric.default_filters`中的默认条件，来自服务端Catalog还是模型临时生成？
 2. 把条件复制进MetricPlan，是否就意味着数据库已经自动排除了取消订单？为什么？
+
+用户回答：第一题来自Catalog，正确；第二题“不代表，这里只是服务端整理要求，最终还
+要看模型生成的SQL”，主线正确。补充：候选SQL还会接受服务端计划、安全和结果等检查，
+不能把最终是否允许执行只归于模型；现有检查也不能证明全部业务口径正确。
+
+### 2026-10-22｜Day 2：客单价必须按订单平均
+
+本单元只核对一个新指标，不改运行时、不启动评测。先读
+`src/data_analysis_agent/resources/catalog/olist_catalog_v3.yaml:255-264`：本项目
+`average_order_value`别名为客单价/AOV，定义为有效订单的商品金额之和除以有效订单数，
+不含运费、不是支付金额；`grain: order`表示平均的对象是一张张订单。
+
+对照离线Gold的实现`olist_queryspec.py:531-565`，只关注内层`SUM(i.price)`得到
+`order_total`、按`o.order_id`分组，再由外层`AVG(order_total)`平均。该renderer用于
+结构化Gold，不是在线理解中文或替代模型生成SQL的入口；线上候选也应遵守相同指标口径。
+现有`tests/test_olist_queryspec.py:96-102`断言该两层结构，本轮仅阅读，没有重跑测试。
+
+本轮复述题（待回答）：假设两张有效订单，A有两条商品行100元、50元，B有一条商品行50元。
+
+1. 按本项目口径，这两张订单的客单价是多少？
+2. 直接对三条商品行执行`AVG(i.price)`，能否得到客单价？它实际平均的是什么？
