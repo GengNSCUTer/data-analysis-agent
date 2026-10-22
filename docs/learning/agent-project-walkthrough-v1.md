@@ -766,3 +766,47 @@ GMV仍为150。商品表记录卖了什么（100+50），支付表记录这150�
 代金券50）；它们是同一笔交易的两个视角，不能再将商品金额与支付金额相加当作成交额。
 关联后的四行是两条商品行各匹配两条支付记录，不表示实际发生了四次商品销售。
 本轮只解释这一处疑问，关联放大的理解仍待用户确认。
+
+### 2026-10-22｜Day 2：从错误JOIN到EXISTS筛选
+
+用户已复述关联会重复计算，并请求具体SQL及继续学习。需纠正“本质就是不能关联支付表”
+这一概括：支付表可以参与查询，问题是直接裸连多条支付记录后再累加商品行金额。
+重复的是`i.price`，不是把支付表的`payment_value`当作商品金额再次相加。
+本单元只展示SQL与筛选写法，不改运行时、不启动训练或评测。
+
+会把前述150元示意订单算成300元的写法：
+
+```sql
+SELECT SUM(i.price) AS gmv
+FROM analytics.fact_orders o
+JOIN analytics.fact_order_items i ON i.order_id = o.order_id
+JOIN analytics.fact_payments p ON p.order_id = o.order_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable');
+```
+
+订单表一行匹配两条商品行，得到两行；再匹配两条支付记录，得到四行；SUM累加这四行的
+商品金额。只问总体GMV时直接去掉支付表JOIN即可，订单表仍用于检查默认订单状态。
+
+下一小步：如果问题是“使用过信用卡的订单，其商品成交额是多少”，支付记录只用于筛选
+订单，可按Catalog的规定使用EXISTS，不将其多条记录拼到商品行上：
+
+```sql
+SELECT SUM(i.price) AS gmv
+FROM analytics.fact_orders o
+JOIN analytics.fact_order_items i ON i.order_id = o.order_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+  AND EXISTS (
+    SELECT 1
+    FROM analytics.fact_payments p
+    WHERE p.order_id = o.order_id
+      AND p.payment_type = 'credit_card'
+  );
+```
+
+EXISTS只判断该订单有没有符合条件的支付记录。这里求的是筛选后订单的完整商品成交额，
+不是信用卡实付金额，也不是按支付方式分摊的GMV。口径来源为
+`src/data_analysis_agent/resources/catalog/olist_catalog_v3.yaml:175`；
+`metric_context.py:93-97`另有避免事实行放大的生成提示，不构成业务正确性证明。
+
+本轮复述题（待回答）：同一订单若有两条信用卡支付记录，EXISTS写法会让它的一件100元
+商品被累加一次还是两次？
