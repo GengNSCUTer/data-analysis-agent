@@ -968,3 +968,24 @@ SQL分别为允许、schema拒绝和写操作拒绝。没有向数据库实际�
 
 1. `SELECT COUNT(*) FROM app.accounts`没有写操作，为什么仍然必须拒绝？
 2. 在当前项目里，admin身份能否通过这条分析查询链执行DELETE？哪类规则仍然限制它？
+
+### 2026-10-22｜Day 3继续：数据库执行的账号与事务
+
+用户要求继续Day 3。前一节对象访问两题尚未作答，本轮沿同一安全执行链阅读实际连接，
+不据此标记用户已掌握或完成Day 3。本节只核对现有实现，不改代码、不启动服务或查询。
+
+阅读`postgres_runner.py:387-400`：连接使用服务端settings.reader_user，随后将事务设为
+readonly，再设置本次statement_timeout。应用admin并不切换为数据库超级用户。
+账号从workspace绑定，见同文件272-276行；不是由模型SQL或浏览器随意指定。
+
+再读`resources/sql/security.sql:12-29`的Olist初始化：reader默认只读，获授analytics的
+USAGE和SELECT；writer获授app元数据表的写权限。reader执行分析SQL，writer保存会话/
+审计，不能因为服务需要保存聊天而把writer交给模型查询。SqlPolicy负责应用对象/列规则，
+数据库授权和只读事务是另一层实际执行限制；reader可以读取的敏感业务标识仍需SqlPolicy
+限制输出，不能由“reader只读”推出数据不会泄露。超时与结果预算将在下一小节展开。
+
+本轮复述题（待回答）：
+
+1. SqlPolicy已经限制只读，为什么连接数据库还要用reader账号、设置只读事务？
+2. 保存聊天记录需要写数据库，这能否成为让模型SQL使用writer账号的理由？两种操作应
+   分别使用哪个账号？
