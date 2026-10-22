@@ -24,7 +24,7 @@ _TIME_PARTITION_HINT = re.compile(
 
 
 def sql_plan_mismatch(sql: str, plan: Mapping[str, Any] | None) -> str | None:
-    """Return a user-safe reason when SQL omits a required plan rule."""
+    """Return a safe reason for a detected, covered mismatch; otherwise None."""
 
     if not isinstance(sql, str) or not sql.strip() or not isinstance(plan, Mapping):
         return None
@@ -80,52 +80,12 @@ def sql_plan_mismatch(sql: str, plan: Mapping[str, Any] | None) -> str | None:
         ]
         if not rank_windows:
             return "分区 Top-N 的 SQL 必须使用窗口排名并按计划分区，不能用全局 LIMIT 代替。"
-        partition_sets = [
-            {
-                column.name.casefold()
-                for column in (window.args.get("partition_by") or ())
-                if isinstance(column, exp.Column)
-            }
-            for window in rank_windows
-        ]
-        partitioned_as_planned = any(
-            all(
-                (
-                    dimension == "time"
-                    and any(_TIME_PARTITION_HINT.search(column) for column in columns)
-                )
-                or dimension.casefold() in columns
-                for dimension in partition_dimensions
-            )
-            for columns in partition_sets
-        )
-        if not partitioned_as_planned:
+        if not any(_rank_partition_matches(window, partition_dimensions) for window in rank_windows):
             return f"分区 Top-N 缺少计划分区字段：{', '.join(partition_dimensions)}。"
-        # PostgreSQL has no QUALIFY. The model must filter the generated rank
-        # in an outer query; inspect the generated rank alias so an unrelated
-        # date/value predicate cannot satisfy this contract by accident.
-        rank_aliases = {
-            alias.alias_or_name.casefold()
-            for alias in root.find_all(exp.Alias)
-            if isinstance(alias.this, exp.Window)
-            and isinstance(alias.this.this, (exp.RowNumber, exp.Rank, exp.DenseRank))
-        }
-        rank_filter_values = []
-        for predicate in (*root.find_all(exp.LTE), *root.find_all(exp.LT)):
-            column = predicate.this
-            value = predicate.expression
-            if (
-                isinstance(column, exp.Column)
-                and column.name.casefold() in rank_aliases
-                and isinstance(value, exp.Literal)
-                and not value.is_string
-            ):
-                rank_filter_values.append((type(predicate), int(value.this)))
-        if not any(
-            (kind is exp.LTE and value <= limit)
-            or (kind is exp.LT and value <= limit + 1)
-            for kind, value in rank_filter_values
-        ):
+        # Follow the rank used by a contributing WHERE, not any occurrence
+        # inside NOT, OR TRUE, an unused CTE, or a differently partitioned rank.
+        scope = build_scope(root)
+        if scope is None or not _rank_bound_enforced(scope, partition_dimensions, limit):
             return f"分区 Top-N 必须在外层过滤排名不超过 {limit} 的行。"
     # The online aggregate runner owns the outer LIMIT: SqlPolicy replaces it
     # using this server plan. Rejecting a missing model-written LIMIT here is a
@@ -144,18 +104,93 @@ def sql_plan_mismatch(sql: str, plan: Mapping[str, Any] | None) -> str | None:
         match = _LIMIT.search(sql)
         if match is None or int(match.group(1)) > limit:
             return f"按 {dimension} 汇总时 SQL 必须 LIMIT {limit} 或更少，只保留该指标最高的分组。"
-    for requirement in plan.get("attribution_requirements") or []:
+    requirements = plan.get("attribution_requirements") or []
+    if requirements:
+        try:
+            columns = {column.name.casefold() for column in parse_one(sql, read="postgres").find_all(exp.Column)}
+        except (ParseError, TokenError, RecursionError):
+            return None  # SqlPolicy owns malformed SQL.
+    for requirement in requirements:
         if not isinstance(requirement, Mapping):
             continue
         mode = requirement.get("policy_mode")
         dimension = str(requirement.get("dimension") or "")
-        if mode == "payment_share" and (
-            "payment_value" not in folded or "payment_type" not in folded
-        ):
+        if mode == "payment_share" and not {"payment_value", "payment_type"} <= columns:
             return "按支付方式拆金额时，SQL 必须用 payment_value 占比分摊，并按 payment_type 汇总。"
-        if mode == "multi_membership" and dimension and dimension.casefold() not in folded:
+        if mode == "multi_membership" and dimension and dimension.casefold() not in columns:
             return f"SQL 必须包含分组列 {dimension}，并允许同一订单进入多个分组。"
     return None
+
+
+def _rank_partition_matches(window: exp.Window, dimensions: tuple[str, ...]) -> bool:
+    columns = {
+        column.name.casefold()
+        for column in window.args.get("partition_by") or ()
+        if isinstance(column, exp.Column)
+    }
+    return all(
+        dimension.casefold() in columns
+        or (dimension == "time" and any(_TIME_PARTITION_HINT.search(column) for column in columns))
+        for dimension in dimensions
+    )
+
+
+def _is_planned_rank(column: exp.Expression, scope: Scope, dimensions: tuple[str, ...]) -> bool:
+    if not isinstance(column, exp.Column):
+        return False
+    for alias, (_, source) in scope.selected_sources.items():
+        if (column.table and column.table != alias) or not isinstance(source, Scope):
+            continue
+        for projection in source.expression.selects:
+            if projection.alias_or_name.casefold() != column.name.casefold():
+                continue
+            value = projection.unalias()
+            if isinstance(value, exp.Window):
+                return (
+                    isinstance(value.this, (exp.RowNumber, exp.Rank, exp.DenseRank))
+                    and _rank_partition_matches(value, dimensions)
+                )
+            if _is_planned_rank(value, source, dimensions):
+                return True
+    return False
+
+
+def _rank_bound(node: exp.Expression | None, scope: Scope, dimensions: tuple[str, ...], limit: int) -> bool:
+    if isinstance(node, (exp.Where, exp.Having, exp.Paren)):
+        return _rank_bound(node.this, scope, dimensions, limit)
+    if isinstance(node, exp.And):
+        return (
+            _rank_bound(node.this, scope, dimensions, limit)
+            or _rank_bound(node.expression, scope, dimensions, limit)
+        )
+    if isinstance(node, exp.Or):
+        return (
+            _rank_bound(node.this, scope, dimensions, limit)
+            and _rank_bound(node.expression, scope, dimensions, limit)
+        )
+    if not isinstance(node, (exp.LTE, exp.LT, exp.GTE, exp.GT)):
+        return False
+    column, value = node.this, node.expression
+    if isinstance(node, (exp.GTE, exp.GT)):
+        column, value = value, column
+    if not isinstance(value, exp.Literal) or not value.is_int:
+        return False
+    upper = int(value.this) - int(isinstance(node, (exp.LT, exp.GT)))
+    return upper <= limit and _is_planned_rank(column, scope, dimensions)
+
+
+def _rank_bound_enforced(scope: Scope, dimensions: tuple[str, ...], limit: int) -> bool:
+    if isinstance(scope.expression, exp.SetOperation):
+        return all(_rank_bound_enforced(branch, dimensions, limit) for branch in scope.union_scopes)
+    if any(
+        _rank_bound(scope.expression.args.get(clause), scope, dimensions, limit)
+        for clause in ("where", "having")
+    ):
+        return True
+    return any(
+        isinstance(source, Scope) and _rank_bound_enforced(source, dimensions, limit)
+        for _, source in scope.selected_sources.values()
+    )
 
 
 def _column_lineage(node, scope, known_sources, filter_value=None):

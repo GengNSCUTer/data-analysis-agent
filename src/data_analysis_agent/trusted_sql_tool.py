@@ -125,6 +125,10 @@ class TrustedRunSqlTool(RunSqlTool):
         self.result_artifact_store = result_artifact_store
 
     async def execute(self, context: ToolContext, args: RunSqlToolArgs) -> ToolResult:
+        # Errors belong to this candidate, not an earlier tool call using the
+        # same request context. A stale error must not repair a policy refusal.
+        context.metadata.pop("safe_sql_error", None)
+        context.metadata.pop("sql_error", None)
         mismatch = sql_plan_mismatch(args.sql, context.metadata.get("query_plan"))
         if mismatch:
             await self._audit_plan_rejection(context, args.sql, mismatch)
@@ -160,6 +164,13 @@ class TrustedRunSqlTool(RunSqlTool):
                     detail="查询已执行，但结果没有通过指标结果合同，系统未输出未经验证的数字。",
                 )
             return result
+        if not safe_error.retryable:
+            return self._terminal_result(
+                result, context,
+                evidence={"repair_attempted": False, "repair_error_category": safe_error.category,
+                          "repair_execution_status": "not_attempted", "terminal_reason": "error_not_repairable"},
+                detail=safe_error.public_reason,
+            )
         if self.repair_provider is None or self.repair_policy is None:
             return self._terminal_result(
                 result,
@@ -222,7 +233,10 @@ class TrustedRunSqlTool(RunSqlTool):
                 result,
                 context,
                 evidence=evidence,
-                detail="原始 SQL 执行失败，修复候选没有通过安全策略，系统未输出未经验证的数字。",
+                detail={
+                    "repair_provider_failed": "SQL 修复服务暂不可用，系统未执行修复候选。",
+                    "repair_candidate_missing": "修复未返回完整可用的 SQL，系统未执行修复候选。",
+                }.get(outcome.reason, "修复候选没有通过安全策略，系统未执行修复候选。"),
             )
 
         # The retry is a new database attempt, but remains one logical Vanna

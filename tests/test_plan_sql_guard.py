@@ -1,3 +1,5 @@
+import pytest
+
 from data_analysis_agent.plan_sql_guard import sql_plan_mismatch
 
 
@@ -103,3 +105,78 @@ def test_partitioned_top_n_requires_window_rank_and_partition_filter():
         valid.replace("PARTITION BY customer_state", "PARTITION BY seller_state"), plan
     )
     assert "排名" in sql_plan_mismatch(valid.replace("rn <= 5", "rn <= 8"), plan)
+
+
+@pytest.mark.parametrize(("condition", "accepted"), [
+    ("rn <= 5 OR TRUE", False),
+    ("NOT (rn <= 5)", False),
+    ("CASE WHEN rn <= 5 THEN TRUE ELSE TRUE END", False),
+    ("rn <= 5 AND gmv > 0", True),
+    ("rn <= 5 OR rn < 3", True),
+    ("5 >= rn", True),
+    ("6 > rn", True),
+])
+def test_partitioned_rank_bound_must_actually_restrict_rows(condition, accepted):
+    plan = {
+        "dimensions": ["customer_state", "product_category_name"],
+        "top_n": {"product_category_name": 5},
+        "top_n_partition_dimensions": ["customer_state"],
+        "result_budget": {"query_mode": "aggregate"},
+    }
+    sql = (
+        "WITH ranked AS (SELECT customer_state, product_category_name, gmv, "
+        "ROW_NUMBER() OVER (PARTITION BY customer_state ORDER BY gmv DESC) AS rn "
+        "FROM grouped) SELECT customer_state, product_category_name, gmv "
+        "FROM ranked WHERE " + condition
+    )
+    assert (sql_plan_mismatch(sql, plan) is None) is accepted
+
+
+def test_unused_ranked_cte_cannot_supply_top_n_evidence():
+    plan = {"top_n": {"product_category_name": 5},
+            "top_n_partition_dimensions": ["customer_state"]}
+    sql = (
+        "WITH ranked AS (SELECT customer_state, product_category_name, gmv, "
+        "ROW_NUMBER() OVER (PARTITION BY customer_state ORDER BY gmv DESC) AS rn FROM grouped), "
+        "unused AS (SELECT customer_state, gmv FROM ranked WHERE rn <= 5) "
+        "SELECT customer_state, product_category_name, gmv FROM grouped"
+    )
+    assert sql_plan_mismatch(sql, plan)
+
+
+def test_rank_bound_survives_aliases_and_must_hold_for_both_union_branches():
+    plan = {"top_n": {"product_category_name": 5},
+            "top_n_partition_dimensions": ["customer_state"]}
+    ctes = (
+        "WITH ranked AS (SELECT customer_state, product_category_name, gmv, "
+        "ROW_NUMBER() OVER (PARTITION BY customer_state ORDER BY gmv DESC) AS rn FROM grouped), "
+        "renamed AS (SELECT customer_state, product_category_name, gmv, rn AS position FROM ranked) "
+    )
+    query = "SELECT customer_state, product_category_name, gmv FROM renamed WHERE position <= 5"
+    assert sql_plan_mismatch(ctes + query, plan) is None
+    assert sql_plan_mismatch(ctes + query + " UNION ALL " + query, plan) is None
+    assert sql_plan_mismatch(ctes + query + " UNION ALL " + query.replace("position <= 5", "TRUE"), plan)
+
+
+def test_rank_filter_must_belong_to_the_planned_partition():
+    plan = {"top_n": {"product_category_name": 5},
+            "top_n_partition_dimensions": ["customer_state"]}
+    sql = (
+        "WITH ranked AS (SELECT customer_state, product_category_name, gmv, "
+        "ROW_NUMBER() OVER (PARTITION BY customer_state ORDER BY gmv DESC) AS state_rank, "
+        "ROW_NUMBER() OVER (PARTITION BY seller_state ORDER BY gmv DESC) AS rn FROM grouped) "
+        "SELECT customer_state, product_category_name, gmv FROM ranked WHERE rn <= 5"
+    )
+    assert sql_plan_mismatch(sql, plan)
+    assert sql_plan_mismatch(sql.replace("WHERE rn <= 5", "WHERE state_rank <= 5"), plan) is None
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT payment_type, SUM(price) FROM items GROUP BY payment_type /* payment_value */",
+    "SELECT payment_type, 'payment_value' AS note, SUM(price) FROM items GROUP BY payment_type",
+])
+def test_payment_share_requires_real_column_references(sql):
+    plan = {"attribution_requirements": [
+        {"policy_mode": "payment_share", "dimension": "payment_type"}
+    ]}
+    assert sql_plan_mismatch(sql, plan)

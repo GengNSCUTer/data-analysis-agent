@@ -7,7 +7,7 @@ import pytest
 from data_analysis_agent.result_validator import ResultValidationError, ResultValidator
 from data_analysis_agent.result_budget import ResultBudget
 from data_analysis_agent.result_artifact_store import ResultArtifactStore
-from data_analysis_agent.sql_policy import SqlPolicy
+from data_analysis_agent.sql_policy import PolicyViolation, SqlPolicy
 from data_analysis_agent.sql_repair import SafeSqlExecutionError, SanitizedSqlError
 from data_analysis_agent.trusted_sql_tool import TrustedRunSqlTool
 from vanna.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
@@ -353,3 +353,96 @@ async def test_executable_result_missing_metric_is_terminal_without_repair(tmp_p
     assert context.metadata["result_validation"]["missing_columns"] == [
         "paid_order_count"
     ]
+
+
+STATE_COUNT_SQL = (
+    "SELECT COUNT(DISTINCT o.order_id) AS paid_order_count "
+    "FROM analytics.fact_orders o JOIN analytics.dim_customers c "
+    "ON c.customer_id=o.customer_id WHERE c.customer_state='SP'"
+)
+
+
+def _state_context():
+    context = _context()
+    context.metadata["query_plan"] = {"metric_ids": ["paid_order_count"], "filters": [
+        {"dimension": "customer_state", "value": "SP",
+         "sources": [{"table": "dim_customers", "column": "customer_state"}]},
+    ]}
+    return context
+
+
+@pytest.mark.asyncio
+async def test_plan_mismatch_can_be_repaired_without_executing_original(tmp_path):
+    runner = SequenceRunner([pd.DataFrame({"paid_order_count": [7]})])
+    provider = FakeRepairProvider(STATE_COUNT_SQL)
+    result = await _tool(runner, provider, tmp_path).execute(
+        _state_context(), RunSqlToolArgs(sql="SELECT COUNT(*) AS paid_order_count FROM fact_orders")
+    )
+    assert result.success and runner.calls == [STATE_COUNT_SQL]
+    assert len(provider.prompts) == 1 and "SP" in provider.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_repair_that_drops_confirmed_filter_is_not_executed(tmp_path):
+    original = STATE_COUNT_SQL.replace("o.order_id) AS", "o.missing_column) AS")
+    runner = SequenceRunner([SafeSqlExecutionError(
+        SanitizedSqlError("unknown_column", "列不可用。", True))])
+    provider = FakeRepairProvider("SELECT COUNT(*) AS paid_order_count FROM fact_orders")
+    result = await _tool(runner, provider, tmp_path).execute(_state_context(), RunSqlToolArgs(sql=original))
+    assert not result.success and runner.calls == [original]
+    assert len(provider.prompts) == 1
+    assert result.metadata["terminal_reason"] == "plan_sql_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_failed_repaired_execution_does_not_generate_another_candidate(tmp_path):
+    error = SafeSqlExecutionError(SanitizedSqlError("unknown_column", "列不可用。", True))
+    runner = SequenceRunner([error, error])
+    provider = FakeRepairProvider("SELECT COUNT(*) AS paid_order_count FROM fact_orders")
+    result = await _tool(runner, provider, tmp_path).execute(
+        _context(), RunSqlToolArgs(sql="SELECT missing_column FROM fact_orders"))
+    assert not result.success and len(runner.calls) == 2 and len(provider.prompts) == 1
+    assert result.metadata["terminal_reason"] == "repaired_sql_execution_failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("category", ["permission", "timeout", "connection"])
+async def test_nonrepairable_error_keeps_reason_without_calling_model(category, tmp_path):
+    runner = SequenceRunner([SafeSqlExecutionError(SanitizedSqlError(category, "本次查询不可重试。", False))])
+    provider = FakeRepairProvider("SELECT COUNT(*) AS paid_order_count FROM fact_orders")
+    context = _context()
+    result = await _tool(runner, provider, tmp_path).execute(
+        context, RunSqlToolArgs(sql="SELECT COUNT(*) AS paid_order_count FROM fact_orders"))
+    assert not result.success and not provider.prompts and len(runner.calls) == 1
+    assert result.error == "本次查询不可重试。"
+    assert result.metadata["sql_repair"]["repair_attempted"] is False
+    assert not context.metadata.get("sql_repair_attempted")
+
+
+@pytest.mark.asyncio
+async def test_provider_outage_is_reported_as_outage_without_second_execution(tmp_path):
+    async def unavailable(prompt, context):
+        raise RuntimeError("private provider response")
+
+    runner = SequenceRunner([SafeSqlExecutionError(
+        SanitizedSqlError("unknown_column", "列不可用。", True))])
+    result = await _tool(runner, unavailable, tmp_path).execute(
+        _context(), RunSqlToolArgs(sql="SELECT missing_column FROM fact_orders"))
+    assert not result.success and len(runner.calls) == 1
+    assert result.metadata["terminal_reason"] == "repair_provider_failed"
+    assert "private" not in result.error and "安全策略" not in result.error
+
+
+@pytest.mark.asyncio
+async def test_previous_execution_error_cannot_trigger_repair_of_policy_rejection(tmp_path):
+    class RejectingRunner(SqlRunner):
+        async def run_sql(self, args, context):
+            raise PolicyViolation("table is not allowed")
+
+    context = _context()
+    context.metadata["safe_sql_error"] = SanitizedSqlError("unknown_column", "上一条SQL的错误。", True)
+    provider = FakeRepairProvider("SELECT COUNT(*) AS paid_order_count FROM fact_orders")
+    result = await _tool(RejectingRunner(), provider, tmp_path).execute(
+        context, RunSqlToolArgs(sql="SELECT COUNT(*) FROM app.accounts"))
+    assert not result.success and not provider.prompts
+    assert "上一条" not in result.result_for_llm

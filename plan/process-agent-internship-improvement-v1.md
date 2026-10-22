@@ -64,7 +64,7 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
 | TASK-001 | Day 1：从 src/data_analysis_agent/server.py:create_app、ManagedChatHandler、SemanticIntentInterpreter 和 BudgetedChatHandler 跟踪“客户州有效订单前五”请求。理解当前自然语言理解、状态和执行的分工；旧 classify/admit 只供历史离线协议。用户闭卷画链路，说明QuerySpec/QueryPlan区别与一次拒绝路径。 | 是 | 2026-10-21 |
-| TASK-002 | Day 2：以GMV为代表，阅读Catalog定义、MetricPlan.from_metric()及plan_sql_guard.py，理解统计粒度、默认条件、join放大，以及计划校验的覆盖与盲区。不逐项学习全部指标；其余合同按需查阅。只为发现的真实口径缺陷补测试，不展开全部训练构造脚本。 | 否 | — |
+| TASK-002 | Day 2：以GMV为代表，阅读Catalog定义、MetricPlan.from_metric()及plan_sql_guard.py，理解统计粒度、默认条件、join放大，以及计划校验的覆盖与盲区。不逐项学习全部指标；其余合同按需查阅。只为发现的真实口径缺陷补测试，不展开全部训练构造脚本。 | 是 | 2026-10-22 |
 | TASK-003 | Day 3：阅读 sql_policy.py、SecurePostgresRunner 和 ResultValidator，复核只读角色、敏感列、空窗口、计划结果预算与多读一行，以及预览200行/模型8行/完整工件的区别；说明执行与合同通过不能证明全部SQL业务语义。旧1,000行协议只供历史离线评测。 | 否 | — |
 | TASK-004 | Day 4：阅读 conversation_store.py、working_memory.py、context_builder.py、analysis_lifecycle.py 与 ResultArtifactStore。跟踪“查结果→结果解释→换维度→重载→清空分析”的会话，验证摘要不进入 SQL 条件、状态冲突可恢复、下载不能跨用户/workspace。 | 否 | — |
 | TASK-005 | Day 5：复用 scripts/run_product_capability_online.py 和 conversations.py 的结果记录，读取仓库外回答证据，完成已有 Phase B 的人工标注；若旧输出缺失，明确标缺失。另冻结 evals/cases/product_release_dev_v1.yaml 的 60 条新开发用例：单轮业务10、澄清10、两窗口比较/趋势10、多轮10、安全与范围10、图表/下载/空结果10。来源不复写既有 SFT 或 final test；输出当前 baseline 和第一周五分钟口述。 | 否 | — |
@@ -75,7 +75,9 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 安全、结果保存与回答的主链；能说明遗漏SP筛选应拒绝、QuerySpec与QueryPlan的来源差异，
 以及服务端身份、角色白名单与数据库只读权限的区别。完成依据是代码阅读与复述，不是工程
 测试数量。Day 2已完成GMV的商品行粒度、关联放大、EXISTS筛选及MetricPlan口径传递复述；
-2026-10-22收住逐指标讲解，余下只阅读SQL计划校验的实现与边界，TASK-002仍待完成。
+2026-10-22完成Day 2：用户已回答检查通过不能证明业务正确；补充澄清None只表示未发现
+已覆盖偏差，不是完整验证全部QueryPlan。按用户要求修复排名证据、归因字段与一次修复
+流程的具体缺陷并完成回归。工程测试不代替学习复述；下一单元回到Day 3执行安全和结果。
 问答继续集中在[`agent-project-walkthrough-v1.md`](../docs/learning/agent-project-walkthrough-v1.md)，
 不启动新训练或重复终测。
 

@@ -56,6 +56,9 @@ jobs:
           tests/test_chart_contract.py \
           tests/test_product_release_dev_contract.py \
           tests/test_query_filters.py \
+          tests/test_plan_sql_guard.py \
+          tests/test_sql_repair.py \
+          tests/test_trusted_sql_tool.py \
           tests/test_runtime_paths.py \
           tests/test_runtime_workspace.py \
           tests/test_workspace_onboarding.py \

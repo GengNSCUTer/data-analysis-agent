@@ -26,7 +26,7 @@ from data_analysis_agent.result_budget import ResultBudget
 from data_analysis_agent.run_recorder import PostgresRunRecorder
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
-from data_analysis_agent.sql_policy import PolicyViolation
+from data_analysis_agent.sql_policy import PolicyViolation, SqlPolicy
 from data_analysis_agent.sql_repair import SafeSqlExecutionError
 from data_analysis_agent.query_filters import QueryFilter
 from data_analysis_agent.trusted_sql_tool import TrustedRunSqlTool
@@ -60,6 +60,60 @@ def make_context(user_id: str, role: str = "analyst") -> ToolContext:
         agent_memory=DemoAgentMemory(),
         metadata={"question": "integration test"},
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("keep_filter", [True, False])
+async def test_grouping_error_repair_rechecks_plan_before_real_reader(keep_filter, tmp_path):
+    """Use a controlled candidate, real PostgreSQL error, policy and validation."""
+    context = make_context(f"repair-chain-{uuid.uuid4().hex}")
+    context.metadata.update({
+        "required_result_columns": ["customer_state", "paid_order_count"],
+        "metric_result_columns": ["paid_order_count"],
+        "query_plan": {"metric_ids": ["paid_order_count"], "filters": [
+            {"dimension": "customer_state", "value": "SP",
+             "sources": [{"table": "dim_customers", "column": "customer_state"}]},
+        ]},
+    })
+    original = (
+        "SELECT c.customer_state, COUNT(DISTINCT o.order_id) AS paid_order_count "
+        "FROM analytics.fact_orders o JOIN analytics.dim_customers c ON c.customer_id=o.customer_id "
+        "WHERE o.order_status NOT IN ('canceled', 'unavailable') AND c.customer_state='SP'"
+    )
+    prompts = []
+
+    async def candidate(prompt, _):
+        prompts.append(prompt)
+        sql = original if keep_filter else original.replace(" AND c.customer_state='SP'", "")
+        return sql + " GROUP BY c.customer_state"
+
+    runner = SecurePostgresRunner(result_validator=ResultValidator())
+    tool = TrustedRunSqlTool(
+        runner, repair_provider=candidate, repair_policy=SqlPolicy(),
+        file_system=LocalFileSystem(str(tmp_path)),
+    )
+    result = await tool.execute(context, RunSqlToolArgs(sql=original))
+    assert len(prompts) == 1 and "syntax" in prompts[0] and "current_query_plan" in prompts[0]
+    assert result.success is keep_filter
+    audits = runner.audit.list_recent(context.user.id, "analyst")
+    assert len(audits) == 2 and audits[1]["policy_status"] == "execution_error"
+    if not keep_filter:
+        assert audits[0]["policy_status"] == "rejected"
+        assert result.metadata["terminal_reason"] == "plan_sql_mismatch"
+        return
+    assert audits[0]["policy_status"] == "allowed"
+    assert context.metadata["result_validation"]["state"] == "valid"
+    with psycopg2.connect(
+        host=runner.settings.host, port=runner.settings.port,
+        database=runner.settings.database, user=runner.settings.reader_user,
+    ) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM analytics.fact_orders WHERE order_status NOT IN ('canceled','unavailable') "
+                "AND customer_id IN (SELECT customer_id FROM analytics.dim_customers WHERE customer_state='SP')"
+            )
+            expected = cursor.fetchone()[0]
+    assert result.metadata["results"] == [{"customer_state": "SP", "paid_order_count": expected}]
 
 
 @pytest.mark.asyncio

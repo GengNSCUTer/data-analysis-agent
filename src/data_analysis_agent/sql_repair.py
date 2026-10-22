@@ -114,11 +114,18 @@ _CLASSIFIERS: tuple[tuple[SqlErrorCategory, tuple[str, ...], str, bool], ...] = 
     ),
     (
         "syntax",
-        ("syntax error", "parse failed", "unterminated", "grouping error"),
+        ("syntax error", "parse failed", "unterminated", "grouping error",
+         "must appear in the group by clause", "aggregate function calls cannot be nested"),
         "生成的查询语法或聚合结构无效。",
         True,
     ),
 )
+
+_SQLSTATE_CATEGORIES: dict[str, SqlErrorCategory] = {
+    "42601": "syntax", "42803": "syntax", "42703": "unknown_column",
+    "42P01": "unknown_table", "42702": "ambiguous_reference",
+    "42501": "permission", "57014": "timeout",
+}
 
 
 def sanitize_sql_error(
@@ -127,6 +134,14 @@ def sanitize_sql_error(
     """Map driver/parser text to a small stable category; never expose it."""
     if isinstance(error, SanitizedSqlError):
         return error
+    code = getattr(error, "pgcode", None)
+    known_category = _SQLSTATE_CATEGORIES.get(code)
+    if isinstance(code, str) and code.startswith("08"):
+        known_category = "connection"
+    if known_category:
+        for category, _, reason, retryable in _CLASSIFIERS:
+            if category == known_category:
+                return SanitizedSqlError(category, reason, retryable)
     text = str(error).casefold()
     for category, needles, reason, retryable in _CLASSIFIERS:
         if any(needle in text for needle in needles):
@@ -185,11 +200,14 @@ class OneShotSqlRepair:
         sanitized = sanitize_sql_error(error)
         if self.attempted:
             return self._budget_exhausted(original_sql, sanitized)
-        self.attempted = True
         if not sanitized.retryable:
             return self._not_repairable(original_sql, sanitized)
+        self.attempted = True
         prompt = build_repair_prompt(original_sql, sanitized, catalog_context)
-        repaired_sql = candidate_factory(prompt)
+        try:
+            repaired_sql = candidate_factory(prompt)
+        except Exception:
+            return self._provider_failure(original_sql, sanitized)
         return self._accept_candidate(original_sql, sanitized, repaired_sql)
 
     async def repair_async(
@@ -204,16 +222,16 @@ class OneShotSqlRepair:
         sanitized = sanitize_sql_error(error)
         if self.attempted:
             return self._budget_exhausted(original_sql, sanitized)
-        self.attempted = True
         if not sanitized.retryable:
             return self._not_repairable(original_sql, sanitized)
+        self.attempted = True
         prompt = build_repair_prompt(original_sql, sanitized, catalog_context)
         try:
             repaired_sql = await candidate_factory(prompt)
         except Exception:
             # The repair path must fail closed if the secondary model is
             # unavailable or returns an unexpected provider error.
-            repaired_sql = None
+            return self._provider_failure(original_sql, sanitized)
         return self._accept_candidate(original_sql, sanitized, repaired_sql)
 
     def _accept_candidate(
@@ -250,6 +268,13 @@ class OneShotSqlRepair:
             reason="repaired_sql_passed_policy",
             error=sanitized,
             policy_decision=decision,
+        )
+
+    @staticmethod
+    def _provider_failure(original_sql: str, error: SanitizedSqlError) -> SqlRepairOutcome:
+        return SqlRepairOutcome(
+            attempted=True, accepted=False, original_sql=original_sql,
+            repaired_sql=None, reason="repair_provider_failed", error=error,
         )
 
     @staticmethod
