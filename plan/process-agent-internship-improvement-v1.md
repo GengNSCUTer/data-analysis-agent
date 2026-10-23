@@ -2,7 +2,7 @@
 goal: 可信数据分析 Agent 的产品完善、代码学习与后端及 Agent 实习面试准备
 version: 1.0
 date_created: 2026-10-10
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 owner: 李耿楠
 status: In Progress
 tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
@@ -65,7 +65,7 @@ tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 | --- | --- | --- | --- |
 | TASK-001 | Day 1：从 src/data_analysis_agent/server.py:create_app、ManagedChatHandler、SemanticIntentInterpreter 和 BudgetedChatHandler 跟踪“客户州有效订单前五”请求。理解当前自然语言理解、状态和执行的分工；旧 classify/admit 只供历史离线协议。用户闭卷画链路，说明QuerySpec/QueryPlan区别与一次拒绝路径。 | 是 | 2026-10-21 |
 | TASK-002 | Day 2：以GMV为代表，阅读Catalog定义、MetricPlan.from_metric()及plan_sql_guard.py，理解统计粒度、默认条件、join放大，以及计划校验的覆盖与盲区。不逐项学习全部指标；其余合同按需查阅。只为发现的真实口径缺陷补测试，不展开全部训练构造脚本。 | 是 | 2026-10-22 |
-| TASK-003 | Day 3：阅读 sql_policy.py、SecurePostgresRunner 和 ResultValidator，复核只读角色、敏感列、空窗口、计划结果预算与多读一行，以及预览200行/模型8行/完整工件的区别；说明执行与合同通过不能证明全部SQL业务语义。旧1,000行协议只供历史离线评测。 | 否 | — |
+| TASK-003 | Day 3：阅读 sql_policy.py、SecurePostgresRunner 和 ResultValidator，复核只读角色、敏感列、空窗口、计划结果预算与多读一行；结合 result_evidence.py 区分完整工件、200行预览与token预算内的模型证据，理解服务端计算和模型解释。说明执行与合同通过不能证明全部SQL业务语义。旧1,000行及8行样本协议只供历史离线评测。 | 否 | — |
 | TASK-004 | Day 4：阅读 conversation_store.py、working_memory.py、context_builder.py、analysis_lifecycle.py 与 ResultArtifactStore。跟踪“查结果→结果解释→换维度→重载→清空分析”的会话，验证摘要不进入 SQL 条件、状态冲突可恢复、下载不能跨用户/workspace。 | 否 | — |
 | TASK-005 | Day 5：复用 scripts/run_product_capability_online.py 和 conversations.py 的结果记录，读取仓库外回答证据，完成已有 Phase B 的人工标注；若旧输出缺失，明确标缺失。另冻结 evals/cases/product_release_dev_v1.yaml 的 60 条新开发用例：单轮业务10、澄清10、两窗口比较/趋势10、多轮10、安全与范围10、图表/下载/空结果10。来源不复写既有 SFT 或 final test；输出当前 baseline 和第一周五分钟口述。 | 否 | — |
 
