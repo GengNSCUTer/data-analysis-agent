@@ -13,7 +13,10 @@ from vanna.core.middleware import LlmMiddleware
 from vanna.core.registry import ToolRegistry
 from vanna.core.tool import ToolCall, ToolContext, ToolResult
 
-from .result_evidence import DEFAULT_RESULT_EVIDENCE_TOKENS, bound_result_evidence
+from .result_evidence import bound_result_evidence
+from .token_budget import DEFAULT_TOKEN_COUNTER, ContextCapacityError
+from .result_analysis import ResultInspection
+import json
 
 
 TERMINATION_REASONS: Final[frozenset[str]] = frozenset(
@@ -62,7 +65,7 @@ class RequestBudget:
     max_context_chars: int = 192_000  # legacy observability ceiling
     max_context_messages: int = 160
     max_output_tokens: int = 4_000
-    max_result_evidence_tokens: int = DEFAULT_RESULT_EVIDENCE_TOKENS
+    max_result_evidence_tokens: int | None = None  # Optional operator ceiling; otherwise use available space.
     # Connection is TCP/TLS/HTTP setup. First byte is the wait until the model
     # emits anything. Stream idle is the gap allowed between later tokens.
     llm_connect_timeout_seconds: float = 10.0
@@ -73,6 +76,8 @@ class RequestBudget:
     def __post_init__(self) -> None:
         for name, value in self.__dict__.items():
             if isinstance(value, bool):
+                continue
+            if value is None:
                 continue
             if value <= 0:
                 raise ValueError(f"{name} must be positive")
@@ -200,6 +205,8 @@ class BudgetUsage:
     query_plan: dict[str, Any] | None = None
     query_plan_prompt: str | None = None
     result_summary: str | None = None
+    result_inspections: tuple[ResultInspection, ...] = ()
+    result_numerators: dict[int, dict[str, Any]] = field(default_factory=dict)
     # A degraded result may be displayed for diagnosis, but it is not a
     # trusted numeric source. The next model response must not turn it into a
     # business conclusion.
@@ -437,7 +444,26 @@ class BudgetUsage:
         if summary is None:
             self.result_summary = None
             return
-        self.result_summary = bound_result_evidence(summary, self.budget.max_result_evidence_tokens)
+        self.result_summary = bound_result_evidence(summary, self.budget.max_prompt_tokens)
+
+    def result_evidence_limit(self) -> int:
+        """Allocate from remaining request space, retaining the complete context and output."""
+        packet = self.context_packet or {}
+        non_result = json.dumps({"question": self.catalog_question, "plan": self.query_plan,
+                                "recent_dialogue": packet.get("recent_dialogue"),
+                                "narrative_summary": packet.get("narrative_summary")}, ensure_ascii=False)
+        # Covers instructions/JSON wrappers; actual requests are checked again by the LLM boundary.
+        used = DEFAULT_TOKEN_COUNTER.count_text(non_result) + 1024
+        available = self.budget.max_prompt_tokens - self.budget.max_output_tokens - used
+        if self.budget.max_result_evidence_tokens is not None:
+            available = min(available, self.budget.max_result_evidence_tokens)
+        if available <= 0:
+            raise ContextCapacityError("当前上下文没有结果证据空间，请先压缩历史。")
+        self.record_catalog({"result_evidence_budget": {"limit": available, "non_result_tokens": used,
+                             "output_reserve": self.budget.max_output_tokens,
+                             "request_limit": self.budget.max_prompt_tokens,
+                             "tokenizer_mode": DEFAULT_TOKEN_COUNTER.mode}})
+        return available
 
     def mark_result_contract_satisfied(self) -> None:
         """Mark that a server-validated result is available for this request."""

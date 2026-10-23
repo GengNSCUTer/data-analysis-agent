@@ -156,6 +156,7 @@ class Catalog:
     currency_name: str | None = None
     available_attribution_rule_ids: frozenset[str] = frozenset()
     workspace: WorkspaceProfile | None = field(default=None, repr=False, compare=False)
+    metric_semantics: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
 
     @property
     def tables_by_id(self) -> dict[str, CatalogTable]:
@@ -268,6 +269,7 @@ class ResultContract:
     requested_end_exclusive: bool = False
     result_budget: ResultBudget | None = None
     additive_metric_ids: tuple[str, ...] = ()
+    metric_semantics: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
 
     @classmethod
     def from_selection(
@@ -352,6 +354,7 @@ class ResultContract:
             attribution_requirements=attribution_requirements,
             result_budget=result_budget,
             additive_metric_ids=catalog.additive_metrics_for(metric_ids, requested_dimensions),
+            metric_semantics={m: dict(catalog.metric_semantics.get(m, {})) for m in metric_ids},
         )
 
     @staticmethod
@@ -416,6 +419,7 @@ class ResultContract:
             # Result-only rollups are not SQL inputs. Keep frozen candidate
             # prompts and offline contracts unchanged.
             result["additive_metric_ids"] = list(self.additive_metric_ids)
+            result["metric_semantics"] = {m: dict(v) for m, v in self.metric_semantics.items()}
         return result
 
     def as_evidence(self) -> dict[str, Any]:
@@ -498,7 +502,7 @@ class CatalogLoader:
             "description", "tables", "metrics", "joins",
         }
         missing = required - set(raw)
-        optional = {"currency_code", "currency_symbol", "currency_name"}
+        optional = {"currency_code", "currency_symbol", "currency_name", "metric_semantics"}
         unknown = set(raw) - required - optional
         if missing or unknown:
             details = []
@@ -527,6 +531,14 @@ class CatalogLoader:
             for index, item in enumerate(raw["metrics"])
         )
         self._unique([metric.metric_id for metric in metrics], "metric_id")
+        semantics = self._mapping(raw.get("metric_semantics", {}), "metric_semantics")
+        for metric_id, spec in semantics.items():
+            if metric_id not in {m.metric_id for m in metrics}:
+                raise CatalogValidationError(f"metric_semantics references unknown metric {metric_id}")
+            self._keys(self._mapping(spec, metric_id), {"kind", "unit"}, metric_id)
+            if spec["kind"] not in {"amount", "count", "rate", "mean", "duration"}:
+                raise CatalogValidationError(f"invalid calculation kind for {metric_id}")
+            self._nonempty(spec["unit"], metric_id + ".unit")
         joins = tuple(
             self._parse_join(item, index, table_map)
             for index, item in enumerate(raw["joins"])
@@ -546,6 +558,7 @@ class CatalogLoader:
             currency_name=self._optional_nonempty(raw.get("currency_name"), "currency_name"),
             available_attribution_rule_ids=self.available_attribution_rule_ids,
             workspace=self.workspace,
+            metric_semantics=MappingProxyType({m: MappingProxyType(dict(s)) for m, s in semantics.items()}),
         )
 
     def _parse_table(self, raw: Any, index: int) -> CatalogTable:

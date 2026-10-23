@@ -362,7 +362,7 @@ def create_app(*, llm_provider=None) -> FastAPI:
                 tools=None,
                 stream=False,
                 temperature=0.0,
-                max_tokens=800,
+                max_tokens=budget.max_output_tokens,
                 system_prompt="你是数据分析语义理解器。只输出符合要求的 JSON，不生成 SQL，不执行工具。",
                 metadata={"purpose": "semantic_intent"},
             )

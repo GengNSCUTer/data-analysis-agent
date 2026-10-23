@@ -52,6 +52,24 @@ RUN_PROJECT_DB=1 RUN_VANNA_E2E=1 \
   python -m pytest -q tests/e2e/test_result_evidence_flow.py
 ```
 
+`test_result_evidence_flow.py`的22轮受控链路实际经过浏览器、SSE、SQL策略、PostgreSQL
+reader及工件。覆盖趋势反例、滚动/累计、排名、分位数、阈值、合计占比、补查基期/分母、
+非可加客单价重算、换图和刷新；刻意改变补查结果顺序，验证旧分子不会被新行号替换。
+该测试只在独立合成库修改并恢复fixture，不应指向真实业务库。
+
+真实模型开发验收使用同一产品应用和真实页面，语义、SQL、SSE均不替换：
+
+```bash
+RUN_LIVE_RESULT_ANALYSIS=1 RESULT_ANALYSIS_LIVE_OUTPUT=/private/result-analysis-live \
+  python -m pytest -q -s tests/e2e/test_result_analysis_live.py
+```
+
+按部署方式配置workspace、只读业务库和私有模型凭据。用例创建唯一测试账号和会话，
+不写业务表；Olist用2017年，TheLook用2023年，独立SQL核对12个月结果。完整报告、
+模型提案和截图保留仓库外。它覆盖七轮连续开发问题，不是全业务准确率评测；首次失败
+与定向复测均须保留。2026-10-23复测中出现过一次组合计算的`invalid_intent_output`；
+结构不合规现在最多重新解释一次，Catalog/权限拒绝不重试，第二次不合规仍明确失败。
+
 受控脚本启动自己的临时 HTTP 进程、创建唯一测试账号和会话；结束后停止该进程，不触碰现有
 用户或业务表。`--output` 使用新的仓库外目录，生成的凭据与原始截图不提交。容量验证不加
 `--browser-only`，即 1/5/10 并发各20次。CI 数据库容器是临时的，不下载 Olist/TheLook 原始数据。

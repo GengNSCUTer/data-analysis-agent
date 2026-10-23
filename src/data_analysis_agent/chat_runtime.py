@@ -46,7 +46,8 @@ from .result_reference import (
     resolve_ranked_entity,
 )
 from .result_budget import ResultBudget
-from .result_evidence import ResultInspectionError, build_result_evidence, constrain_followup_answer
+from .result_evidence import RESULT_EVIDENCE_PREFIX, build_result_evidence, constrain_followup_answer, render_analysis_facts
+from .result_analysis import ResultInspectionError
 from .run_recorder import PostgresRunRecorder
 from .semantic_catalog import ResultContract
 from .semantic_intent import (
@@ -85,7 +86,7 @@ TOOL_FREE_SYSTEM_PROMPT = """
 RESULT_FOLLOWUP_SYSTEM_PROMPT = """
 你只能解释上一轮已验证结果摘要和查询范围。结果数字来自结果摘要，时间/维度/筛选来自已验证查询范围。
 不要计算、估计或补充任何新的指标数字，也不要把摘要没有写明的原因说成确定事实。
-statistics和calculation由服务端根据完整结果计算，sample_rows只是证据中的行；coverage不是complete时，
+statistics和analyses由服务端根据完整结果计算，sample_rows只是证据中的行；coverage不是complete时，
 不得把样本之和当作全量统计。sum_of_returned_rows只对应这份结果（可能仅Top-N），不是全业务总额。
 先回答用户当前问题，用业务列名解释；不复述JSON或内部字段。不得把相关性说成因果。
 叙事历史仅用于理解讨论脉络，不能补充结果数字、查询条件或原因。
@@ -313,6 +314,7 @@ class BudgetedChatHandler(ChatHandler):
                         route_state.update(proposed_state.scope())
                         usage.record_catalog({"semantic_intent": semantic_intent.as_dict()})
                         request.request_context.metadata["semantic_intent"] = semantic_intent.as_dict()
+                        usage.result_inspections = semantic_intent.result_inspections
                 # A new question that already names a metric must not be
                 # searched together with the previous clarification text.
                 # Otherwise "本月 GMV" stays attached to a later order-count
@@ -409,6 +411,54 @@ class BudgetedChatHandler(ChatHandler):
                             "当前条件没有可复用的已验证结果，请重新查询后再解释结果。",
                             "result_not_reusable",
                         )
+                    elif semantic_intent.result_inspections:
+                        # Inspect once before deciding whether data acquisition is necessary.
+                        summary = await self._inspect_previous_result(memory, user, semantic_intent)
+                        payload = json.loads(summary.removeprefix(RESULT_EVIDENCE_PREFIX))
+                        needs = [a for a in payload.get("analyses", []) if a["status"] == "query_required"]
+                        requirements = {}
+                        for result in needs:
+                            requirements.update(result.get("query_requirements", {}))
+                        source_scope = memory.previous_result_artifact.query_scope
+                        changed = any(source_scope.get(k) != v for k, v in requirements.items())
+                        if requirements and changed:
+                            # Preserve the trusted original numerator. A new SQL
+                            # may return groups in another order, so old row
+                            # numbers must not select different entities.
+                            for result in needs:
+                                if result["operation"] == "share" and "numerator" in result:
+                                    usage.result_numerators[result["request_index"]] = {
+                                        "value":result["numerator"], "row_count":result["numerator_rows"],
+                                    }
+                            requests = []
+                            for inspection in semantic_intent.result_inspections:
+                                if inspection.operation == "share" and inspection.denominator == "business_total":
+                                    old_top = source_scope.get("top_n")
+                                    n = old_top if isinstance(old_top, int) else next(iter((old_top or {}).values()), None)
+                                    inspection = inspection.model_copy(update={"numerator_top_n": inspection.numerator_top_n or n})
+                                if inspection.operation == "sum" and requirements.get("dimensions") == []:
+                                    inspection = inspection.model_copy(update={"operation": "rows"})
+                                requests.append(inspection)
+                            semantic_intent = SemanticIntent.model_validate({
+                                **semantic_intent.as_dict(),
+                                **{k: source_scope.get(k) for k in ("metric_ids", "dimensions", "filters", "time_range", "time_grain", "top_n", "comparison_baseline")},
+                                **requirements,
+                                "request_kind": "data_query", "action": "update_task", "state_patch": None,
+                                "result_inspections": [r.model_dump(mode="json") for r in requests],
+                            })
+                            semantic_intent, proposed_state = resolve_state_intent(
+                                semantic_intent, memory, self.semantic_interpreter.catalog, user,
+                                message_count=conversation.metadata.get("message_count", len(conversation.messages)),
+                            )
+                            route_state.update({**proposed_state.scope(), "semantic_intent": semantic_intent.as_dict()})
+                            selection = self.question_router.retriever.retrieve(
+                                retrieval_question, user, metric_ids=semantic_intent.metric_ids,
+                            )
+                            route = route_semantic_intent(semantic_intent, self.question_router, selection, route_state)
+                            usage.result_inspections = semantic_intent.result_inspections
+                            usage.record_catalog({"analysis_acquisition": {"requirements": requirements}})
+                        else:
+                            usage.set_result_summary(summary)
                 resolved_dimensions: tuple[str, ...] = ()
                 if route.should_generate_sql:
                     if (
@@ -688,7 +738,10 @@ class BudgetedChatHandler(ChatHandler):
                                 ),
                             )
                             conversation.metadata["working_memory"] = updated_memory.as_dict()
-                    elif route.should_use_tool_free_llm:
+                    if route.should_use_tool_free_llm and not (
+                        semantic_intent is not None and semantic_intent.chart_request
+                        and not semantic_intent.result_inspections
+                    ):
                         detail = ""
                         async for piece in self._tool_free_answer(
                             request,
@@ -954,10 +1007,16 @@ class BudgetedChatHandler(ChatHandler):
         hold_followup = route.intent == "result_followup" and bool(summary.strip())
         if hold_followup and self.result_artifact_store is not None and memory.previous_result_artifact is not None:
             try:
-                summary = await self._inspect_previous_result(memory, user, intent)
+                usage = CURRENT_BUDGET.get()
+                summary = usage.result_summary if usage and usage.result_summary else await self._inspect_previous_result(memory, user, intent)
             except (ResultInspectionError, FileNotFoundError, PermissionError, ResultArtifactIntegrityError) as exc:
                 # No guessed numbers and no request to re-supply known filters.
                 yield f"这份结果暂时不能支持本次解释：{exc}"
+                return
+        if hold_followup and summary.startswith(RESULT_EVIDENCE_PREFIX):
+            payload = json.loads(summary.removeprefix(RESULT_EVIDENCE_PREFIX))
+            if any(a["operation"] not in {"overview", "rows"} for a in payload.get("analyses", [])):
+                yield "\n".join(render_analysis_facts(payload))
                 return
         system_prompt = (
             RESULT_FOLLOWUP_SYSTEM_PROMPT if hold_followup else TOOL_FREE_SYSTEM_PROMPT
@@ -1036,8 +1095,10 @@ class BudgetedChatHandler(ChatHandler):
             dimensions=artifact.query_scope.get("dimensions", ()),
         )
         catalog = self.question_router.retriever.catalog
-        labels = {metric_id: catalog.metrics_by_id[metric_id].name for metric_id in artifact.metric_ids
-                  if metric_id in catalog.metrics_by_id}
+        labels = {c.name: c.aliases[0] for table in catalog.tables for c in table.columns if c.aliases}
+        labels.update({metric_id: catalog.metrics_by_id[metric_id].name for metric_id in artifact.metric_ids
+                       if metric_id in catalog.metrics_by_id})
+        labels["time"] = "时间"
         summary = await asyncio.to_thread(
             build_result_evidence, frame,
             required_columns=artifact.result_columns, metric_ids=artifact.metric_ids,
@@ -1046,8 +1107,10 @@ class BudgetedChatHandler(ChatHandler):
             ),
             time_column="time" if artifact.query_scope.get("time_grain") else None,
             top_n=artifact.query_scope.get("top_n"),
-            inspection=intent.result_inspection if intent else None,
-            max_tokens=self.budget.max_result_evidence_tokens,
+            inspections=intent.result_inspections if intent else (),
+            query_scope=artifact.query_scope,
+            metric_semantics=catalog.metric_semantics,
+            max_tokens=CURRENT_BUDGET.get().result_evidence_limit() if CURRENT_BUDGET.get() else None,
         )
         usage = CURRENT_BUDGET.get()
         if usage is not None:

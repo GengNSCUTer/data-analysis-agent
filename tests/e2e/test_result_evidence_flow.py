@@ -52,7 +52,7 @@ def result_evidence_data():
 
 @pytest.mark.skipif(os.getenv("RUN_VANNA_E2E") != "1" or os.getenv("RUN_PROJECT_DB") != "1",
                     reason="requires an explicitly enabled isolated DB/browser run")
-def test_browser_result_evidence_continuity_and_refresh(result_evidence_data):
+def test_browser_result_evidence_continuity_and_refresh(result_evidence_data, monkeypatch):
     import pandas as pd
     from fastapi.testclient import TestClient
     from playwright.sync_api import sync_playwright
@@ -61,10 +61,20 @@ def test_browser_result_evidence_continuity_and_refresh(result_evidence_data):
 
     from data_analysis_agent.local_auth import AccountStore
     from data_analysis_agent.postgres_runner import PostgresConnectionSettings
-    from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX, render_result_facts
+    from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX, render_result_facts, render_analysis_facts
     from data_analysis_agent.server import create_app
     from vanna.core.llm import LlmResponse, LlmStreamChunk
     from vanna.core.tool import ToolCall
+    from data_analysis_agent.budget import CURRENT_BUDGET
+
+    captured = []
+    from data_analysis_agent.result_evidence import build_result_evidence
+    def record_evidence(*args, **kwargs):
+        result = build_result_evidence(*args, **kwargs)
+        captured.append(json.loads(result.removeprefix(RESULT_EVIDENCE_PREFIX)))
+        return result
+    monkeypatch.setattr("data_analysis_agent.postgres_runner.build_result_evidence", record_evidence)
+    monkeypatch.setattr("data_analysis_agent.chat_runtime.build_result_evidence", record_evidence)
 
     categories_question = "按商品品类看销售额前十名"
     monthly_question = "2017年按月看销售额趋势"
@@ -72,16 +82,46 @@ def test_browser_result_evidence_continuity_and_refresh(result_evidence_data):
         categories_question: {"request_kind": "data_query", "action": "new_task", "metric_ids": ["gmv"],
                               "dimensions": ["product_category_name"], "top_n": 10},
         "第九名和第十名的金额分别是多少": {"request_kind": "result_followup", "action": "keep",
-                                        "result_inspection": {"operation": "rows", "row_numbers": [9, 10]}},
+                                        "result_inspections": [{"operation": "rows", "row_numbers": [9, 10]}]},
         "这十个品类合计销售额是多少": {"request_kind": "result_followup", "action": "keep",
-                                       "result_inspection": {"operation": "sum", "metric_id": "gmv"}},
+                                       "result_inspections": [{"operation": "sum", "metric_id": "gmv"}]},
         "比较前两名，差多少": {"request_kind": "result_followup", "action": "keep",
-                                "result_inspection": {"operation": "compare", "metric_id": "gmv", "row_numbers": [1, 2]}},
+                                "result_inspections": [{"operation": "compare", "metric_id": "gmv", "row_numbers": [1, 2]}]},
+        "刚才前两名占全部品类销售额多少": {"request_kind": "result_followup", "action": "keep",
+                                            "result_inspections": [{"operation": "share", "metric_id": "gmv", "row_numbers":[1,2], "denominator": "business_total"}]},
         monthly_question: {"request_kind": "data_query", "action": "new_task", "metric_ids": ["gmv"],
                            "dimensions": [], "time_grain": "month", "time_range": {"start": "2017-01-01", "end": "2018-01-01"}},
         "最后一个月表现怎么样": {"request_kind": "result_followup", "action": "keep",
-                                    "result_inspection": {"operation": "rows", "row_numbers": [12]}},
+                                    "result_inspections": [{"operation": "rows", "row_numbers": [12]}]},
+        "全年每个月都在增长吗": {"request_kind": "result_followup", "action": "keep",
+                                "result_inspections": [{"operation": "trend", "metric_id": "gmv", "trend_mode": "strict_increase"}]},
+        "有没有从未下降": {"request_kind": "result_followup", "action": "keep",
+                          "result_inspections": [{"operation": "trend", "metric_id": "gmv", "trend_mode": "nondecreasing"}]},
+        "最后一个月环比": {"request_kind": "result_followup", "action": "keep",
+                          "result_inspections": [{"operation": "period_compare", "metric_id": "gmv"}]},
+        "按月累计金额": {"request_kind": "result_followup", "action": "keep",
+                        "result_inspections": [{"operation": "trend", "metric_id": "gmv", "trend_mode": "cumulative"}]},
+        "再给三月滑动平均": {"request_kind": "result_followup", "action": "keep",
+                            "result_inspections": [{"operation": "trend", "metric_id": "gmv", "trend_mode": "rolling", "window": 3}]},
+        "金额前三的月份": {"request_kind": "result_followup", "action": "keep",
+                          "result_inspections": [{"operation": "rank", "metric_id": "gmv", "limit": 3}]},
+        "月销售额中位数": {"request_kind": "result_followup", "action": "keep",
+                          "result_inspections": [{"operation": "distribution", "metric_id": "gmv"}]},
+        "低于一万的月份有几个": {"request_kind": "result_followup", "action": "keep",
+                              "result_inspections": [{"operation": "threshold", "metric_id": "gmv", "threshold_value": 10000}]},
+        "全年合计和十二月占比一起给我，并画折线图": {"request_kind": "result_followup", "action": "keep", "chart_request":"line",
+                                      "result_inspections": [{"operation": "sum", "metric_id": "gmv"},
+                                                             {"operation": "share", "metric_id": "gmv", "row_numbers": [12]}]},
         "继续解释全年结果": {"request_kind": "result_followup", "action": "keep"},
+        "另查2017年十二月商品成交额，按月": {"request_kind":"data_query", "action":"new_task", "metric_ids":["gmv"],
+            "dimensions":[], "time_grain":"month", "time_range":{"start":"2017-12-01", "end":"2018-01-01"}},
+        "补上一个月对比环比": {"request_kind":"result_followup", "action":"keep",
+            "result_inspections":[{"operation":"period_compare", "metric_id":"gmv"}]},
+        "再看十二月同比，没有基期就说明": {"request_kind":"result_followup", "action":"keep",
+            "result_inspections":[{"operation":"period_compare", "metric_id":"gmv", "baseline":"previous_year"}]},
+        "另按客户州统计客单价": {"request_kind":"data_query", "action":"new_task", "metric_ids":["average_order_value"], "dimensions":["customer_state"]},
+        "这些州合在一起算总体客单价": {"request_kind":"result_followup", "action":"keep",
+            "result_inspections":[{"operation":"sum", "metric_id":"average_order_value"}]},
     }
     statements = {
         "category": """SELECT p.product_category_name, SUM(i.price) AS gmv
@@ -114,9 +154,25 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
         async def stream_request(self, request):
             # No text SSE is fabricated: the Agent builds it from this actual response.
             if request.tools:
-                monthly = "2017年按月看销售额趋势" in request.messages[-1].content
+                plan = CURRENT_BUDGET.get().query_plan
+                monthly = bool(plan.get("time_grain"))
+                statement = statements["monthly" if monthly else "category"]
+                if monthly:
+                    bounds = plan["time_range"]
+                    statement = statement.replace("2017-01-01", bounds["start"]).replace("2018-01-01", bounds["end"])
+                if not monthly and not plan.get("top_n"):
+                    statement = statement.removesuffix(" LIMIT 10").replace("ORDER BY gmv DESC", "ORDER BY gmv ASC")
+                if plan["metric_ids"] == ["average_order_value"]:
+                    grouped = bool(plan["dimensions"])
+                    statement = ("WITH order_totals AS (SELECT o.order_id, c.customer_state, SUM(i.price) AS amount "
+                        "FROM analytics.fact_orders o JOIN analytics.fact_order_items i ON i.order_id=o.order_id "
+                        "JOIN analytics.dim_customers c ON c.customer_id=o.customer_id "
+                        "WHERE o.order_status NOT IN ('canceled','unavailable') GROUP BY o.order_id,c.customer_state) "
+                        + ("SELECT customer_state," if grouped else "SELECT ")
+                        + "AVG(amount) AS average_order_value FROM order_totals"
+                        + (" GROUP BY customer_state" if grouped else ""))
                 yield LlmStreamChunk(tool_calls=[ToolCall(id="sql", name="run_sql",
-                                                          arguments={"sql": statements["monthly" if monthly else "category"]})],
+                                                          arguments={"sql": statement})],
                                      finish_reason="tool_calls")
             else:
                 response = await self.send_request(request)
@@ -178,9 +234,13 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                         cursor.execute("SELECT termination_reason,sql_calls_used,catalog_trace FROM app.agent_runs WHERE conversation_id=%s ORDER BY started_at DESC LIMIT 1", (cid,))
                         run = dict(cursor.fetchone())
                 assert run["termination_reason"] == "completed", run
-                assert run["sql_calls_used"] == int(question in {categories_question, monthly_question})
+                assert run["sql_calls_used"] == int(question in {categories_question, monthly_question, "刚才前两名占全部品类销售额多少", "另查2017年十二月商品成交额，按月", "补上一个月对比环比", "再看十二月同比，没有基期就说明", "另按客户州统计客单价", "这些州合在一起算总体客单价"})
                 assert detail["trusted_result_artifact"]
-                current = explanations[-1]
+                current = captured[-1]
+                answer = detail["messages"][-1]["content"]
+                if current["analyses"] and question not in {"第九名和第十名的金额分别是多少", "最后一个月表现怎么样", "继续解释全年结果"}:
+                    for fact in render_analysis_facts(current):
+                        assert fact in answer
                 if question == categories_question:
                     assert len(current["sample_rows"]) == 10
                     assert current["coverage"] == "complete"
@@ -188,22 +248,54 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                     assert current["row_numbers"] == [9, 10]
                     assert run["catalog_trace"]["result_inspection"]["source_row_count"] == 10
                 elif question == "这十个品类合计销售额是多少":
-                    assert current["calculation"]["value"] == sum(row["gmv"] for row in current["sample_rows"])
+                    assert current["analyses"][0]["value"] == sum(row["gmv"] for row in current["sample_rows"])
                     assert current["scope"] == "returned_top_n"
+                elif question == "刚才前两名占全部品类销售额多少":
+                    calculation = current["analyses"][0]
+                    assert current["source_row_count"] > 10
+                    ordered = sorted((r["gmv"] for r in current["sample_rows"]), reverse=True)
+                    assert calculation["share_percent"] == pytest.approx(sum(ordered[:2]) / sum(ordered) * 100)
+                    assert calculation["numerator_rows"] == 2
+                    assert "analysis_acquisition" in run["catalog_trace"]
                 elif question == monthly_question:
                     assert current["row_count"] == 12
                     assert current["sample_rows"][-1]["time"].startswith("2017-12")
                 elif question == "最后一个月表现怎么样":
                     assert current["row_numbers"] == [12]
+                elif question == "全年每个月都在增长吗":
+                    assert current["analyses"][0]["groups"][0]["judgment"] == "false"
+                    assert "不成立" in answer and "反例" in answer
+                elif question == "月销售额中位数":
+                    assert current["analyses"][0]["median"] == pd.Series([r["gmv"] for r in current["sample_rows"]]).median()
+                elif question == "全年合计和十二月占比一起给我，并画折线图":
+                    assert len(current["analyses"]) == 2
+                    assert detail["charts"]
+                    chat.locator(".js-plotly-plot").last.wait_for(state="visible")
+                elif question == "补上一个月对比环比":
+                    assert current["source_row_count"] == 2
+                    assert current["analyses"][0]["comparisons"][0]["baseline_period"] == "2017-11"
+                    assert "analysis_acquisition" in run["catalog_trace"]
+                elif question == "再看十二月同比，没有基期就说明":
+                    assert current["analyses"][0]["status"] == "query_required"
+                    assert "基期" in answer and "部分分组" in answer
+                elif question == "这些州合在一起算总体客单价":
+                    assert current["source_row_count"] == 1 and "analysis_acquisition" in run["catalog_trace"]
+                    with psycopg2.connect(os.environ["RESULT_EVIDENCE_TEST_ADMIN_DSN"]) as connection:
+                        with connection.cursor() as cursor:
+                            cursor.execute("SELECT i.price FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id WHERE o.order_status NOT IN ('canceled','unavailable')")
+                            prices = [r[0] for r in cursor.fetchall()]
+                    assert current["sample_rows"][0]["average_order_value"] == pytest.approx(float(sum(prices)/len(prices)))
                 elif question == "继续解释全年结果":
                     assert current["coverage"] == "complete" and len(current["sample_rows"]) == 12
                 observations.append({"question": question, "sql_calls": run["sql_calls_used"],
                                      "source_rows": current["source_row_count"], "coverage": current["coverage"],
-                                     "inspection": run["catalog_trace"].get("result_inspection")})
+                                     "inspection": run["catalog_trace"].get("result_inspection"),
+                                     "operations": [a["operation"] for a in current["analyses"]],
+                                     "answer": answer})
             csv_response = client.get(f"/api/project/conversations/{cid}/result.csv")
             assert csv_response.is_success
             import io
-            assert len(pd.read_csv(io.StringIO(csv_response.text))) == 12
+            assert len(pd.read_csv(io.StringIO(csv_response.text))) == 1
             page.screenshot(path=str(output / "result-evidence-continuity.png"), full_page=True)
             assert not errors
         finally:

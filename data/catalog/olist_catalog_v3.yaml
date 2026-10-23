@@ -6,6 +6,26 @@ description: "Server-owned semantic catalog for the trusted Olist PostgreSQL ana
 currency_code: BRL
 currency_symbol: "R$"
 currency_name: "Brazilian real"
+metric_semantics:
+  gmv: {kind: amount, unit: BRL}
+  paid_order_count: {kind: count, unit: 单}
+  average_delivery_days: {kind: duration, unit: 天}
+  positive_review_rate: {kind: rate, unit: 比例0至1}
+  item_count: {kind: count, unit: 件}
+  average_order_value: {kind: mean, unit: BRL每单}
+  average_review_score: {kind: mean, unit: 分}
+  on_time_delivery_rate: {kind: rate, unit: 比例0至1}
+  cancellation_rate: {kind: rate, unit: 比例0至1}
+  freight_amount: {kind: amount, unit: BRL}
+  unique_customer_count: {kind: count, unit: 人}
+  review_count: {kind: count, unit: 条}
+  canceled_order_count: {kind: count, unit: 单}
+  delivered_order_count: {kind: count, unit: 单}
+  unavailable_order_count: {kind: count, unit: 单}
+  average_items_per_order: {kind: mean, unit: 件每单}
+  average_item_price: {kind: mean, unit: BRL每件}
+  approval_latency_days: {kind: duration, unit: 天}
+  carrier_handoff_days: {kind: duration, unit: 天}
 
 tables:
   - table_id: fact_orders

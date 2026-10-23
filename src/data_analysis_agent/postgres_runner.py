@@ -538,7 +538,11 @@ class SecurePostgresRunner(SqlRunner):
                     additive_metric_ids=context.metadata.get("additive_metric_ids", ()),
                     time_column="time" if plan.get("time_grain") else None,
                     top_n=plan.get("top_n"),
-                    max_tokens=usage.budget.max_result_evidence_tokens if usage is not None else None,
+                    query_scope=plan,
+                    metric_semantics=context.metadata.get("metric_semantics", {}),
+                    inspections=usage.result_inspections if usage is not None else (),
+                    numerator_overrides=usage.result_numerators if usage is not None else None,
+                    max_tokens=usage.result_evidence_limit() if usage is not None else None,
                 )
             else:
                 # Frozen offline callers retain their historical sample format.
@@ -553,7 +557,7 @@ class SecurePostgresRunner(SqlRunner):
                 if result_budget is not None:
                     evidence = json.loads(result_summary.removeprefix(RESULT_EVIDENCE_PREFIX))
                     usage.record_catalog({"result_evidence": {
-                        "token_limit": usage.budget.max_result_evidence_tokens,
+                        "token_limit": evidence["evidence_token_limit"],
                         "source_row_count": len(validated_frame),
                         "included_row_count": evidence["included_row_count"],
                         "coverage": evidence["coverage"],

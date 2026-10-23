@@ -3,6 +3,27 @@ dataset_version: "thelook-kaggle-mirror-v1-20260908"
 metric_version: "0.2-frozen"
 policy_version: "sql-policy-v1"
 description: "Server-owned v2 semantic catalog for TheLook protected cross-schema evaluation. It expands fact-domain coverage without entering Olist training or prompting."
+metric_semantics:
+  completed_sale_amount: {kind: amount, unit: 来源金额单位未声明}
+  completed_item_count: {kind: count, unit: 商品行}
+  completed_order_count: {kind: count, unit: 单}
+  average_order_value: {kind: mean, unit: 来源金额单位每单}
+  average_items_per_completed_order: {kind: mean, unit: 商品行每单}
+  cancelled_order_count: {kind: count, unit: 单}
+  returned_order_count: {kind: count, unit: 单}
+  average_fulfillment_days: {kind: duration, unit: 天}
+  average_dispatch_days: {kind: duration, unit: 天}
+  average_transit_days: {kind: duration, unit: 天}
+  average_post_delivery_return_days: {kind: duration, unit: 天}
+  return_rate: {kind: rate, unit: 比例0至1}
+  completed_customer_count: {kind: count, unit: 人}
+  received_inventory_unit_count: {kind: count, unit: 库存件}
+  sold_inventory_unit_count: {kind: count, unit: 库存件}
+  current_unsold_inventory_unit_count: {kind: count, unit: 库存件}
+  average_days_to_sale: {kind: duration, unit: 天}
+  event_count: {kind: count, unit: 次}
+  unique_session_count: {kind: count, unit: 会话}
+  registered_user_count: {kind: count, unit: 人}
 
 tables:
   - table_id: distribution_centers

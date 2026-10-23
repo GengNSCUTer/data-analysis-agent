@@ -432,6 +432,45 @@ def test_interpreter_does_not_copy_untrusted_prose_into_query_scope():
     )
 
 
+@pytest.mark.asyncio
+async def test_interpreter_repairs_one_malformed_combined_calculation():
+    prompts = []
+    async def complete(prompt, user):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return json.dumps({"request_kind":"result_followup", "action":"keep",
+                               "result_inspections":[{"operation":"sum"}]})
+        return json.dumps({"request_kind":"result_followup", "action":"keep",
+                           "result_inspections":[{"operation":"sum", "metric_id":"gmv"},
+                                                 {"operation":"share", "metric_id":"gmv", "row_numbers":[12]}]})
+    interpreter = SemanticIntentInterpreter(CatalogLoader().load(), complete)
+    intent = await interpreter.interpret("合计及第12行占比", User(id="u"))
+    assert [r.operation for r in intent.result_inspections] == ["sum", "share"]
+    assert len(prompts) == 2 and "a calculation requires metric_id" in prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_interpreter_does_not_retry_catalog_permission_rejection():
+    calls = []
+    async def complete(prompt, user):
+        calls.append(prompt)
+        return '{"request_kind":"data_query","metric_ids":["secret_profit"]}'
+    with pytest.raises(SemanticIntentError, match="unknown_or_invisible_metric"):
+        await SemanticIntentInterpreter(CatalogLoader().load(), complete).interpret("利润", User(id="u"))
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_interpreter_stops_after_second_malformed_output():
+    calls = []
+    async def complete(prompt, user):
+        calls.append(prompt)
+        return '{"request_kind":"result_followup","result_inspections":[{"operation":"run_python"}]}'
+    with pytest.raises(SemanticIntentError, match="invalid_intent_output"):
+        await SemanticIntentInterpreter(CatalogLoader().load(), complete).interpret("分析", User(id="u"))
+    assert len(calls) == 2
+
+
 @pytest.mark.parametrize(
     "payload,reason",
     [

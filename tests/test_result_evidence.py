@@ -15,7 +15,7 @@ from data_analysis_agent.result_artifact import ResultArtifact
 from data_analysis_agent.result_artifact_store import ResultArtifactIntegrityError, ResultArtifactStore
 from data_analysis_agent.result_evidence import (
     RESULT_EVIDENCE_PREFIX, ResultInspection, ResultInspectionError,
-    build_result_evidence, constrain_followup_answer, followup_adds_numbers,
+    build_result_evidence, constrain_followup_answer, followup_adds_numbers, resize_result_evidence,
 )
 from data_analysis_agent.runtime_workspace import load_runtime_workspace
 from data_analysis_agent.question_router import QuestionRouter
@@ -58,6 +58,46 @@ def test_large_result_has_full_statistics_and_year_end_peak_not_just_a_prefix():
     assert result["time_endpoints"]["last"]["gmv"] == 9_876
 
 
+def test_actual_request_resizes_rows_but_keeps_full_population_statistics():
+    frame = pd.DataFrame({"category":[f"类别{i}" for i in range(250)],"gmv":range(250)})
+    summary = evidence(frame)
+    assert DEFAULT_TOKEN_COUNTER.count_text(summary) > 4000
+    usage = BudgetUsage(RequestBudget(max_prompt_tokens=6000, max_history_tokens=4000, max_output_tokens=1000))
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        request = LlmRequest(messages=[LlmMessage(role="user",content="历史背景"*300 + summary)],
+                             user=User(id="budget"),max_tokens=1000,metadata={"purpose":"tool_free_response"})
+        service = ObservedLlmService(None)
+        fitted = service._fit_result_request(request)
+        service._check_context(fitted)
+    finally:
+        CURRENT_BUDGET.reset(token)
+    result = json.loads(fitted.messages[0].content.split(RESULT_EVIDENCE_PREFIX)[1])
+    assert result["source_row_count"] == 250 and result["included_row_count"] < 250
+    assert result["statistics"]["gmv"]["sum_of_returned_rows"] == sum(range(250))
+    assert request.messages[0].content.endswith(summary)
+
+
+def test_large_calculation_detail_is_paged_without_changing_computed_count():
+    frame = pd.DataFrame({"category":[f"类别{i}" for i in range(250)],"gmv":range(250)})
+    result = payload(evidence(frame, inspections=[ResultInspection(operation="threshold", metric_id="gmv", threshold_value=1000, limit=250)],max_tokens=2000))
+    assert result["analyses"][0]["match_count"] == 250
+    assert result["analyses"][0]["detail_items_omitted"] > 0
+    assert result["source_row_count"] == 250
+    resized = resize_result_evidence(evidence(frame), 2000)
+    assert DEFAULT_TOKEN_COUNTER.count_text(resized) <= 2000
+
+
+def test_restoration_uses_current_budget_without_breaking_a_saved_result(monkeypatch):
+    summary = evidence(pd.DataFrame({"category":[f"类别{i}" for i in range(250)], "gmv":range(250)}))
+    monkeypatch.setenv("DATA_ANALYSIS_MAX_RESULT_EVIDENCE_TOKENS", "2000")
+    restored = WorkingMemory.from_mapping({"previous_result_summary":summary})
+    data = payload(restored.previous_result_summary)
+    assert DEFAULT_TOKEN_COUNTER.count_text(restored.previous_result_summary) <= 2000
+    assert data["source_row_count"] == 250
+    assert data["statistics"]["gmv"]["sum_of_returned_rows"] == sum(range(250))
+
+
 def test_accepted_time_alias_still_has_full_sequence_endpoints():
     frame = pd.DataFrame({"month": pd.date_range("2017-01-01", periods=12, freq="MS"), "gmv": range(12)})
     result = payload(build_result_evidence(frame, required_columns=("time", "gmv"), metric_ids=("gmv",),
@@ -83,9 +123,11 @@ def test_non_additive_metrics_never_get_group_sum_or_average():
                                           metric_ids=("positive_review_rate",)))
     assert result["statistics"]["positive_review_rate"]["sum_allowed"] is False
     assert "sum_of_returned_rows" not in result["statistics"]["positive_review_rate"]
-    with pytest.raises(ResultInspectionError, match="不可跨组求和"):
-        build_result_evidence(frame, required_columns=frame.columns, metric_ids=("positive_review_rate",),
-                              inspection=ResultInspection(operation="sum", metric_id="positive_review_rate"))
+    calculated = payload(build_result_evidence(frame, required_columns=frame.columns,
+                         metric_ids=("positive_review_rate",), inspections=[
+                         ResultInspection(operation="sum", metric_id="positive_review_rate")]))
+    assert calculated["analyses"][0]["status"] == "query_required"
+    assert "不可跨组求和" in calculated["analyses"][0]["reason"]
 
 
 def test_additivity_depends_on_catalog_dimension_not_just_metric_name():
@@ -98,25 +140,25 @@ def test_additivity_depends_on_catalog_dimension_not_just_metric_name():
 
 def test_server_sum_is_decimal_based_and_comparison_handles_zero_denominator():
     frame = pd.DataFrame({"state": ["SP", "RJ", "MG"], "gmv": [0.1, 0.2, 0.0]})
-    result = payload(evidence(frame, inspection=ResultInspection(operation="sum", metric_id="gmv")))
-    assert result["calculation"]["value"] == 0.3
-    result = payload(evidence(frame, inspection=ResultInspection(operation="compare", metric_id="gmv", row_numbers=(1, 3))))
-    assert result["calculation"]["difference_first_minus_second"] == 0.1
-    assert result["calculation"]["relative_change_percent"] is None
-    assert result["calculation"]["zero_denominator"] is True
+    result = payload(evidence(frame, inspections=[ResultInspection(operation="sum", metric_id="gmv")]))
+    assert result["analyses"][0]["value"] == 0.3
+    result = payload(evidence(frame, inspections=[ResultInspection(operation="compare", metric_id="gmv", row_numbers=(1, 3))]))
+    assert result["analyses"][0]["difference"] == 0.1
+    assert result["analyses"][0]["relative_change_percent"] is None
+    assert result["analyses"][0]["baseline_status"] == "zero"
 
 
 def test_targeted_read_reaches_rows_outside_the_old_sample_and_matches_exact_values():
     frame = pd.DataFrame({"state": ["01", "NA", *[f"S{i}" for i in range(20)]], "gmv": range(22)})
-    result = payload(evidence(frame, inspection=ResultInspection(operation="rows", row_numbers=(10, 20))))
+    result = payload(evidence(frame, inspections=[ResultInspection(operation="rows", row_numbers=(10, 20))]))
     assert result["row_numbers"] == [10, 20]
     assert [row["gmv"] for row in result["sample_rows"]] == [9, 19]
-    result = payload(evidence(frame, inspection=ResultInspection(operation="sum", metric_id="gmv", filters={"state": "NA"})))
-    assert result["calculation"]["value"] == 1
+    result = payload(evidence(frame, inspections=[ResultInspection(operation="sum", metric_id="gmv", filters={"state": "NA"})]))
+    assert result["analyses"][0]["value"] == 1
     with pytest.raises(ResultInspectionError, match="超出"):
-        evidence(frame, inspection=ResultInspection(row_numbers=(300,)))
+        evidence(frame, inspections=[ResultInspection(row_numbers=(300,))])
     with pytest.raises(ResultInspectionError, match="列"):
-        evidence(frame, inspection=ResultInspection(filters={"order_id": "secret"}))
+        evidence(frame, inspections=[ResultInspection(filters={"order_id": "secret"})])
 
 
 def test_refresh_preserves_structured_evidence_larger_than_old_character_limit():
@@ -132,7 +174,7 @@ def test_refresh_preserves_structured_evidence_larger_than_old_character_limit()
     assert restored.previous_result_summary == summary
     assert payload(restored.previous_result_summary)["sample_rows"][-1]["category"] == "类别26"
     with pytest.raises(ContextCapacityError):
-        WorkingMemory().with_result_summary("长" * 8_000)
+        WorkingMemory().with_result_summary("长" * 80_000)
 
 
 @pytest.fixture
@@ -187,14 +229,14 @@ async def test_followup_reads_complete_artifact_without_sql_or_task_mutation(sav
     memory = AnalysisState(previous_result_artifact=artifact, previous_result_summary=artifact.summary,
                            filters=("customer_state=SP",))
     intent = SemanticIntent(request_kind="result_followup", action="keep",
-                            result_inspection=ResultInspection(operation="sum", metric_id="gmv"))
+                            result_inspections=(ResultInspection(operation="sum", metric_id="gmv"),))
     usage = BudgetUsage(RequestBudget())
     token = CURRENT_BUDGET.set(usage)
     try:
         result = payload(await handler._inspect_previous_result(memory, User(id="owner"), intent))
     finally:
         CURRENT_BUDGET.reset(token)
-    assert result["calculation"]["value"] == sum(range(22))
+    assert result["analyses"][0]["value"] == sum(range(22))
     assert usage.sql_calls_used == 0
     assert memory.filters == ("customer_state=SP",)
     assert usage.catalog_trace["result_inspection"]["source_row_count"] == 22

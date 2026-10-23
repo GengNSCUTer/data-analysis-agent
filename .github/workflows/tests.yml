@@ -76,6 +76,7 @@ jobs:
           tests/test_result_presentation.py \
           tests/test_result_validator.py \
           tests/test_result_evidence.py \
+          tests/test_result_analysis.py \
           tests/test_result_budget_contract.py \
           tests/test_result_budget_runtime.py \
           tests/test_local_auth.py \

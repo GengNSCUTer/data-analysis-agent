@@ -58,6 +58,20 @@ def test_default_catalog_matches_policy_and_expected_versions(catalog) -> None:
         )
 
 
+@pytest.mark.parametrize("name,count,rate", [("olist",19,"positive_review_rate"), ("thelook",20,"return_rate")])
+def test_runtime_metric_semantics_are_explicit_and_cover_the_current_catalog(monkeypatch, name, count, rate):
+    from data_analysis_agent.runtime_workspace import load_runtime_workspace
+    monkeypatch.delenv("DATA_ANALYSIS_CATALOG_PATH", raising=False)
+    monkeypatch.delenv("DATA_ANALYSIS_DATASET_VERSION", raising=False)
+    root = Path(__file__).resolve().parents[1]
+    workspace = load_runtime_workspace(root / f"data/workspaces/{name}.yaml").profile
+    catalog = CatalogLoader(workspace).load()
+    assert len(catalog.metric_semantics) == len(catalog.metrics) == count
+    assert catalog.metric_semantics[rate] == {"kind":"rate", "unit":"比例0至1"}
+    assert catalog.metric_semantics["average_order_value"]["kind"] == "mean"
+    assert "metric_semantics" not in CatalogRetriever(catalog).retrieve("客单价", _user("analyst")).prompt
+
+
 def test_catalog_retrieval_selects_metric_tables_columns_and_join(catalog) -> None:
     selection = CatalogRetriever(catalog).retrieve(
         "按品类统计 GMV", _user("analyst")

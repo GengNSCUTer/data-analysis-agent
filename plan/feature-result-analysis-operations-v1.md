@@ -4,23 +4,26 @@ version: 1.0
 date_created: 2026-10-23
 last_updated: 2026-10-23
 owner: 李耿楠
-status: Planned
+status: Completed
 tags: [Agent, 结果分析, 趋势, 服务端计算, 学习]
 ---
 
 # Introduction
 
-![Status: Planned](https://img.shields.io/badge/status-Planned-blue)
+![Status: Completed](https://img.shields.io/badge/status-Completed-brightgreen)
 
-本轮是代码核查和实施设计，尚未新增运行时能力。它承接四周学习计划的 Day 3，不启动
+2026-10-23用户授权实施并要求完整浏览器验证，以及按请求剩余空间动态分配结果token。
+本轮输入为既有计划、可信工件及语义意图；输出为计算实现、动态预算和分层测试证据。
+非目标为训练模型、任意代码执行和重新设计会话系统；保持SQL安全、工件隔离和页面预览。
+它承接四周学习计划的 Day 3，不启动
 后训练、重新构建数据集或重做会话架构。目标是用少量通用计算覆盖常见经营分析问题，
 让模型理解问题和组织解释，服务端负责计算与事实结论；不为每种中文句式添加拦截规则。
 
 最小任务卡：输入为用户意图、已验证 QueryPlan、Catalog 和完整 ResultArtifact；输出为
 能力缺口、查询覆盖表、计算语义及分步验证方案。保持身份隔离、SQL 安全、结果预算和
-可信工件边界。当前验收采用代码追踪与合成数据复现；后续实施再执行单元、数据库和浏览器测试。
+可信工件边界。验收采用确定性测试、独立合成PostgreSQL及真实浏览器/在线模型，记录见文末。
 
-**已核实的缺口。** `result_evidence.py:build_result_evidence()`目前提供概览、选行、
+**实施前已核实的缺口。** `result_evidence.py:build_result_evidence()`当时仅提供概览、选行、
 可加指标求和和两行比较。时间证据只有首末行，没有逐期比较、期间完整性或分组趋势。
 `followup_adds_numbers()`只检查新数字，不能证明数字属于正确指标或文字趋势正确。
 2026-10-23 用合成月数据 `100 → 120 → 110 → 150` 调用现有代码：证据没有趋势字段；
@@ -128,18 +131,18 @@ ISO周或当前未结束期间时显示实际比较窗口；v1默认不做完整
 固定窗口序列均值作为trend的显式模式，明确窗口长度与单位，不引入任意程序执行。
 
 新增 `result_analysis.py:analyze_result()`纯计算入口，返回具名的四类处理结果：
-`ready`、`query_required`、`clarification_required`、`unsupported`。权限异常仍独立抛出。
+`ready`、`query_required`、`unsupported`。真正歧义由现有语义澄清路径处理，权限异常仍独立抛出。
 数据有缺口但能给部分事实时为ready并标明结论证据不足，不把所有内容都拒绝掉。补查沿用
 现有一次候选修复预算；不能因真实缺月而反复查询，也不能静默扩大用户筛选或时间。
 
 运算遵守现有结果行数、字节与超时预算。工件内计算复用同一完整DataFrame与分组结果，
 不为每个子问题重新读CSV；全店分母、大量明细的分布或更粗粒度汇总优先让PostgreSQL
-返回聚合结果，不为取得完整依据把数百万事实行搬到应用或模型。计算证据仍受4K预算，
+返回聚合结果，不为取得完整依据把数百万事实行搬到应用或模型。计算证据按请求剩余空间动态分配，
 前端预览仍为200行；两者都不用于截断服务端实际计算总体。
 
-计算证据至少绑定 `operation/metric_id/unit/scope/operands/coverage/findings`。coverage
-分别表达当前返回集合、期望时间和模型可见行；findings含服务端判定、计算值、观察数量与
-必要反例。复用工件ID、状态版本和现有trace记录，不加新hash。
+计算证据绑定`operation/metric_id/unit/scope/request_index`，各操作提供比较对象、范围、
+完整性和计算值。结果级`coverage`描述模型可见行，趋势组的`complete/missing_periods`
+描述时间覆盖，不能混用。复用工件ID、状态版本和现有trace记录，不加新hash。
 
 关键结论用服务端模板直接呈现，例如“不是逐月增长：3月为110，低于2月120”。模型可
 解释含义和给出有区分的建议，但不负责重新计算、改写判定或把一个指标的数挪给另一个。
@@ -148,7 +151,7 @@ ISO周或当前未结束期间时显示实际比较窗口；v1默认不做完整
 
 ## 2. Implementation Steps
 
-阶段顺序为1→2→3；每阶段内按TASK顺序实施。下表均为待实施，不能据本方案标记已完成。
+阶段顺序为1→2→3。下表记录最终代码位置；验收范围和未覆盖项见文末。
 
 ### Implementation Phase 1
 
@@ -156,9 +159,9 @@ ISO周或当前未结束期间时显示实际比较窗口；v1默认不做完整
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-001 | 在`result_evidence.py:ResultInspection`增加trend的指标、分组、期间与判断模式；新增`result_analysis.py:analyze_result()`和`analyze_trend()`，实现日历覆盖、分组、逐期差额、涨跌平、连续段和三值结论。从现有QueryPlan/ResultContract读取范围、粒度、时间别名与边界，不从叙事摘要提取。新增`tests/test_result_analysis.py`覆盖TEST-001到TEST-004。 | 否 | 未实施 |
-| TASK-002 | 更新`semantic_intent.py:SemanticIntentInterpreter`的类型与提示，将单个result_inspection直接替换为result_inspections列表，首次data_query及result_followup均可携带请求；更新全部调用方和测试，在`budget.py:BudgetUsage`传递请求。在`postgres_runner.py`的现有`build_result_evidence()`调用与`chat_runtime.py:_inspect_previous_result()`调用共用计算器，保留查询所需分组/时间与用户请求的结果范围。缺数据返回具名原因，只有SQL路径具备所需能力时补查；不得回到关键词路由。 | 否 | 未实施 |
-| TASK-003 | 在`result_evidence.py:build_result_evidence()/render_result_facts()`优先放入请求的计算结论、反例和范围，按剩余token放行；在`llm_observability.py:_explain_result()`和`chat_runtime.py:_tool_free_answer()`统一呈现服务端关键结论。补TEST-009；完成首次提问、工件追问和缺月正常回答的浏览器验证后才进入Phase 2。 | 否 | 未实施 |
+| TASK-001 | `result_analysis.py:ResultInspection/analyze_result/_trend`实现日历覆盖、逐组变化、连续段和三值判断，范围来自QueryPlan。 | 是 | 2026-10-23 |
+| TASK-002 | `SemanticIntent.result_inspections`列表经BudgetUsage传递，Runner及工件追问共用计算器；需要新范围时重新选择Catalog并走受控SQL。 | 是 | 2026-10-23 |
+| TASK-003 | `build_result_evidence/render_analysis_facts`优先保留运算事实；首次与追问直接呈现。`result_evidence_limit/_fit_result_request`按估算剩余空间和实际序列化请求调整。 | 是 | 2026-10-23 |
 
 Phase 1完成条件：完整年、反转、持平、缺月、空值和多分组趋势均有确定性证据；首次与
 追问一致，已有期间不被重复澄清，正常求和不因趋势缺月而被拦截。
@@ -169,9 +172,9 @@ Phase 1完成条件：完整年、反转、持平、缺月、空值和多分组�
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-004 | 在`semantic_catalog.py:MetricDefinition/CatalogLoader`及`data/catalog/`的Olist/TheLook配置中增加计算必需的数值类型与单位尺度；已存在的workspace可加清单与维度策略仍为可加性来源，不另建重复清单。只有已明确公式的加权口径才配置分子分母，否则保留补查路径。更新配置加载测试，旧离线样本与候选SQL模板不改写。 | 否 | 未实施 |
-| TASK-005 | 在`result_analysis.py`实现`analyze_period_compare()/analyze_rank()/analyze_share()`；按本方案处理同比/环比、基数0/负数、百分点、排名分区与并列、Top-N和全店分母。在`query_plan.py:QueryPlan`及候选请求构造中传递补查所需的已确认比较窗口，不放宽既有SQL与权限检查。排名默认精确N条并稳定按维度键破同分，用户要求并列名次时用dense_rank语义并遵守结果预算。 | 否 | 未实施 |
-| TASK-006 | 实现`analyze_distribution()/analyze_threshold()`：对指定返回群组输出有效/缺失数、中位数、p25/p75（线性插值）与阈值筛选；明确群组分布而非底层事实分布。在`analyze_trend()`实现累计可加量和固定日历窗口的序列均值，窗口期间不全则不假装完整。可加分组折叠复用sum；增量贡献复用期间比较与share。统计异常仅输出实际最大跌幅等描述，不自动建立显著性或异常检测模型。 | 否 | 未实施 |
+| TASK-004 | Catalog根级`metric_semantics`和ResultContract携带类型/单位；覆盖Olist19及TheLook20指标，不改写冻结离线Prompt。复用原可加策略，总体均值按原公式补查。 | 是 | 2026-10-23 |
+| TASK-005 | `_period_compare`和`analyze_result`实现期间比较、分区排名、份额及增量贡献；`acquisition_scope`补基期并固定操作数。补分母保留原可信分子，其他运算通过`within_period`保留原时间范围。 | 是 | 2026-10-23 |
+| TASK-006 | `analyze_result/_trend`实现群组分位数、阈值、累计和完整日历滑窗。零/负基数、缺期和非可加总体均明确说明；不实现因果归因或预测。 | 是 | 2026-10-23 |
 
 Phase 2完成条件：TEST-005到TEST-008通过；全店占比和加权总体缺依据时正确补查，
 完整工件可以支持的计算无需再次执行SQL。所有新操作都保留原权限、过滤和预算。
@@ -182,9 +185,9 @@ Phase 2完成条件：TEST-005到TEST-008通过；全店占比和加权总体缺
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-007 | 为`tests/test_result_analysis.py`补齐数值、日历、范围和重排不变性用例；为`tests/test_result_evidence.py`、语义解释与runtime测试加入首次/追问共用、数据不足补查、权限失败不绕过、证据优先级和token边界。按TEST-001到TEST-010核对预期，测试预期不得由被测计算器自身生成。 | 否 | 未实施 |
-| TASK-008 | 在`tests/e2e/`现有Playwright测试体系新增`test_result_analysis_conversation.py`，用合成数据库与受控模型验证TEST-011完整多轮链路，再分别对Olist/TheLook用在线模型执行TEST-012的业务开发问题。记录计算值、最终文本、SQL次数、澄清原因、图表与刷新恢复；不使用protected final test作开发用例。 | 否 | 未实施 |
-| TASK-009 | 更新`PROJECT.md`、飞书项目文档和`docs/learning/agent-project-walkthrough-v1.md`，分别记录确定性算法、真实模型问题与未覆盖类型；以同一计算口径核对事实结论，完成相关回归后提交推送。继续原四周学习计划，不把本任务扩展为新训练或商业BI平台。 | 否 | 未实施 |
+| TASK-007 | `test_result_analysis/test_result_evidence/test_semantic_catalog/test_semantic_intent`覆盖运算、范围、完整性、动态预算及一次结构纠正，新增计算回归进入CI。 | 是 | 2026-10-23 |
+| TASK-008 | 复用`test_result_evidence_flow.py`完成22轮受控真实浏览器链路；`test_result_analysis_live.py`在Olist/TheLook执行真实模型七轮，保留原始失败与复测。 | 是 | 2026-10-23 |
+| TASK-009 | 更新本地项目、测试和Day3学习记录，完成飞书项目同步、提交推送。 | 是 | 2026-10-23 |
 
 Phase 3完成条件：新增操作的确定性预期通过；受控模型真实浏览器链路通过；公网模型
 逐题记录成功和失败，存在失败就说明具体限制，不用回归数量包装线上准确率。
@@ -207,10 +210,10 @@ Phase 3完成条件：新增操作的确定性预期通过；受控模型真实�
 
 - **FILE-001**: `src/data_analysis_agent/result_analysis.py`：新增纯计算入口和类型明确的处理结果，不执行SQL或调用模型。
 - **FILE-002**: `src/data_analysis_agent/result_evidence.py`：扩展受限计算参数，接入计算事实、按问题组织证据和服务端结论呈现。
-- **FILE-003**: `src/data_analysis_agent/semantic_intent.py`、`budget.py`、`query_plan.py`：提出并传递计算与所需数据，沿用受控状态。
+- **FILE-003**: `src/data_analysis_agent/semantic_intent.py`、`budget.py`：提出并传递计算与所需数据，沿用既有受控状态及QueryPlan接口。
 - **FILE-004**: `src/data_analysis_agent/postgres_runner.py`、`chat_runtime.py`、`llm_observability.py`：首次成功结果与工件追问共用计算，统一关键结论呈现。
 - **FILE-005**: `src/data_analysis_agent/semantic_catalog.py`与`data/catalog/`：补充必要的单位和指标数值语义，复用可加性，不改变已冻结离线输入。
-- **FILE-006**: `tests/test_result_analysis.py`、`tests/test_result_evidence.py`与`tests/e2e/test_result_analysis_conversation.py`：算法、接线及真实浏览器覆盖。
+- **FILE-006**: `tests/test_result_analysis.py`、`tests/test_result_evidence.py`、`tests/e2e/test_result_evidence_flow.py`与`tests/e2e/test_result_analysis_live.py`：算法、接线及真实浏览器覆盖。
 
 ## 6. Testing
 
@@ -242,3 +245,31 @@ Phase 3完成条件：新增操作的确定性预期通过；受控模型真实�
 - [结果预算v2](../docs/architecture/result-budget-v2.md)
 - [ResultArtifact Presenter](../docs/architecture/result-artifact-presenter-v1.md)
 - [数据源接入模板](../docs/workspace-onboarding.md)
+
+## 9. 实施验收记录（2026-10-23）
+
+- 确定性：CI清单647项通过，10项不属于该测试层；定向Ruff与编译检查通过。
+- 独立合成PostgreSQL：Runner、工件鉴权路由和真实浏览器共16项通过；浏览器22轮，
+  覆盖Top-10、补分母后反向排序、完整日历反例、累计/滑窗、分位数、阈值、组合问题加图、
+  缺基期补查与缺事实不循环、分组客单价重新计算总体、刷新/完整CSV。
+- 真实模型：`test_result_analysis_live.py`使用DeepSeek-V3.2，Olist2017及TheLook2023
+  各七轮通过。首轮12月金额用独立SQL核对，后续比较、排名、分位数、求和/份额逐项
+  对照独立数值预期；趋势、换图和刷新续接均通过。各会话SQL次数为`1,0,0,0,0,0,0`。
+  两条七轮分别约89和90秒，各轮响应约5–32秒，含模型和数据库等待；不作为速度SLA。
+- 动态预算：同一对话中证据分配随历史由约58.7K降至57.8K，未机械占满；最终实际请求
+  仍校验系统、消息、工具与输出预留。250行完整证据超过原4K也可提供；小预算优先
+  运算事实并标注未展开明细。原始完整结果不受模型可见行数影响。
+- 初始失败：一次TheLook组合计算返回`invalid_intent_output`，当时未保留原始提案，不能
+  断言具体哪个字段不合规。后加真实输出记录及一次结构纠正，不放宽类型、权限或指标；
+  永久不合规和Catalog拒绝有单独回归。后续两轮两库复测通过，不能据此声称该失败永不复现。
+- 单机计算测量：10万合成分组的完整合计为4,999,950,000，约6.23秒构造计算和预算证据，
+  约1,902行进入证据。此项不包含数据库扫描，也不是并发或生产性能保证。
+
+证据均在仓库外：`evals/result-analysis-20261023/verified/`含逐轮报告、真实模型提案与
+截图；`final/`保留上述失败。合成链路位于`evals/result-evidence-VBX7Pe/analysis-browser/`。
+未用protected final开发或训练，未改默认provider，未引入新数据库表或服务。
+
+边界：真实模型验证主要为单金额指标的月度链路，并非39指标全覆盖；比率百分点、非可加
+总体、多实体方向与零基数等由确定性/受控浏览器覆盖。任意分区占比、分组分位数或多层
+重聚合应走普通SQL或另行扩展，不声称结果算子已支持所有组合。自由文本解释、底层SQL
+口径、预测和因果结论仍不能靠本次计算器证明。下一步回到Day 3小单元代码学习。

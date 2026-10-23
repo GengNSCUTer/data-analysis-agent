@@ -143,6 +143,7 @@ class ObservedLlmService(LlmService):
         return request
 
     async def _ensure_context(self, request):
+        request = self._fit_result_request(request)
         try:
             self._check_context(request)
         except ContextCapacityError:
@@ -153,6 +154,39 @@ class ObservedLlmService(LlmService):
             await usage.context_compactor()
             request = self._query_request(await rebuild())
             self._check_context(request)
+        return request
+
+    def _fit_result_request(self, request: LlmRequest) -> LlmRequest:
+        """Use actual system/message/tool sizes, rather than a fixed result allowance."""
+        from .result_evidence import RESULT_EVIDENCE_PREFIX, resize_result_evidence
+        usage = CURRENT_BUDGET.get()
+        if usage is None or request.metadata.get("purpose") not in {"result_explanation", "tool_free_response"}:
+            return request
+        if self.token_counter.count_request(request) + (request.max_tokens or usage.budget.max_output_tokens) <= usage.budget.max_prompt_tokens:
+            return request
+        for index, message in enumerate(request.messages):
+            text = message.content or ""
+            start = text.find(RESULT_EVIDENCE_PREFIX)
+            if start < 0:
+                continue
+            _, length = json.JSONDecoder().raw_decode(text[start + len(RESULT_EVIDENCE_PREFIX):])
+            end = start + len(RESULT_EVIDENCE_PREFIX) + length
+            messages = list(request.messages)
+            messages[index] = message.model_copy(update={"content": text[:start] + text[end:]})
+            without = request.model_copy(update={"messages": messages})
+            available = usage.budget.max_prompt_tokens - (request.max_tokens or usage.budget.max_output_tokens) - self.token_counter.count_request(without) - 32
+            # Evidence is JSON embedded inside a message; serialized quotes cost
+            # additional tokens. Measure that actual request, not just its text.
+            while True:
+                fitted = resize_result_evidence(text[start:end], available, self.token_counter)
+                messages[index] = message.model_copy(update={"content": text[:start] + fitted + text[end:]})
+                candidate = request.model_copy(update={"messages": list(messages)})
+                excess = self.token_counter.count_request(candidate) + (request.max_tokens or usage.budget.max_output_tokens) - usage.budget.max_prompt_tokens
+                if excess <= 0:
+                    break
+                available -= excess
+            usage.record_catalog({"result_request_resize": {"evidence_tokens": self.token_counter.count_text(fitted), "available": available}})
+            return candidate
         return request
 
     async def send_request(self, request: LlmRequest) -> LlmResponse:
@@ -295,13 +329,19 @@ class ObservedLlmService(LlmService):
     async def _explain_result(self, request: LlmRequest, usage) -> LlmResponse:
         """One tool-free explanation; numbers have already been computed by Python/SQL."""
         usage.mark_deterministic_result_finalized()
+        from .result_evidence import RESULT_EVIDENCE_PREFIX, render_analysis_facts
+        payload = json.loads(usage.result_summary.removeprefix(RESULT_EVIDENCE_PREFIX))
+        if any(a["operation"] not in {"overview", "rows"} for a in payload.get("analyses", [])):
+            usage.record_catalog({"result_explanation": {"server_calculated": True, "tools_enabled": False, "model_used": False}})
+            usage.finish()
+            return LlmResponse(content="\n".join(render_analysis_facts(payload)), tool_calls=[], finish_reason="trusted_result_finalized")
         usage.record_llm_round()
         summary = usage.result_summary
         explanation = LlmRequest(
             user=request.user,
             system_prompt=(
                 "用中文解释服务端已验证结果，先回答当前问题。只能引用下列结果证据，不执行计算或调用工具。"
-                "statistics/calculation是服务端全量计算，sample_rows是已返回的行；coverage不是complete时"
+                "statistics/analyses是服务端全量计算，sample_rows是已返回的行；coverage不是complete时"
                 "不能由样本推断全量。sum_of_returned_rows是这份结果的合计，若scope为returned_top_n，"
                 "不能说成全部业务总额。formatted_metrics和*_display可用于展示数值。"
                 "不得简单平均比率/均值或累加不可加的去重计数，不假设币种，不把相关性当因果。"
@@ -312,9 +352,10 @@ class ObservedLlmService(LlmService):
                 f"用户问题：{usage.catalog_question or ''}\n"
                 f"查询范围：{json.dumps(usage.query_plan or {}, ensure_ascii=False)}\n{summary}"
             ))],
-            tools=None, temperature=0.0, max_tokens=min(usage.budget.max_output_tokens, 2_000),
+            tools=None, temperature=0.0, max_tokens=usage.budget.max_output_tokens,
             metadata={"purpose": "result_explanation"},
         )
+        explanation = self._fit_result_request(explanation)
         self._check_context(explanation)
         response = await self._send_request(explanation)
         answer = constrain_followup_answer(response.content or "", summary)
