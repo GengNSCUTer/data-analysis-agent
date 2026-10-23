@@ -181,7 +181,7 @@ def _rank_bound(node: exp.Expression | None, scope: Scope, dimensions: tuple[str
 
 def _rank_bound_enforced(scope: Scope, dimensions: tuple[str, ...], limit: int) -> bool:
     if isinstance(scope.expression, exp.SetOperation):
-        return all(_rank_bound_enforced(branch, dimensions, limit) for branch in scope.union_scopes)
+        return all(_rank_bound_enforced(branch, dimensions, limit) for branch in scope.set_operation_scopes)
     if any(
         _rank_bound(scope.expression.args.get(clause), scope, dimensions, limit)
         for clause in ("where", "having")
@@ -357,7 +357,7 @@ class _FilterCheck:
     def enforced(self, scope, output=None):
         query = scope.expression
         if isinstance(query, exp.SetOperation):
-            return all(self.enforced(branch, output) for branch in scope.union_scopes)
+            return all(self.enforced(branch, output) for branch in scope.set_operation_scopes)
         if any(self.predicate(query.args.get(clause), scope) for clause in ("where", "having")):
             return True
         joins = query.args.get("joins") or []

@@ -11,6 +11,15 @@
 [面试材料](docs/interview/project-release-facts-v1.md)。Docker实运行和外部独立部署尚未验证。
 后续回到[四周学习计划](plan/process-agent-internship-improvement-v1.md)，下面保留历史实验与阶段记录。
 
+2026-10-23 CI修复：本地SQLGlot30.14.0仍有`union_scopes`，新安装30.24.0已改成
+`set_operation_scopes`；原`sqlglot>=25`允许CI升级，导致本地通过但GitHub失败。
+隔离安装30.24.0复现同一报错后，直接更新排名/筛选两处集合运算检查，依赖固定为
+30.24.0，不添加兼容分支。新增排名双分支及嵌套UNION筛选回归，CI安装时打印版本。
+本地同版本完整CI清单652项通过（10项不属于该层），Ruff、编译与diff检查通过。保持
+原SQL权限、筛选和排名约束；当前网页运行环境也更新同版本。远端完整流水线结论以
+[GitHub Actions](https://github.com/GengNSCUTer/data-analysis-agent/actions/workflows/tests.yml)为准，
+本地通过不能替代远端数据库、浏览器及wheel安装检查。
+
 2026-10-23结果分析已实现：[实施与验收记录](plan/feature-result-analysis-operations-v1.md)。
 首次查询和工件追问共用服务端计算，支持日历趋势、期间比较、排名、占比、分位数、阈值及
 累计/滑窗。趋势检查完整期间和相邻变化；`100→120→110→150`明确为不逐月增长，不再

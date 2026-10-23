@@ -144,7 +144,8 @@ def test_unused_ranked_cte_cannot_supply_top_n_evidence():
     assert sql_plan_mismatch(sql, plan)
 
 
-def test_rank_bound_survives_aliases_and_must_hold_for_both_union_branches():
+@pytest.mark.parametrize("operation", ["UNION ALL", "UNION", "INTERSECT", "EXCEPT"])
+def test_rank_bound_survives_aliases_and_must_hold_for_both_union_branches(operation):
     plan = {"top_n": {"product_category_name": 5},
             "top_n_partition_dimensions": ["customer_state"]}
     ctes = (
@@ -154,8 +155,26 @@ def test_rank_bound_survives_aliases_and_must_hold_for_both_union_branches():
     )
     query = "SELECT customer_state, product_category_name, gmv FROM renamed WHERE position <= 5"
     assert sql_plan_mismatch(ctes + query, plan) is None
-    assert sql_plan_mismatch(ctes + query + " UNION ALL " + query, plan) is None
-    assert sql_plan_mismatch(ctes + query + " UNION ALL " + query.replace("position <= 5", "TRUE"), plan)
+    assert sql_plan_mismatch(ctes + query + f" {operation} " + query, plan) is None
+    assert sql_plan_mismatch(ctes + query + f" {operation} " + query.replace("position <= 5", "TRUE"), plan)
+    assert sql_plan_mismatch(ctes + query.replace("position <= 5", "TRUE") + f" {operation} " + query, plan)
+
+
+@pytest.mark.parametrize("operation", ["UNION ALL", "UNION"])
+def test_state_filter_must_hold_for_each_nested_union_branch(operation):
+    plan = {"metric_ids":["gmv"], "filters":[{
+        "dimension":"customer_state", "value":"SP",
+        "sources":[{"table":"dim_customers", "column":"customer_state"}],
+    }]}
+    query = ("SELECT SUM(i.price) AS gmv FROM analytics.fact_order_items i "
+             "JOIN analytics.fact_orders o ON o.order_id=i.order_id "
+             "JOIN analytics.dim_customers c ON c.customer_id=o.customer_id "
+             "WHERE c.customer_state='SP'")
+    assert sql_plan_mismatch(f"{query} {operation} {query} {operation} {query}", plan) is None
+    for index in range(3):
+        branches = [query] * 3
+        branches[index] = query.replace("c.customer_state='SP'", "TRUE")
+        assert sql_plan_mismatch(f" {operation} ".join(branches), plan)
 
 
 def test_rank_filter_must_belong_to_the_planned_partition():

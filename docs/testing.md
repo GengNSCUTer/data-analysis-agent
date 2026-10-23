@@ -26,6 +26,12 @@ DATA_ANALYSIS_ENV_FILE=/dev/null python -m pytest -q \
 测试。没有开启相应环境开关的 skip 必须记录，不能计为通过。CI 同时构建前端和 wheel，并在
 源码目录之外安装检查资源；不把开发机有环境、缓存或模型权重当作用户已经安装成功。
 
+SQLGlot参与SQL安全与计划AST检查，当前在`pyproject.toml`固定30.24.0，升级时一起更新
+调用和相关回归。2026-10-23曾因开发环境30.14.0与CI新安装版本不同，`union_scopes`
+重命名导致集合运算检查失败；两处调用现统一为`set_operation_scopes`。测试前先按上面
+命令同步依赖，不能只在长期未更新的conda环境跑测试。CI打印实际版本；推送后还需确认
+远端完整workflow通过，不能把本地确定性回归当成数据库和浏览器验收。
+
 `test_demo_scenarios.py` 中的真实Olist快照golden核对也标为 `postgres`，但不纳入合成库CI；
 其固定数据参考值与合成样本不同。CI只运行该文件的无数据库清单/按钮测试。
 

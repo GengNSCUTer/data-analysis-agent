@@ -27,7 +27,8 @@ dependencies = [
     "tabulate",
     "sqlparse",
     "sqlalchemy",
-    "sqlglot>=25.0.0",
+    # Scope APIs are used by SQL safety/plan checks; upgrade with their regressions.
+    "sqlglot==30.24.0",
     "psycopg2-binary>=2.9.0",
     "requests",
 ]
