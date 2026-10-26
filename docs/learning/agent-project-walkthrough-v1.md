@@ -2,8 +2,8 @@
 
 本记录承接当前[两周学习计划](../../plan/process-agent-internship-improvement-v2-2week.md)，只放代码理解与问答。项目进度见 PROJECT.md，后训练知识继续使用既有 post-training/learning 目录。每轮阅读 1–3 个关键函数，问题答完再进入下一段。
 
-当前学习位置（2026-10-26）：Day 3 已完成核心代码学习与收尾复述，下一单元为 Day 4 的
-分析状态与结果工件关联。Day 1/2 的主要复述已完成。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
+当前学习位置（2026-10-26）：Day 1–3 小节主要复述已完成，先补业务场景与整链复盘，再进入
+Day 4 的 `ResultContract.from_selection()`；当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
 不代表现行实现；当前内容以文末日期和真实代码为准。工程完成不代替用户理解。
 
 ## Day 1：沿一条问题认识请求链
@@ -1202,3 +1202,23 @@ PostgreSQL `REPEATABLE READ`只读事务中生成受控诊断查询：按实际�
 实际提问：1. SQL 成功返回，但缺少要求的指标列，能否保存为可信工件？2. 已有 SP 州品类前十，“第十名多少钱”和“全国第十名多少钱”，分别是否需要重新查库？
 
 用户回答：第一题不行，应在结果审查处拒绝；第二题前者不用、后者需要。两题正确：已有范围内的第十名可以读取同一授权工件，全国范围不在旧 SP 结果中，需要新查询。至此 Day 3 核心学习及收尾复述完成；下一单元按两周计划进入 Day 4 的结果合同、工件与分析状态关联，后续再讲上下文。没有因工程测试通过跳过用户复述，本轮仅归档学习记录，不改运行时、不新增测试。
+
+### 2026-10-26｜Day 1–3 业务串联与查漏补缺（待复述）
+
+用户要求每节先说业务功能、关键设计，再说真实代码实现；先补 Day 1–3 的遗漏、串联主线，再进入 Day 4。此前小节回答正确不等于已经完整审阅整条链。本节以“2017 年 SP 州销售额前五的商品品类”为统一场景，不新增运行时功能、不运行模型或重做评测。
+
+审阅记录支持三个补强点：非 SQL 请求如何分流；语义维度如何绑定 workspace 真实列与 Join；各检查层和失败回答的职责如何衔接。资源生命周期也需要再次区分：`create_app()`启动时装配复用组件，但 reader 数据库连接在每次执行中创建并关闭，不是全服务共用一个事务。身份来自服务端凭据；conversation_id/request_id只是标识，不是授权。
+
+业务目标是让运营看到一个明确时间、明确地域、明确口径的品类销售排名。Day 1 解决“用户要什么”；Day 2 解决“在当前库按什么口径计算”；Day 3 解决“候选能否安全执行，失败怎样处理”。不能因为任一层通过，就宣称整条 SQL 的业务语义已证明正确。
+
+1. **身份与请求。** 浏览器发送问题与会话 ID，`server.py:create_app()`装配身份解析、Catalog、模型、Runner 和存储；`chat_sse()`将请求交给 Managed/Budgeted handler，SSE只负责分块传输。服务端校验身份与所属 workspace，会话恢复不能跨用户。模型未参与登录授权。
+2. **理解与状态。** `SemanticIntentInterpreter`提出 gmv、product_category_name、SP 筛选、2017 年半开区间、top_n=5；这里只限2017年，不要求逐月分组，time_grain=null。`parse_semantic_intent()`检查提案的结构与可见业务对象；`resolve_state_intent()`结合patch应用当前 AnalysisState，`update_task`保留未改字段，`new_task`建立新任务范围。模型仍可能理解错，合法JSON不是语义正确的证明。
+3. **非SQL分支。** “GMV怎么算”读取Catalog定义；“SP还是卖家州”之类确实有未解决歧义时澄清；越权请求拒绝；仅对已有工件换图/补看可复用结果。这些分支不因为用户发消息就自动调用run_sql。线上`route_semantic_intent()`仍有代码分支，但不是旧关键词classify/admit语言闸门。
+4. **Catalog与QueryPlan。** gmv 是指标ID，不是物理列；Olist定义为有效订单商品行price之和、不含运费。workspace将客户州绑定dim_customers.customer_state、品类绑定产品/翻译来源；`bind_query_filters()`绑定筛选真实来源，`select_intent_catalog()`保留所需表列及Join桥。`MetricPlan.from_metric()`复制粒度、时间字段、来源表与默认条件；`QueryPlan.from_selection()`整理这次的分组、SP条件、时间、Top-N和必需结果列。计划与Catalog进入模型输入，模型写run_sql候选，并非renderer编译离线QuerySpec。Catalog配置正确和实际SQL遵守配置是两件事。
+5. **SQL与检查。** SQL应汇总商品行price，经orders关联限定有效状态及购买日期，经customers限定SP，经products取品类，按品类聚合再排序。支付表不参与该题；若直接关联一对多支付明细，可能重复累加商品金额。`sql_plan_mismatch()`检查已实现的筛选、关联键、排名等偏差，不证明全部公式/状态/时间语义；`SqlPolicy.evaluate()`检查单条只读AST、表/schema/列白名单、敏感输出、函数，并规范执行LIMIT。前者关注已确认要求是否被候选违反，后者关注SQL访问和执行边界，不是重复的语法检查。
+6. **数据库与预算。** `SecurePostgresRunner._run_sql_sync()`使用workspace reader，在只读REPEATABLE READ事务执行；writer另存会话与审计。行数/字节预算约束返回体积，statement_timeout约束语句耗时，多读一行用于识别资源截断。聚合返回5行也可能扫描大量明细，LIMIT不保证低计算成本。JOIN计数探针只检查支持范围内的重复输入，复杂来源记partial，不冒充全覆盖。
+7. **失败与证据。** 计划偏差或可修复的执行错误最多尝试一次修复，再过原计划和安全链；权限、超时、连接和结果合同拒绝当前不自动修复。失败记录到run/query审计，未验证数字不得先流式显示再撤回，`BudgetSafetyMiddleware`按已知失败状态控制回答展示。请求成功返回200或SSE结束不等于业务查询成功。查库后结果按生成前的ResultContract验收，valid才保存可信工件，供展示、解释和追问。
+
+建议现在亲自补看两个短函数：`query_filters.py:bind_query_filters()`（业务条件如何绑定物理来源）、`query_plan.py:MetricPlan.from_metric()`（指标合同怎样进入计划）。对应既有测试是`test_semantic_intent.py:test_category_catalog_keeps_filter_source_and_all_join_bridges`和`test_analysis_state.py:test_scope_changes_preserve_untouched_fields_and_new_task_resets`；本轮只作阅读入口，不把旧测试证据描述成新执行。
+
+待复述两题：1. 模型遗漏SP筛选、模型查询app.accounts，分别主要由哪层拦截？2. 这个例子中的gmv、SUM(price)与结果列gmv分别是什么，为什么不能直接查询同名物理字段？回答后进入Day 4的ResultContract构建，不先展开Day 5上下文机制。
