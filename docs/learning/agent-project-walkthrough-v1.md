@@ -1,10 +1,10 @@
 # Agent 项目代码学习记录
 
-本记录承接 [`四周完善与学习计划`](../../plan/process-agent-internship-improvement-v1.md)，只放代码理解与问答。项目进度见 PROJECT.md，后训练知识继续使用既有 post-training/learning 目录。每轮阅读 1–3 个关键函数，问题答完再进入下一段。
+本记录承接当前[两周学习计划](../../plan/process-agent-internship-improvement-v2-2week.md)，只放代码理解与问答。项目进度见 PROJECT.md，后训练知识继续使用既有 post-training/learning 目录。每轮阅读 1–3 个关键函数，问题答完再进入下一段。
 
-当前学习位置（2026-10-20）：Day 1尚未闭卷复述完成。下文保留旧版本学习原文，旧Router
-和examples入口不再代表现行代码。现在先读本文末尾“恢复学习：模型理解提案与服务端校验”，
-只审阅两个位置；工程六项已做完，不因此跳过用户理解、也不继续插入新功能或训练。
+当前学习位置（2026-10-26）：Day 3，正在审阅失败分类与一次 SQL 修复。Day 1/2 的主要复述
+已完成，Day 3 尚未收尾。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
+不代表现行实现；当前内容以文末日期和真实代码为准。工程完成不代替用户理解。
 
 ## Day 1：沿一条问题认识请求链
 
@@ -1182,3 +1182,13 @@ PostgreSQL `REPEATABLE READ`只读事务中生成受控诊断查询：按实际�
 当前学习问答和代码审阅记录继续集中在本文件；项目事实、工程测试和阶段决策分别写入 `PROJECT.md`、`evals/results/` 与飞书项目文档；后训练知识单独维护在 `docs/post-training/learning/` 及飞书后训练学习笔记。本地学习问答没有和项目进度混写。
 
 原四周路线已压缩为 [`process-agent-internship-improvement-v2-2week.md`](../../plan/process-agent-internship-improvement-v2-2week.md)。当前从 Day 3 的 SQL 安全、结果验证和 JOIN 证据收尾，随后进入真实质量归因、部署边界、后训练复盘和面试模拟。每天继续采用“读一小段真实代码 → 用户复述 → 定向测试 → 记录边界”的方式；工程完成不自动视为用户掌握。
+
+### 2026-10-26｜Day 3：失败分类与一次 SQL 修复问答
+
+用户复述：字段名错可能是模型看错，缺指标列可能是业务理解错；新 SQL 必须重新验证；修复也失败时返回失败，不能沿用失败前数字。后两点正确；第一点需纠正：缺指标列也可能只是别名或投影错误，不能据此判定业务理解必然错误。不自动修复结果合同失败是当前实现的范围选择，并非技术上不能修复。允许修复不保证修复正确，拒绝修复也不证明问题更严重。
+
+当前分类：`sanitize_sql_error()`优先按 PostgreSQL SQLSTATE 识别，再匹配脱敏错误类别。语法/分组错误、未知表列、歧义引用可尝试修复；`sql_plan_mismatch()`发现遗漏已确认筛选或排名等计划偏差也可进入一次修复。权限拒绝、超时、连接失败、无法归类的执行异常，以及结果合同拒绝不自动修复。
+
+`TrustedRunSqlTool.execute()`提供原 SQL、错误类别与安全提示、Catalog、当前 QueryPlan 和必需结果列；`LlmRepairCandidateProvider`以 temperature=0 请求一条 SQL，截断输出不用。`OneShotSqlRepair`检查候选 Policy，工具再核对原计划，Runner 重新经过 Policy、reader、执行预算、关联证据与 ResultValidator；成功才保存可信工件。整个请求最多一次修复，不能删除 SP 筛选来换取执行成功，也不能把旧成功结果当成本轮失败查询的答案。
+
+代码入口：`trusted_sql_tool.py:execute()`、`sql_repair.py:sanitize_sql_error()`与`build_repair_prompt()`。本轮只核对代码和整理问答，没有改运行时或新增模型测试；Day 3 继续进行，不自动标记完成。
