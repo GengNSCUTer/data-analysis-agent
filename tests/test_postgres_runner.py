@@ -87,6 +87,38 @@ async def test_runtime_join_probe_rejects_repeated_item_inputs():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("duplicate", [False, True])
+async def test_private_key_preaggregation_probe_runs_as_analyst_and_still_detects_fanout(duplicate):
+    context = make_context(f"private-group-{uuid.uuid4().hex}")
+    context.metadata.update({
+        "required_result_columns": ["customer_state", "gmv"], "metric_result_columns": ["gmv"],
+        "metric_fact_grains": {"gmv": "order_item"},
+        "join_source_keys": {"fact_order_items": ["order_id", "order_item_id"], "fact_orders": ["order_id"]},
+        "join_source_grains": {"fact_order_items": "order_item", "fact_orders": "order"},
+    })
+    extra = " CROSS JOIN (SELECT 1 AS n UNION ALL SELECT 2 AS n) copies" if duplicate else ""
+    sql = (
+        "WITH amount AS (SELECT i.order_id, SUM(i.price) AS amount "
+        "FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id"
+        + extra + " GROUP BY i.order_id) SELECT c.customer_state, SUM(a.amount) AS gmv FROM amount a "
+        "JOIN analytics.fact_orders o ON o.order_id=a.order_id "
+        "JOIN analytics.dim_customers c ON c.customer_id=o.customer_id GROUP BY c.customer_state"
+    )
+    runner = SecurePostgresRunner()
+    if duplicate:
+        with pytest.raises(ResultValidationError, match="重复放大"):
+            await runner.run_sql(RunSqlToolArgs(sql=sql), context)
+        assert context.metadata["join_evidence"]["status"] == "amplified"
+    else:
+        frame = await runner.run_sql(RunSqlToolArgs(sql=sql), context)
+        assert list(frame.columns) == ["customer_state", "gmv"]
+        assert context.metadata["join_evidence"]["checks"]
+        assert all(value == 1 for value in context.metadata["join_multiplicity"].values())
+    with pytest.raises(PolicyViolation, match="sensitive"):
+        await runner.run_sql(RunSqlToolArgs(sql="SELECT order_id FROM analytics.fact_orders"), context)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("keep_filter", [True, False])
 async def test_grouping_error_repair_rechecks_plan_before_real_reader(keep_filter, tmp_path):
     """Use a controlled candidate, real PostgreSQL error, policy and validation."""

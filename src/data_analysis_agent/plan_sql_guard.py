@@ -232,6 +232,16 @@ def _lookup_join_mismatch(root, definitions):
     for item in definitions:
         condition = parse_one(item["on"], read="postgres")
         allowed.add(frozenset((col.table, col.name) for col in condition.find_all(exp.Column)))
+        # A preaggregate can retain the target's own key, e.g. sums grouped
+        # by orders.order_id and then joined back to orders.order_id. The
+        # Catalog's single-key many-to-one target is still unique; this is
+        # not a join on status/city or another non-key attribute.
+        if isinstance(condition, exp.EQ) and all(
+            isinstance(side, exp.Column) for side in (condition.this, condition.expression)
+        ):
+            target = [col for col in condition.find_all(exp.Column) if col.table == item["table"]]
+            if len(target) == 1:
+                allowed.add(frozenset({(target[0].table, target[0].name)}))
     known_sources = set().union(*allowed) if allowed else set()
     for scope in root.traverse():
         for join in scope.expression.args.get("joins") or []:

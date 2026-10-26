@@ -1,5 +1,47 @@
 from data_analysis_agent.join_evidence import build_join_probes
 from data_analysis_agent.sql_policy import SqlPolicy
+from sqlglot import parse_one, exp
+
+
+def test_internal_probe_can_group_by_private_foreign_key_without_exposing_it():
+    sql = (
+        "WITH amounts AS (SELECT i.product_id, SUM(i.price) AS amount "
+        "FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id "
+        "GROUP BY i.product_id) SELECT p.product_category_name, SUM(a.amount) AS gmv "
+        "FROM amounts a JOIN analytics.dim_products p ON p.product_id=a.product_id GROUP BY p.product_category_name"
+    )
+    policy = SqlPolicy()
+    policy.evaluate(sql)
+    probes, _ = build_join_probes(
+        sql,
+        row_keys={"fact_order_items": ("order_id", "order_item_id"), "fact_orders": ("order_id",)},
+        source_grains={"fact_order_items": "order_item", "fact_orders": "order"},
+        metric_grains={"gmv": "order_item"},
+    )
+    assert probes
+    for probe in probes:
+        decision = policy.evaluate(probe.sql, complete_result=True, result_limit=1)
+        assert parse_one(decision.final_sql, read="postgres").named_selects == ["input_rows", "distinct_facts"]
+
+
+def test_internal_probe_keeps_private_projections_inside_ctes_and_avoids_name_collision():
+    sql = (
+        "WITH daa_join_inputs AS (SELECT i.order_id, i.order_item_id, i.price "
+        "FROM analytics.fact_order_items i) SELECT c.customer_state, SUM(i.price) AS gmv "
+        "FROM daa_join_inputs i JOIN analytics.fact_orders o ON o.order_id=i.order_id "
+        "JOIN analytics.dim_customers c ON c.customer_id=o.customer_id GROUP BY c.customer_state"
+    )
+    probes, _ = build_join_probes(
+        sql,
+        row_keys={"fact_order_items": ("order_id", "order_item_id")},
+        source_grains={"fact_order_items": "order_item"}, metric_grains={"gmv": "order_item"},
+    )
+    assert probes
+    tree = parse_one(probes[0].sql, read="postgres")
+    names = [cte.alias_or_name for cte in tree.find_all(exp.CTE)]
+    assert len(names) == len(set(names))
+    assert tree.named_selects == ["input_rows", "distinct_facts"]
+    SqlPolicy().evaluate(probes[0].sql, complete_result=True, result_limit=1)
 
 
 def test_probe_counts_fact_identity_without_exposing_sensitive_grouping():
@@ -86,11 +128,7 @@ def test_probe_flattens_simple_cte_but_keeps_preaggregated_boundary():
         metric_grains={"gmv": "order_item"},
     )
     assert not probes
-    assert any(
-        item["reason"]
-        in {"source_identity_unavailable", "identity_group_preaggregation"}
-        for item in uncovered
-    )
+    assert any(item["reason"] == "source_identity_unavailable" for item in uncovered)
 
 
 def test_item_count_uses_item_identity_even_when_counting_order_foreign_key():

@@ -372,7 +372,7 @@ class SemanticIntentInterpreter:
                 "不存在的比率不要发明metric_id，也不要拿两个计数替代比率；先说明缺少指标口径，询问分母含义。",
                 "普通用户问'买家等多久收到货'是在问实际履约时长，只有问定义/口径才catalog_definition。",
                 "当前是经营数据助手，'最近生意怎么样'应查经营概览，不是一般经营建议。",
-                "Top-N写成top_n数字。'最高的五个州'是dimensions=[customer_state],top_n=5。",
+                "Top-N写成top_n数字。'最高的五个州'是dimensions=[customer_state],top_n=5；只问哪个实体最高/最低时top_n=1，不只在assumptions或result_inspections里表达排名数量。",
                 "分区Top-N可与时间和多维度一起使用；维度ID取当前Catalog。服务端在时间和前置维度分区内排名最后一维，不澄清成只支持单维度。",
                 "只是sales走势并不自动要求图；只有明确要求画曲线/画图时chart_request才填写。",
                 "时序默认month；没有趋势或按日/按月要求时不添加time_grain。",

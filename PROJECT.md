@@ -11,6 +11,20 @@
 [面试材料](docs/interview/project-release-facts-v1.md)。Docker实运行和外部独立部署尚未验证。
 后续回到[四周学习计划](plan/process-agent-internship-improvement-v1.md)，下面保留历史实验与阶段记录。
 
+2026-10-26 JOIN/下钻修复任务：输入为扩测失败 SQL 与现有状态/工件；输出为同一只读事务中
+可执行的计数探针，以及“最高州→该州品类→前五→换图→取消州筛选”的完整链路。不新增
+权限角色、不放宽用户敏感字段规则、不训练模型；服务端探针将内部标识处理留在 CTE，最终
+只输出计数，仍经过现有 Policy。计划检查允许按 Catalog 多对一目标键回连原表，但仍拒绝
+非键关联。验收包含误拦 SQL 回放、放大输入拒绝、状态筛选继承和两业务库真实浏览器复测。
+
+本轮已完成：此前 7 条误拦 SQL 的计划/Policy/探针回放通过；本地确定性清单 667 项通过
+（10 项不属于该层），隔离 PostgreSQL 与浏览器集成 18 项通过，放大输入仍拒绝。真实
+DeepSeek-V3.2 定向复测 TheLook 8/8 自动通过；Olist 自动为 1/6，但 4 条仅品类译名不同、
+1 条换图参考被前序比较失败连带影响，依据翻译表、独立 SQL 和同工件/零 SQL 复核为 6/6。
+两库均通过最高州→该州前十品类→前五→只换图→取消州筛选，未重新运行原 72 条全量套件。
+代码入口为 `join_evidence.py`、`plan_sql_guard.py` 和语义解释提示；未重写记忆架构或提升
+数据库角色。完整事实与剩余边界见[扩测及修复记录](evals/results/join-evidence-real-browser-20261026.md)。
+
 2026-10-26 真实浏览器扩测：使用当前 Olist/TheLook 服务、真实 DeepSeek-V3.2、PostgreSQL
 reader 和独立 SQL 对照完成 TheLook 60 条与 Olist 12 条开发验收。TheLook 自动通过 49/60，
 Olist 6/12；基础指标稳定，但复杂 JOIN 证据探针误复用 analyst Policy、连续下钻状态、

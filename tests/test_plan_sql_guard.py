@@ -3,6 +3,32 @@ import pytest
 from data_analysis_agent.plan_sql_guard import sql_plan_mismatch
 
 
+@pytest.mark.parametrize("column,accepted", [("order_id", True), ("status", False)])
+def test_preaggregate_can_rejoin_the_same_catalog_target_key_but_not_non_key(column, accepted):
+    plan = {"metric_ids": ["average_order_value"], "lookup_joins": [
+        {"table": "orders", "on": "order_items.order_id = orders.order_id"},
+        {"table": "users", "on": "orders.user_id = users.id"},
+    ]}
+    sql = (
+        f"WITH amounts AS (SELECT o.{column} AS join_key, SUM(i.sale_price) AS amount "
+        "FROM analytics.orders o JOIN analytics.order_items i ON i.order_id=o.order_id "
+        f"WHERE o.status='Complete' GROUP BY o.{column}) "
+        "SELECT u.traffic_source AS customer_traffic_source, AVG(a.amount) AS average_order_value "
+        f"FROM amounts a JOIN analytics.orders o ON o.{column}=a.join_key "
+        "JOIN analytics.users u ON u.id=o.user_id GROUP BY u.traffic_source"
+    )
+    assert (sql_plan_mismatch(sql, plan) is None) is accepted
+
+
+def test_preaggregate_join_on_wrong_item_key_still_rejected():
+    plan = {"lookup_joins": [{"table": "orders", "on": "order_items.order_id = orders.order_id"}]}
+    sql = (
+        "WITH a AS (SELECT i.product_id, SUM(i.sale_price) AS amount FROM analytics.order_items i GROUP BY i.product_id) "
+        "SELECT SUM(a.amount) AS completed_sale_amount FROM a JOIN analytics.orders o ON o.order_id=a.product_id"
+    )
+    assert sql_plan_mismatch(sql, plan)
+
+
 def test_state_filter_and_top_n_must_appear_in_sql() -> None:
     plan = {
         "warnings": ["filter_customer_state:SP"],

@@ -163,28 +163,6 @@ def build_join_probes(
                     group_expressions.append(group.copy())
                 if not group_expressions and select.args.get("group") and select.args["group"].expressions:
                     continue
-                identities = {
-                    (a, key)
-                    for a, table in sources.items()
-                    for key in row_keys.get(table.name, ())
-                }
-                if any(
-                    (c.table, c.name) in identities
-                    or not c.table
-                    and any(c.name == key for _, key in identities)
-                    for group in group_expressions
-                    for c in group.find_all(exp.Column)
-                ):
-                    # The business query may legitimately preaggregate by a
-                    # private identity. Do not expose that grouping in a
-                    # diagnostic or weaken Policy to run it.
-                    uncovered.append(
-                        {
-                            "reason": "identity_group_preaggregation",
-                            "aggregate": aggregate.key,
-                        }
-                    )
-                    continue
                 value = aggregate.this
                 predicate = (
                     aggregate.parent.expression
@@ -257,6 +235,19 @@ def build_join_probes(
                         else predicate.copy()
                     )
                 check = check.limit(1)
+                # Identity grouping is an internal relational stage, just as
+                # in the already-admitted business SQL. Keep it in a CTE so
+                # analyst Policy sees only the two counts at the output; no
+                # admin role or sensitive-projection exception is necessary.
+                cte_names = {cte.alias_or_name for cte in tree.find_all(exp.CTE)}
+                diagnostic_name = "daa_join_inputs"
+                while diagnostic_name in cte_names:
+                    diagnostic_name += "_next"
+                ctes = [cte.copy() for cte in global_with.expressions] if global_with else []
+                ctes.append(exp.CTE(
+                    this=check,
+                    alias=exp.TableAlias(this=exp.to_identifier(diagnostic_name)),
+                ))
                 probe = exp.select(
                     *[
                         exp.alias_(
@@ -268,9 +259,8 @@ def build_join_probes(
                         )
                         for field in ("input_rows", "distinct_facts")
                     ]
-                ).from_(check.subquery("duplicate_inputs"))
-                if global_with is not None:
-                    probe.set("with_", global_with.copy())
+                ).from_(diagnostic_name)
+                probe.set("with_", exp.With(expressions=ctes))
                 probes.append(
                     JoinProbe(
                         name, probe.sql(dialect="postgres"), source.name, aggregate.key
