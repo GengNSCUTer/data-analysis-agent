@@ -2,7 +2,7 @@
 
 本记录承接当前[两周学习计划](../../plan/process-agent-internship-improvement-v2-2week.md)，只放代码理解与问答。项目进度见 PROJECT.md，后训练知识继续使用既有 post-training/learning 目录。每轮阅读 1–3 个关键函数，问题答完再进入下一段。
 
-当前学习位置（2026-10-26）：Day 3，正在审阅失败分类与一次 SQL 修复。Day 1/2 的主要复述
+当前学习位置（2026-10-26）：Day 3，正在收尾可信结果保存与追问复用。Day 1/2 的主要复述
 已完成，Day 3 尚未收尾。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
 不代表现行实现；当前内容以文末日期和真实代码为准。工程完成不代替用户理解。
 
@@ -1192,3 +1192,11 @@ PostgreSQL `REPEATABLE READ`只读事务中生成受控诊断查询：按实际�
 `TrustedRunSqlTool.execute()`提供原 SQL、错误类别与安全提示、Catalog、当前 QueryPlan 和必需结果列；`LlmRepairCandidateProvider`以 temperature=0 请求一条 SQL，截断输出不用。`OneShotSqlRepair`检查候选 Policy，工具再核对原计划，Runner 重新经过 Policy、reader、执行预算、关联证据与 ResultValidator；成功才保存可信工件。整个请求最多一次修复，不能删除 SP 筛选来换取执行成功，也不能把旧成功结果当成本轮失败查询的答案。
 
 代码入口：`trusted_sql_tool.py:execute()`、`sql_repair.py:sanitize_sql_error()`与`build_repair_prompt()`。本轮只核对代码和整理问答，没有改运行时或新增模型测试；Day 3 继续进行，不自动标记完成。
+
+### 2026-10-26｜Day 3收尾：可信结果保存与追问复用（待复述）
+
+本节只看`TrustedRunSqlTool._remember_result_artifact()`与`BudgetedChatHandler._inspect_previous_result()`。工具执行成功不等于结果合同有效；保存可信结果工件要求`result_validation.state == valid`。保存完整结果 CSV，并绑定用户、workspace、数据版本、指标版本与执行来源；模型不保存或重建这张事实表。这里的“可信”指通过已实施的检查，不表示证明全部业务语义正确。
+
+例如已经得到 SP 州品类前十：后续“改成横向柱状图”复用同工件，不重新查询；“第十名多少钱”可从授权完整工件补读。若改成全国品类排名，原 CSV 不含全国事实，需要新查询。追问读取先核对归属与版本，再以完整结果构造服务端计算证据，token 只控制提供给模型的内容。
+
+待用户回答：1. SQL 成功返回，但结果缺少所需指标列，能否保存为供后续复用的可信工件？2. 已有 SP 州前十品类，换横向图和取消 SP 限制分别是否需要新 SQL，为什么？本轮只核对代码，不改运行时、不新增测试；Day 3 尚未标记完成。
