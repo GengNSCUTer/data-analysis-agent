@@ -11,6 +11,15 @@
 [面试材料](docs/interview/project-release-facts-v1.md)。Docker实运行和外部独立部署尚未验证。
 后续回到[四周学习计划](plan/process-agent-internship-improvement-v1.md)，下面保留历史实验与阶段记录。
 
+2026-10-26 真实浏览器扩测：使用当前 Olist/TheLook 服务、真实 DeepSeek-V3.2、PostgreSQL
+reader 和独立 SQL 对照完成 TheLook 60 条与 Olist 12 条开发验收。TheLook 自动通过 49/60，
+Olist 6/12；基础指标稳定，但复杂 JOIN 证据探针误复用 analyst Policy、连续下钻状态、
+维度零值语义和缺少指标时的过宽概览仍有缺口。TheLook 时间戳时区和 Olist 品类翻译经独立
+复核后属于评测表示差异，不等同业务数值错误。原始 SQL、SSE、截图和 CSV 在仓库外
+`/disk2/gengnan/data-analysis-agent-data/evals/join-evidence-20261026/`，详细记录见
+[`JOIN 证据真实浏览器扩测`](evals/results/join-evidence-real-browser-20261026.md)。下一步先修复
+探针内部边界与连续下钻，再重跑失败子集；本轮不把这些失败样本接入训练或 DPO。
+
 2026-10-26关联放大证据任务：补齐线上`join_multiplicity`一直为None的实际缺口。输入是
 已通过Policy的SQL、Catalog事实行标识及结果合同；在同一reader只读快照中检查聚合前
 同一事实行在同一分组的重复次数，输出只有计数的执行证据，交给现有ResultValidator。
