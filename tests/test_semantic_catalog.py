@@ -486,3 +486,17 @@ def test_runtime_catalog_maps_canceled_order_ranking() -> None:
     selection = retriever.retrieve("取消订单最多的州", _user("analyst"))
 
     assert selection.trace.selected_metrics == ("canceled_order_count",)
+
+
+def test_runtime_row_keys_are_only_internal_execution_metadata():
+    from data_analysis_agent.result_budget import ResultBudget
+    from data_analysis_agent.semantic_catalog import ResultContract
+    catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
+    selection = CatalogRetriever(catalog).retrieve("按客户州统计GMV", _user("analyst"))
+    contract = ResultContract.from_selection(selection, "按客户州统计GMV", catalog=catalog,
+        result_budget=ResultBudget.aggregate())
+    metadata = contract.as_tool_metadata()
+    assert metadata["join_source_keys"]["fact_order_items"] == ["order_id", "order_item_id"]
+    assert metadata["join_source_grains"]["fact_order_items"] == "order_item"
+    assert "join_source_keys" not in contract.as_tool_metadata(include_result_budget=False)
+    assert "join_source_keys" not in contract.as_evidence()

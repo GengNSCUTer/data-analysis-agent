@@ -90,3 +90,10 @@ RUN_LIVE_RESULT_ANALYSIS=1 RESULT_ANALYSIS_LIVE_OUTPUT=/private/result-analysis-
 全新 wheel、独立 PostgreSQL、真实模型和重启恢复用 `scripts/verify_isolated_deployment.py --help`；
 需要 PostgreSQL 16+ 二进制和新虚拟环境运行，证据生成在仓库外。两者都需要私有模型额度，
 不由 push/PR 自动触发。已有的首次报告、失败与定向复测分别记录，不把混合证据写成全量新跑。
+
+2026-10-26增加关联放大证据测试：Runner在同一只读`REPEATABLE READ`事务中运行服务端生成的
+计数探针，仅比较聚合输入行数与Catalog事实主键去重行数；不向模型或结果列暴露主键。正常
+多对一查询和先聚合路径通过，人为复制每个事实行的`SUM()`即使只有一行结果也会被拒绝。
+复杂加权、无法识别事实身份的查询标为`uncovered`，不是“检查通过”。
+真实模型开发验收追加了Olist/TheLook各七轮，直接聚合均通过；TheLook带CTE的时间分组在
+无法安全展开时记录`partial`，不会误报“已证明”，也不阻断正常查询。

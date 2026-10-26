@@ -11,6 +11,20 @@
 [面试材料](docs/interview/project-release-facts-v1.md)。Docker实运行和外部独立部署尚未验证。
 后续回到[四周学习计划](plan/process-agent-internship-improvement-v1.md)，下面保留历史实验与阶段记录。
 
+2026-10-26关联放大证据任务：补齐线上`join_multiplicity`一直为None的实际缺口。输入是
+已通过Policy的SQL、Catalog事实行标识及结果合同；在同一reader只读快照中检查聚合前
+同一事实行在同一分组的重复次数，输出只有计数的执行证据，交给现有ResultValidator。
+正常多对一、互斥分组和先聚合再关联必须通过；不把所有一对多关系都判错。不支持的
+加权表达式/来源明确记录覆盖不足，不冒充验证成功；不新增模型、权限、数据库表或通用
+SQL等价证明器。验收为确定性AST、合成PostgreSQL正反例、真实浏览器及推送后的CI。
+
+已完成本地实现：Olist/TheLook Catalog增加事实行主键；Runner在同一只读`REPEATABLE READ`
+事务中执行只返回输入行数和去重事实数的服务端探针，重复输入交给ResultValidator拒绝。
+复杂加权或无法识别事实身份只记为`uncovered`。隔离PostgreSQL、19项Runner/浏览器回归
+通过；新增关联回归后确定性清单为662项通过（10项不属于该层）。TheLook/Olist真实模型七轮
+各通过，TheLook探针对带CTE月度SQL在无法安全展开时记录`partial`而不阻断；两套结果的
+正常直接聚合探针均未发现重复。完整CI和推送仍待本轮结束后确认。
+
 2026-10-23 CI修复：本地SQLGlot30.14.0仍有`union_scopes`，新安装30.24.0已改成
 `set_operation_scopes`；原`sqlglot>=25`允许CI升级，导致本地通过但GitHub失败。
 隔离安装30.24.0复现同一报错后，直接更新排名/筛选两处集合运算检查，依赖固定为

@@ -63,6 +63,30 @@ def make_context(user_id: str, role: str = "analyst") -> ToolContext:
 
 
 @pytest.mark.asyncio
+async def test_runtime_join_probe_rejects_repeated_item_inputs():
+    """Actual reader evidence rejects a fanout even when SUM returns one row."""
+    context = make_context(f"join-proof-{uuid.uuid4().hex}")
+    context.metadata.update({
+        "required_result_columns": ["gmv"], "metric_result_columns": ["gmv"],
+        "metric_fact_grains": {"gmv": "order_item"},
+        "join_source_keys": {"fact_order_items": ["order_id", "order_item_id"]},
+        "join_source_grains": {"fact_order_items": "order_item", "fact_orders": "order"},
+    })
+    runner = SecurePostgresRunner()
+    good = "SELECT SUM(i.price) AS gmv FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id"
+    frame = await runner.run_sql(RunSqlToolArgs(sql=good), context)
+    assert len(frame) == 1
+    assert context.metadata["join_evidence"]["status"] == "checked"
+    assert all(n == 1 for n in context.metadata["join_multiplicity"].values())
+    bad = good + " CROSS JOIN (SELECT 1 AS n UNION ALL SELECT 2 AS n) duplicate_rows"
+    with pytest.raises(ResultValidationError, match="重复放大"):
+        await runner.run_sql(RunSqlToolArgs(sql=bad), context)
+    assert context.metadata["join_evidence"]["status"] == "amplified"
+    evidence = context.metadata["join_evidence"]["checks"][0]
+    assert evidence["duplicate_group_input_rows"] == 2 * evidence["duplicate_group_distinct_facts"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("keep_filter", [True, False])
 async def test_grouping_error_repair_rechecks_plan_before_real_reader(keep_filter, tmp_path):
     """Use a controlled candidate, real PostgreSQL error, policy and validation."""

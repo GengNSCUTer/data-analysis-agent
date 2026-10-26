@@ -122,6 +122,8 @@ def test_browser_result_evidence_continuity_and_refresh(result_evidence_data, mo
         "另按客户州统计客单价": {"request_kind":"data_query", "action":"new_task", "metric_ids":["average_order_value"], "dimensions":["customer_state"]},
         "这些州合在一起算总体客单价": {"request_kind":"result_followup", "action":"keep",
             "result_inspections":[{"operation":"sum", "metric_id":"average_order_value"}]},
+        "重新查销售额检查重复关联": {"request_kind":"data_query", "action":"new_task", "metric_ids":["gmv"]},
+        "重新正确查询销售额": {"request_kind":"data_query", "action":"update_task", "metric_ids":["gmv"]},
     }
     statements = {
         "category": """SELECT p.product_category_name, SUM(i.price) AS gmv
@@ -154,7 +156,8 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
         async def stream_request(self, request):
             # No text SSE is fabricated: the Agent builds it from this actual response.
             if request.tools:
-                plan = CURRENT_BUDGET.get().query_plan
+                usage = CURRENT_BUDGET.get()
+                plan = usage.query_plan
                 monthly = bool(plan.get("time_grain"))
                 statement = statements["monthly" if monthly else "category"]
                 if monthly:
@@ -171,6 +174,12 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                         + ("SELECT customer_state," if grouped else "SELECT ")
                         + "AVG(amount) AS average_order_value FROM order_totals"
                         + (" GROUP BY customer_state" if grouped else ""))
+                if usage.catalog_question in {"重新查销售额检查重复关联", "重新正确查询销售额"}:
+                    statement = ("SELECT SUM(i.price) AS gmv FROM analytics.fact_order_items i "
+                        "JOIN analytics.fact_orders o ON o.order_id=i.order_id "
+                        + ("CROSS JOIN (SELECT 1 AS n UNION ALL SELECT 2 AS n) duplicate_rows "
+                           if usage.catalog_question == "重新查销售额检查重复关联" else "")
+                        + "WHERE o.order_status NOT IN ('canceled','unavailable')")
                 yield LlmStreamChunk(tool_calls=[ToolCall(id="sql", name="run_sql",
                                                           arguments={"sql": statement})],
                                      finish_reason="tool_calls")
@@ -191,6 +200,9 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
     output = Path(os.getenv("RESULT_EVIDENCE_BROWSER_OUTPUT", "/tmp/result-evidence-browser"))
     output.mkdir(parents=True, exist_ok=True)
     observations = []
+    from data_analysis_agent.semantic_catalog import CatalogLoader
+    from data_analysis_agent.runtime_workspace import load_runtime_workspace
+    assert CatalogLoader(load_runtime_workspace().profile).load().row_keys
     with TestClient(create_app(llm_provider=Provider())) as client, sync_playwright() as engine:
         assert client.post("/api/auth/login", json={"username": username, "password": password}).is_success
         browser = engine.chromium.launch(headless=True)
@@ -233,8 +245,18 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                     with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
                         cursor.execute("SELECT termination_reason,sql_calls_used,catalog_trace FROM app.agent_runs WHERE conversation_id=%s ORDER BY started_at DESC LIMIT 1", (cid,))
                         run = dict(cursor.fetchone())
+                if question == "重新查销售额检查重复关联":
+                    assert run["termination_reason"] != "completed"
+                    assert run["sql_calls_used"] == 1
+                    assert run["catalog_trace"]["join_evidence"]["status"] == "amplified"
+                    assert "未输出未经验证的数字结论" in detail["messages"][-1]["content"]
+                    observations.append({"question":question, "join_evidence":run["catalog_trace"]["join_evidence"],
+                                         "termination_reason":run["termination_reason"]})
+                    continue
                 assert run["termination_reason"] == "completed", run
-                assert run["sql_calls_used"] == int(question in {categories_question, monthly_question, "刚才前两名占全部品类销售额多少", "另查2017年十二月商品成交额，按月", "补上一个月对比环比", "再看十二月同比，没有基期就说明", "另按客户州统计客单价", "这些州合在一起算总体客单价"})
+                assert run["sql_calls_used"] == int(question in {categories_question, monthly_question, "刚才前两名占全部品类销售额多少", "另查2017年十二月商品成交额，按月", "补上一个月对比环比", "再看十二月同比，没有基期就说明", "另按客户州统计客单价", "这些州合在一起算总体客单价", "重新正确查询销售额"})
+                if run["sql_calls_used"]:
+                    assert run["catalog_trace"]["join_evidence"]["status"] in {"checked", "partial"}
                 assert detail["trusted_result_artifact"]
                 current = captured[-1]
                 answer = detail["messages"][-1]["content"]
@@ -287,6 +309,9 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                     assert current["sample_rows"][0]["average_order_value"] == pytest.approx(float(sum(prices)/len(prices)))
                 elif question == "继续解释全年结果":
                     assert current["coverage"] == "complete" and len(current["sample_rows"]) == 12
+                elif question == "重新正确查询销售额":
+                    assert run["catalog_trace"]["join_evidence"]["status"] == "checked"
+                    assert run["catalog_trace"]["join_evidence"]["checks"][0]["multiplicity_lower_bound"] == 1
                 observations.append({"question": question, "sql_calls": run["sql_calls_used"],
                                      "source_rows": current["source_row_count"], "coverage": current["coverage"],
                                      "inspection": run["catalog_trace"].get("result_inspection"),

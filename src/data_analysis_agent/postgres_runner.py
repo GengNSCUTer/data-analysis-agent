@@ -34,6 +34,7 @@ from .workspace import WorkspaceProfile
 from .query_filters import QueryFilter
 from .result_budget import ResultBudget, ResultBudgetError, validate_runtime_result_budget
 from .result_evidence import RESULT_EVIDENCE_PREFIX, build_result_evidence
+from .join_evidence import build_join_probes
 
 
 class _QueryCancellation:
@@ -340,6 +341,8 @@ class SecurePostgresRunner(SqlRunner):
         context.metadata.pop("result_validation", None)
         context.metadata.pop("query_audit_id", None)
         context.metadata.pop("audited_sql", None)
+        context.metadata.pop("join_multiplicity", None)
+        context.metadata.pop("join_evidence", None)
         role = self._role_for_context(context)
         started_at = perf_counter()
         try:
@@ -395,7 +398,7 @@ class SecurePostgresRunner(SqlRunner):
             try:
                 if cancellation is not None:
                     cancellation.attach(connection)
-                connection.set_session(readonly=True, autocommit=False)
+                connection.set_session(readonly=True, autocommit=False, isolation_level="REPEATABLE READ")
                 timeout = result_budget.statement_timeout_ms if result_budget else self.settings.statement_timeout_ms
                 with connection.cursor() as control:
                     control.execute("SET LOCAL statement_timeout = %s", (timeout,))
@@ -422,6 +425,48 @@ class SecurePostgresRunner(SqlRunner):
                         policy_limit_applied=decision.policy_limit_applied,
                     )
                     frame = pd.DataFrame(rows, columns=[column.name for column in cursor.description])
+                if context.metadata.get("join_source_keys"):
+                    probes, uncovered = build_join_probes(
+                        decision.final_sql,
+                        row_keys=context.metadata["join_source_keys"],
+                        source_grains=context.metadata.get("join_source_grains", {}),
+                        metric_grains=context.metadata.get("metric_fact_grains", {}),
+                        column_schema={self.workspace.analytics_schema: {
+                            table: dict.fromkeys(columns, "UNKNOWN")
+                            for table, columns in self.workspace.allowed_columns.items()
+                        }},
+                    )
+                    counts, evidence = {}, []
+                    check_started = perf_counter()
+                    with connection.cursor() as control:
+                        for probe in probes:
+                            remaining_ms = int((deadline - perf_counter()) * 1_000)
+                            if remaining_ms <= 0:
+                                raise ResultValidationError(ResultValidation(
+                                    "refuse", "查询及关联证据检查超过执行时间预算。", len(frame), tuple(frame.columns)))
+                            diagnostic = self.policy.evaluate(probe.sql, role=role, complete_result=True, result_limit=1)
+                            control.execute("SET LOCAL statement_timeout = %s", (remaining_ms,))
+                            control.execute(diagnostic.final_sql)
+                            inputs, facts = (int(n) for n in control.fetchone())
+                            # Pigeonhole lower bound: proves repetition, not
+                            # the exact maximum copies of any individual row.
+                            count = (inputs + facts - 1) // facts if facts else 1
+                            counts[probe.name] = count
+                            evidence.append({"source_table":probe.table, "aggregate":probe.aggregate,
+                                             "duplicate_group_input_rows":inputs, "duplicate_group_distinct_facts":facts,
+                                             "multiplicity_lower_bound":count})
+                            if count > 1:
+                                break
+                    context.metadata["join_multiplicity"] = counts
+                    context.metadata["join_evidence"] = {
+                        "status": "amplified" if any(n>1 for n in counts.values()) else "partial" if uncovered else "checked" if counts else "not_applicable",
+                        "checks":evidence, "uncovered":uncovered,
+                        "elapsed_ms":int((perf_counter()-check_started)*1_000),
+                    }
+                    self._record_timing(context, "join_evidence", check_started)
+                    usage = context.metadata.get("budget_usage")
+                    if usage is not None:
+                        usage.record_catalog({"join_evidence":context.metadata["join_evidence"]})
             finally:
                 cancellation.close(connection) if cancellation is not None else connection.close()
         except ResultValidationError as exc:

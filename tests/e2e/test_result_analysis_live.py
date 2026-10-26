@@ -137,6 +137,8 @@ def test_live_result_analysis_multiturn(monkeypatch):
                 assert run["termination_reason"] == "completed", {"question": question, "answer": answer, "terminal":run["termination_reason"]}
                 assert run["sql_calls_used"] == sql_calls, question
                 if index == 0:
+                    assert run["catalog_trace"]["join_evidence"]["status"] in {"checked", "partial"}
+                    assert all(r["multiplicity_lower_bound"] == 1 for r in run["catalog_trace"]["join_evidence"]["checks"])
                     csv = pd.read_csv(io.StringIO(client.get(f"/api/project/conversations/{cid}/result.csv").text))
                     assert csv[metric].tolist() == pytest.approx(values)
                     assert pd.to_datetime(csv["time"], utc=True).tolist() == [pd.Timestamp(stamp).tz_convert("UTC") if pd.Timestamp(stamp).tzinfo else pd.Timestamp(stamp).tz_localize("UTC") for stamp, _ in expected]

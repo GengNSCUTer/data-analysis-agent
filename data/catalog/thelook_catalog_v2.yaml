@@ -3,6 +3,14 @@ dataset_version: "thelook-kaggle-mirror-v1-20260908"
 metric_version: "0.2-frozen"
 policy_version: "sql-policy-v1"
 description: "Server-owned v2 semantic catalog for TheLook protected cross-schema evaluation. It expands fact-domain coverage without entering Olist training or prompting."
+row_keys:
+  distribution_centers: [id]
+  events: [id]
+  inventory_items: [id]
+  order_items: [id]
+  orders: [order_id]
+  products: [id]
+  users: [id]
 metric_semantics:
   completed_sale_amount: {kind: amount, unit: 来源金额单位未声明}
   completed_item_count: {kind: count, unit: 商品行}

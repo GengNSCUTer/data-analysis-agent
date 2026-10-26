@@ -157,6 +157,7 @@ class Catalog:
     available_attribution_rule_ids: frozenset[str] = frozenset()
     workspace: WorkspaceProfile | None = field(default=None, repr=False, compare=False)
     metric_semantics: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+    row_keys: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
     @property
     def tables_by_id(self) -> dict[str, CatalogTable]:
@@ -270,6 +271,8 @@ class ResultContract:
     result_budget: ResultBudget | None = None
     additive_metric_ids: tuple[str, ...] = ()
     metric_semantics: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+    join_source_keys: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    join_source_grains: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_selection(
@@ -355,6 +358,8 @@ class ResultContract:
             result_budget=result_budget,
             additive_metric_ids=catalog.additive_metrics_for(metric_ids, requested_dimensions),
             metric_semantics={m: dict(catalog.metric_semantics.get(m, {})) for m in metric_ids},
+            join_source_keys={t.table_id: catalog.row_keys[t.table_id] for t in selection.tables if t.table_id in catalog.row_keys},
+            join_source_grains={t.table_id: t.grain for t in selection.tables},
         )
 
     @staticmethod
@@ -420,6 +425,8 @@ class ResultContract:
             # prompts and offline contracts unchanged.
             result["additive_metric_ids"] = list(self.additive_metric_ids)
             result["metric_semantics"] = {m: dict(v) for m, v in self.metric_semantics.items()}
+            result["join_source_keys"] = {t: list(keys) for t, keys in self.join_source_keys.items()}
+            result["join_source_grains"] = dict(self.join_source_grains)
         return result
 
     def as_evidence(self) -> dict[str, Any]:
@@ -502,7 +509,7 @@ class CatalogLoader:
             "description", "tables", "metrics", "joins",
         }
         missing = required - set(raw)
-        optional = {"currency_code", "currency_symbol", "currency_name", "metric_semantics"}
+        optional = {"currency_code", "currency_symbol", "currency_name", "metric_semantics", "row_keys"}
         unknown = set(raw) - required - optional
         if missing or unknown:
             details = []
@@ -526,6 +533,14 @@ class CatalogLoader:
         tables = tuple(self._parse_table(item, index) for index, item in enumerate(raw["tables"]))
         self._unique([table.table_id for table in tables], "table_id")
         table_map = {table.table_id: table for table in tables}
+        row_keys = self._mapping(raw.get("row_keys", {}), "row_keys")
+        for table_id, keys in row_keys.items():
+            if table_id not in table_map:
+                raise CatalogValidationError(f"row_keys references unknown table {table_id}")
+            if (not isinstance(keys, list) or not keys
+                    or any(not isinstance(k, str) or k not in table_map[table_id].columns_by_name for k in keys)
+                    or len(set(keys)) != len(keys)):
+                raise CatalogValidationError(f"invalid row_keys for {table_id}")
         metrics = tuple(
             self._parse_metric(item, index, table_map)
             for index, item in enumerate(raw["metrics"])
@@ -559,6 +574,7 @@ class CatalogLoader:
             available_attribution_rule_ids=self.available_attribution_rule_ids,
             workspace=self.workspace,
             metric_semantics=MappingProxyType({m: MappingProxyType(dict(s)) for m, s in semantics.items()}),
+            row_keys=MappingProxyType({t: tuple(keys) for t, keys in row_keys.items()}),
         )
 
     def _parse_table(self, raw: Any, index: int) -> CatalogTable:

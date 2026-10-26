@@ -4,6 +4,10 @@ dataset_version: example-snapshot-v1
 metric_version: example-metrics-v1
 policy_version: sql-policy-v1
 description: 示例业务口径；请用实际Schema和业务确认的公式替换。
+# 可选但建议填写：事实表的真实唯一键，只用于服务端关联放大诊断，不进入模型/结果列。
+row_keys:
+  orders: [order_id]
+  customers: [customer_id]
 # 币种确认后可添加 currency_code/currency_symbol/currency_name，未知则不声明。
 tables:
   - table_id: orders

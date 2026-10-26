@@ -1160,3 +1160,19 @@ Day 3尚未因功能完成自动记为学习完成，本轮没有新增问答题
 200行。对应阅读入口为`budget.py:result_evidence_limit()`、`result_analysis.py:analyze_result()`
 和`result_evidence.py:render_analysis_facts()`，之后按一个小单元继续学习，不自动进入Day 4。
 本轮浏览器验收与工程进度见`PROJECT.md`；没有启动新训练。
+
+### 2026-10-26｜Day 3续读：ResultValidator与关联放大证据
+
+用户确认：缺少指标列时应直接拒绝；结果列齐全且`safe_to_answer=True`也不能证明SQL业务口径一定正确。
+本轮沿`SecurePostgresRunner._run_sql_sync()`和`ResultValidator.validate()`补上一个具体缺口：此前
+`join_multiplicity`虽然有校验入口，但线上默认一直是`None`，所以错误JOIN把金额放大后可能仍被当作可回答结果。
+
+现在QueryPlan生成的ResultContract从Catalog带出各源表的事实主键和粒度。主查询通过Policy后，Runner在同一个
+PostgreSQL `REPEATABLE READ`只读事务中生成受控诊断查询：按实际聚合条件计算输入行数和去重事实行数，只返回两个
+标量。输入数多于去重事实数时，说明至少有事实行重复进入聚合，`join_multiplicity`交给ResultValidator，结果被
+拒绝而不是生成数字。探针同样经过SqlPolicy；敏感主键只在COUNT(DISTINCT ...)内部使用，不进入模型或前端。
+
+它不是万能SQL等价证明器：加权支付分摊、复杂相关子查询、无法识别事实主键的派生关系会记为`uncovered`，不能据此
+证明安全。正常多对一关联、按品类的合法多成员归属和先聚合再关联不应因为“表有一对多关系”就被拦截。证据说明
+“检测到重复输入”，不自动说明业务原因，也不把主键送给LLM。对应代码是`join_evidence.py`、
+`semantic_catalog.py:row_keys`和`postgres_runner.py`探针接线；下一节继续看执行错误如何进入一次候选修复。

@@ -6,6 +6,15 @@ description: "Server-owned semantic catalog for the trusted Olist PostgreSQL ana
 currency_code: BRL
 currency_symbol: "R$"
 currency_name: "Brazilian real"
+row_keys:
+  fact_orders: [order_id]
+  fact_order_items: [order_id, order_item_id]
+  fact_payments: [order_id, payment_sequential]
+  fact_reviews: [review_id, order_id]
+  dim_customers: [customer_id]
+  dim_sellers: [seller_id]
+  dim_products: [product_id]
+  dim_category_translation: [product_category_name]
 metric_semantics:
   gmv: {kind: amount, unit: BRL}
   paid_order_count: {kind: count, unit: 单}
