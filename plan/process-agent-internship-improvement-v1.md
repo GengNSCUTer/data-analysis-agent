@@ -8,6 +8,8 @@ status: In Progress
 tags: [Agent, 后端, 电商分析, Text-to-SQL, 后训练, 开源, 面试]
 ---
 
+> 历史说明：本文件是 2026-10-10 起的四周原始路线和完成记录。当前生效的压缩计划是 [`process-agent-internship-improvement-v2-2week.md`](process-agent-internship-improvement-v2-2week.md)；本文件保留作历史依据，不再继续按四周任务表新增任务。
+
 # Introduction
 
 ![Status: In Progress](https://img.shields.io/badge/status-In_Progress-blue)

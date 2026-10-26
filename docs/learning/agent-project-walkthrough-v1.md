@@ -1176,3 +1176,9 @@ PostgreSQL `REPEATABLE READ`只读事务中生成受控诊断查询：按实际�
 证明安全。正常多对一关联、按品类的合法多成员归属和先聚合再关联不应因为“表有一对多关系”就被拦截。证据说明
 “检测到重复输入”，不自动说明业务原因，也不把主键送给LLM。对应代码是`join_evidence.py`、
 `semantic_catalog.py:row_keys`和`postgres_runner.py`探针接线；下一节继续看执行错误如何进入一次候选修复。
+
+## 2026-10-26｜学习材料归档与两周计划切换
+
+当前学习问答和代码审阅记录继续集中在本文件；项目事实、工程测试和阶段决策分别写入 `PROJECT.md`、`evals/results/` 与飞书项目文档；后训练知识单独维护在 `docs/post-training/learning/` 及飞书后训练学习笔记。本地学习问答没有和项目进度混写。
+
+原四周路线已压缩为 [`process-agent-internship-improvement-v2-2week.md`](../../plan/process-agent-internship-improvement-v2-2week.md)。当前从 Day 3 的 SQL 安全、结果验证和 JOIN 证据收尾，随后进入真实质量归因、部署边界、后训练复盘和面试模拟。每天继续采用“读一小段真实代码 → 用户复述 → 定向测试 → 记录边界”的方式；工程完成不自动视为用户掌握。

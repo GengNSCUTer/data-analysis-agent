@@ -9,7 +9,7 @@
 安装见[部署](docs/deployment.md)，测试见[分层说明](docs/testing.md)，贡献/安全/数据模型
 许可见[贡献](CONTRIBUTING.md)、[安全](SECURITY.md)、[资产](THIRD_PARTY.md)，可讲述事实见
 [面试材料](docs/interview/project-release-facts-v1.md)。Docker实运行和外部独立部署尚未验证。
-后续回到[四周学习计划](plan/process-agent-internship-improvement-v1.md)，下面保留历史实验与阶段记录。
+当前学习主线已压缩为[两周学习与面试计划](plan/process-agent-internship-improvement-v2-2week.md)；原[四周计划](plan/process-agent-internship-improvement-v1.md)保留为历史记录。下面保留项目事实、实验与阶段记录。
 
 2026-10-26 JOIN/下钻修复任务：输入为扩测失败 SQL 与现有状态/工件；输出为同一只读事务中
 可执行的计数探针，以及“最高州→该州品类→前五→换图→取消州筛选”的完整链路。不新增
