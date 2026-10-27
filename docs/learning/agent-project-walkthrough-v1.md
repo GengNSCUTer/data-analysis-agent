@@ -1321,3 +1321,7 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 要区分源查询范围与全业务范围：原SQL若只返回前十，完整工件也只有前十；前十合计不等于全国总额。平均值、比率等指标不默认跨行相加。前端初始200行、CSV保存完整结果、给模型的证据按预算组织是三个用途。本节不展开完整趋势/同比/占比算法或token二分细节。
 
 对应已有测试：全年366行、峰值在最后一天、证据预算仅1500 tokens时，sample_rows不完整，但合计和年末峰值仍正确；完整工件追问测试核对服务端合计、零SQL调用、用户/版本失配拒绝及状态未被改动。本轮定向执行这两个测试，2 passed；不改运行时代码。待题：没有额外筛选，250行GMV在第250行达到最大值，而token预算只放得下前20行样本，statistics.maximum能否包含第250行的值？请从先计算statistics、后构造sample_rows的代码顺序解释。
+
+用户回答：可以，先计算拿到最大值这一行，然后只给模型这一行，不会全部给。前半句正确；后半句需纠正：最大值和对应行存在statistics里，模型还会收到预算允许的sample_rows，并非只收到最大值那一行。`payload`同时包含statistics和sample_rows；后面的`pack(count)`更新sample_rows、included_row_count和coverage，不把statistics替换成行样本。
+
+本节继续核对证据字段，不切新功能。无额外筛选的250行结果、样本20行时，source_row_count=250、row_count=250、included_row_count=20、coverage=selected_rows；statistics中的maximum_row可来自第250行，与sample_rows不重复也不冲突。小结果预算足够时也可全部给模型，不是永远只给部分行。本轮仅核对代码与归档，没有改运行时代码或重跑测试。待源码题：上述场景的source_row_count和included_row_count分别是多少，为什么不都写成20？
