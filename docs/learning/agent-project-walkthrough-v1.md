@@ -3,7 +3,7 @@
 本记录承接当前[两周学习计划](../../plan/process-agent-internship-improvement-v2-2week.md)，只放代码理解与问答。项目进度见 PROJECT.md，后训练知识继续使用既有 post-training/learning 目录。每轮阅读 1–3 个关键函数，问题答完再进入下一段。
 
 当前学习位置（2026-10-27）：Day 1–3 复盘已收到回答，当前进入 Day 4 的
-`ResultContract.from_selection()`，先理解SQL生成前的验收要求。当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
+合同数据传递和缺列检查实现，要求亲自推演关键变量及返回分支。前期职责复述不代表全部源码掌握。当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
 不代表现行实现；当前内容以文末日期和真实代码为准。工程完成不代替用户理解。
 
 ## Day 1：沿一条问题认识请求链
@@ -1234,3 +1234,17 @@ PostgreSQL `REPEATABLE READ`只读事务中生成受控诊断查询：按实际�
 亲自阅读`semantic_catalog.py:ResultContract.from_selection()`中`metric_ids`、`required`及返回cls的`required_result_columns/metric_result_columns/metric_value_constraints`几处；对照`chat_runtime.py`的调用参数。本轮不要求读完整Catalog文件。
 
 待复述：1. 本例结果只有gmv金额列、没有品类列，为什么即使SQL可执行也不满足要求？2. 必须返回的列应该由模型看到查询结果后决定，还是由服务端在生成SQL前根据计划确定？本节仅核对代码并讲解，不改运行时、不新增评测；Day 4进行中。
+
+### 2026-10-27｜Day 4：从职责判断转向源码追踪（待代码复述）
+
+用户回答“不能”“服务端在SQL生成前根据计划确定”，并指出前期提问偏业务，担心面试时无法回答具体实现。第二题正确；第一题只给了结论，还需解释缺品类时无法将金额对应到实体。后续保留业务背景，但把主要阅读和问答落在调用方、类型、参数传递、分支返回与测试，不把前期问答完成等同于全部代码掌握。
+
+当前只深入一个功能：按合同检查返回表是否缺列。输入是pandas DataFrame以及required_columns、metric_columns、允许别名；输出是ResultValidation对象，并非单一True/False。ResultContract是带类型字段的dataclass，`as_tool_metadata()`把字段转成dict中的list/dict；`chat_runtime.py`在SQL生成前update请求metadata，覆盖客户端同名合同字段。Agent工具执行路径将metadata带入ToolContext，Runner取required_result_columns传为required_columns、metric_result_columns传为metric_columns，调用`ResultValidator.validate()`。这是请求内数据传递，不是模型重新生成合同，也不是从全局变量猜列要求。
+
+重点阅读`result_validator.py`的213–231行：`missing`逐个检查required_columns中的列及允许别名是否出现在frame.columns；`metric_names`是指标列集合；`missing_metrics`是missing与指标集合的交集；`missing_shape`是missing中非指标的部分。缺指标立即返回state=refuse；缺维度先添加shape_notes，后续无更严重问题时返回degraded。`ResultValidation.safe_to_display`对valid/degraded为True，而safe_to_answer仅对valid为True。Runner对不能展示的状态记录审计并抛ResultValidationError；degraded可展示现有表及说明，但不能保存为完整可信结果或生成可信数字结论。
+
+用本例required_columns=(product_category_name,gmv)、metric_columns=(gmv,)：只有gmv时missing=(product_category_name,)，missing_metrics为空，最终可为degraded；只有product_category_name时missing=(gmv,)，missing_metrics非空，直接refuse。这纠正了之前笼统的“所有缺列都直接拒绝展示”；不满足完整合同与一律不展示是两个判断。
+
+对应已有测试：`test_missing_dimension_still_displays_the_metric`断言degraded/允许展示/禁止可信回答；`test_validator_refuses_missing_metric_and_non_finite_values`断言缺指标拒绝；正常州GMV无time列的测试作为正例。未新增运行时代码或测试。
+
+待源码复述：1. 当required_columns=(product_category_name,gmv)、metric_columns=(gmv,)、frame.columns只有product_category_name，missing与missing_metrics分别是什么，会走哪个return？2. 若将`if missing_metrics`改成`if missing`，对只缺品类的情况会发生什么变化，上述哪条测试会失败？不提前标记本节掌握。
