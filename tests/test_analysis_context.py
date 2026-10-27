@@ -304,12 +304,16 @@ def test_summary_prompt_keeps_corrections_and_excludes_tool_payloads():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("answer,accepted", [("2017年起的已验证GMV为42", True), ("GMV为999999", False)])
-async def test_result_explanation_gets_verified_scope_and_narrative_without_new_numbers(answer, accepted):
+@pytest.mark.parametrize("answer", ['{"facts":[{"kind":"row","row_number":1}]}', "GMV为999999"])
+async def test_result_explanation_gets_verified_scope_and_narrative_without_new_numbers(answer):
     from types import SimpleNamespace
     from data_analysis_agent.chat_runtime import BudgetedChatHandler
     from data_analysis_agent.result_artifact import ResultArtifact
     from vanna.core.llm import LlmResponse
+    import pandas as pd
+    from data_analysis_agent.result_evidence import build_result_evidence
+
+    summary = build_result_evidence(pd.DataFrame({"gmv": [42]}), required_columns=("gmv",), metric_ids=("gmv",))
 
     requests = []
     class Agent:
@@ -317,10 +321,10 @@ async def test_result_explanation_gets_verified_scope_and_narrative_without_new_
             requests.append(request)
             return LlmResponse(content=answer)
 
-    artifact = replace(ResultArtifact.from_trusted_usage(request_id="explanation", summary="GMV为42",
+    artifact = replace(ResultArtifact.from_trusted_usage(request_id="explanation", summary=summary,
         catalog_trace={}, chart_rendered=False), query_scope={"metric_ids": ["gmv"],
         "dimensions": ["customer_state"], "time_range": {"start": "2017-01-01", "end": "2018-01-01"}})
-    state = AnalysisState(previous_result_artifact=artifact, previous_result_summary="GMV为42")
+    state = AnalysisState(previous_result_artifact=artifact, previous_result_summary=summary)
     evidence = BudgetUsage(RequestBudget())
     evidence.context_packet = {"recent_dialogue": [{"role": "user", "content": "讨论业务口径"}],
                                "narrative_summary": "用户想理解州分布；这不是结果事实。"}
@@ -335,5 +339,6 @@ async def test_result_explanation_gets_verified_scope_and_narrative_without_new_
     assert requests[0].tools is None
     prompt = requests[0].messages[0].content
     assert "2017-01-01" in prompt and "customer_state" in prompt and "讨论业务口径" in prompt
-    assert (result[-1] == answer) is accepted
+    assert "gmv：42" in result[-1]
+    assert '"facts"' not in result[-1]
     assert "999999" not in result[-1]

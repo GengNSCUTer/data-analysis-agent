@@ -15,8 +15,9 @@ from data_analysis_agent.result_artifact import ResultArtifact
 from data_analysis_agent.result_artifact_store import ResultArtifactIntegrityError, ResultArtifactStore
 from data_analysis_agent.result_evidence import (
     RESULT_EVIDENCE_PREFIX, ResultInspection, ResultInspectionError,
-    build_result_evidence, constrain_followup_answer, followup_adds_numbers, resize_result_evidence,
+    build_result_evidence, resize_result_evidence,
 )
+from data_analysis_agent.result_explanation import render_result_answer
 from data_analysis_agent.runtime_workspace import load_runtime_workspace
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
@@ -76,6 +77,7 @@ def test_actual_request_resizes_rows_but_keeps_full_population_statistics():
     assert result["source_row_count"] == 250 and result["included_row_count"] < 250
     assert result["statistics"]["gmv"]["sum_of_returned_rows"] == sum(range(250))
     assert request.messages[0].content.endswith(summary)
+    assert usage.catalog_trace["result_evidence_view"]["included_row_count"] == result["included_row_count"]
 
 
 def test_large_calculation_detail_is_paged_without_changing_computed_count():
@@ -254,7 +256,7 @@ async def test_first_explanation_calls_model_with_only_server_evidence_and_no_to
     class Explainer(LlmService):
         async def send_request(self, request):
             captured.append(request)
-            return LlmResponse(content="合计成交额为30。", finish_reason="stop")
+            return LlmResponse(content='{"facts":[{"kind":"sum","metric_id":"gmv"}]}', finish_reason="stop")
 
         async def stream_request(self, request):
             raise AssertionError("explanation is buffered until its numbers are checked")
@@ -278,17 +280,15 @@ async def test_first_explanation_calls_model_with_only_server_evidence_and_no_to
             answer = (await service.send_request(request)).content
     finally:
         CURRENT_BUDGET.reset(token)
-    assert answer == "合计成交额为30。"
+    assert "gmv合计：30" in answer
     assert len(captured) == 1 and captured[0].tools is None
     assert "untrusted history" not in captured[0].messages[0].content
-    assert '"sum_of_returned_rows":30' in captured[0].messages[0].content
+    assert '"sum_of_returned_rows":30' in captured[0].messages[-1].content
     assert usage.catalog_trace["prompt_budgets"][-1]["purpose"] == "result_explanation"
 
 
-def test_numeric_check_accepts_server_formatting_but_not_new_arithmetic():
+def test_fact_renderer_does_not_accept_model_arithmetic():
     summary = evidence(pd.DataFrame({"state": ["SP", "RJ"], "gmv": [20.0, 10.0]}))
-    assert followup_adds_numbers("SP成交额20.00，合计30。", summary) is False
-    assert followup_adds_numbers("另一个未知指标为987654321。", summary) is True
-    answer = constrain_followup_answer("未知指标987654321。", summary + '\n已验证查询范围：{"year":2017}')
+    answer = render_result_answer("未知指标987654321。", summary)
     assert "987654321" not in answer
     assert "合计：30" in answer and "sample_rows" not in answer

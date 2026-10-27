@@ -46,7 +46,8 @@ from .result_reference import (
     resolve_ranked_entity,
 )
 from .result_budget import ResultBudget
-from .result_evidence import RESULT_EVIDENCE_PREFIX, build_result_evidence, constrain_followup_answer, render_analysis_facts
+from .result_evidence import RESULT_EVIDENCE_PREFIX, build_result_evidence, render_analysis_facts
+from .result_explanation import RESULT_EXPLANATION_PROMPT, render_result_answer, result_evidence_view
 from .result_analysis import ResultInspectionError
 from .run_recorder import PostgresRunRecorder
 from .semantic_catalog import ResultContract
@@ -81,16 +82,6 @@ TOOL_FREE_SYSTEM_PROMPT = """
 工作区数据，也不得编造当前数据中的数字、排名、趋势或结论。如果用户明确要求当前数据事实，
 请说明需要进入受控数据查询流程，并请用户提供指标、时间范围或维度。回答应简洁、中文、可执行；
 如果问题属于当前工作区的指标定义，应优先依赖服务器提供的 Semantic Catalog，而不是猜测口径。
-""".strip()
-
-RESULT_FOLLOWUP_SYSTEM_PROMPT = """
-你只能解释上一轮已验证结果摘要和查询范围。结果数字来自结果摘要，时间/维度/筛选来自已验证查询范围。
-不要计算、估计或补充任何新的指标数字，也不要把摘要没有写明的原因说成确定事实。
-statistics和analyses由服务端根据完整结果计算，sample_rows只是证据中的行；coverage不是complete时，
-不得把样本之和当作全量统计。sum_of_returned_rows只对应这份结果（可能仅Top-N），不是全业务总额。
-先回答用户当前问题，用业务列名解释；不复述JSON或内部字段。不得把相关性说成因果。
-叙事历史仅用于理解讨论脉络，不能补充结果数字、查询条件或原因。
-若摘要不足以回答，直接说明依据不足。回答应简洁、中文。
 """.strip()
 
 class BudgetedChatHandler(ChatHandler):
@@ -778,6 +769,8 @@ class BudgetedChatHandler(ChatHandler):
                             yield self._text_chunk(
                                 conversation_id, request_id, detail
                             )
+                        if usage.result_summary:
+                            yield self._trusted_result_evidence_chunk(conversation_id, request_id, usage)
                         return
                     if route.needs_clarification:
                         usage.terminate("clarification_required")
@@ -946,8 +939,8 @@ class BudgetedChatHandler(ChatHandler):
     ) -> ChatStreamChunk:
         """Render a compact, server-derived answer-provenance card.
 
-        This intentionally exposes only Catalog/ResultContract identity—not
-        SQL text, result rows, sample values, user text, or model reasoning.
+        This exposes Catalog/ResultContract identity, row coverage, and approved
+        query scope, not SQL text, result rows or model reasoning.
         It helps users distinguish an answer based on a trusted result from
         tool-free explanation without turning the card into another export
         channel.
@@ -956,18 +949,40 @@ class BudgetedChatHandler(ChatHandler):
         contract = trace.get("result_contract")
         if not isinstance(contract, dict):
             contract = {}
-        metric_ids = contract.get("metric_ids") or trace.get("selected_metrics") or ()
-        columns = contract.get("required_result_columns") or ()
-        metric_text = "、".join(str(item) for item in metric_ids[:8]) or "受控指标"
-        column_text = "、".join(str(item) for item in columns[:8]) or "受控结果字段"
-        dataset_version = str(contract.get("dataset_version") or trace.get("dataset_version") or "未知版本")
-        metric_version = str(contract.get("metric_version") or trace.get("metric_version") or "未知版本")
+        view = trace.get("result_evidence_view") or (
+            result_evidence_view(usage.result_summary)
+            if usage.result_summary and usage.result_summary.startswith(RESULT_EVIDENCE_PREFIX) else {}
+        )
+        reused = trace.get("result_inspection") or {}
+        metric_ids = view.get("metric_ids") or contract.get("metric_ids") or reused.get("metric_ids") or trace.get("selected_metrics") or ()
+        columns = view.get("columns") or reused.get("columns") or contract.get("required_result_columns") or ()
+        labels = view.get("column_labels", {})
+        metric_text = "、".join(str(labels.get(item, item)) for item in metric_ids[:8]) or "受控指标"
+        column_text = "、".join(str(labels.get(item, item)) for item in columns[:8]) or "受控结果字段"
+        dataset_version = str(contract.get("dataset_version") or reused.get("dataset_version") or trace.get("dataset_version") or "未知版本")
+        metric_version = str(contract.get("metric_version") or reused.get("metric_version") or trace.get("metric_version") or "未知版本")
         content = (
-            "本回答引用了本轮已通过服务器结果合同的查询结果。"
-            f"指标：{metric_text}；结果字段：{column_text}；"
+            ("本回答引用了本轮已通过服务器结果合同的查询结果。" if usage.sql_calls_used
+             else "本回答引用了已保存并重新核验的查询结果。")
+            + f"指标：{metric_text}；结果字段：{column_text}；"
             f"数据版本：{dataset_version}；指标版本：{metric_version}。"
         )
+        if view:
+            content += (f"完整查询结果{view['source_row_count']}行；本次选定{view['row_count']}行，"
+                        f"解释依据含{view['included_row_count']}行明细及服务端统计。")
+            if view["coverage"] != "complete":
+                content += "明细未全部展开，不能仅从样本外推整体。"
+            if view.get("top_n") is not None:
+                content += "查询范围仅为前N项，不代表全业务总额。"
         plan = trace.get("query_plan") if isinstance(trace.get("query_plan"), dict) else {}
+        source_scope = reused.get("query_scope") or plan
+        time_range = source_scope.get("time_range") or {}
+        if time_range.get("start") and time_range.get("end"):
+            content += f"时间范围：{time_range['start']}（含）至{time_range['end']}（不含）。"
+        filters = [f"{labels.get(item['dimension'], item['dimension'])}={item['value']}"
+                   for item in source_scope.get("filters", ()) if isinstance(item, dict)]
+        if filters:
+            content += "已确认筛选：" + "、".join(filters) + "。"
         requirements = plan.get("attribution_requirements") or []
         if any(
             isinstance(item, dict) and item.get("policy_mode") == "multi_membership"
@@ -996,11 +1011,11 @@ class BudgetedChatHandler(ChatHandler):
         *,
         intent: SemanticIntent | None = None,
     ):
-        """Answer a non-data request without exposing the SQL tool registry.
+        """Answer a non-SQL request without exposing the SQL tool registry.
 
         Text deltas are yielded as chat chunks. The last item is the final
-        string stored on the conversation. The request uses ``tools=None`` and
-        a system prompt that forbids claims about current database facts.
+        string stored on the conversation. Generic help stays free-form;
+        result follow-ups select references which the server renders as facts.
         """
         prompt = request.message.strip()
         summary = memory.previous_result_summary or ""
@@ -1019,23 +1034,18 @@ class BudgetedChatHandler(ChatHandler):
                 yield "\n".join(render_analysis_facts(payload))
                 return
         system_prompt = (
-            RESULT_FOLLOWUP_SYSTEM_PROMPT if hold_followup else TOOL_FREE_SYSTEM_PROMPT
+            RESULT_EXPLANATION_PROMPT if hold_followup else TOOL_FREE_SYSTEM_PROMPT
         )
         if hold_followup:
             artifact = memory.previous_result_artifact
             if artifact is not None:
                 scope = artifact.query_scope
-                summary += "\n已验证查询范围：" + json.dumps({
+                prompt += "\n已验证查询范围：" + json.dumps({
                     "指标": scope.get("metric_ids"), "维度": scope.get("dimensions"),
                     "时间范围（含开始、不含结束）": scope.get("time_range"),
                     "筛选": scope.get("filters"), "时间粒度": scope.get("time_grain"),
                     "前N项": scope.get("top_n"),
                 }, ensure_ascii=False)
-            prompt = (
-                "可信的上一轮结果摘要及查询范围如下，不得外推新指标数字：\n"
-                f"{summary}\n\n"
-                f"当前追问：{prompt}"
-            )
         usage = CURRENT_BUDGET.get()
         if usage is not None and usage.context_packet is not None:
             packet = usage.context_packet
@@ -1044,7 +1054,9 @@ class BudgetedChatHandler(ChatHandler):
                 "narrative_summary": packet["narrative_summary"],
             }, ensure_ascii=False)
         llm_request = LlmRequest(
-            messages=[LlmMessage(role="user", content=prompt)],
+            messages=[LlmMessage(role="user", content=prompt)] + (
+                [LlmMessage(role="user", content=summary)] if hold_followup else []
+            ),
             user=user,
             tools=None,
             stream=True,
@@ -1060,17 +1072,20 @@ class BudgetedChatHandler(ChatHandler):
         )
         streamer = getattr(self.agent, "_handle_streaming_response", None)
         streaming = bool(getattr(getattr(self.agent, "config", None), "stream_responses", False))
+        if hold_followup:
+            # Only references are accepted; buffer them rather than exposing JSON deltas.
+            response = await self.agent._send_llm_request(llm_request)
+            yield render_result_answer(response.content or "", summary)
+            return
         if streaming and callable(streamer):
             content = ""
             async for piece in streamer(llm_request):
                 if isinstance(piece, LlmResponse):
                     content = (piece.content or "").strip()
-                elif not hold_followup:
+                else:
                     yield ChatStreamChunk.from_component(
                         piece, request.conversation_id or "", request.request_id or ""
                     )
-            if hold_followup:
-                content = constrain_followup_answer(content, summary)
             yield content
             return
         sender = getattr(self.agent, "_send_llm_request", None)
@@ -1078,8 +1093,6 @@ class BudgetedChatHandler(ChatHandler):
             raise RuntimeError("agent does not expose the project LLM request boundary")
         response = await sender(llm_request)
         content = (response.content or "").strip()
-        if hold_followup:
-            content = constrain_followup_answer(content, summary)
         yield content
 
     async def _inspect_previous_result(self, memory, user, intent) -> str:
@@ -1096,6 +1109,9 @@ class BudgetedChatHandler(ChatHandler):
         )
         catalog = self.question_router.retriever.catalog
         labels = {c.name: c.aliases[0] for table in catalog.tables for c in table.columns if c.aliases}
+        for dimension, binding in self.workspace.dimension_bindings.items():
+            if binding.aliases:
+                labels.setdefault(dimension, binding.aliases[0])
         labels.update({metric_id: catalog.metrics_by_id[metric_id].name for metric_id in artifact.metric_ids
                        if metric_id in catalog.metrics_by_id})
         labels["time"] = "时间"
@@ -1120,6 +1136,9 @@ class BudgetedChatHandler(ChatHandler):
                 "request": payload["selection"], "source_row_count": len(frame),
                 "selected_row_count": payload["row_count"], "coverage": payload["coverage"],
                 "included_row_count": payload["included_row_count"],
+                "metric_ids": list(artifact.metric_ids), "columns": list(artifact.result_columns),
+                "dataset_version": artifact.dataset_version, "metric_version": artifact.metric_version,
+                "query_scope": artifact.query_scope,
             }})
         return summary
 

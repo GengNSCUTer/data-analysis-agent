@@ -7,6 +7,7 @@ contracts, CSV artifacts and chart inputs keep their original typed values.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Mapping, Sequence
 
 
@@ -145,6 +146,39 @@ def display_value(column: str, value: Any) -> str:
     if numeric.is_integer():
         return str(int(numeric))
     return f"{numeric:.2f}"
+
+
+def display_metric_value(metric_id: str, value: Any, semantics: Mapping[str, Any]) -> str:
+    """Use the Catalog's kind/unit, never a model-selected currency or scale."""
+    spec = semantics.get(metric_id)
+    if not spec or value is None:
+        return display_value(metric_id, value)
+    number = Decimal(str(value))
+    if not number.is_finite():
+        return "-"
+    if spec["kind"] == "rate":
+        return f"{(number * 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):.2f}%"
+    if spec["kind"] == "count" and number == number.to_integral_value():
+        text = str(int(number))
+    else:
+        rounded = number.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        text = format(abs(rounded) if rounded == 0 else rounded, ".2f")
+    unit = spec["unit"]
+    # Unknown source currency must stay unknown; do not label it RMB/USD.
+    return f"{text} {unit}" if "未声明" not in unit else text
+
+
+def display_evidence_row(row: Mapping[str, Any], evidence: Mapping[str, Any]) -> str:
+    """Preserve dimension keys; format only columns bound to Catalog metrics."""
+    labels = evidence.get("column_labels", {})
+    metrics = evidence.get("metric_columns", {})
+    rendered = []
+    for name, value in row.items():
+        metric_id = metrics.get(name, name)
+        text = (display_metric_value(metric_id, value, evidence.get("metric_semantics", {}))
+                if metric_id in evidence["metric_ids"] else "-" if value is None else str(value))
+        rendered.append(f"{labels.get(name, name)}：{text}")
+    return "，".join(rendered)
 
 
 def display_records(

@@ -61,7 +61,7 @@ def test_browser_result_evidence_continuity_and_refresh(result_evidence_data, mo
 
     from data_analysis_agent.local_auth import AccountStore
     from data_analysis_agent.postgres_runner import PostgresConnectionSettings
-    from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX, render_result_facts, render_analysis_facts
+    from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX, render_analysis_facts
     from data_analysis_agent.server import create_app
     from vanna.core.llm import LlmResponse, LlmStreamChunk
     from vanna.core.tool import ToolCall
@@ -81,6 +81,8 @@ def test_browser_result_evidence_continuity_and_refresh(result_evidence_data, mo
     intents = {
         categories_question: {"request_kind": "data_query", "action": "new_task", "metric_ids": ["gmv"],
                               "dimensions": ["product_category_name"], "top_n": 10},
+        "概述刚才的品类结果": {"request_kind":"result_followup", "action":"keep"},
+        "重新概述刚才的品类结果": {"request_kind":"result_followup", "action":"keep"},
         "第九名和第十名的金额分别是多少": {"request_kind": "result_followup", "action": "keep",
                                         "result_inspections": [{"operation": "rows", "row_numbers": [9, 10]}]},
         "这十个品类合计销售额是多少": {"request_kind": "result_followup", "action": "keep",
@@ -138,6 +140,7 @@ AND o.order_purchase_timestamp >= DATE '2017-01-01' AND o.order_purchase_timesta
 GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
     }
     explanations = []
+    invalid_explanations = []
 
     class Provider:
         model = "controlled-result-evidence"
@@ -147,11 +150,18 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                 prompt = request.messages[0].content
                 question = prompt.rsplit("用户问题: ", 1)[1]
                 return LlmResponse(content=json.dumps({**intents[question], "confidence": 0.99}, ensure_ascii=False))
-            text = request.messages[0].content.split(RESULT_EVIDENCE_PREFIX, 1)[1]
+            text = request.messages[-1].content.split(RESULT_EVIDENCE_PREFIX, 1)[1]
             # Follow-up prompts append scope/history after the evidence JSON.
             data, _ = json.JSONDecoder().raw_decode(text)
             explanations.append(data)
-            return LlmResponse(content=render_result_facts(data), finish_reason="stop")
+            question = request.messages[0].content.split("\n", 1)[0]
+            if question in {"概述刚才的品类结果", "重新概述刚才的品类结果"}:
+                invalid_explanations.append(question)
+                # Deliberately invalid model facts must not reach either the UI or saved answer.
+                return LlmResponse(content='{"facts":[{"kind":"row","row_number":1,"value":987654321,"entity":"wrong-category"}]}')
+            return LlmResponse(content=json.dumps({"facts": [
+                {"kind": "row", "row_number": n} for n in data["row_numbers"]
+            ]}), finish_reason="stop")
 
         async def stream_request(self, request):
             # No text SSE is fabricated: the Agent builds it from this actual response.
@@ -260,6 +270,11 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                 assert detail["trusted_result_artifact"]
                 current = captured[-1]
                 answer = detail["messages"][-1]["content"]
+                if question in {"概述刚才的品类结果", "重新概述刚才的品类结果"}:
+                    assert "987654321" not in answer and "wrong-category" not in answer
+                    assert '"facts"' not in answer
+                    chat.get_by_text("本次回答的数据依据", exact=True).last.wait_for(state="visible")
+                    page.screenshot(path=str(output / "reference-fallback.png"), full_page=True)
                 if current["analyses"] and question not in {"第九名和第十名的金额分别是多少", "最后一个月表现怎么样", "继续解释全年结果"}:
                     for fact in render_analysis_facts(current):
                         assert fact in answer
@@ -323,6 +338,7 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
             assert len(pd.read_csv(io.StringIO(csv_response.text))) == 1
             page.screenshot(path=str(output / "result-evidence-continuity.png"), full_page=True)
             assert not errors
+            assert len(invalid_explanations) == 2
         finally:
             (output / "observations.json").write_text(json.dumps(observations, ensure_ascii=False, indent=2))
             browser.close()

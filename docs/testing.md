@@ -58,7 +58,7 @@ RUN_PROJECT_DB=1 RUN_VANNA_E2E=1 \
   python -m pytest -q tests/e2e/test_result_evidence_flow.py
 ```
 
-`test_result_evidence_flow.py`的22轮受控链路实际经过浏览器、SSE、SQL策略、PostgreSQL
+`test_result_evidence_flow.py`的26轮受控链路实际经过浏览器、SSE、SQL策略、PostgreSQL
 reader及工件。覆盖趋势反例、滚动/累计、排名、分位数、阈值、合计占比、补查基期/分母、
 非可加客单价重算、换图和刷新；刻意改变补查结果顺序，验证旧分子不会被新行号替换。
 该测试只在独立合成库修改并恢复fixture，不应指向真实业务库。
@@ -68,7 +68,17 @@ reader及工件。覆盖趋势反例、滚动/累计、排名、分位数、阈�
 ```bash
 RUN_LIVE_RESULT_ANALYSIS=1 RESULT_ANALYSIS_LIVE_OUTPUT=/private/result-analysis-live \
   python -m pytest -q -s tests/e2e/test_result_analysis_live.py
+
+# 引用式结果解释：真实模型/SQL，查库→概括→换图→刷新后续问。
+RUN_LIVE_RESULT_ANALYSIS=1 RESULT_ANALYSIS_LIVE_OUTPUT=/private/result-explanation-live \
+  python -m pytest -q -s tests/e2e/test_result_explanation_live.py
 ```
+
+2026-10-27结果解释改为模型选行/统计引用、服务端渲染；旧数字池正则已删除。
+新增`tests/test_result_explanation.py`覆盖金额对调、将元数据数字当金额、非法引用、并列极值、
+Top-N、非可加指标、单位/精度和来源卡片。受控浏览器增加两次伪造解释；真实新测试在Olist
+使用全州、TheLook使用明确前十名（完整216州仍超过图表200行上限）。证据及首次失败边界
+见[结果解释改造验收](../evals/results/result-explanation-20261027.md)。
 
 按部署方式配置workspace、只读业务库和私有模型凭据。用例创建唯一测试账号和会话，
 不写业务表；Olist用2017年，TheLook用2023年，独立SQL核对12个月结果。完整报告、

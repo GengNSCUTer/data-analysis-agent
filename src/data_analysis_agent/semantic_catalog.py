@@ -315,6 +315,10 @@ class ResultContract:
                 # presentation metadata and never changes the SQL contract.
                 if column.aliases:
                     result_column_labels.setdefault(column.name, column.aliases[0])
+        if selection.workspace:
+            for dimension, binding in selection.workspace.dimension_bindings.items():
+                if binding.aliases:
+                    result_column_labels.setdefault(dimension, binding.aliases[0])
         # An available translation join is context, not proof that a future
         # SQL projection uses the translated column. Keep the UI label neutral
         # until actual result provenance establishes the display language.

@@ -11,6 +11,16 @@
 [面试材料](docs/interview/project-release-facts-v1.md)。Docker实运行和外部独立部署尚未验证。
 当前学习主线已压缩为[两周学习与面试计划](plan/process-agent-internship-improvement-v2-2week.md)；原[四周计划](plan/process-agent-internship-improvement-v1.md)保留为历史记录。下面保留项目事实、实验与阶段记录。
 
+2026-10-27 结果解释优化已完成：修复数字集合检查放行实体金额对调、将行数当金额的实际
+缺口。输入为可信结果证据及用户分析意图，输出为模型选择的行/统计引用与服务端渲染文字；
+实体与数值成对取证，正文先结论，Catalog统一单位/精度，行数/原查询范围放入已有依据卡片。
+没有新增模型审核调用、hash或表，未改变SQL权限/训练；删除旧数字池匹配实现。698项确定性
+回归、隔离合成库26轮受控浏览器、真实DeepSeek-V3.2的Olist四轮与TheLook前十名四轮通过；
+真实两库均为首轮1次SQL、后三轮0次，CSV与独立SQL一致。TheLook完整216州超过原图表
+200行上限仍会被拒绝，未放宽限制；引用有效不证明选择重点或SQL业务语义正确。代码入口为
+`result_explanation.py`、`llm_observability.py`、`chat_runtime.py`、`result_presentation.py`。
+测试证据与边界见[结果解释改造验收](evals/results/result-explanation-20261027.md)。
+
 2026-10-26 JOIN/下钻修复任务：输入为扩测失败 SQL 与现有状态/工件；输出为同一只读事务中
 可执行的计数探针，以及“最高州→该州品类→前五→换图→取消州筛选”的完整链路。不新增
 权限角色、不放宽用户敏感字段规则、不训练模型；服务端探针将内部标识处理留在 CTE，最终

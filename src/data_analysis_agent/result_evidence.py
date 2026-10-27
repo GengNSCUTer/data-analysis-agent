@@ -11,72 +11,16 @@ from decimal import Decimal
 import json
 import math
 import os
-import re
 from typing import Any, Mapping, Sequence
 
 import pandas as pd
 from .result_analysis import ResultInspection, ResultInspectionError, analyze_result
 
 from .token_budget import DEFAULT_TOKEN_COUNTER, ContextCapacityError, TokenCounter
-from .result_presentation import display_value
+from .result_presentation import display_value, display_evidence_row
 
 
 RESULT_EVIDENCE_PREFIX = "已通过结果合同的可信结果摘要："
-
-_NUMBER = re.compile(r"(?<![a-zA-Z0-9_.])-?\d+(?:,\d{3})*(?:\.\d+)?%?")
-_ORDINAL = re.compile(r"(?:第|排名第|前|top\s*)\s*$", re.IGNORECASE)
-_UNIT = re.compile(r"^\s*(?:名|位|个|项|条|行|组|页|的|是|为)")
-_COUNT = re.compile(r"(?:共|总共|返回|展示|显示|列出|保留)\s*$")
-
-
-def _business_numbers(text: str) -> set[tuple[Decimal, bool]]:
-    values = set()
-    for match in _NUMBER.finditer(text or ""):
-        before = text[max(0, match.start() - 12):match.start()]
-        after = text[match.end():match.end() + 8]
-        line_before = text[text.rfind("\n", 0, match.start()) + 1:match.start()]
-        if _ORDINAL.search(before) and (re.search(r"top\s*$", before, re.IGNORECASE) or _UNIT.search(after)):
-            continue
-        if _COUNT.search(before) and _UNIT.search(after):
-            continue
-        if not line_before.strip() and re.match(r"\s*[.)）、:：-]", after):
-            continue
-        number = match.group(0).replace(",", "")
-        values.add((Decimal(number.rstrip("%")), number.endswith("%")))
-    return values
-
-
-def followup_adds_numbers(answer: str, summary: str) -> bool:
-    return not _business_numbers(answer).issubset(_business_numbers(summary))
-
-
-def constrain_followup_answer(answer: str, summary: str) -> str:
-    if not followup_adds_numbers(answer, summary):
-        return answer
-    if summary.startswith(RESULT_EVIDENCE_PREFIX):
-        # The follow-up prompt may append verified scope after the evidence.
-        evidence, _ = json.JSONDecoder().raw_decode(summary.removeprefix(RESULT_EVIDENCE_PREFIX))
-        if "coverage" in evidence:
-            return "解释中出现了证据外数字，以下直接展示已验证内容。\n" + render_result_facts(evidence)
-    return "这次只复述已验证摘要，不补充摘要以外的数字。\n" + summary.strip()
-
-
-def render_result_facts(evidence: Mapping[str, Any]) -> str:
-    """Readable exact facts if an explanation cannot be used, without raw JSON."""
-    labels = evidence.get("column_labels", {})
-    lines = [f"完整结果共 {evidence['source_row_count']} 行；本次提供 {evidence['included_row_count']} 行。"]
-    for number, row in zip(evidence["row_numbers"], evidence["sample_rows"]):
-        lines.append(f"第 {number} 行：" + "，".join(f"{labels.get(name, name)}：{display_value(name, value)}" for name, value in row.items()))
-    for metric_id, stat in evidence.get("statistics", {}).items():
-        label = labels.get(metric_id, metric_id)
-        lines.append(f"{label}在这份结果中的最小值：{stat['minimum_display']}；最大值：{stat['maximum_display']}。")
-        if "sum_of_returned_rows" in stat:
-            lines.append(f"这份结果的{label}合计：{stat['sum_of_returned_rows']}。")
-    lines.extend(render_analysis_facts(evidence))
-    if evidence.get("top_n") is not None:
-        lines.append("本次仅覆盖查询返回的前N项，不代表全部业务总额。")
-    return "\n".join(lines)
-
 
 def result_evidence_token_limit() -> int:
     """Persistence ceiling, not the per-call allocation (which uses remaining space)."""
@@ -99,7 +43,7 @@ def render_analysis_facts(evidence: Mapping[str, Any]) -> list[str]:
         if result.get("within_period"):
             lines.append(f"本项计算范围：{result['within_period'][0]}（含）至{result['within_period'][1]}（不含）。")
         if op == "rows":
-            lines.extend("，".join(f"{labels.get(k,k)}：{v}" for k,v in row.items()) for row in result["rows"])
+            lines.extend(display_evidence_row(row, evidence) for row in result["rows"])
         elif op == "sum":
             lines.append(f"选定结果的{label}合计：{result['value']}（{unit}）。")
         elif op == "compare":
@@ -281,6 +225,7 @@ def build_result_evidence(
     counter: TokenCounter = DEFAULT_TOKEN_COUNTER,
 ) -> str:
     """Include complete small results, otherwise full-result facts and selected rows."""
+    top_n = top_n or None
     limit = max_tokens or result_evidence_token_limit()
     allowed = set(required_columns) | set(metric_ids)
     for name, aliases in (column_aliases or {}).items():
@@ -331,12 +276,16 @@ def build_result_evidence(
                 "minimum_row": _row(selected, numeric.idxmin()),
                 "maximum_row": _row(selected, numeric.idxmax()),
                 "maximum_tie_count": int((numeric == numeric.max()).sum()),
+                "minimum_tie_count": int((numeric == numeric.min()).sum()),
                 "sum_allowed": _normalized(metric_id) in additive}
         if stat["sum_allowed"]:
             stat["sum_of_returned_rows"] = _sum(selected.loc[numeric.index, column])
         statistics[metric_id] = stat
     payload = {
         "metric_ids": list(metric_ids), "columns": columns,
+        "metric_columns": metric_columns,
+        "metric_semantics": {metric_id: dict(spec) for metric_id, spec in (metric_semantics or {}).items()
+                             if metric_id in metric_ids},
         "column_labels": {name: _label(name, column_labels or {}) for name in columns},
         "source_row_count": source_count, "row_count": population_count,
         "scope": "returned_top_n" if top_n is not None else "returned_result",

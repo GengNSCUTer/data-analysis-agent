@@ -7,7 +7,6 @@ import pytest
 from data_analysis_agent.budget import RequestBudget
 from data_analysis_agent.chat_runtime import BudgetedChatHandler
 from data_analysis_agent.run_recorder import AgentRun
-from data_analysis_agent.result_evidence import constrain_followup_answer, followup_adds_numbers
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
 from data_analysis_agent.working_memory import WorkingMemory
@@ -275,27 +274,6 @@ def test_new_question_does_not_inherit_previous_metric(router) -> None:
 
     assert "gmv" not in route.metric_ids
     assert route.reason_code != "comparison_without_baseline"
-
-
-def test_result_followup_cannot_keep_numbers_missing_from_the_summary() -> None:
-    assert followup_adds_numbers("GMV为999999", "GMV为42") is True
-    assert followup_adds_numbers("成交额为999999元", "成交额为42元") is True
-    summary = "SP 41127；RJ 12698"
-    assert followup_adds_numbers("SP 是 41127，大约还有 5000 未统计。", summary) is True
-    assert followup_adds_numbers("SP 41127 高于 RJ 12698。", summary) is False
-    constrained = constrain_followup_answer("额外数字 5000", summary)
-    assert "5000" not in constrained
-    assert "41127" in constrained
-
-
-def test_result_followup_ignores_presentation_numbers_but_keeps_new_business_values() -> None:
-    summary = "SP 41127；RJ 12698"
-    answer = "1. SP 是第一名，排名第 2 的 RJ 也在结果中；共 2 行。"
-    assert followup_adds_numbers(answer, summary) is False
-    assert followup_adds_numbers("第 10 名的销售额是 5000。", summary) is True
-    assert followup_adds_numbers("1. SP 销售额为 41127。", summary) is False
-    assert followup_adds_numbers("Top 10 商品如下：SP 41127。", summary) is False
-    assert followup_adds_numbers("1）SP 销售额为 41127。", summary) is False
 
 
 def test_new_question_is_not_retrieved_with_the_pending_clarification(router) -> None:
@@ -785,7 +763,9 @@ async def test_budgeted_handler_persists_only_trusted_result_summary(
 
         async def send_message(self, request_context, message, conversation_id=None):
             request_context.metadata["budget_usage"].set_result_summary(
-                '已通过结果合同的可信结果摘要：{"metric_ids":["gmv"],"row_count":1}'
+                '已通过结果合同的可信结果摘要：{"metric_ids":["gmv"],"row_count":1,'
+                '"source_row_count":1,"included_row_count":1,"coverage":"complete",'
+                '"scope":"returned_result","top_n":null}'
             )
             request_context.metadata["budget_usage"].mark_result_contract_satisfied()
             if False:
