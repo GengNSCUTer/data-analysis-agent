@@ -2,7 +2,7 @@
 
 本记录承接当前[两周学习计划](../../plan/process-agent-internship-improvement-v2-2week.md)，只放代码理解与问答。项目进度见 PROJECT.md，后训练知识继续使用既有 post-training/learning 目录。每轮阅读 1–3 个关键函数，问题答完再进入下一段。
 
-当前学习位置（2026-10-27）：Day 1–3 复盘已收到回答，Day 4 已复述缺列分支、异常传播和完整 CSV/manifest 保存，当前学习按用户和 workspace 读取工件说明。可信工件保存条件的源码题尚待复述。前期职责复述不代表全部源码掌握。当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
+当前学习位置（2026-10-27）：Day 1–3 复盘已收到回答，Day 4 已复述缺列分支、异常传播、完整 CSV/manifest 保存及按用户/workspace读取路径，当前学习CSV完整性检查。可信工件保存条件的源码题尚待复述。前期职责复述不代表全部源码掌握。当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
 不代表现行实现；当前内容以文末日期和真实代码为准。工程完成不代替用户理解。
 
 ## Day 1：沿一条问题认识请求链
@@ -1282,10 +1282,20 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 
 用户回答：保存全部数据到CSV；manifest装的是文件说明信息。两题正确，补充具体数量为250行数据（另有表头）；每200行记录偏移并不截断循环。
 
-### 2026-10-27｜Day 4：按用户与workspace读取manifest（待复述）
+### 2026-10-27｜Day 4：按用户与workspace读取manifest（已复述）
 
 业务功能：同一个结果ID不能让其他用户读取原用户保存的结果。只读`result_artifact_store.py:_scope()`与`load_manifest()`。路径由root/用户指纹/workspace/artifact组成；输入三个字符串，前者返回Path，后者读取JSON并返回dict。`load_manifest()`先构造当前身份范围内的路径，不存在就抛FileNotFoundError；存在时检查过期，再解析JSON，核对其中artifact_id/workspace_id，不匹配抛PermissionError。
 
 用户B拿用户A的artifact_id，在B自己的目录没有该文件时，首先触发的是FileNotFoundError，并不是末尾的PermissionError。用户指纹不是认证或加密：调用方必须传服务端已验证的身份，不能让浏览器随意选择user_id。`chat_runtime.py:_verified_previous_artifact()`传入`user_id=user.id`与服务端workspace；读取说明也不等于已经检查CSV完整性，后续由verify_manifest完成。
 
 对应现有测试`test_result_artifact_store_scopes_users_and_workspaces`：用户A正确范围可读，换用户或workspace读取报FileNotFoundError。本轮定向执行该测试，1 passed；没有修改运行时代码，不据此宣称完整权限链均已验证。待源码题：A保存rta_test，B使用相同artifact_id读取且B目录没有同名文件，路径是否相同，会在load_manifest哪个条件抛哪种异常？
+
+用户回答：B发现该路径没有文件，抛结果文件未找到异常。判断正确；对应`if not path.is_file()`，异常类为`FileNotFoundError`。这说明理解了本例路径隔离与缺文件分支，不代表已复述完整认证流程。
+
+### 2026-10-27｜Day 4：CSV存在不等于内容仍完整（待复述）
+
+业务功能：用户下载或追问先前结果时，避免复用已损坏或被改动的CSV。保存时manifest记录csv_sha256和csv_bytes；`verify_manifest()`先调用load_manifest确认范围并读取说明，再把CSV固定文件名、预期摘要和大小传给`_verify_file()`。后者返回None：正常返回表示这些检查通过，失败抛`ResultArtifactIntegrityError`，并不返回DataFrame。
+
+只看`_verify_file()`末尾：确认文件存在后，`digest, size = _sha256_size(path)`重新读取当前文件并计算SHA-256和字节数；`if digest != expected_sha256 or size != expected_bytes`任一不符就抛异常。相同长度的数值替换也可能保持文件大小，因此不能只比字节数。完整性通过不证明SQL业务公式正确；manifest与CSV同时被有权限者改写也不由这两项比较单独防住，不能把普通摘要说成签名或身份认证。
+
+阅读并定向执行现有`test_result_artifact_store_detects_payload_tampering`，1 passed：保存gmv=10后直接改CSV为gmv=999，不改manifest，断言verify_manifest抛完整性异常。本节不改运行时代码。待源码题：CSV把10改成99、字节数不变且manifest不变，检查能否通过？会因if中的哪个比较失败？
