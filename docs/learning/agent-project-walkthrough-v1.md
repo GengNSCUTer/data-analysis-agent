@@ -1268,3 +1268,15 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 `_remember_result_artifact()`先确认store存在，再读取context.metadata中的result_validation，只有dict且state=valid才继续。columns/results来自工具结果metadata；user来自context.user，workspace和版本来自服务端metadata。save_result_csv保存完整结果并返回manifest，工具将manifest写回context.metadata['result_artifact']。输入中的validation与返回manifest不是同一对象；ToolResult.success与验证状态是两个维度。
 
 请读tests/test_trusted_sql_tool.py的test_result_artifact_requires_explicit_validated_result_contract：自定义Runner故意直接返回DataFrame但不提供验证证据，测试断言工具success=True且context.metadata没有result_artifact；测试没有直接断言磁盘文件不存在，不扩大它的覆盖结论。这是具体的缺验证正向控制流反例，不能拿它当允许线上绕过验证的接口。待题：若删除保存函数内的validation检查，这个测试会在哪个断言失败？为什么只检查result.success不足？本节只核对代码，未运行新测试、不改运行时。
+
+用户反馈“没看懂”；解释改为“拿到表格”和“有通过校验记录”两个独立条件，`return`只退出保存函数、不执行后续CSV写入。随后用户要求继续，尚未收到该测试题复述，不据此标记掌握。
+
+### 2026-10-27｜Day 4：完整CSV与manifest如何保存（待复述）
+
+业务目标：已验证结果可供后续分页、下载与追问复用，不必每次重跑SQL。只读`result_artifact_store.py:save_result_csv()`与工具层接收返回值的几行。本节默认数据已通过上一层验证，不重复展开验证逻辑。
+
+输入`columns`是列名序列，`rows`是按行字典的可迭代对象，另传用户、workspace、artifact ID和数据/指标版本。`_scope()`组织路径为root/用户指纹/workspace/artifact，因此不同用户或工作区不会把相同artifact ID写到同一个目录；这只是存储隔离的一部分，不单独等同完整授权。目录中`result.csv`存完整结果，`manifest.json`存列名、总行数、版本、文件大小/摘要和分页偏移等描述，不重复存全部业务行。
+
+写CSV使用`csv.DictWriter`先写表头、循环写全部rows，不按网页200行截断。每200行记录文件偏移用于分页定位，不代表只保存200行。先写同目录临时文件，退出with关闭文件后`os.replace()`替换正式result.csv，减少读到半截CSV的风险；manifest另行原子写入，不能说两个文件共同构成一次数据库事务，也不承诺断电零丢失。最后返回manifest字典，由调用方写到context.metadata['result_artifact']；函数返回的是结果的描述，不是CSV全部行，也不是模型记住这些数据。
+
+本轮只核对现有代码和归档，无运行时代码修改或新测试。待源码题：1. save_result_csv传入250行、每200行记一次偏移，CSV会保存多少行数据，为什么？2. return manifest后调用方变量manifest装的是全部查询行，还是文件/版本/行数等描述？Day 4继续。
