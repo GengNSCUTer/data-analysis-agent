@@ -1251,10 +1251,20 @@ PostgreSQL `REPEATABLE READ`只读事务中生成受控诊断查询：按实际�
 
 用户回答：missing和missing_metrics都是gmv，走refuse；改成if missing时只缺品类也会refuse。分支判断正确，类型补充为两个元组`('gmv',)`；第二题尚未指出断言，补充已有`test_missing_dimension_still_displays_the_metric`中的`result.state == 'degraded'`首先失败，safe_to_display为True的断言也不再成立。
 
-### 2026-10-27｜Day 4：调用方如何落实结果状态（待复述）
+### 2026-10-27｜Day 4：调用方如何落实结果状态（已复述）
 
 业务目标是让“校验拒绝”真正阻止未通过的结果沿正常成功链返回，而非只算出一个state后忽略它。读`postgres_runner.py`的`if not validation.safe_to_display`分支：记录审计后`raise ResultValidationError(validation)`，当前执行不再继续return DataFrame。异常沿`run_sql()`的await传播到`src/vanna/tools/run_sql.py:RunSqlTool.execute()`，后者在except中返回`ToolResult(success=False)`；这不是自动返回HTTP 500，工具失败和HTTP传输状态要区分。
 
 degraded的safe_to_display=True，不走上述raise；Runner在`if not validation.safe_to_answer`里记录说明并return validated_frame，允许有限展示。valid则继续产生可信结果证据。源码学习要区分`return ResultValidation`（校验器给判断）、`raise ResultValidationError`（Runner停止正常结果路径）和`return ToolResult(success=False)`（工具包装层给Agent的失败对象）。本轮只读现有代码、整理问答，没有改运行时或运行新测试。
 
 下一题：若Runner把refuse分支中的raise改成return frame，父类RunSqlTool.execute是否仍会进入except？若数据表正常渲染完成，其success会是什么？需要根据真实try/except和成功return位置说明，而非只回答“安全”。Day 4继续进行。
+
+用户回答：正常返回不会触发异常捕获，后续处理正常时可能返回true，无法检测错误。控制流判断正确；最后一句需纠正为“错误已被Validator检测，但Runner没有执行阻断”，不是检测消失。工具success仅表示工具正常完成，不自动等于业务合同有效。
+
+### 2026-10-27｜Day 4：工具成功与可信工件保存（待复述）
+
+业务功能：让后续换图、分页和追问只复用已验证的结果。`TrustedRunSqlTool.execute()`调用`super().execute()`进入父类工具执行路径；返回success=True后调用`self._remember_result_artifact()`。后者返回None，通过写文件及context.metadata记录完成保存，提前return表示跳过持久化，不会将父类success自动改为False。
+
+`_remember_result_artifact()`先确认store存在，再读取context.metadata中的result_validation，只有dict且state=valid才继续。columns/results来自工具结果metadata；user来自context.user，workspace和版本来自服务端metadata。save_result_csv保存完整结果并返回manifest，工具将manifest写回context.metadata['result_artifact']。输入中的validation与返回manifest不是同一对象；ToolResult.success与验证状态是两个维度。
+
+请读tests/test_trusted_sql_tool.py的test_result_artifact_requires_explicit_validated_result_contract：自定义Runner故意直接返回DataFrame但不提供验证证据，工具可以success=True，仍必须没有result_artifact，store下无result.csv。这是具体的缺验证正向控制流反例，不能拿它当允许线上绕过验证的接口。待题：若删除保存函数内的validation检查，这个测试会在哪个断言失败？为什么只检查result.success不足？本节只核对代码，未运行新测试、不改运行时。
