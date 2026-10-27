@@ -2,8 +2,8 @@
 
 本记录承接当前[两周学习计划](../../plan/process-agent-internship-improvement-v2-2week.md)，只放代码理解与问答。项目进度见 PROJECT.md，后训练知识继续使用既有 post-training/learning 目录。每轮阅读 1–3 个关键函数，问题答完再进入下一段。
 
-当前学习位置（2026-10-26）：Day 1–3 小节主要复述已完成，先补业务场景与整链复盘，再进入
-Day 4 的 `ResultContract.from_selection()`；当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
+当前学习位置（2026-10-27）：Day 1–3 复盘已收到回答，当前进入 Day 4 的
+`ResultContract.from_selection()`，先理解SQL生成前的验收要求。当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
 不代表现行实现；当前内容以文末日期和真实代码为准。工程完成不代替用户理解。
 
 ## Day 1：沿一条问题认识请求链
@@ -1222,3 +1222,15 @@ PostgreSQL `REPEATABLE READ`只读事务中生成受控诊断查询：按实际�
 建议现在亲自补看两个短函数：`query_filters.py:bind_query_filters()`（业务条件如何绑定物理来源）、`query_plan.py:MetricPlan.from_metric()`（指标合同怎样进入计划）。对应既有测试是`test_semantic_intent.py:test_category_catalog_keeps_filter_source_and_all_join_bridges`和`test_analysis_state.py:test_scope_changes_preserve_untouched_fields_and_new_task_resets`；本轮只作阅读入口，不把旧测试证据描述成新执行。
 
 待复述两题：1. 模型遗漏SP筛选、模型查询app.accounts，分别主要由哪层拦截？2. 这个例子中的gmv、SUM(price)与结果列gmv分别是什么，为什么不能直接查询同名物理字段？回答后进入Day 4的ResultContract构建，不先展开Day 5上下文机制。
+
+### 2026-10-27｜Day 1–3复盘反馈与Day 4第一小节
+
+用户回答：遗漏SP由QueryPlan对照拒绝，查询app.accounts由SqlPolicy拒绝；gmv是指标ID，表示商品行price合计。第一题正确，第二题已理解业务口径，但尚未区分三个位置。补充：指标ID gmv是Catalog中的业务标识；`SUM(i.price)`是SQL对输入商品行执行的计算；`AS gmv`是给结果列起名，便于结果合同检查。完整GMV还要求有效订单范围、不含运费和本次筛选；同名别名不保证表达式或输入范围正确，例如错误公式也能命名为gmv。此处不再新增复盘题，进入Day 4。
+
+**业务功能。** 运营问“2017年SP州销售额前五的商品品类”，执行前要先知道返回表中必须有品类和销售额，否则只有五个金额仍不知道属于哪些品类。ResultContract是服务端生成的验收要求；QueryPlan描述查什么、按什么范围组织，ResultContract描述结果列、指标数值约束和版本等验收条件；ResultValidator实际对返回DataFrame做检查。它们不是同一对象，也不是LLM看完结果后临时决定标准。
+
+**实现。** `chat_runtime.py`在生成QueryPlan后、调用SQL生成Agent前，调用`ResultContract.from_selection()`。`selection`提供本次Catalog指标、定义和表列；`query_plan.required_result_columns`提供本次必须返回的列；当前状态提供时间范围；Catalog提供数值约束和版本，结果预算单独传入。当前例子的required_result_columns应包括product_category_name与gmv，metric_result_columns只包括gmv；客户州和2017年只是筛选，不要求结果含州列或time列。按月分组才需要time。ResultContract只规定可检查的期望，不会自行生成SQL、执行查询或证明全部业务口径。
+
+亲自阅读`semantic_catalog.py:ResultContract.from_selection()`中`metric_ids`、`required`及返回cls的`required_result_columns/metric_result_columns/metric_value_constraints`几处；对照`chat_runtime.py`的调用参数。本轮不要求读完整Catalog文件。
+
+待复述：1. 本例结果只有gmv金额列、没有品类列，为什么即使SQL可执行也不满足要求？2. 必须返回的列应该由模型看到查询结果后决定，还是由服务端在生成SQL前根据计划确定？本节仅核对代码并讲解，不改运行时、不新增评测；Day 4进行中。
