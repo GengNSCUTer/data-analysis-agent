@@ -2,7 +2,7 @@
 
 本记录承接当前[两周学习计划](../../plan/process-agent-internship-improvement-v2-2week.md)，只放代码理解与问答。项目进度见 PROJECT.md，后训练知识继续使用既有 post-training/learning 目录。每轮阅读 1–3 个关键函数，问题答完再进入下一段。
 
-当前学习位置（2026-10-27）：Day 1–3 复盘已收到回答，Day 4 已复述缺列分支、异常传播、完整 CSV/manifest 保存、按用户/workspace读取路径及CSV完整性检查，当前学习读取结果时的版本比较。可信工件保存条件的源码题尚待复述。前期职责复述不代表全部源码掌握。当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
+当前学习位置（2026-10-27）：Day 1–3 复盘已收到回答，Day 4 已复述缺列分支、异常传播、完整 CSV/manifest 保存、隔离读取、完整性及版本比较，当前学习完整结果怎样转成模型解释证据。可信工件保存条件的源码题尚待复述。前期职责复述不代表全部源码掌握。当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
 不代表现行实现；当前内容以文末日期和真实代码为准。工程完成不代替用户理解。
 
 ## Day 1：沿一条问题认识请求链
@@ -1302,10 +1302,22 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 
 用户回答：不能通过，expected-sha256会不通过。判断正确，准确表述为重新计算的digest与保存的expected_sha256不相等；expected_sha256本身没有变化，字节数相等不能使or条件整体变成False。
 
-### 2026-10-27｜Day 4：旧结果与当前版本是否一致（待复述）
+### 2026-10-27｜Day 4：旧结果与当前版本是否一致（已复述）
 
 业务功能：CSV即便没有损坏，也不能把旧数据快照或旧指标口径下的结果冒充当前结果。例子是GMV定义从不含运费改为包含运费：旧表仍是合法历史结果，但当前版本追问不能直接沿用旧数字。版本值来自服务端workspace配置，不是LLM根据文件内容推断，也不是每次数据库行变化都会自动更新版本；配置维护是前提。
 
 只读`result_artifact_store.py:read_result_frame()`的版本分支。输入包含artifact/user/workspace ID及调用方传入的数据和指标版本；先verify_manifest验证文件，再比较`(manifest['dataset_version'], manifest['metric_version'])`与`(dataset_version, metric_version)`。Python元组逐项比较，任一版本不同就抛ResultArtifactIntegrityError，不继续执行后面的pd.read_csv；成功时继续读CSV、校验行数并最终返回DataFrame。这里异常名覆盖版本失配，不代表CSV已经损坏。
 
 `chat_runtime.py`读取时传`self.workspace.dataset_version_id`及`self.workspace.metric_version`，即当前服务端配置。现有参数化测试`test_result_calculation_preserves_ownership_versions_and_integrity[version]`先正常读取，再只将请求dataset_version改为old，断言抛异常；本轮定向执行1 passed，该用例不单独测试指标版本变化。本节只讲解现有实现，不改运行时代码。待源码题：manifest为(v1,m1)，调用方要求(v1,m2)，即使SHA-256一致，版本分支是否通过，会不会执行后面的pd.read_csv？
+
+用户回答：不会通过，指标版本不一致拒绝后续执行。正确；在此函数中抛ResultArtifactIntegrityError，后面的pd.read_csv不会执行，并非把旧CSV删除。
+
+### 2026-10-27｜Day 4：完整结果如何变成解释证据（待复述）
+
+业务功能：已有250行品类结果，用户追问其中最大值或合计，不必重查数据库，也不能只让模型看一小段表后猜。`chat_runtime.py:_inspect_previous_result()`读取通过归属、完整性和版本检查的完整DataFrame，再调用`result_evidence.py:build_result_evidence()`，返回带固定前缀的JSON字符串供回答链使用；不是直接把完整CSV交给模型，也不是自然语言历史摘要。
+
+本节只看统计先算、展示行后裁剪的顺序。不带结果筛选或指定行请求时，selected包含本次查询返回的全部行、仅保留合同允许的列。函数先对selected的指标列转数值、计算min/max及其所在行；Catalog认可当前维度下可加的指标才计算sum_of_returned_rows。随后把statistics与来源行数等放入payload，才按token预算选择sample_rows并记录included_row_count/coverage。因此行样本变少不把统计计算缩成前几行；显式结果筛选会改变选定统计范围，不能笼统说所有操作永远按原始全部行。
+
+要区分源查询范围与全业务范围：原SQL若只返回前十，完整工件也只有前十；前十合计不等于全国总额。平均值、比率等指标不默认跨行相加。前端初始200行、CSV保存完整结果、给模型的证据按预算组织是三个用途。本节不展开完整趋势/同比/占比算法或token二分细节。
+
+对应已有测试：全年366行、峰值在最后一天、证据预算仅1500 tokens时，sample_rows不完整，但合计和年末峰值仍正确；完整工件追问测试核对服务端合计、零SQL调用、用户/版本失配拒绝及状态未被改动。本轮定向执行这两个测试，2 passed；不改运行时代码。待题：没有额外筛选，250行GMV在第250行达到最大值，而token预算只放得下前20行样本，statistics.maximum能否包含第250行的值？请从先计算statistics、后构造sample_rows的代码顺序解释。
