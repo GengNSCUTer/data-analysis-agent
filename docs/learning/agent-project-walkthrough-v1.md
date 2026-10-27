@@ -1328,10 +1328,16 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 
 用户回答：source-row-count是250，included-row-count是20。两个字段正确：前者是来源完整结果行数，后者是提供的明细行数；统计与样本同时进入证据，不意味着只给模型极值行。不据此标记整个证据算法已掌握。
 
-### 2026-10-27｜Day 4：证据进入解释调用与数字检查（待复述）
+### 2026-10-27｜Day 4：证据进入解释调用与数字检查（已复述分支，继续看输出）
 
 业务功能：查询结果已经由SQL/Python计算后，让模型整理中文回答，不在解释阶段再次发起SQL。只看`llm_observability.py:ObservedLlmService._explain_result()`构造LlmRequest及接收结果的几行。user消息包含当前问题、查询范围和usage.result_summary；tools=None，不提供工具定义；系统提示约束样本不能外推、Top-N合计不能冒充总体。普通解释走模型调用；有明确计算分析操作的分支可直接用render_analysis_facts输出服务端事实，本节不展开该分支。
 
 `response = await self._send_request(explanation)`返回LlmResponse，再调用`constrain_followup_answer(response.content or '', summary)`。该函数在result_evidence.py中：将回答里的业务数字与证据数字比较，发现新增数字时返回说明加render_result_facts(evidence)，不保留模型原来的错误段落。检查后才作为最终回答内容返回；流式入口的这个结果解释也会缓冲检查，不先发送未经核对的数字。
 
 边界：数字出现在证据中不等于实体、指标和因果归属都正确。数字集合检查不是完整语义证明；tools=None是解释调用不提供工具能力，不是数据库授权的替代品。本轮只读现有代码，执行现有test_first_explanation_calls_model_with_only_server_evidence_and_no_tools（stream参数两例）与test_numeric_check_accepts_server_formatting_but_not_new_arithmetic，3 passed；不改运行时代码。待题：证据只有GMV 20、10和合计30，模型另编987654321时，constrain_followup_answer会原样返回回答吗，走哪个返回分支？
+
+用户回答：走render_result_facts分支，并追问服务端事实具体怎样输出。分支正确。本节用SP州20、RJ州10两行合成结果直接调用现有函数，观察实际返回文本，不调用外部模型、不查业务库，也不新增运行时代码。
+
+`render_result_facts(evidence)`返回普通str：先建lines列表，加入完整行数与提供行数；遍历row_numbers/sample_rows，用column_labels转换字段显示名，用display_value格式化值，逐行append；再追加statistics里的最小/最大值以及已有的可加合计；如有analyses则追加服务端计算说明，如为Top-N追加范围提示。最后`return '\n'.join(lines)`把多行拼成一段普通中文文本，不发起SQL或LLM调用，不重新计算指标。constrain_followup_answer在其前加证据外数字提示，整段替换模型原文，不是只修正那一个数字。
+
+`ObservedLlmService._explain_result()`接住这个str为answer，经`response.model_copy(update={'content': answer, ...})`放入最终响应content，由原有聊天展示链路呈现；不把内部JSON直接给用户。当前两行示例应展示两州销售额、最小10/最大20、合计30及2行范围说明。此模板不保证像模型一样有针对性地解释问题，但避免保留这次证据外数字。用户本轮是在追问细节，不追加新的测验题或跳到Day 5。
