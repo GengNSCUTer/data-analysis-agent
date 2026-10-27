@@ -24,7 +24,7 @@ def test_live_entity_bound_explanation_and_refresh(monkeypatch):
     from data_analysis_agent.local_auth import AccountStore
     from data_analysis_agent.llm_observability import ObservedLlmService
     from data_analysis_agent.postgres_runner import PostgresConnectionSettings
-    from data_analysis_agent.result_explanation import ExplanationSelection
+    from data_analysis_agent.result_explanation import parse_answer_draft
     from data_analysis_agent.runtime_workspace import load_runtime_workspace
     from data_analysis_agent.server import create_app
 
@@ -54,9 +54,9 @@ def test_live_entity_bound_explanation_and_refresh(monkeypatch):
 
     async def observe(self, request):
         response = await send(self, request)
-        if request.metadata.get("purpose") == "result_explanation":
+        if request.metadata.get("purpose") in {"result_answer_draft", "result_answer_review", "result_answer_revision"}:
             explanations.append({"model": self.model, "content": response.content,
-                                 "tools_enabled": bool(request.tools)})
+                                 "purpose":request.metadata["purpose"], "tools_enabled": bool(request.tools)})
             (root / "provider-selections.json").write_text(json.dumps(explanations, ensure_ascii=False, indent=2))
         return response
 
@@ -66,10 +66,10 @@ def test_live_entity_bound_explanation_and_refresh(monkeypatch):
     AccountStore(replace(settings, writer_user=workspace.writer_role)).create_account(username, password, "analyst")
     amount = "已完成销售额" if thelook else "商品成交额"
     scope = "销售额前十名" if thelook else "各州金额"
-    questions = [f"按客户州统计{year}年{amount}，列出{scope}，不用画图。",
-                 "用一句话概括刚才的各州结果，不要重新查询。",
+    questions = [f"按客户州统计{year}年{amount}（{scope}）。正文简要概括主要发现即可，不抄写表格，不画图。",
+                 "用自然语言概括刚才的各州结果，说明可以确认的结论，不要重新查询。",
                  "把这份各州结果画成柱状图，不要重新查询。",
-                 "继续解释刚才各州结果，不用重新查询和画图。"]
+                 "为什么会出现这个销售分布？请区分事实、待验证的可能原因与行动建议，不要重新查询和画图。"]
     with TestClient(create_app()) as client, sync_playwright() as engine:
         assert client.post("/api/auth/login", json={"username": username, "password": password}).is_success
         browser = engine.chromium.launch(headless=True)
@@ -97,7 +97,7 @@ def test_live_entity_bound_explanation_and_refresh(monkeypatch):
                 if chat.locator(".minimized-icon").is_visible():
                     chat.locator(".minimized-icon").click()
                 chat.locator("textarea.message-input").fill(question)
-                with page.expect_response(lambda r, q=question: r.url.endswith("/chat_sse") and r.request.post_data_json.get("message") == q):
+                with page.expect_response(lambda r, q=question: r.url.endswith("/chat_sse") and r.request.post_data_json.get("message") == q) as pending:
                     chat.locator("button.send-button").click()
                 page.wait_for_function("() => !document.querySelector('vanna-chat').shadowRoot.querySelector('textarea.message-input').disabled")
                 cid = chat.evaluate("el => el.conversationId")
@@ -108,27 +108,38 @@ def test_live_entity_bound_explanation_and_refresh(monkeypatch):
                         run = dict(cursor.fetchone())
                 answer = detail["messages"][-1]["content"]
                 observations.append({"question": question, "answer":answer, **run})
+                (root / f"response-{index}.txt").write_text(pending.value.text())
+                (root / f"dom-{index}.html").write_text(chat.evaluate("el => el.shadowRoot.innerHTML"))
+                page.screenshot(path=str(root / f"turn-{index+1}.png"), full_page=True)
                 (root / "observations.json").write_text(json.dumps(observations, ensure_ascii=False, indent=2))
                 assert run["termination_reason"] == "completed", observations[-1]
                 assert run["sql_calls_used"] == (1 if index == 0 else 0), observations[-1]
-                assert '"facts"' not in answer and '"row_number"' not in answer
+                assert '"paragraphs"' not in answer and '"evidence_refs"' not in answer
                 if index == 0:
                     response = client.get(f"/api/project/conversations/{cid}/result.csv")
                     assert response.is_success
                     frame = pd.read_csv(io.StringIO(response.text))
                     assert dict(zip(frame[dimension], frame[metric])) == pytest.approx(expected)
-                    assert run["catalog_trace"]["result_explanation"]["server_rendered_references"]
+                    assert run["catalog_trace"]["result_explanation"]["answer_status"] == "accepted"
+                if index != 2:
+                    trace = run["catalog_trace"]["result_explanation"]
+                    assert trace["answer_status"] == "accepted", observations[-1]
+                    assert trace["revision_count"] <= 1 and trace["review_count"] <= 2 and len(trace["calls"]) <= 4
                 if index == 2:
                     assert detail["charts"]
                     chat.locator(".js-plotly-plot").last.wait_for(state="visible")
                 else:
-                    chat.get_by_text("本次回答的数据依据", exact=True).last.wait_for(state="visible")
+                    chat.get_by_text("本次回答的数据依据", exact=True).last.wait_for(state="visible",timeout=10000)
                 page.screenshot(path=str(root / f"turn-{index+1}.png"), full_page=True)
                 print(f"{workspace.workspace_id}: explanation turn {index+1} completed", flush=True)
             assert explanations, "no real explanation provider call observed"
             assert not any(entry["tools_enabled"] for entry in explanations)
             for entry in explanations:
-                ExplanationSelection.model_validate_json(entry["content"])
+                if entry["purpose"] != "result_answer_review":
+                    parse_answer_draft(entry["content"])
+            final_draft = next(entry for entry in reversed(explanations) if entry["purpose"] != "result_answer_review")
+            assert observations[-1]["answer"] == parse_answer_draft(final_draft["content"]).text()
+            assert any(p.kind != "fact" for p in parse_answer_draft(final_draft["content"]).paragraphs)
             assert not errors
         finally:
             browser.close()

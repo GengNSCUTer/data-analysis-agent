@@ -54,12 +54,15 @@ def serve(args):
 
         async def send_request(self, request):
             await self.delay(request)
-            if request.metadata.get("purpose") == "result_explanation":
+            if request.metadata.get("purpose") == "result_answer_review":
+                return LlmResponse(content='{"verdict":"supported","issues":[]}')
+            if request.metadata.get("purpose") in {"result_answer_draft", "result_answer_revision"}:
                 from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX
                 text = request.messages[-1].content.removeprefix(RESULT_EVIDENCE_PREFIX)
                 data = json.loads(text)
-                return LlmResponse(content=json.dumps({"facts": [
-                    {"kind": "row", "row_number": n} for n in data["row_numbers"]
+                return LlmResponse(content=json.dumps({"paragraphs": [
+                    {"text":f"{row['customer_state']}有效订单数为{row['paid_order_count']}。", "kind":"fact", "evidence_refs":[f"/sample_rows/{i}"]}
+                    for i,row in enumerate(data["sample_rows"])
                 ]}))
             assert request.metadata.get("purpose") == "semantic_intent"
             return LlmResponse(

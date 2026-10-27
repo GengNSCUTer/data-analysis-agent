@@ -17,7 +17,7 @@ import pandas as pd
 from .result_analysis import ResultInspection, ResultInspectionError, analyze_result
 
 from .token_budget import DEFAULT_TOKEN_COUNTER, ContextCapacityError, TokenCounter
-from .result_presentation import display_value, display_evidence_row
+from .result_presentation import display_metric_value
 
 
 RESULT_EVIDENCE_PREFIX = "已通过结果合同的可信结果摘要："
@@ -29,93 +29,6 @@ def result_evidence_token_limit() -> int:
     return min(available, int(configured)) if configured else available
 
 
-def render_analysis_facts(evidence: Mapping[str, Any]) -> list[str]:
-    """Authoritative statements about requested operations, not an LLM paraphrase."""
-    lines = []
-    labels = evidence.get("column_labels", {})
-    for result in evidence.get("analyses", []):
-        op, metric = result["operation"], result.get("metric_id")
-        label = labels.get(metric, metric)
-        if result["status"] != "ready":
-            lines.append(f"{label or '本次分析'}：{result['reason']}")
-            continue
-        unit = result.get("unit", "原指标单位")
-        if result.get("within_period"):
-            lines.append(f"本项计算范围：{result['within_period'][0]}（含）至{result['within_period'][1]}（不含）。")
-        if op == "rows":
-            lines.extend(display_evidence_row(row, evidence) for row in result["rows"])
-        elif op == "sum":
-            lines.append(f"选定结果的{label}合计：{result['value']}（{unit}）。")
-        elif op == "compare":
-            lines.append(f"{label}：第一项{result['current']}，第二项{result['baseline']}，差额{result['difference']}（{unit}）。")
-            lines.extend(_comparison_text(label, result))
-        elif op == "trend":
-            for group in result["groups"]:
-                name = "，".join(f"{labels.get(k,k)}={v}" for k,v in group["group"].items()) or "当前范围"
-                judgment = {"true": "成立", "false": "不成立", "insufficient": "证据不足"}[group["judgment"]]
-                kind = "从未下降" if result["mode"] == "nondecreasing" else "逐期严格增长"
-                lines.append(f"{name}的{label}：上涨{group['up_count']}次、下降{group['down_count']}次、持平{group['flat_count']}次；{kind}判断：{judgment}。")
-                counter = group.get("first_counterexample")
-                if counter:
-                    lines.append(f"反例：{counter['period']}为{counter['current']}，前期{counter['previous_period']}为{counter['baseline']}（{unit}）。")
-                end = group.get("endpoints")
-                if end:
-                    lines.append(f"{end['last_period']}较{end['first_period']}差额{end['difference']}（{unit}）；首末变化不代表中间持续增长。")
-                lines.append(f"最长连续上涨{group['longest_up_transitions']}次、连续下降{group['longest_down_transitions']}次。")
-                if group.get("largest_drop"):
-                    drop = group["largest_drop"]
-                    lines.append(f"最大下跌发生在{drop['period']}，较{drop['previous_period']}变化{drop['difference']}（{unit}）。")
-                if not group["complete"]:
-                    lines.append(f"覆盖不完整：缺少期间{group['missing_periods']}；无效值{group['null_count']}；重复期间={group['duplicate_periods']}；部分期间={group['partial_periods']}；前N项限制={group['top_n_limited']}。未将缺失补0。")
-                if group.get("derived_rows"):
-                    lines.append(group["derived_scope"] + "：")
-                    lines.extend(f"{row['period']}：{row['value'] if row['value'] is not None else '窗口期间不足'}（{unit}）" for row in group["derived_rows"])
-                if group.get("calculation_notice"):
-                    lines.append(group["calculation_notice"])
-            if not result["all_groups_included"]:
-                lines.append(f"共{result['group_count']}组，仅列本次选定分组。")
-        elif op == "period_compare":
-            for comparison in result.get("comparisons", []):
-                name = "，".join(f"{labels.get(k,k)}={v}" for k,v in comparison["group"].items()) or "当前范围"
-                lines.append(f"{name}的{label}：{comparison['current_period']}为{comparison['current']}，基期{comparison['baseline_period']}为{comparison['baseline']}，差额{comparison['difference']}（{unit}）。")
-                lines.extend(_comparison_text(label, comparison))
-            if result.get("notice"):
-                lines.append(result["notice"])
-        elif op == "share":
-            percent = result.get("share_percent")
-            lines.append(f"{label}分子{result['numerator']}，分母{result['denominator']}（{unit}），占比{percent:.2f}%。" if percent is not None else f"{label}的分母非正或为空，不能计算占比。")
-            lines.append("分母为同口径全体。" if result["denominator_scope"] == "business_total" else "分母为本次查询范围内的完整结果合计，沿用原时间与筛选。")
-            if result.get("share_basis") == "change":
-                lines.append("上述分子和分母均为相同本期与基期之间的增量；以下为数值贡献，不推断业务原因：")
-                for row in result["contributions"]:
-                    name = "，".join(f"{labels.get(k,k)}={v}" for k,v in row.items() if k not in {"difference","contribution_percent"}) or "当前范围"
-                    percent = row["contribution_percent"]
-                    lines.append(f"{name}：增量{row['difference']}（{unit}），贡献率{percent:.2f}%。" if percent is not None else f"{name}：增量{row['difference']}（{unit}），总体净增量非正，贡献率未定义。")
-        elif op == "distribution":
-            lines.append(f"{label}：有效群组{result['count']}，空值{result['null_count']}，中位数{result['median']}，25%分位数{result['p25']}，75%分位数{result['p75']}（{unit}）。{result['population']}。")
-        elif op in {"rank", "threshold"}:
-            if op == "threshold":
-                lines.append(f"{label}满足阈值的群组数：{result['match_count']}。{result['population']}。")
-            else:
-                ranking = {"value":"指标值", "change":"增量", "relative_change":"增长率"}[result["rank_by"]]
-                lines.append(f"{label}排名（按{ranking}）：")
-                if result.get("unrankable_count"):
-                    lines.append(f"{result['unrankable_count']}组缺少可用数值或正基数，未参与排名。")
-            for row in result["rows"]:
-                names = {"rank":"名次", "difference":"增量", "relative_change_percent":"增长率（%）", **labels}
-                lines.append("，".join(f"{names.get(k,k)}：{v}" for k,v in row.items()))
-        if result.get("detail_items_omitted"):
-            lines.append(f"受本次上下文预算限制，另有{result['detail_items_omitted']}项计算明细未展开；计算仍覆盖完整查询结果，可继续按分组或行定位查看。")
-    return lines
-
-
-def _comparison_text(label, result):
-    lines = []
-    if result.get("percentage_points") is not None:
-        lines.append(f"{label}变化{result['percentage_points']:.2f}个百分点。")
-    relative = result.get("relative_change_percent")
-    lines.append(f"相对基期变化{relative:.2f}%。" if relative is not None else "基数为零或负数，不按正基数惯例计算增长率。")
-    return lines
 
 
 def _scalar(value: Any) -> Any:
@@ -271,8 +184,8 @@ def build_result_evidence(
             continue
         stat = {"non_null_count": len(numeric), "minimum": _scalar(numeric.min()),
                 "maximum": _scalar(numeric.max()),
-                "minimum_display": display_value(metric_id, numeric.min()),
-                "maximum_display": display_value(metric_id, numeric.max()),
+                "minimum_display": display_metric_value(metric_id, numeric.min(), metric_semantics or {}),
+                "maximum_display": display_metric_value(metric_id, numeric.max(), metric_semantics or {}),
                 "minimum_row": _row(selected, numeric.idxmin()),
                 "maximum_row": _row(selected, numeric.idxmax()),
                 "maximum_tie_count": int((numeric == numeric.max()).sum()),
@@ -309,7 +222,7 @@ def build_result_evidence(
     # samples preserve source order; they never masquerade as the whole result.
     rows = [_row(selected, index) for index in selected.index]
     positions = [original_positions[index] for index in selected.index]
-    formatted = [{c: display_value(metric_columns[c], row[c]) for c in metric_columns} for row in rows]
+    formatted = [{c: display_metric_value(metric_columns[c], row[c], metric_semantics or {}) for c in metric_columns} for row in rows]
     def pack(count):
         payload.update(sample_rows=rows[:count], formatted_metrics=formatted[:count], row_numbers=positions[:count],
                        included_row_count=count, coverage="complete" if count == population_count else "selected_rows")

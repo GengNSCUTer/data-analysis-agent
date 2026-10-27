@@ -168,19 +168,6 @@ def display_metric_value(metric_id: str, value: Any, semantics: Mapping[str, Any
     return f"{text} {unit}" if "未声明" not in unit else text
 
 
-def display_evidence_row(row: Mapping[str, Any], evidence: Mapping[str, Any]) -> str:
-    """Preserve dimension keys; format only columns bound to Catalog metrics."""
-    labels = evidence.get("column_labels", {})
-    metrics = evidence.get("metric_columns", {})
-    rendered = []
-    for name, value in row.items():
-        metric_id = metrics.get(name, name)
-        text = (display_metric_value(metric_id, value, evidence.get("metric_semantics", {}))
-                if metric_id in evidence["metric_ids"] else "-" if value is None else str(value))
-        rendered.append(f"{labels.get(name, name)}：{text}")
-    return "，".join(rendered)
-
-
 def display_records(
     records: Sequence[Mapping[str, Any]], *, columns: Sequence[str], labels: Mapping[str, str]
 ) -> tuple[list[dict[str, str]], list[str]]:

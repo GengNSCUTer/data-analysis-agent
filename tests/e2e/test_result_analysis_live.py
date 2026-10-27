@@ -85,6 +85,16 @@ def test_live_result_analysis_multiturn(monkeypatch):
         return summary
     monkeypatch.setattr(chat_runtime, "build_result_evidence", record_evidence)
     monkeypatch.setattr(postgres_runner, "build_result_evidence", record_evidence)
+    from data_analysis_agent.llm_observability import ObservedLlmService
+    send = ObservedLlmService._send_request
+    provider_answers = []
+    async def observe(self, request):
+        response = await send(self, request)
+        if request.metadata.get("purpose") in {"result_answer_draft", "result_answer_review", "result_answer_revision"}:
+            provider_answers.append({"purpose":request.metadata["purpose"], "content":response.content})
+            (root / "provider-answers.json").write_text(json.dumps(provider_answers, ensure_ascii=False, indent=2))
+        return response
+    monkeypatch.setattr(ObservedLlmService, "_send_request", observe)
     # These are development acceptance questions, not protected training holdouts.
     questions = [
         (f"按月统计{year}年{'已完成销售额' if thelook else '商品成交额'}，判断是不是每个月都增长，并给出反例。不用画图。", "trend", 1),
@@ -155,7 +165,8 @@ def test_live_result_analysis_multiturn(monkeypatch):
                     assert operation in [r["operation"] for r in inspections], question
                     if operation == "share":
                         assert "sum" in [r["operation"] for r in inspections]
-                    assert not run["catalog_trace"].get("result_explanation", {}).get("model_used", False)
+                    assert run["catalog_trace"]["result_explanation"]["model_used"]
+                    assert run["catalog_trace"]["result_explanation"]["answer_status"] == "accepted"
                 if operation != "chart":
                     analyses = evidence_calls[-1]["analyses"]
                     calculation = next(r for r in analyses if r["operation"] == operation)
@@ -163,7 +174,6 @@ def test_live_result_analysis_multiturn(monkeypatch):
                         group = calculation["groups"][0]
                         assert group["down_count"] == sum(b<a for a,b in zip(values, values[1:]))
                         assert group["up_count"] == sum(b>a for a,b in zip(values, values[1:]))
-                        assert ("不成立" if any(b<=a for a,b in zip(values, values[1:])) else "成立") in answer
                     elif operation == "period_compare":
                         pair = calculation["comparisons"][0]
                         assert pair["difference"] == pytest.approx(values[-1]-values[-2])

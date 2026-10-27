@@ -82,9 +82,10 @@ Runner 使用 PostgreSQL named cursor，每批最多 1,000 行；资源 LIMIT �
 `chat_runtime.py:_inspect_previous_result()`在解释追问时校验工件归属、workspace、数据及指标
 版本和文件完整性，再由服务端读取完整 CSV 并生成本次证据。已有结果足够时不新增SQL；
 缺可查询基期/分母时才进入正常QueryPlan、SQL策略、reader与结果校验。相同范围仍真实缺失
-时说明缺口，不重复查询。`render_analysis_facts()`直接呈现带指标、单位和范围的计算结论，
-`_explain_result()`和追问共同使用，不让模型把“首末增加”改写为“每月增加”。普通概览仍可
-使用无工具模型；其数字检查不能保证因果解释或任意自由文本的语义正确。
+时说明缺口，不重复查询。计算结论作为证据交给无工具模型，由模型自由组织正文；首次查询和
+追问共用`generate_result_answer()`，不再直接调用服务端业务模板。代码先核对引用/数值等，
+有疑点才复核，最多修订一次，仍失败隐藏正文并保留数据。机制与局限见
+[当前解释流程](product-request-architecture-v1.md#2026-10-27自主解释与按疑点复核)。
 
 `BudgetUsage.result_evidence_limit()`先从完整请求预算扣除输出预留、当前问题、计划、已选历史
 及包装开销，为结果分配剩余空间。实际发送时`_fit_result_request()`再计量系统、消息、工具

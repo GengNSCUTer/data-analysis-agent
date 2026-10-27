@@ -282,7 +282,7 @@ async def test_provider_timeout_uses_the_same_safe_terminal_response() -> None:
 
 
 @pytest.mark.asyncio
-async def test_validated_result_is_finalized_without_a_provider_summary() -> None:
+async def test_obsolete_evidence_does_not_generate_a_template_answer() -> None:
     usage = BudgetUsage(RequestBudget())
     usage.mark_result_contract_satisfied()
     usage.set_result_summary(
@@ -308,10 +308,7 @@ async def test_validated_result_is_finalized_without_a_provider_summary() -> Non
 
     assert response.finish_reason == "trusted_result_finalized"
     content = response.content or ""
-    assert "已返回 75 个分组，完整明细见上表" in content
-    assert "| 商品品类 | 平均履约天数 | 好评率 |" in content
-    assert "health_beauty | 2.50 天 | 91.87%" in content
-    assert "不代表排名或趋势" in content
+    assert "文字解释未通过核验" in content
     assert "持续上升" not in content
     assert "最高" not in content
     assert "因为" not in content
@@ -333,12 +330,12 @@ async def test_trusted_result_finalization_falls_back_for_malformed_summary() ->
         CURRENT_BUDGET.reset(token)
 
     assert response.finish_reason == "trusted_result_finalized"
-    assert "未生成额外模型推断" in (response.content or "")
+    assert "文字解释未通过核验" in (response.content or "")
     assert usage.deterministic_result_finalized is True
 
 
 @pytest.mark.asyncio
-async def test_explicit_chart_path_uses_the_same_provider_free_trusted_summary() -> None:
+async def test_incomplete_evidence_keeps_chart_but_withholds_prose() -> None:
     usage = BudgetUsage(RequestBudget())
     usage.mark_result_contract_satisfied()
     usage.set_result_summary(
@@ -355,7 +352,7 @@ async def test_explicit_chart_path_uses_the_same_provider_free_trusted_summary()
         CURRENT_BUDGET.reset(token)
 
     assert response.finish_reason == "trusted_result_finalized"
-    assert "商品成交额" in (response.content or "")
+    assert "文字解释未通过核验" in (response.content or "")
     assert usage.deterministic_result_finalized is True
     assert usage.llm_observations == []
 

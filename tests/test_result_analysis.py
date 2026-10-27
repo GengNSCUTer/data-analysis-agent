@@ -6,7 +6,7 @@ import pytest
 
 from data_analysis_agent.budget import BudgetUsage, RequestBudget
 from data_analysis_agent.result_analysis import ResultInspection, acquisition_scope, analyze_result
-from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX, build_result_evidence, render_analysis_facts
+from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX, build_result_evidence
 from data_analysis_agent.token_budget import DEFAULT_TOKEN_COUNTER
 
 
@@ -205,15 +205,18 @@ def test_new_denominator_order_cannot_rebind_the_old_selected_numerator():
     assert result["numerator"] == 70 and result["share_percent"] == 70
 
 
-def test_requested_calculations_produce_bound_facts_without_the_model_reinterpreting_them():
+def test_requested_calculations_produce_evidence_for_the_model_to_explain():
     frame = pd.DataFrame({"time":pd.date_range("2024-01-01", periods=4, freq="MS"), "gmv":[100,120,110,150]})
     summary = build_result_evidence(frame, required_columns=("time","gmv"), metric_ids=("gmv",),
                                     additive_metric_ids=("gmv",), time_column="time", column_labels={"gmv":"销售额"},
                                     query_scope={"time_grain":"month", "time_range":{"start":"2024-01-01","end":"2024-05-01"}},
                                     inspections=[ResultInspection(operation="trend", metric_id="gmv", trend_mode="strict_increase")])
-    facts = "\n".join(render_analysis_facts(json.loads(summary.removeprefix(RESULT_EVIDENCE_PREFIX))))
-    assert "不成立" in facts and "2024-03为110" in facts and "2024-02为120" in facts
-    assert "销售额" in facts and "订单数" not in facts
+    payload = json.loads(summary.removeprefix(RESULT_EVIDENCE_PREFIX))
+    group = payload["analyses"][0]["groups"][0]
+    assert group["judgment"] == "false"
+    assert group["first_counterexample"]["current"] == 110
+    assert group["first_counterexample"]["baseline"] == 120
+    assert payload["column_labels"]["gmv"] == "销售额"
 
 
 def test_result_budget_grows_with_available_context_and_packs_more_than_four_k():

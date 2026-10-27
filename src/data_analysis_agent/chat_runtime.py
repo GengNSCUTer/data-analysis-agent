@@ -46,8 +46,8 @@ from .result_reference import (
     resolve_ranked_entity,
 )
 from .result_budget import ResultBudget
-from .result_evidence import RESULT_EVIDENCE_PREFIX, build_result_evidence, render_analysis_facts
-from .result_explanation import RESULT_EXPLANATION_PROMPT, render_result_answer, result_evidence_view
+from .result_evidence import RESULT_EVIDENCE_PREFIX, build_result_evidence
+from .result_explanation import result_evidence_view
 from .result_analysis import ResultInspectionError
 from .run_recorder import PostgresRunRecorder
 from .semantic_catalog import ResultContract
@@ -1014,8 +1014,8 @@ class BudgetedChatHandler(ChatHandler):
         """Answer a non-SQL request without exposing the SQL tool registry.
 
         Text deltas are yielded as chat chunks. The last item is the final
-        string stored on the conversation. Generic help stays free-form;
-        result follow-ups select references which the server renders as facts.
+        string stored on the conversation. Result prose is checked by the same
+        observed LLM boundary as first results, before any text is displayed.
         """
         prompt = request.message.strip()
         summary = memory.previous_result_summary or ""
@@ -1028,15 +1028,13 @@ class BudgetedChatHandler(ChatHandler):
                 # No guessed numbers and no request to re-supply known filters.
                 yield f"这份结果暂时不能支持本次解释：{exc}"
                 return
-        if hold_followup and summary.startswith(RESULT_EVIDENCE_PREFIX):
-            payload = json.loads(summary.removeprefix(RESULT_EVIDENCE_PREFIX))
-            if any(a["operation"] not in {"overview", "rows"} for a in payload.get("analyses", [])):
-                yield "\n".join(render_analysis_facts(payload))
-                return
-        system_prompt = (
-            RESULT_EXPLANATION_PROMPT if hold_followup else TOOL_FREE_SYSTEM_PROMPT
-        )
+        system_prompt = TOOL_FREE_SYSTEM_PROMPT
         if hold_followup:
+            usage = CURRENT_BUDGET.get()
+            if usage is not None:
+                # Narrative-only follow-ups also need the actual evidence for
+                # the provenance card; they need not request a calculation.
+                usage.set_result_summary(summary)
             artifact = memory.previous_result_artifact
             if artifact is not None:
                 scope = artifact.query_scope
@@ -1061,7 +1059,7 @@ class BudgetedChatHandler(ChatHandler):
             tools=None,
             stream=True,
             temperature=0.0,
-            max_tokens=min(self.budget.max_output_tokens, 800),
+            max_tokens=self.budget.max_output_tokens if hold_followup else min(self.budget.max_output_tokens, 800),
             system_prompt=system_prompt,
             metadata={
                 "purpose": "tool_free_response",
@@ -1073,9 +1071,9 @@ class BudgetedChatHandler(ChatHandler):
         streamer = getattr(self.agent, "_handle_streaming_response", None)
         streaming = bool(getattr(getattr(self.agent, "config", None), "stream_responses", False))
         if hold_followup:
-            # Only references are accepted; buffer them rather than exposing JSON deltas.
+            # The observed service returns checked prose, never draft JSON deltas.
             response = await self.agent._send_llm_request(llm_request)
-            yield render_result_answer(response.content or "", summary)
+            yield response.content or ""
             return
         if streaming and callable(streamer):
             content = ""

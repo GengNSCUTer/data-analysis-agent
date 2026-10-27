@@ -61,7 +61,8 @@ def test_browser_result_evidence_continuity_and_refresh(result_evidence_data, mo
 
     from data_analysis_agent.local_auth import AccountStore
     from data_analysis_agent.postgres_runner import PostgresConnectionSettings
-    from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX, render_analysis_facts
+    from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX
+    from result_answer_provider import model_answer
     from data_analysis_agent.server import create_app
     from vanna.core.llm import LlmResponse, LlmStreamChunk
     from vanna.core.tool import ToolCall
@@ -150,18 +151,19 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                 prompt = request.messages[0].content
                 question = prompt.rsplit("用户问题: ", 1)[1]
                 return LlmResponse(content=json.dumps({**intents[question], "confidence": 0.99}, ensure_ascii=False))
+            if request.metadata.get("purpose") == "result_answer_review":
+                return LlmResponse(content='{"verdict":"supported","issues":[]}')
             text = request.messages[-1].content.split(RESULT_EVIDENCE_PREFIX, 1)[1]
             # Follow-up prompts append scope/history after the evidence JSON.
             data, _ = json.JSONDecoder().raw_decode(text)
             explanations.append(data)
             question = request.messages[0].content.split("\n", 1)[0]
             if question in {"概述刚才的品类结果", "重新概述刚才的品类结果"}:
-                invalid_explanations.append(question)
-                # Deliberately invalid model facts must not reach either the UI or saved answer.
-                return LlmResponse(content='{"facts":[{"kind":"row","row_number":1,"value":987654321,"entity":"wrong-category"}]}')
-            return LlmResponse(content=json.dumps({"facts": [
-                {"kind": "row", "row_number": n} for n in data["row_numbers"]
-            ]}), finish_reason="stop")
+                if request.metadata["purpose"] == "result_answer_draft":
+                    invalid_explanations.append(question)
+                if request.metadata["purpose"] == "result_answer_draft" or question == "重新概述刚才的品类结果":
+                    return LlmResponse(content='{"paragraphs":[{"text":"wrong-category销售额987654321。","kind":"fact","evidence_refs":["/sample_rows/0"]}]}')
+            return LlmResponse(content=model_answer(data), finish_reason="stop")
 
         async def stream_request(self, request):
             # No text SSE is fabricated: the Agent builds it from this actual response.
@@ -245,7 +247,7 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                         chat.locator(".minimized-icon").click()
                 chat.locator("textarea.message-input").fill(question)
                 with page.expect_response(lambda response, question=question: response.url.endswith("/chat_sse")
-                                          and response.request.post_data_json.get("message") == question):
+                                          and response.request.post_data_json.get("message") == question) as pending:
                     chat.locator("button.send-button").click()
                 page.wait_for_function("() => !document.querySelector('vanna-chat').shadowRoot.querySelector('textarea.message-input').disabled")
                 cid = chat.evaluate("element => element.conversationId")
@@ -272,12 +274,15 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                 answer = detail["messages"][-1]["content"]
                 if question in {"概述刚才的品类结果", "重新概述刚才的品类结果"}:
                     assert "987654321" not in answer and "wrong-category" not in answer
-                    assert '"facts"' not in answer
+                    assert '"paragraphs"' not in answer
+                    assert "987654321" not in pending.value.text()
+                    assert run["catalog_trace"]["result_explanation"]["revision_count"] == 1
+                    if question == "重新概述刚才的品类结果":
+                        assert "文字解释未通过核验" in answer
                     chat.get_by_text("本次回答的数据依据", exact=True).last.wait_for(state="visible")
                     page.screenshot(path=str(output / "reference-fallback.png"), full_page=True)
-                if current["analyses"] and question not in {"第九名和第十名的金额分别是多少", "最后一个月表现怎么样", "继续解释全年结果"}:
-                    for fact in render_analysis_facts(current):
-                        assert fact in answer
+                if question not in {"概述刚才的品类结果", "重新概述刚才的品类结果"}:
+                    assert "模型说明" in answer
                 if question == categories_question:
                     assert len(current["sample_rows"]) == 10
                     assert current["coverage"] == "complete"

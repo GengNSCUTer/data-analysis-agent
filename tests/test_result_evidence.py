@@ -17,7 +17,6 @@ from data_analysis_agent.result_evidence import (
     RESULT_EVIDENCE_PREFIX, ResultInspection, ResultInspectionError,
     build_result_evidence, resize_result_evidence,
 )
-from data_analysis_agent.result_explanation import render_result_answer
 from data_analysis_agent.runtime_workspace import load_runtime_workspace
 from data_analysis_agent.question_router import QuestionRouter
 from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
@@ -256,7 +255,7 @@ async def test_first_explanation_calls_model_with_only_server_evidence_and_no_to
     class Explainer(LlmService):
         async def send_request(self, request):
             captured.append(request)
-            return LlmResponse(content='{"facts":[{"kind":"sum","metric_id":"gmv"}]}', finish_reason="stop")
+            return LlmResponse(content='{"paragraphs":[{"text":"合计成交额为30。","kind":"fact","evidence_refs":["/statistics/gmv/sum_of_returned_rows"]}]}', finish_reason="stop")
 
         async def stream_request(self, request):
             raise AssertionError("explanation is buffered until its numbers are checked")
@@ -280,15 +279,38 @@ async def test_first_explanation_calls_model_with_only_server_evidence_and_no_to
             answer = (await service.send_request(request)).content
     finally:
         CURRENT_BUDGET.reset(token)
-    assert "gmv合计：30" in answer
+    assert answer == "合计成交额为30。"
     assert len(captured) == 1 and captured[0].tools is None
     assert "untrusted history" not in captured[0].messages[0].content
     assert '"sum_of_returned_rows":30' in captured[0].messages[-1].content
-    assert usage.catalog_trace["prompt_budgets"][-1]["purpose"] == "result_explanation"
+    assert usage.catalog_trace["prompt_budgets"][-1]["purpose"] == "result_answer_draft"
 
 
-def test_fact_renderer_does_not_accept_model_arithmetic():
-    summary = evidence(pd.DataFrame({"state": ["SP", "RJ"], "gmv": [20.0, 10.0]}))
-    answer = render_result_answer("未知指标987654321。", summary)
-    assert "987654321" not in answer
-    assert "合计：30" in answer and "sample_rows" not in answer
+@pytest.mark.asyncio
+async def test_computed_trend_uses_the_same_model_answer_and_optional_review():
+    captured = []
+    text = "四月比三月下降，不能说每个月都在增长。建议核对当月商品结构。"
+    class Explainer(LlmService):
+        async def send_request(self, request):
+            captured.append(request)
+            if request.metadata["purpose"] == "result_answer_review":
+                return LlmResponse(content='{"verdict":"supported","issues":[]}',finish_reason="stop")
+            return LlmResponse(content=json.dumps({"paragraphs":[{"text":text,"kind":"fact","evidence_refs":["/analyses/0"]}]}),finish_reason="stop")
+        async def stream_request(self, request):
+            raise AssertionError("unchecked draft must not stream")
+            yield
+        async def validate_tools(self, tools):
+            return []
+    usage = BudgetUsage(RequestBudget())
+    usage.mark_result_contract_satisfied()
+    usage.set_result_summary(evidence(pd.DataFrame({"time":pd.date_range("2017-03-01",periods=2,freq="MS"),"gmv":[120,110]}),
+        time_column="time",query_scope={"time_grain":"month"}))
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        response = await ObservedLlmService(Explainer()).send_request(LlmRequest(user=User(id="owner"),messages=[]))
+    finally:
+        CURRENT_BUDGET.reset(token)
+    assert response.content == text
+    assert [r.metadata["purpose"] for r in captured] == ["result_answer_draft","result_answer_review"]
+    assert '"operation":"trend"' in captured[0].messages[-1].content
+    assert usage.llm_rounds_used == 2 and usage.catalog_trace["result_explanation"]["revision_count"] == 0

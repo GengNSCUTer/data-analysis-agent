@@ -304,7 +304,7 @@ def test_summary_prompt_keeps_corrections_and_excludes_tool_payloads():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("answer", ['{"facts":[{"kind":"row","row_number":1}]}', "GMV为999999"])
+@pytest.mark.parametrize("answer", ['{"paragraphs":[{"text":"GMV为42。","kind":"fact","evidence_refs":["/sample_rows/0"]}]}', "GMV为999999"])
 async def test_result_explanation_gets_verified_scope_and_narrative_without_new_numbers(answer):
     from types import SimpleNamespace
     from data_analysis_agent.chat_runtime import BudgetedChatHandler
@@ -316,10 +316,14 @@ async def test_result_explanation_gets_verified_scope_and_narrative_without_new_
     summary = build_result_evidence(pd.DataFrame({"gmv": [42]}), required_columns=("gmv",), metric_ids=("gmv",))
 
     requests = []
-    class Agent:
-        async def _send_llm_request(self, request):
+    from data_analysis_agent.llm_observability import ObservedLlmService
+    class Provider:
+        async def send_request(self, request):
             requests.append(request)
             return LlmResponse(content=answer)
+    class Agent:
+        async def _send_llm_request(self, request):
+            return await ObservedLlmService(Provider()).send_request(request)
 
     artifact = replace(ResultArtifact.from_trusted_usage(request_id="explanation", summary=summary,
         catalog_trace={}, chart_rendered=False), query_scope={"metric_ids": ["gmv"],
@@ -337,8 +341,14 @@ async def test_result_explanation_gets_verified_scope_and_narrative_without_new_
     finally:
         CURRENT_BUDGET.reset(token)
     assert requests[0].tools is None
+    assert evidence.result_summary == summary  # Narrative-only reuse still yields its provenance card.
+    card = handler._trusted_result_evidence_chunk("explanation", "explanation", evidence)
+    assert card.rich["data"]["title"] == "本次回答的数据依据"
     prompt = requests[0].messages[0].content
     assert "2017-01-01" in prompt and "customer_state" in prompt and "讨论业务口径" in prompt
-    assert "gmv：42" in result[-1]
+    if answer.startswith("{"):
+        assert result[-1] == "GMV为42。"
+    else:
+        assert "文字解释未通过核验" in result[-1]
     assert '"facts"' not in result[-1]
     assert "999999" not in result[-1]

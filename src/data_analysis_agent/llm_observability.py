@@ -11,9 +11,8 @@ from typing import Any, AsyncGenerator
 from vanna.core.llm import LlmMessage, LlmRequest, LlmResponse, LlmService, LlmStreamChunk
 
 from .budget import CURRENT_BUDGET
-from .result_presentation import display_label, display_value
 from .token_budget import ContextCapacityError, TokenCounter
-from .result_explanation import RESULT_EXPLANATION_PROMPT, render_result_answer, result_evidence_view
+from .result_explanation import ANSWER_UNVERIFIED, generate_result_answer, result_evidence_view
 
 
 class LlmPhaseTimeout(TimeoutError):
@@ -160,7 +159,7 @@ class ObservedLlmService(LlmService):
         """Use actual system/message/tool sizes, rather than a fixed result allowance."""
         from .result_evidence import RESULT_EVIDENCE_PREFIX, resize_result_evidence
         usage = CURRENT_BUDGET.get()
-        if usage is None or request.metadata.get("purpose") not in {"result_explanation", "tool_free_response"}:
+        if usage is None or request.metadata.get("purpose") not in {"tool_free_response", "result_answer_draft"}:
             return request
         if self.token_counter.count_request(request) + (request.max_tokens or usage.budget.max_output_tokens) <= usage.budget.max_prompt_tokens:
             if request.messages and (request.messages[-1].content or "").startswith(RESULT_EVIDENCE_PREFIX):
@@ -194,7 +193,8 @@ class ObservedLlmService(LlmService):
 
     async def send_request(self, request: LlmRequest) -> LlmResponse:
         usage = CURRENT_BUDGET.get()
-        if usage is None or not usage.can_finalize_trusted_result():
+        followup = request.metadata.get("purpose") == "tool_free_response" and request.metadata.get("intent") == "result_followup"
+        if not followup and (usage is None or not usage.can_finalize_trusted_result()):
             # Compaction can itself call the model. Do not hold a provider
             # permit while waiting for that nested summary call.
             request = await self._ensure_context(self._query_request(request))
@@ -203,13 +203,15 @@ class ObservedLlmService(LlmService):
 
     async def _send_request(self, request: LlmRequest) -> LlmResponse:
         usage = CURRENT_BUDGET.get()
+        if request.metadata.get("purpose") == "tool_free_response" and request.metadata.get("intent") == "result_followup":
+            return await self._explain_result(request, usage)
         if usage is not None and usage.can_finalize_trusted_result():
             if usage.result_summary and '"coverage":' in usage.result_summary:
                 return await self._explain_result(request, usage)
             usage.mark_deterministic_result_finalized()
             usage.finish()
             return LlmResponse(
-                content=_trusted_result_completion(usage.result_summary),
+                content=ANSWER_UNVERIFIED,
                 finish_reason="trusted_result_finalized",
                 metadata={"deterministic_result_finalized": True},
             )
@@ -274,7 +276,7 @@ class ObservedLlmService(LlmService):
             usage.mark_deterministic_result_finalized()
             usage.finish()
             yield LlmStreamChunk(
-                content=_trusted_result_completion(usage.result_summary),
+                content=ANSWER_UNVERIFIED,
                 finish_reason="trusted_result_finalized",
                 metadata={"deterministic_result_finalized": True},
             )
@@ -330,35 +332,37 @@ class ObservedLlmService(LlmService):
                     pass
 
     async def _explain_result(self, request: LlmRequest, usage) -> LlmResponse:
-        """One tool-free explanation; numbers have already been computed by Python/SQL."""
-        usage.mark_deterministic_result_finalized()
-        from .result_evidence import RESULT_EVIDENCE_PREFIX, render_analysis_facts
-        payload = json.loads(usage.result_summary.removeprefix(RESULT_EVIDENCE_PREFIX))
-        if any(a["operation"] not in {"overview", "rows"} for a in payload.get("analyses", [])):
-            usage.record_catalog({"result_explanation": {"server_calculated": True, "tools_enabled": False, "model_used": False}})
-            usage.finish()
-            return LlmResponse(content="\n".join(render_analysis_facts(payload)), tool_calls=[], finish_reason="trusted_result_finalized")
-        usage.record_llm_round()
-        summary = usage.result_summary
-        explanation = LlmRequest(
-            user=request.user,
-            system_prompt=RESULT_EXPLANATION_PROMPT,
-            messages=[LlmMessage(role="user", content=(
-                f"用户问题：{usage.catalog_question or ''}\n"
-                f"查询范围：{json.dumps(usage.query_plan or {}, ensure_ascii=False)}"
-            )), LlmMessage(role="user", content=summary)],
-            tools=None, temperature=0.0, max_tokens=usage.budget.max_output_tokens,
-            metadata={"purpose": "result_explanation"},
+        """Generate prose for both first results and follow-ups, checking before display."""
+        if usage is not None:
+            usage.mark_deterministic_result_finalized()
+        followup = request.metadata.get("intent") == "result_followup"
+        explanation = request if followup else LlmRequest(
+            user=request.user, messages=[LlmMessage(role="user", content=(
+                f"用户问题：{usage.catalog_question or ''}\n查询范围："
+                + json.dumps(usage.query_plan or {}, ensure_ascii=False)
+            )), LlmMessage(role="user", content=usage.result_summary)],
+            temperature=0.0, max_tokens=usage.budget.max_output_tokens,
         )
-        explanation = self._fit_result_request(explanation)
-        self._check_context(explanation)
-        response = await self._send_request(explanation)
-        answer = render_result_answer(response.content or "", explanation.messages[-1].content)
-        usage.record_catalog({"result_explanation": {"server_calculated": True, "tools_enabled": False,
-                                                      "server_rendered_references": True}})
-        usage.finish()
-        return response.model_copy(update={"content": answer, "tool_calls": [],
-                                           "finish_reason": "trusted_result_finalized"})
+
+        def prepare(value):
+            # Only the initial draft may reduce row detail. Reviews/revisions
+            # see exactly the same evidence, or fail visibly on context overflow.
+            value = self._fit_result_request(value)
+            self._check_context(value)
+            return value
+
+        outcome = await generate_result_answer(explanation, self._send_request, prepare,
+            usage.record_llm_round if usage else lambda: None,
+            usage.finish_llm_round if usage else lambda: None)
+        if usage is not None:
+            usage.record_catalog({"result_explanation": {
+                "server_calculated":True, "tools_enabled":False, "model_used":True,
+                "answer_status":outcome.status, "review_count":outcome.review_count,
+                "revision_count":outcome.revision_count, "calls":outcome.calls,
+                "issue_codes":list(outcome.issue_codes),
+            }})
+            usage.finish()
+        return LlmResponse(content=outcome.text, tool_calls=[], finish_reason="trusted_result_finalized")
 
     async def _next_stream_chunk(
         self, iterator: Any, timeout_seconds: float, phase: str
@@ -448,82 +452,3 @@ def _chunk_usage(chunk: LlmStreamChunk) -> dict[str, int] | None:
         if isinstance(value, int):
             parsed[key] = value
     return parsed or None
-
-
-def _trusted_result_completion(summary: str | None) -> str:
-    """Render a bounded user-facing conclusion from a validated result only.
-
-    The SQL tool has already emitted the complete table.  This renderer is
-    deliberately deterministic: it can quote values from the validated sample
-    rows, but never infer a ranking, trend, currency, or causal relationship.
-    """
-    payload: dict[str, Any] = {}
-    prefix = "已通过结果合同的可信结果摘要："
-    if summary and summary.startswith(prefix):
-        try:
-            decoded = json.loads(summary[len(prefix) :])
-            if isinstance(decoded, dict):
-                payload = decoded
-        except json.JSONDecodeError:
-            pass
-    columns = [str(value) for value in payload.get("columns", [])[:16]]
-    metric_ids = [str(value) for value in payload.get("metric_ids", [])[:16]]
-    labels = payload.get("column_labels", {})
-    labels = labels if isinstance(labels, dict) else {}
-    sample_rows = payload.get("sample_rows", [])
-    sample_rows = sample_rows if isinstance(sample_rows, list) else []
-    row_count = payload.get("row_count")
-    if not isinstance(row_count, int) or row_count < 0:
-        return _trusted_result_fallback(columns, metric_ids)
-
-    display_columns = columns[:8]
-    has_dimensions = any(column not in metric_ids for column in display_columns)
-    lines = ["### 查询结果"]
-    if row_count == 1 and sample_rows:
-        lines.append("已返回 1 条结果：")
-    elif has_dimensions:
-        lines.append(f"已返回 {row_count} 个分组，完整明细见上表。")
-    else:
-        lines.append(f"已返回 {row_count} 条结果，完整明细见上表。")
-
-    preview_rows = [row for row in sample_rows[:3] if isinstance(row, dict)]
-    if display_columns and preview_rows:
-        if row_count > len(preview_rows):
-            lines.append("以下为表格中的前几条记录，不代表排名或趋势：")
-        lines.extend(("", _markdown_preview(display_columns, preview_rows, labels)))
-
-    lines.extend(
-        (
-            "",
-            "结果已通过服务器结果合同的字段、数值及适用范围/截断检查。"
-            "为避免超出结果证据，本轮未额外推断趋势、排名、币种或因果。",
-        )
-    )
-    return "\n".join(lines)
-
-
-def _trusted_result_fallback(columns: list[str], metric_ids: list[str]) -> str:
-    """Retain a safe concise response for legacy or malformed summaries."""
-    lines = ["查询已完成，以上表格已通过服务器结果合同校验。"]
-    if columns:
-        lines.append(f"- 返回列：{', '.join(f'`{column}`' for column in columns)}")
-    if metric_ids:
-        lines.append(f"- 已核对指标：{', '.join(f'`{metric}`' for metric in metric_ids)}")
-    lines.append("- 未生成额外模型推断，请以表格结果为准。")
-    return "\n".join(lines)
-
-
-def _markdown_preview(
-    columns: list[str], rows: list[dict[str, Any]], labels: dict[str, Any]
-) -> str:
-    header = [display_label(column, labels) for column in columns]
-    rendered = ["| " + " | ".join(_escape_markdown(value) for value in header) + " |"]
-    rendered.append("| " + " | ".join("---" for _ in columns) + " |")
-    for row in rows:
-        values = [display_value(column, row.get(column)) for column in columns]
-        rendered.append("| " + " | ".join(_escape_markdown(value) for value in values) + " |")
-    return "\n".join(rendered)
-
-
-def _escape_markdown(value: str) -> str:
-    return str(value).replace("|", "\\|").replace("\n", " ")

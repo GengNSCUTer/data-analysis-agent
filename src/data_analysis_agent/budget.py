@@ -640,7 +640,8 @@ class BudgetSafetyMiddleware(LlmMiddleware):
 
     async def before_llm_request(self, request: LlmRequest) -> LlmRequest:
         usage = CURRENT_BUDGET.get()
-        if usage is not None and not usage.can_finalize_trusted_result():
+        answer_followup = request.metadata.get("purpose") == "tool_free_response" and request.metadata.get("intent") == "result_followup"
+        if usage is not None and not usage.can_finalize_trusted_result() and not answer_followup:
             usage.record_llm_round()
         return request
 
