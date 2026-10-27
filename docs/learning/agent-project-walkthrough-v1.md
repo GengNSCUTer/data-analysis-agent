@@ -1235,7 +1235,7 @@ PostgreSQL `REPEATABLE READ`只读事务中生成受控诊断查询：按实际�
 
 待复述：1. 本例结果只有gmv金额列、没有品类列，为什么即使SQL可执行也不满足要求？2. 必须返回的列应该由模型看到查询结果后决定，还是由服务端在生成SQL前根据计划确定？本节仅核对代码并讲解，不改运行时、不新增评测；Day 4进行中。
 
-### 2026-10-27｜Day 4：从职责判断转向源码追踪（待代码复述）
+### 2026-10-27｜Day 4：从职责判断转向源码追踪（缺列分支已复述）
 
 用户回答“不能”“服务端在SQL生成前根据计划确定”，并指出前期提问偏业务，担心面试时无法回答具体实现。第二题正确；第一题只给了结论，还需解释缺品类时无法将金额对应到实体。后续保留业务背景，但把主要阅读和问答落在调用方、类型、参数传递、分支返回与测试，不把前期问答完成等同于全部代码掌握。
 
@@ -1248,3 +1248,13 @@ PostgreSQL `REPEATABLE READ`只读事务中生成受控诊断查询：按实际�
 对应已有测试：`test_missing_dimension_still_displays_the_metric`断言degraded/允许展示/禁止可信回答；`test_validator_refuses_missing_metric_and_non_finite_values`断言缺指标拒绝；正常州GMV无time列的测试作为正例。未新增运行时代码或测试。
 
 待源码复述：1. 当required_columns=(product_category_name,gmv)、metric_columns=(gmv,)、frame.columns只有product_category_name，missing与missing_metrics分别是什么，会走哪个return？2. 若将`if missing_metrics`改成`if missing`，对只缺品类的情况会发生什么变化，上述哪条测试会失败？不提前标记本节掌握。
+
+用户回答：missing和missing_metrics都是gmv，走refuse；改成if missing时只缺品类也会refuse。分支判断正确，类型补充为两个元组`('gmv',)`；第二题尚未指出断言，补充已有`test_missing_dimension_still_displays_the_metric`中的`result.state == 'degraded'`首先失败，safe_to_display为True的断言也不再成立。
+
+### 2026-10-27｜Day 4：调用方如何落实结果状态（待复述）
+
+业务目标是让“校验拒绝”真正阻止未通过的结果沿正常成功链返回，而非只算出一个state后忽略它。读`postgres_runner.py`的`if not validation.safe_to_display`分支：记录审计后`raise ResultValidationError(validation)`，当前执行不再继续return DataFrame。异常沿`run_sql()`的await传播到`src/vanna/tools/run_sql.py:RunSqlTool.execute()`，后者在except中返回`ToolResult(success=False)`；这不是自动返回HTTP 500，工具失败和HTTP传输状态要区分。
+
+degraded的safe_to_display=True，不走上述raise；Runner在`if not validation.safe_to_answer`里记录说明并return validated_frame，允许有限展示。valid则继续产生可信结果证据。源码学习要区分`return ResultValidation`（校验器给判断）、`raise ResultValidationError`（Runner停止正常结果路径）和`return ToolResult(success=False)`（工具包装层给Agent的失败对象）。本轮只读现有代码、整理问答，没有改运行时或运行新测试。
+
+下一题：若Runner把refuse分支中的raise改成return frame，父类RunSqlTool.execute是否仍会进入except？若数据表正常渲染完成，其success会是什么？需要根据真实try/except和成功return位置说明，而非只回答“安全”。Day 4继续进行。
