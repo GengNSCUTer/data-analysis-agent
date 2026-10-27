@@ -1361,3 +1361,13 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 证据：698项CI同范围确定性测试通过（10项deselected），隔离合成库26轮受控浏览器通过，含两次模型伪造值/实体的替代输出；真实DeepSeek-V3.2与Olist、TheLook前十名各4轮通过，SQL调用均为[1,0,0,0]，CSV独立SQL核对一致。TheLook完整216州绘图被现有200行上限拒绝，未改变该能力边界，单独用明确前十名完成绘图验收。技术记录见`evals/results/result-explanation-20261027.md`。
 
 后续源码阅读先看FactReference与render_result_answer，再看解释调用方，不一次展开所有服务端分析算法。引用绑定只证明数值与实体来自对应证据，不证明模型选对回答重点或SQL业务正确；当前结果解释不接收任意自由叙述。没有因为工程完成将Day 4或用户源码理解标记完成。
+
+### 2026-10-27｜Day 4收尾学习安排与引用解析（待复述）
+
+用户要求今天学完Day 4。本日剩余内容压成三小段：新引用解释源码；网页预览/完整CSV/会话ResultArtifact对象的区别与调用衔接；补可信工件保存条件并做整链复述。不再扩展功能、重训模型或重复完整评测；用户完成复述后再标学习完成。
+
+本节业务场景：SP=20、RJ=10，用户问哪个州最高。LLM只返回`{"facts":[{"kind":"maximum","metric_id":"gmv"}]}`。`render_result_answer(answer, summary)`的两个输入都是str：前者是模型引用JSON，后者是服务端证据JSON及前缀。`parse_result_evidence`将后者变成dict；`ExplanationSelection.model_validate_json(answer)`是Pydantic反序列化/校验，不是再次调用大模型，返回含FactReference列表的Python对象。
+
+`_render_reference()`按引用查同一证据；maximum从statistics取最大值及对应实体，row只从实际提供的row_numbers/sample_rows查行。`dict.fromkeys`对已渲染文字按原顺序去重，最后join成字符串。FactReference的extra=forbid不允许模型附带value或entity等字段；额外字段导致ValidationError，render_result_answer进入except，返回render_result_facts的服务端事实，不发起第二次LLM或SQL调用。
+
+本节阅读范围为result_explanation.py的FactReference、ExplanationSelection和render_result_answer，测试入口为test_reference_binds_maximum_to_its_entity和test_model_cannot_supply_values_entities_or_use_metadata_as_metrics。本轮只核对现有代码并归档，不运行新测试。待两题：1. model_validate_json得到的是SQL、另一轮模型回答，还是带facts字段的Python对象？2. 引用中额外提供value=10，会被服务端当作SP金额吗，实际在哪个校验/异常分支处理？本节不提前标记掌握。
