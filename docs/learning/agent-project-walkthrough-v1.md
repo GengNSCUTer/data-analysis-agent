@@ -2,7 +2,7 @@
 
 本记录承接当前[两周学习计划](../../plan/process-agent-internship-improvement-v2-2week.md)，只放代码理解与问答。项目进度见 PROJECT.md，后训练知识继续使用既有 post-training/learning 目录。每轮阅读 1–3 个关键函数，问题答完再进入下一段。
 
-当前学习位置（2026-10-27）：Day 1–3 复盘已收到回答，Day 4 已复述缺列分支、异常传播、完整 CSV/manifest 保存及按用户/workspace读取路径，当前学习CSV完整性检查。可信工件保存条件的源码题尚待复述。前期职责复述不代表全部源码掌握。当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
+当前学习位置（2026-10-27）：Day 1–3 复盘已收到回答，Day 4 已复述缺列分支、异常传播、完整 CSV/manifest 保存、按用户/workspace读取路径及CSV完整性检查，当前学习读取结果时的版本比较。可信工件保存条件的源码题尚待复述。前期职责复述不代表全部源码掌握。当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
 不代表现行实现；当前内容以文末日期和真实代码为准。工程完成不代替用户理解。
 
 ## Day 1：沿一条问题认识请求链
@@ -1292,10 +1292,20 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 
 用户回答：B发现该路径没有文件，抛结果文件未找到异常。判断正确；对应`if not path.is_file()`，异常类为`FileNotFoundError`。这说明理解了本例路径隔离与缺文件分支，不代表已复述完整认证流程。
 
-### 2026-10-27｜Day 4：CSV存在不等于内容仍完整（待复述）
+### 2026-10-27｜Day 4：CSV存在不等于内容仍完整（已复述）
 
 业务功能：用户下载或追问先前结果时，避免复用已损坏或被改动的CSV。保存时manifest记录csv_sha256和csv_bytes；`verify_manifest()`先调用load_manifest确认范围并读取说明，再把CSV固定文件名、预期摘要和大小传给`_verify_file()`。后者返回None：正常返回表示这些检查通过，失败抛`ResultArtifactIntegrityError`，并不返回DataFrame。
 
 只看`_verify_file()`末尾：确认文件存在后，`digest, size = _sha256_size(path)`重新读取当前文件并计算SHA-256和字节数；`if digest != expected_sha256 or size != expected_bytes`任一不符就抛异常。相同长度的数值替换也可能保持文件大小，因此不能只比字节数。完整性通过不证明SQL业务公式正确；manifest与CSV同时被有权限者改写也不由这两项比较单独防住，不能把普通摘要说成签名或身份认证。
 
 阅读并定向执行现有`test_result_artifact_store_detects_payload_tampering`，1 passed：保存gmv=10后直接改CSV为gmv=999，不改manifest，断言verify_manifest抛完整性异常。本节不改运行时代码。待源码题：CSV把10改成99、字节数不变且manifest不变，检查能否通过？会因if中的哪个比较失败？
+
+用户回答：不能通过，expected-sha256会不通过。判断正确，准确表述为重新计算的digest与保存的expected_sha256不相等；expected_sha256本身没有变化，字节数相等不能使or条件整体变成False。
+
+### 2026-10-27｜Day 4：旧结果与当前版本是否一致（待复述）
+
+业务功能：CSV即便没有损坏，也不能把旧数据快照或旧指标口径下的结果冒充当前结果。例子是GMV定义从不含运费改为包含运费：旧表仍是合法历史结果，但当前版本追问不能直接沿用旧数字。版本值来自服务端workspace配置，不是LLM根据文件内容推断，也不是每次数据库行变化都会自动更新版本；配置维护是前提。
+
+只读`result_artifact_store.py:read_result_frame()`的版本分支。输入包含artifact/user/workspace ID及调用方传入的数据和指标版本；先verify_manifest验证文件，再比较`(manifest['dataset_version'], manifest['metric_version'])`与`(dataset_version, metric_version)`。Python元组逐项比较，任一版本不同就抛ResultArtifactIntegrityError，不继续执行后面的pd.read_csv；成功时继续读CSV、校验行数并最终返回DataFrame。这里异常名覆盖版本失配，不代表CSV已经损坏。
+
+`chat_runtime.py`读取时传`self.workspace.dataset_version_id`及`self.workspace.metric_version`，即当前服务端配置。现有参数化测试`test_result_calculation_preserves_ownership_versions_and_integrity[version]`先正常读取，再只将请求dataset_version改为old，断言抛异常；本轮定向执行1 passed，该用例不单独测试指标版本变化。本节只讲解现有实现，不改运行时代码。待源码题：manifest为(v1,m1)，调用方要求(v1,m2)，即使SHA-256一致，版本分支是否通过，会不会执行后面的pd.read_csv？
