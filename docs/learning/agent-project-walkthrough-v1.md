@@ -2,7 +2,7 @@
 
 本记录承接当前[两周学习计划](../../plan/process-agent-internship-improvement-v2-2week.md)，只放代码理解与问答。项目进度见 PROJECT.md，后训练知识继续使用既有 post-training/learning 目录。每轮阅读 1–3 个关键函数，问题答完再进入下一段。
 
-当前学习位置（2026-10-27）：Day 1–3 复盘已收到回答，Day 4 已复述缺列分支、异常传播、完整 CSV/manifest 保存、隔离读取、完整性及版本比较，当前学习完整结果怎样转成模型解释证据。可信工件保存条件的源码题尚待复述。前期职责复述不代表全部源码掌握。当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
+当前学习位置（2026-10-27）：Day 1–3 复盘已收到回答，Day 4 已复述缺列分支、异常传播、完整 CSV/manifest 保存、隔离读取、完整性、版本及证据行数区别，当前学习证据怎样进入无工具解释调用和数字校验。可信工件保存条件的源码题尚待复述。前期职责复述不代表全部源码掌握。当前任务与上次成功结果区别留到 Day 5。下文保留历史学习原文，旧 Router、examples 入口及固定结果样本预算
 不代表现行实现；当前内容以文末日期和真实代码为准。工程完成不代替用户理解。
 
 ## Day 1：沿一条问题认识请求链
@@ -1312,7 +1312,7 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 
 用户回答：不会通过，指标版本不一致拒绝后续执行。正确；在此函数中抛ResultArtifactIntegrityError，后面的pd.read_csv不会执行，并非把旧CSV删除。
 
-### 2026-10-27｜Day 4：完整结果如何变成解释证据（待复述）
+### 2026-10-27｜Day 4：完整结果如何变成解释证据（已复述统计顺序与行数）
 
 业务功能：已有250行品类结果，用户追问其中最大值或合计，不必重查数据库，也不能只让模型看一小段表后猜。`chat_runtime.py:_inspect_previous_result()`读取通过归属、完整性和版本检查的完整DataFrame，再调用`result_evidence.py:build_result_evidence()`，返回带固定前缀的JSON字符串供回答链使用；不是直接把完整CSV交给模型，也不是自然语言历史摘要。
 
@@ -1325,3 +1325,13 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 用户回答：可以，先计算拿到最大值这一行，然后只给模型这一行，不会全部给。前半句正确；后半句需纠正：最大值和对应行存在statistics里，模型还会收到预算允许的sample_rows，并非只收到最大值那一行。`payload`同时包含statistics和sample_rows；后面的`pack(count)`更新sample_rows、included_row_count和coverage，不把statistics替换成行样本。
 
 本节继续核对证据字段，不切新功能。无额外筛选的250行结果、样本20行时，source_row_count=250、row_count=250、included_row_count=20、coverage=selected_rows；statistics中的maximum_row可来自第250行，与sample_rows不重复也不冲突。小结果预算足够时也可全部给模型，不是永远只给部分行。本轮仅核对代码与归档，没有改运行时代码或重跑测试。待源码题：上述场景的source_row_count和included_row_count分别是多少，为什么不都写成20？
+
+用户回答：source-row-count是250，included-row-count是20。两个字段正确：前者是来源完整结果行数，后者是提供的明细行数；统计与样本同时进入证据，不意味着只给模型极值行。不据此标记整个证据算法已掌握。
+
+### 2026-10-27｜Day 4：证据进入解释调用与数字检查（待复述）
+
+业务功能：查询结果已经由SQL/Python计算后，让模型整理中文回答，不在解释阶段再次发起SQL。只看`llm_observability.py:ObservedLlmService._explain_result()`构造LlmRequest及接收结果的几行。user消息包含当前问题、查询范围和usage.result_summary；tools=None，不提供工具定义；系统提示约束样本不能外推、Top-N合计不能冒充总体。普通解释走模型调用；有明确计算分析操作的分支可直接用render_analysis_facts输出服务端事实，本节不展开该分支。
+
+`response = await self._send_request(explanation)`返回LlmResponse，再调用`constrain_followup_answer(response.content or '', summary)`。该函数在result_evidence.py中：将回答里的业务数字与证据数字比较，发现新增数字时返回说明加render_result_facts(evidence)，不保留模型原来的错误段落。检查后才作为最终回答内容返回；流式入口的这个结果解释也会缓冲检查，不先发送未经核对的数字。
+
+边界：数字出现在证据中不等于实体、指标和因果归属都正确。数字集合检查不是完整语义证明；tools=None是解释调用不提供工具能力，不是数据库授权的替代品。本轮只读现有代码，执行现有test_first_explanation_calls_model_with_only_server_evidence_and_no_tools（stream参数两例）与test_numeric_check_accepts_server_formatting_but_not_new_arithmetic，3 passed；不改运行时代码。待题：证据只有GMV 20、10和合计30，模型另编987654321时，constrain_followup_answer会原样返回回答吗，走哪个返回分支？
