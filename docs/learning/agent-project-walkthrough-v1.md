@@ -1424,6 +1424,12 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 
 Day 4最后一段沿“刷新后追问250行中的最高品类”阅读_inspect_previous_result：先_verified_previous_artifact校验归属、workspace、版本、valid状态及manifest对应，再通过asyncio.to_thread调用read_result_frame；后者读取完整CSV为DataFrame，保留维度字符串并检查行数，随后build_result_evidence重算当前所需证据，交统一解释流程，无需重查数据库。to_thread用于把同步文件/Pandas操作移到线程，await等待返回frame，不代表启动后台不等结果。相同代码支撑刷新恢复；文件缺失或版本失配则拒绝使用，不能从旧模型回答猜数。现有测试分别覆盖user/workspace/version/tamper和完整工件求和零SQL调用；本轮仅阅读未新跑测试。最后待整链源码复述后再标Day 4完成，下一主题Day 5解释为何复用旧结果与继承条件生成新SQL是不同分支。
 
+用户正确回答完整读250行，指标版本变化在_verified_previous_artifact停止；补齐调用方收到None后抛ResultInspectionError，不执行read_result_frame。Day 4阶段学习收尾，关键数据路径已复述，整体源码熟练度留Day 7/10闭卷核对，不重复开启工程。
+
+### 2026-10-28｜Day 5开始：当前任务与上一成功结果
+
+用“2017年各州GMV→只看SP→换柱状图→改2018年”串联：AnalysisState表示当前想查的条件，previous_result_artifact表示已经成功查到的具体结果；两者在同一会话working_memory中关联保存，但不能视为同一范围。SemanticIntent模型理解用户操作并提出结构化变更，服务端验证、应用；_result_reuse_decision先核验工件，再将请求范围与工件query_scope交reuse_decision，不能凭“存在CSV”复用。execution_memory.py的reuse_decision校验workspace/版本、显式filters及scope字段；不适配返回query_required。只换图可读取旧工件；改变时间的按州查询不能使用原年份CSV。上一成功结果保留允许失败后明确回看，并不自动成为当前待查询范围的答案。本轮只读代码，后续完整跟踪一次条件变化；未宣称Day 5完成。
+
 用户回答初稿错误后修订通过调用一次，需纠正为生成加修订共两次；attempt=1时break正确。随后追问修订标准，解释格式失败、代码明确错误或模型复核不通过均进入问题列表；doubts本身只触发复核，不直接修订。用户正确判断复核supported且issues为空不再修订，并反馈连续流程拆得太碎、题目偏业务理解。教学调整：一次讲完整个连贯功能，再选关键源码追踪，不按零散变量不断插题。
 
 已整链解释生成初稿、格式解析、证据代码检查、按疑点模型复核、最多一次修订、再次检查及最终显示/失败隐藏。用户表示明白，继续Day 4；此反馈不等于所有核验代码逐行掌握。本轮衔接下个完整功能：同一结果的完整CSV、网页预览、模型证据和会话ResultArtifact引用如何配合。
