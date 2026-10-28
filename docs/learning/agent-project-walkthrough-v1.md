@@ -1416,6 +1416,10 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 
 本节继续读generate_result_answer的控制流：for attempt in range(2)只做初稿和一次修订的检查，不代表固定调用模型两次；issues=checked.errors决定是否先修订，not issues且历史有语义疑点时复核，最后not issues才return outcome(draft.text(), accepted)。attempt=0允许构造一次revision并调用；attempt=1仍有问题则break，返回unverified提示。复核不是改写，修订才重新生成正文；调用均不提供SQL工具。待推演：初稿明确错误、修订通过且从无语义疑点时解释阶段调用几次？修订后仍错误时如何退出？本轮只读与归档，没有运行新测试或标记Day 4完成。
 
+用户回答初稿错误后修订通过为1次、第二轮attempt=1时break；后者正确，前者纠正为生成一次加修订一次共2次。用户正确判断仅有doubts而模型复核supported且issues为空时不修订。随后反馈将连贯功能切碎、提问偏业务导致看不清整体，已按完整链路重讲：输入问题/范围/证据，生成初稿，格式解析，代码核验，按疑点复核，必要时一次修订并复查，最终返回原文或未核验提示；后续以完整功能为单位追踪代码，不再频繁切碎问答。
+
+2026-10-28继续Day 4结果链收尾：用已验证250行结果串联三条用途——TrustedRunSqlTool在显式validation.state=valid时保存完整CSV与manifest；_replace_with_server_presentation使用display_results构造初始预览；Runner的build_result_evidence在完整结果上计算统计并按预算选明细给解释模型。外部文件先保存，chat_runtime随后把ResultArtifact的小型描述/摘要/文件引用放入会话AnalysisState，不把完整CSV装入会话。正文核验失败不等于数据失败，不能据此删除有效工件；合同不完整的degraded表格可展示，但不保存为可复用可信工件且禁止模型数值回答。关联测试test_result_artifact_requires_explicit_validated_result_contract表明工具success本身不足。本轮仅核对源码，没有新改造或测试结论；收尾待用户沿上述函数复述完整结果/预览/证据和保存前提，不提前标Day 4完成。
+
 用户回答初稿错误后修订通过调用一次，需纠正为生成加修订共两次；attempt=1时break正确。随后追问修订标准，解释格式失败、代码明确错误或模型复核不通过均进入问题列表；doubts本身只触发复核，不直接修订。用户正确判断复核supported且issues为空不再修订，并反馈连续流程拆得太碎、题目偏业务理解。教学调整：一次讲完整个连贯功能，再选关键源码追踪，不按零散变量不断插题。
 
 已整链解释生成初稿、格式解析、证据代码检查、按疑点模型复核、最多一次修订、再次检查及最终显示/失败隐藏。用户表示明白，继续Day 4；此反馈不等于所有核验代码逐行掌握。本轮衔接下个完整功能：同一结果的完整CSV、网页预览、模型证据和会话ResultArtifact引用如何配合。
