@@ -1415,3 +1415,15 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 用户回答引用越界进入errors、没有错误疑点不需要再调用模型，均正确。第二点限于首次检查没有历史疑点；semantic_doubt_seen会记住此前的语义疑点，修订后即使当前doubts为空，仍需复核，不能通过删除风险措辞跳过检查。
 
 本节继续读generate_result_answer的控制流：for attempt in range(2)只做初稿和一次修订的检查，不代表固定调用模型两次；issues=checked.errors决定是否先修订，not issues且历史有语义疑点时复核，最后not issues才return outcome(draft.text(), accepted)。attempt=0允许构造一次revision并调用；attempt=1仍有问题则break，返回unverified提示。复核不是改写，修订才重新生成正文；调用均不提供SQL工具。待推演：初稿明确错误、修订通过且从无语义疑点时解释阶段调用几次？修订后仍错误时如何退出？本轮只读与归档，没有运行新测试或标记Day 4完成。
+
+用户回答初稿错误后修订通过调用一次，需纠正为生成加修订共两次；attempt=1时break正确。随后追问修订标准，解释格式失败、代码明确错误或模型复核不通过均进入问题列表；doubts本身只触发复核，不直接修订。用户正确判断复核supported且issues为空不再修订，并反馈连续流程拆得太碎、题目偏业务理解。教学调整：一次讲完整个连贯功能，再选关键源码追踪，不按零散变量不断插题。
+
+已整链解释生成初稿、格式解析、证据代码检查、按疑点模型复核、最多一次修订、再次检查及最终显示/失败隐藏。用户表示明白，继续Day 4；此反馈不等于所有核验代码逐行掌握。本轮衔接下个完整功能：同一结果的完整CSV、网页预览、模型证据和会话ResultArtifact引用如何配合。
+
+### 2026-10-28｜Day 4：一次结果的保存、展示与复用（待推演）
+
+用已验证250行品类GMV、前端预览200行、假设本轮token空间只放20行明细举例。Runner在完整validated_frame上生成统计和解释证据；RunSqlTool拿到完整结果，前端DataFrameComponent只用results_data[:display_budget]。TrustedRunSqlTool成功路径先_remember_result_artifact、后_replace_with_server_presentation；前者必须result_validation.state=valid才将完整metadata.results存入ResultArtifactStore并记manifest，后者整理预览展示元数据，不用200行预览覆盖完整文件。
+
+对话结束后chat_runtime._persist_result_artifact构造小型ResultArtifact，将工件ID、版本、校验信息、范围和预算内summary放进working_memory，并更新会话。对象不是完整250行CSV；其summary可以含预算内明细和全结果统计，不能说记忆里完全没有结果值。下载、分页、补读和换图使用已保存的同一授权工件；ResultArtifact对象和文件manifest不是同一个对象。
+
+源码本节重点读trusted_sql_tool._remember_result_artifact：validation不为valid直接return，columns和rows来自result.metadata而不是前端DataFrameComponent；save_result_csv绑定user/workspace/版本。声明工具成功不足以证明可保存可信工件。解释核验失败与查询结果合同失败不同：前者数据仍可保存/下载，后者不能成为可信复用工件。本轮只读当前代码，不重跑浏览器或改运行时；下一次复述再确认Day 4是否收尾。
