@@ -1395,3 +1395,17 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 `ObservedLlmService._explain_result()`把检查通过的`outcome.text`放进`LlmResponse.content`。`BudgetedChatHandler._tool_free_answer()`在结果追问中也走这条链路，等待核验后才发送正文和存会话，避免错误先流出再撤回。数字可核对不等于语义全对：多对象比较、币种换算、缺期趋势和确定因果需复核；复核本身仍可能漏检。
 
 下一学习单元仍只看这一个回答出口，先追踪`draft → checked → outcome.text → response.content`，再对照表格和工件。没有因工程通过而将用户的Day 4源码学习标记完成。工程测试与时延记录放项目验收文档，不混进本节问答。
+
+### 2026-10-28｜Day 4续学：模型正文与内部引用（待复述）
+
+本节只读`result_explanation.py`的`AnswerParagraph`和`AnswerDraft.text()`，不一次展开审核、修订、工件与前端全部实现。用SP=20 BRL、RJ=10 BRL的合成结果解释“查数后生成中文回答”的业务位置，不将教学数字当成Olist真实查询结果。
+
+模型返回的每个段落包含自由撰写的text、内容性质kind和内部evidence_refs。例如text为“SP这次贡献了20 BRL。”、kind为fact、引用为/sample_rows/0。引用指向本次给模型的证据行；kind是模型声明的内容性质，不是服务器已确认事实正确的标记。
+
+`AnswerParagraph(BaseModel)`与`AnswerDraft(BaseModel)`用于接收和校验结构。text至少一个字符，kind只能取三个规定值，evidence_refs为字符串列表，paragraphs至少一段；extra=forbid拒绝额外字段，strict=True限制类型自动转换。这些是格式约束，不会仅凭格式判断“SP=20”是否真实，也不发起模型或SQL调用。
+
+`AnswerDraft.text()`的真实实现为`return '\n\n'.join(p.text for p in self.paragraphs)`：按顺序取每段自己的text，中间插入空行，返回普通str；不把kind和evidence_refs一起输出，也不从统计里重新拼业务句式。它本身不审核事实。调用方在核验通过分支才使用`draft.text()`构造accepted结果，之后进入LlmResponse.content。本节只标出该衔接，下一小节再读check_answer。
+
+对应阅读`test_free_wording_is_returned_unchanged_without_review`：测试用不同措辞断言outcome.text等于模型原文，无疑点仅一次调用；这是受控Provider测试，不是新的真实模型评测。本轮不改运行时代码、不重跑实验，也不标Day 4完成。
+
+待复述两题：1. 两段text分别为“SP为20 BRL。”和“建议继续分析品类。”，draft.text()具体返回什么，是否包含kind和引用？2. 模型把SP的20写成10且其余JSON结构合法，为什么不能仅靠这两个BaseModel判定业务错误，应该在后续哪一环节核对？
