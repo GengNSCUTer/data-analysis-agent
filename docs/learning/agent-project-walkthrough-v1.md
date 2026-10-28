@@ -1409,3 +1409,9 @@ degraded的safe_to_display=True，不走上述raise；Runner在`if not validatio
 对应阅读`test_free_wording_is_returned_unchanged_without_review`：测试用不同措辞断言outcome.text等于模型原文，无疑点仅一次调用；这是受控Provider测试，不是新的真实模型评测。本轮不改运行时代码、不重跑实验，也不标Day 4完成。
 
 待复述两题：1. 两段text分别为“SP为20 BRL。”和“建议继续分析品类。”，draft.text()具体返回什么，是否包含kind和引用？2. 模型把SP的20写成10且其余JSON结构合法，为什么不能仅靠这两个BaseModel判定业务错误，应该在后续哪一环节核对？
+
+用户复述：text()返回正文、不包含kind和引用；BaseModel发现不了金额错误。结论正确，职责需补充：BaseModel校验结构/类型，不负责拆分或事实证明；text()负责连接正文，check_answer负责对照证据。随后解释AnswerCheck.errors与doubts：前者装明确错误，后者装待复核疑点，不直接改写正文。
+
+用户回答引用越界进入errors、没有错误疑点不需要再调用模型，均正确。第二点限于首次检查没有历史疑点；semantic_doubt_seen会记住此前的语义疑点，修订后即使当前doubts为空，仍需复核，不能通过删除风险措辞跳过检查。
+
+本节继续读generate_result_answer的控制流：for attempt in range(2)只做初稿和一次修订的检查，不代表固定调用模型两次；issues=checked.errors决定是否先修订，not issues且历史有语义疑点时复核，最后not issues才return outcome(draft.text(), accepted)。attempt=0允许构造一次revision并调用；attempt=1仍有问题则break，返回unverified提示。复核不是改写，修订才重新生成正文；调用均不提供SQL工具。待推演：初稿明确错误、修订通过且从无语义疑点时解释阶段调用几次？修订后仍错误时如何退出？本轮只读与归档，没有运行新测试或标记Day 4完成。
