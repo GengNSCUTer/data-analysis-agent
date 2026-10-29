@@ -1467,3 +1467,13 @@ recent_dialogue用于理解“前十”“不限制了”“再试一次”等�
 代码入口analysis_context.py:build的packet构造、chat_runtime中route_state添加context_packet、semantic_intent.py:prompt末尾分区拼接。读取test_summary_failure_keeps_all_unsummarised_originals_and_can_resume确认测试断言摘要失败仍保留40条原始消息；新任务、清空、版本漂移、并列排名等由现有回归覆盖。本轮实际执行test_analysis_state、test_analysis_context、test_result_reference、test_semantic_intent，共91 passed（5.98秒），不是全量浏览器或业务准确率。
 
 真实在线语义调用使用人工构造的2017年/SP/品类GMV/Top5状态和历史，再经过实际SemanticIntentInterpreter及resolve_state_intent。四例最终均符合预期：前十其他不变→保留SP及年份、top_n=10（2次调用，16.08秒）；不限制SP其他不变→只删州筛选（1次，13.11秒）；独立询问2018全平台有效订单总数→新任务、无旧州/分组/TopN（1次，6.08秒）；当前2018查询failed但摘要提及2017时再试一次→保留2018范围及SP、update_task（1次，8.68秒）。调用次数包含解释器自身重试，不将前十例说成首次即正确。未记录首轮原始输出，不能进一步断言其重试原因。探针没有查库、没有写业务数据或走浏览器，不证明最终SQL/结果正确，更不证明任意措辞都能处理。进度仍是Day 5学习中，下一小节按连贯流程解释后台摘要的生成与覆盖边界。
+
+### 2026-10-29｜Day 5：历史压缩的完整生命周期
+
+按请求读历史→回答→保存本轮消息→finally调度后台压缩→成功保存覆盖位置→下轮读取摘要加未覆盖原文串联。默认RequestBudget总请求64K、历史48K、未压缩原文超过24K触发、近期目标16K、摘要目标2K上限4K、单次摘要输入24K和60秒超时，均为代码默认且token估算，不等于提供方最大窗口或实际部署覆盖值。
+
+schedule只是安排任务，_compact_batch检查是否超阈值，不是每轮都调用摘要模型。按完整轮次保留近期原文，从最旧未摘要部分取一批，旧摘要加本批生成新的累计摘要；原文仍保留在app.messages，压缩改变下次模型输入，不删除聊天。source_message_end记录成功覆盖位置，例如索引0至39已摘要时从40继续；保存失败不前进。增量累计不是每次从头压缩整段历史，也不是只保留最后六轮。
+
+save_history_summary事务锁当前会话，核验user/workspace/task/版本、旧覆盖位置和源消息ID/index后，只修改摘要相关JSON字段，避免后台旧Conversation覆盖新对话。摘要生成失败保留旧摘要和未处理原文，本任务停止，后续请求结束后再调度。下轮总空间确实不足才尝试同步缓解，仍不足明确报错，不静默丢历史。超长单轮分片总结且整轮成功才提交，关服务取消任务但原文仍在数据库。
+
+摘要内容是分析目标、讨论与纠正、待解决与下一步、表达偏好，不是执行条件/结果事实。默认同会话一个后台任务、同构建器最多两个并发，独立计量上下文；摘要提示不能保证永不遗漏。测试覆盖20轮短对话不压缩、阈值后增量、失败无缺口、超长轮、失效任务写回拒绝、并发及关闭、硬预算同步处理。本轮实际test_analysis_context.py为18 passed（1.01秒），使用内存Store和受控摘要提供方，不验证真实LLM摘要质量或PostgreSQL事务实现，未重跑浏览器。下一步用户从build读取起点、_compact_batch成功保存和save_history_summary核验理解持久化覆盖关系，不重复讲整套状态补丁。
