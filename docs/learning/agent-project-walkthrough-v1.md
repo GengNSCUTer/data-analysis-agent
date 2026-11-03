@@ -1487,3 +1487,29 @@ save_history_summary事务锁当前会话，核验user/workspace/task/版本、�
 SQL请求超限时_ensure_context在具备重建回调时同步缓解历史、重建请求并检查，仍放不下明确失败；不是自动提高窗口。ContextBudgetFilter剥离旧轮工具轨迹，保留当前调用和对应返回，不按字符串硬切造成孤立tool消息。语义理解也有自己的超限压缩/重建入口，不误认为所有调用都走同一ensure分支。token估算不等于提供方精确计费。
 
 本轮六个定向受控测试通过（0.96秒）：真实请求缩减明细保留统计、当前工具配对与旧工具剥离、禁止第二次过滤层压缩、硬上限同步缓解不丢历史、系统开销迫使压缩、复核超预算保留原证据并隐藏草稿。未改运行时/未跑浏览器或真实摘要质量测试。待用户沿_check_context推演预算，再闭卷串联Day 5状态、引用、历史及摘要，不因测试完成标记掌握。
+
+### 2026-10-30｜Day 5：失败后的重试、旧结果复用与新结果保存
+
+用户对完整链路的复述基本正确：服务先恢复会话状态，再由语义解释提出时间修改，应用补丁，生成查询计划，生成候选SQL，经过安全和结果校验，最后回答。需要补齐三个边界。
+
+第一，恢复的不是一份混在一起的“记忆”。`ConversationStore`恢复当前`AnalysisState`、近期/摘要历史和结果工件引用；`ResultArtifactStore`保存的是上一次成功查询的完整CSV及manifest。假设2017年查询成功、2018年查询失败，当前状态可以是2018年且处于failed，但旧工件仍是2017年的成功结果。旧工件不能自动当作2018年的答案。
+
+第二，模型不是直接修改状态。语义模型提出`action`和`state_patch`，`resolve_state_intent()`负责读取、验证并调用`AnalysisState.apply_patch()`；`apply_patch()`用不可变替换保留没有修改的指标、维度和筛选，再增加版本。状态通过服务端校验后，才进入新的QueryPlan。用户说“按刚才条件再试一次”时，应沿当前失败的2018状态重新查询；只有明确说“查看上一份成功结果”时，才走`result_followup`/复用分支读取2017工件，不生成新SQL。
+
+第三，线上QueryPlan与离线数据集的`QuerySpec`不是同一个东西。线上QueryPlan由当前AnalysisState、Catalog和用户问题整理出来，随后转成给SQL模型的受控提示；这里的“render”通常是把计划整理成模型输入，不是离线`QuerySpec`的deterministic Gold SQL renderer。模型返回候选SQL工具调用后，依次经过计划覆盖检查、`SqlPolicy` AST安全检查、PostgreSQL reader role、`ResultContract/ResultValidator`结果和业务形状检查；只有有效结果才生成新的ResultArtifact、更新成功状态并交给回答模型。失败时保留旧工件，但不把旧工件数值混入新问题的回答。
+
+本轮的核心判断是：`AnalysisState`回答“当前想查什么”，`ResultArtifact`回答“过去哪次查询已经查到了什么”，二者必须通过范围、workspace、数据/指标版本和状态校验后才能关联。这样既支持连续下钻，也避免失败重试时误用旧年份结果。本轮为学习归档，没有修改运行时代码或新增测试。
+
+### 2026-11-02｜连贯复盘：结果状态与 SQL 一次修复
+
+用户正确推演取消月粒度只移除time结果列、保留SP筛选和2018时间范围；正确回答degraded的safe_to_display=True、safe_to_answer=False。第二题回答需纠正：ToolResult.success=True不仅不证明业务正确，甚至不保证要求的列齐全，因为degraded表格也可正常展示。可信工件保存要求明确validation.state=valid，但valid仍不构成完整语义证明。
+
+本轮按用户要求把相关功能完整串讲，不继续按变量拆碎。沿TrustedRunSqlTool.execute追踪：原候选计划检查→实际执行/错误归类→决定是否修复→将原SQL、安全错误、Catalog和当前计划交修复模型→修复候选AST策略→再次计划检查→重新走Runner权限/预算/结果校验→成功处理或终止。计划不匹配也可以触发一次修复，原候选不会先执行；缺指标造成的结果拒绝不走自动SQL修复，degraded可展示但不保存可信工件。权限、超时和连接错误不调用修复模型，不通过删除筛选或扩大权限换取成功。请求metadata的sql_repair_attempted限制跨工具调用的一次修复，修复后的重执行调用父类execute而非递归调用自身，失败后没有第三次候选。
+
+### 2026-11-02｜Day 6开始：在线业务评测的完整判定链
+
+用户正确复述修复SQL删SP会在QueryPlan对照处停止，第二次执行失败直接结束、不再次修复。沿TheLook60题报告进入质量评测：YAML保存问题、独立参考SQL或不执行/复用要求，浏览器走正常产品请求链，测试器下载实际完整CSV，再使用独立reader执行参考SQL，比较全部结果与必要排名、图表、工件复用和分页。参考SQL用于测试器，不作为待测问题的模型答案输入。
+
+主要阅读scripts/verify_workspace_onboarding.py的compare_values和run_partition。数值比较使用assert_frame_equal，并按配置容差处理数值，不比较SQL字符串是否一样；排名另查排序，边界题查零SQL和预期状态，换图查同一工件且零SQL。60题首轮复核58题，两项定向通过是混合证据，不能写成重新全量60/60。该历史评测不证明后来更改的自主解释正文质量，需按被测版本与实际断言描述范围。本轮只读既有证据，不运行付费模型或重跑浏览器；待用户从正常数值题和换图题分别解释通过条件。
+
+源码阅读入口trusted_sql_tool.py:execute、sql_repair.py:sanitize_sql_error/build_repair_prompt/OneShotSqlRepair；对照已有test_execution_error_is_repaired_once_and_reexecuted、test_repair_that_drops_confirmed_filter_is_not_executed、test_failed_repaired_execution_does_not_generate_another_candidate。测试分别断言一个修复请求/两次执行、删SP的新SQL零执行、修复重执行失败不再次生成。这里只阅读测试断言，未重新运行测试或调用在线模型。此段为Day3/4与Day5整链衔接复盘，不重启工程任务；后续主线进入Day6质量评测，暂不标记用户已掌握本次源码。
