@@ -1,6 +1,6 @@
 # TheLook：按通用清单填写的接入实例
 
-配置入口：[workspace YAML](../../data/workspaces/thelook.yaml)、[Catalog](../../data/catalog/thelook_catalog_v2.yaml)。
+配置入口：[workspace YAML](../../data/workspaces/thelook.yaml)、[在线Catalog](../../data/catalog/thelook_online_v1.yaml)。
 按[通用模板](../templates/workspace/README.md)逐项填写；不是TheLook专用Agent。
 
 | 项目 | 本库填写结果 |
@@ -12,7 +12,7 @@
 | 账号 | `daa_thelook_reader`只读安全视图；`daa_thelook_app_writer`只写app元数据，不写或读取业务数据 |
 | 关联原则 | Catalog的8条多对一关联；订单/商品行/库存不能混为同一粒度。商品行到库存必须使用inventory_item_id=id，不能用product_id造成多行放大 |
 | 维度来源 | 品类/品牌/部门优先商品维度；库存指标可直接用库存快照列。注册用户来源和事件来源是不同概念 |
-| 构成图 | workspace声明10个可相加金额/数量指标；比率、均值、去重客户数与会话数不作为构成图指标。图表仍受维度、非负值和分类数量限制 |
+| 构成图 | workspace声明12个可相加金额/数量指标；比率、均值、去重客户数与会话数不作为构成图指标。图表仍受维度、非负值和分类数量限制 |
 | 默认分组范围 | 只返回满足指标过滤条件的事实分组，不自动把无完成订单的用户城市补0；用户明确要求完整维度补全时再单独处理 |
 | 未支持 | 利润、币种换算、广告归因/转化率、库存历史快照趋势、原始个人明细；没有可信定义时澄清或拒绝 |
 
@@ -38,7 +38,10 @@
 关联键只允许内部关联/去重，不能输出用户ID、邮箱、地址、SKU或精确坐标。
 查看完整列含义请读Catalog，避免再复制一份易漂移的表列清单。
 
-## 20个指标需要确认的公式
+## 当前24个指标的公式
+
+2026-11-04增加的4项及快照能力检查见[在线指标说明](online-metrics-v1.md)；历史v2实验
+Catalog不修改。在线版本为`thelook-online-v1 / 0.3.2-online`。
 
 | 指标 | 口径 | 时间归属 |
 | --- | --- | --- |
@@ -62,11 +65,15 @@
 | event_count | 事件行数，包含匿名 | events.created_at |
 | unique_session_count | 事件session_id去重，不输出session明细 | events.created_at |
 | registered_user_count | 注册用户行数 | users.created_at |
+| total_order_count | 所有状态订单去重数 | orders.created_at |
+| cancellation_rate | Cancelled订单数/全部状态订单数 | orders.created_at |
+| period_repeat_customer_rate | 同期≥2笔Complete订单用户数/≥1笔Complete订单用户数 | orders.created_at，各桶独立 |
+| current_unsold_inventory_cost | sold_at为空库存单元的cost之和 | 仅当前数据快照，不支持历史期间 |
 
 每个指标允许的分组以Catalog为准。例如订单级客单价没有“按商品品类”的分摊定义，不能擅自编造。
 入库数和售出数按不同时间归属，即使同一个月份也不能把二者当作同一批库存。
 
-## 本轮验证方式
+## 2026-10-20原20指标验证方式（历史）
 
 先用 `scripts/check_workspace.py --database` 核对配置、实际列、角色，再运行新编60个在线开发问题。
 这些问题不来自模型protected test。可计算查询使用单独编写的参考SQL对比已保存CSV，

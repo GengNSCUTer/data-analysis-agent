@@ -1,6 +1,6 @@
 # 新编在线开发题，不用于训练或protected final；reference_sql由业务定义独立编写。
 workspace_id: thelook-demo
-metric_count: 20
+metric_count: 24
 categories: {metric: 20, grouped: 10, time: 8, continuous: 10, boundary: 8, output: 4}
 cases:
   - id: metric-01

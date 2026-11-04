@@ -4,5 +4,6 @@ include infra/postgres/analytics.sql infra/postgres/security.sql
 include infra/postgres/synthetic.sql
 include infra/postgres/app.sql
 include data/catalog/thelook_catalog_v2.yaml data/catalog/thelook_runtime_shape_bounds_v1.json
+include data/catalog/olist_online_v1.yaml data/catalog/thelook_online_v1.yaml
 include data/workspaces/*.yaml
 include frontends/webcomponent/dist/vanna-components.js

@@ -1,0 +1,86 @@
+workspace_id: thelook-demo
+metric_count: 24
+categories: {metric: 5, continuous: 5, grouped: 3, boundary: 3, empty: 1}
+cases:
+  - id: t-total
+    category: metric
+    question: 全部时间总共有多少订单？包括所有状态，不只看已完成。
+    reference_sql: SELECT COUNT(DISTINCT order_id) AS total_order_count FROM analytics.orders
+  - id: t-cancel
+    category: metric
+    question: 全部订单的取消率是多少？按全部状态订单作分母。
+    reference_sql: SELECT COUNT(*) FILTER(WHERE status='Cancelled')::numeric/NULLIF(COUNT(*),0) AS cancellation_rate FROM analytics.orders
+  - id: t-repeat
+    category: metric
+    question: 全部时间的期间完成订单复购客户率是多少？
+    reference_sql: WITH customers AS (SELECT user_id,COUNT(DISTINCT order_id) AS orders FROM analytics.orders WHERE status='Complete' AND user_id IS NOT NULL GROUP BY user_id) SELECT COUNT(*) FILTER(WHERE orders>=2)::numeric/NULLIF(COUNT(*),0) AS period_repeat_customer_rate FROM customers
+  - id: t-cost
+    category: metric
+    question: 当前数据快照里的未售库存成本合计是多少？不要推断币种。
+    reference_sql: SELECT COALESCE(SUM(cost),0) AS current_unsold_inventory_cost FROM analytics.inventory_items WHERE sold_at IS NULL
+  - id: t-aov-existing
+    category: metric
+    question: 全部时间的平均完成订单金额是多少？先按订单合计商品行成交价，再算平均。
+    reference_sql: WITH amounts AS (SELECT o.order_id,SUM(i.sale_price) AS amount FROM analytics.orders o JOIN analytics.order_items i ON i.order_id=o.order_id WHERE o.status='Complete' GROUP BY o.order_id) SELECT AVG(amount) AS average_order_value FROM amounts
+  - id: t-inventory-dept
+    category: continuous
+    conversation_group: inventory
+    question: 按商品部门统计当前未售库存成本，画柱状图。不限定历史时间。
+    chart: bar
+    reference_sql: SELECT product_department,SUM(cost) AS current_unsold_inventory_cost FROM analytics.inventory_items WHERE sold_at IS NULL GROUP BY product_department
+  - id: t-inventory-filter
+    category: continuous
+    conversation_group: inventory
+    question: 只看Women部门，取消分组，给我合计。
+    reference_sql: SELECT SUM(cost) AS current_unsold_inventory_cost FROM analytics.inventory_items WHERE sold_at IS NULL AND product_department='Women'
+  - id: t-inventory-category
+    category: continuous
+    conversation_group: inventory
+    question: 部门筛选不变，按品类列出成本最高的前五名，画柱状图。
+    chart: bar
+    reference_sql: SELECT product_category,SUM(cost) AS current_unsold_inventory_cost FROM analytics.inventory_items WHERE sold_at IS NULL AND product_department='Women' GROUP BY product_category ORDER BY current_unsold_inventory_cost DESC LIMIT 5
+  - id: t-inventory-chart
+    category: continuous
+    conversation_group: inventory
+    question: 只把刚才这前五名换成横向条形图，不重新查库。
+    chart: horizontal_bar
+    reuse: true
+  - id: t-inventory-refresh
+    category: continuous
+    conversation_group: inventory
+    refresh: true
+    question: 不重新查库，解释刚才的库存成本结果为什么不能当作利润，给一点库存管理建议。
+    reuse: true
+  - id: t-repeat-months
+    category: grouped
+    question: 按月计算2023年的期间完成订单复购客户率，每个月独立算，不累计。
+    reference_sql: WITH customers AS (SELECT DATE_TRUNC('month',created_at AT TIME ZONE 'UTC') AS time,user_id,COUNT(DISTINCT order_id) AS orders FROM analytics.orders WHERE status='Complete' AND user_id IS NOT NULL AND created_at>='2023-01-01 00:00:00+00' AND created_at<'2024-01-01 00:00:00+00' GROUP BY 1,2) SELECT time,COUNT(*) FILTER(WHERE orders>=2)::numeric/NULLIF(COUNT(*),0) AS period_repeat_customer_rate FROM customers GROUP BY time
+  - id: t-cancel-and-total
+    category: grouped
+    pagination: true
+    question: 按客户州同时统计全部订单数和取消率，使用全部时间，不要图表。
+    reference_sql: SELECT u.state AS customer_state,COUNT(DISTINCT o.order_id) AS total_order_count,COUNT(DISTINCT o.order_id) FILTER(WHERE o.status='Cancelled')::numeric/NULLIF(COUNT(DISTINCT o.order_id),0) AS cancellation_rate FROM analytics.orders o JOIN analytics.users u ON u.id=o.user_id GROUP BY u.state
+  - id: t-cost-centers
+    category: grouped
+    question: 按配送中心统计当前未售库存成本，取成本最高的前五名画环形图。
+    chart: donut
+    reference_sql: SELECT d.name AS distribution_center,SUM(i.cost) AS current_unsold_inventory_cost FROM analytics.inventory_items i JOIN analytics.distribution_centers d ON d.id=i.product_distribution_center_id WHERE i.sold_at IS NULL GROUP BY d.name ORDER BY current_unsold_inventory_cost DESC LIMIT 5
+  - id: t-snapshot-history
+    category: boundary
+    question: 按月统计2023年当前未售库存成本的历史趋势，不要改成入库成本。
+    no_sql: true
+    expected_routes: [clarification_required, unsupported]
+  - id: t-snapshot-count-history
+    category: boundary
+    question: 查询2023年1月份当时的未售库存单元数，不是当前快照。
+    no_sql: true
+    expected_routes: [clarification_required, unsupported]
+  - id: t-sensitive
+    category: boundary
+    question: 返回所有用户原始user_id和每个人的订单明细，不要聚合。
+    no_sql: true
+    expected_routes: [clarification_required, unsupported, out_of_scope, unauthorized]
+  - id: t-zero-orders
+    category: empty
+    question: 2000年全部订单数是多少？包含所有状态。
+    reference_sql: SELECT COUNT(DISTINCT order_id) AS total_order_count FROM analytics.orders WHERE created_at>='2000-01-01 00:00:00+00' AND created_at<'2001-01-01 00:00:00+00'

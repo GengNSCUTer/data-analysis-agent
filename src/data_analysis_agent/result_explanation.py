@@ -21,12 +21,15 @@ ANSWER_UNVERIFIED = (
 )
 ANSWER_PROMPT = """
 根据用户问题、查询范围和服务端证据，自主撰写简洁中文回答，先回答当前问题。
+未要求展开时通常用两到四句，不重复表格、说明绘图步骤或增加无关计算。
 按需提供事实、可能解释或建议，不必凑齐三类；允许自然措辞、列表和Markdown。
 只返回JSON，不加Markdown围栏：{"paragraphs":[{"text":"SP州销售额为20。","kind":"fact","evidence_refs":["/sample_rows/0"]}]}。
 text就是用户看到的原文，服务端不会改成句式模板。kind为fact、hypothesis、recommendation。
 事实引用支持该段的证据JSON路径，如/sample_rows/0、/statistics/gmv/maximum_row、
 /statistics/gmv/sum_of_returned_rows、/analyses/0。数组下标从0开始。
-引用只能来自本次提供的sample_rows、statistics、analyses、time_endpoints、metric_semantics、column_labels和结果行数/coverage范围字段。
+只使用证据中实际存在的路径。不确定子路径时引用确实存在的父对象，如/statistics/gmv或/analyses/0；不要编造字段。
+指标口径引用/metric_definitions/实际指标ID；它解释计算定义，不是观测数值。范围/单位可引用/scope、/metric_semantics或/column_labels。
+引用只能来自本次提供的sample_rows、statistics、analyses、time_endpoints、metric_semantics、metric_definitions、column_labels和结果行数/coverage范围字段。
 尽量一个独立事实一段。界面已经提供数据表；除非用户明确要求在正文逐行列出，不要重复整张表。
 不能引用一个字段却替换它的实体、指标或单位。
 实体名称优先保留来源值。可以使用能确认对应的常见译名或别名；不确定州代码全称时保留代码，不能猜。
@@ -148,6 +151,7 @@ _REF_ROOTS = {
     "scope",
     "top_n",
     "metric_semantics",
+    "metric_definitions",
     "column_labels",
 }
 _NUMBER = re.compile(r"(?<![0-9_.])[-+]?\d+(?:,\d{3})*(?:\.\d+)?\s*(?:万|亿)?\s*[%％]?")
@@ -412,6 +416,9 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
                     and not any(
                         r.startswith("/analyses") for r in paragraph.evidence_refs
                     )
+                    and not (not numbers and any(
+                        r.startswith("/metric_definitions/") for r in paragraph.evidence_refs
+                    ))
                     and not unit_conversion
                     and not re.search(
                         r"约|接近|不到|超过|少于|不足|百万|千万|百分之", numeric_text

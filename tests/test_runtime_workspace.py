@@ -101,7 +101,7 @@ def test_server_uses_configured_workspace_for_storage_and_writer(tmp_path, monke
     server.create_app()
     assert stores[0].default_workspace_id == "thelook-demo"
     assert stores[0].default_dataset_version == "thelook-kaggle-mirror-v1-20260908"
-    assert stores[0].default_metric_version == "0.2-frozen"
+    assert stores[0].default_metric_version == "0.3.2-online"
     assert stores[0].settings.writer_user == "daa_thelook_app_writer"
 
 

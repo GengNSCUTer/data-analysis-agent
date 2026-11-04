@@ -1124,6 +1124,7 @@ class BudgetedChatHandler(ChatHandler):
             inspections=intent.result_inspections if intent else (),
             query_scope=artifact.query_scope,
             metric_semantics=catalog.metric_semantics,
+            metric_definitions={m: catalog.metrics_by_id[m].description for m in artifact.metric_ids},
             max_tokens=CURRENT_BUDGET.get().result_evidence_limit() if CURRENT_BUDGET.get() else None,
         )
         usage = CURRENT_BUDGET.get()

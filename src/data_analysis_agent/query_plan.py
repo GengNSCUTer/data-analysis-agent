@@ -272,6 +272,14 @@ class QueryPlan:
             extract_absolute_range(question) or cls._time_range(state)
         )
         has_explicit_range = bool(resolved_range)
+        snapshot_metrics = [metric.name for metric in metrics if metric.temporal_mode == "current_snapshot"]
+        if snapshot_metrics and (has_explicit_range or time_grain):
+            return QueryPlanPreflight(
+                False,
+                "current_snapshot_has_no_history",
+                f"{'、'.join(snapshot_metrics)}只有当前数据快照，不能按历史日期或时间趋势查询。"
+                "可以查看当前快照，或改查入库量、已售库存等有时间记录的指标。",
+            )
         if time_grain == "day" and not has_explicit_range and not isinstance(semantic, Mapping):
             return QueryPlanPreflight(
                 False,

@@ -37,6 +37,33 @@ def answer(text, refs=("/sample_rows/0",), kind="fact"):
     )
 
 
+@pytest.mark.asyncio
+async def test_catalog_metric_definition_is_evidence_for_formula_but_not_an_observed_value():
+    summary = build_result_evidence(pd.DataFrame({"period_repeat_customer_rate": [0.2]}),
+        required_columns=("period_repeat_customer_rate",), metric_ids=("period_repeat_customer_rate",),
+        metric_definitions={"period_repeat_customer_rate": "同期至少2笔有效订单的客户数/至少1笔有效订单的客户数，不是终身老客率。"},
+        metric_semantics={"period_repeat_customer_rate": {"kind": "rate", "unit": "比例0至1"}})
+    draft = answer("期间复购客户率按同期至少2单的客户占至少1单客户的比例计算，不是终身老客率。",
+                   refs=("/metric_definitions/period_repeat_customer_rate",))
+    checked = check_answer(AnswerDraft.model_validate_json(draft), parse_result_evidence(summary))
+    assert not checked.errors and checked.doubts
+    outcome, requests = await run_answer(summary, [draft, '{"verdict":"supported","issues":[]}'])
+    assert outcome.status == "accepted" and outcome.review_count == 1
+    assert "metric_definitions" in requests[1].messages[-1].content
+    # A definition's threshold must never become an unreviewed observed rate.
+    wrong = answer("期间复购客户率是2。", refs=("/metric_definitions/period_repeat_customer_rate",))
+    checked = check_answer(AnswerDraft.model_validate_json(wrong), parse_result_evidence(summary))
+    assert checked.errors or checked.doubts
+
+
+def test_unselected_metric_definitions_are_not_sent_to_result_explanation():
+    summary = build_result_evidence(pd.DataFrame({"gmv": [20]}), required_columns=("gmv",), metric_ids=("gmv",),
+                                   metric_definitions={"gmv": "有效商品行价格合计", "secret_metric": "不要泄漏"})
+    assert parse_result_evidence(summary)["metric_definitions"] == {"gmv": "有效商品行价格合计"}
+    wrong = answer("GMV为999。", refs=("/sample_rows/0", "/metric_definitions/gmv"))
+    assert check_answer(AnswerDraft.model_validate_json(wrong), parse_result_evidence(summary)).errors
+
+
 def check(text, summary, refs=("/sample_rows/0",), kind="fact"):
     return check_answer(
         AnswerDraft.model_validate_json(answer(text, refs, kind)),

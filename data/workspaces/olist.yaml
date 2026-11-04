@@ -2,10 +2,35 @@ workspace_id: olist-demo
 dataset_id: olist-brazilian-ecommerce
 display_name: Olist 电商分析
 description: 巴西 Olist 公开电商快照；不是中国真实平台交易。若使用 synthetic-olist-v1，则是自构造演示数据。
-catalog: ../catalog/olist_catalog_v3.yaml
+catalog: ../catalog/olist_online_v1.yaml
 reader_role: daa_analytics_reader
 writer_role: daa_app_writer
-additive_metric_ids: [gmv, paid_order_count, item_count, freight_amount, canceled_order_count, delivered_order_count, unavailable_order_count, review_count]
+additive_metric_ids: [gmv, paid_order_count, item_count, freight_amount, canceled_order_count, delivered_order_count, unavailable_order_count, review_count, total_order_count, payment_amount]
+dimensions:
+  customer_state:
+    aliases: [客户州, 各州, 按州, 每个州, 地区, 省份]
+    sources: [[dim_customers, customer_state]]
+    max_cardinality: 27
+  customer_city:
+    aliases: [客户城市, 各城市, 按城市, 城市]
+    sources: [[dim_customers, customer_city]]
+    max_cardinality: 4119
+  seller_state:
+    aliases: [卖家州, 商家州]
+    sources: [[dim_sellers, seller_state]]
+    max_cardinality: 27
+  seller_city:
+    aliases: [卖家城市, 商家城市]
+    sources: [[dim_sellers, seller_city]]
+    max_cardinality: 612
+  product_category_name:
+    aliases: [商品品类, 商品类目, 品类, 类目]
+    sources: [[dim_products, product_category_name], [dim_category_translation, product_category_name]]
+    max_cardinality: 74
+  payment_type:
+    aliases: [支付方式, 支付类型]
+    sources: [[fact_payments, payment_type]]
+    max_cardinality: 8
 starter_questions:
   - {label: 州前五, question: 按客户州统计有效订单数前五名，并生成柱状图}
   - {label: 品类 GMV, question: 按商品品类统计 GMV}

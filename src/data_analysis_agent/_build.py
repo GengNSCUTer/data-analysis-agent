@@ -13,6 +13,8 @@ def copy_assets(destination):
         "catalog/olist_catalog.yaml": ROOT / "data/catalog/olist_catalog.yaml",
         "catalog/olist_catalog_v3.yaml": ROOT / "data/catalog/olist_catalog_v3.yaml",
         "catalog/thelook_catalog_v2.yaml": ROOT / "data/catalog/thelook_catalog_v2.yaml",
+        "catalog/olist_online_v1.yaml": ROOT / "data/catalog/olist_online_v1.yaml",
+        "catalog/thelook_online_v1.yaml": ROOT / "data/catalog/thelook_online_v1.yaml",
         "catalog/thelook_runtime_shape_bounds_v1.json": ROOT / "data/catalog/thelook_runtime_shape_bounds_v1.json",
         "workspaces/olist.yaml": ROOT / "data/workspaces/olist.yaml",
         "workspaces/thelook.yaml": ROOT / "data/workspaces/thelook.yaml",

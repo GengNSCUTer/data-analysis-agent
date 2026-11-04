@@ -65,7 +65,7 @@ def initialize(*, synthetic: bool = False, metadata_only: bool = False) -> dict:
             for role, password in ((workspace.reader_role, reader_password), (workspace.writer_role, writer_password)):
                 handle.write(":".join(escape(value) for value in (host, port, database, role, password)) + "\n")
         if synthetic:
-            catalog = yaml.safe_load((RESOURCES / "catalog/olist_catalog_v3.yaml").read_text(encoding="utf-8"))
+            catalog = yaml.safe_load((RESOURCES / "catalog/olist_online_v1.yaml").read_text(encoding="utf-8"))
             catalog["dataset_version"] = SYNTHETIC_VERSION
             catalog["description"] = "Self-generated synthetic commerce demo, using the Olist-shaped schema; not real Olist transactions."
             (root / "synthetic-catalog.yaml").write_text(yaml.safe_dump(catalog, allow_unicode=True, sort_keys=False), encoding="utf-8")

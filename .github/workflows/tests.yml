@@ -64,6 +64,7 @@ jobs:
           tests/test_trusted_sql_tool.py \
           tests/test_runtime_paths.py \
           tests/test_runtime_workspace.py \
+          tests/test_online_metrics.py \
           tests/test_workspace_onboarding.py \
           tests/test_semantic_catalog.py \
           tests/test_semantic_intent.py \

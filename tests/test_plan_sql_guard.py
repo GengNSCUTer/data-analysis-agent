@@ -3,6 +3,31 @@ import pytest
 from data_analysis_agent.plan_sql_guard import sql_plan_mismatch
 
 
+@pytest.mark.parametrize("condition,accepted", [
+    ("category IS NOT NULL", False),
+    ("category IS NOT NULL AND price>0", False),
+    ("category IS NOT NULL OR price>0", True),
+    ("NOT (category IS NOT NULL)", True),
+    ("price IS NOT NULL", True),
+    ("TRUE", True),
+])
+def test_unrequested_missing_dimension_filter_is_checked_without_blocking_metric_null_rules(condition, accepted):
+    sql = f"WITH a AS (SELECT category AS kind,SUM(price) AS amount FROM items WHERE {condition} GROUP BY category) SELECT kind AS product_category,amount AS gmv FROM a"
+    plan = {"query_plan_version": "query-plan-v2", "query_mode": "aggregate", "metric_ids": ["gmv"], "dimensions": ["product_category"]}
+    schema = {"items": {"category": "TEXT", "price": "NUMERIC"}}
+    assert (sql_plan_mismatch(sql, plan, column_schema=schema) is None) is accepted
+
+
+def test_unused_null_filter_is_ignored_and_explicit_dimension_filter_is_allowed():
+    schema = {"items": {"category": "TEXT", "price": "NUMERIC"}}
+    plan = {"query_plan_version": "query-plan-v2", "query_mode": "aggregate", "metric_ids": ["gmv"], "dimensions": ["product_category"]}
+    good = "WITH unused AS (SELECT category,SUM(price) FROM items WHERE category IS NOT NULL GROUP BY category) SELECT category AS product_category,SUM(price) AS gmv FROM items GROUP BY category"
+    assert sql_plan_mismatch(good, plan, column_schema=schema) is None
+    filtered = "SELECT category AS product_category,SUM(price) AS gmv FROM items WHERE category='A' AND category IS NOT NULL GROUP BY category"
+    plan["filters"] = [{"dimension": "product_category", "value": "A", "sources": [{"table": "items", "column": "category"}]}]
+    assert sql_plan_mismatch(filtered, plan, column_schema=schema) is None
+
+
 @pytest.mark.parametrize('sql,allowed', [
     ('SELECT SUM(i.price) AS gmv FROM analytics.fact_order_items i', True),
     ("SELECT SUM(i.price) FILTER (WHERE p.payment_type='credit_card') AS gmv FROM analytics.fact_order_items i JOIN analytics.fact_payments p ON p.order_id=i.order_id", True),

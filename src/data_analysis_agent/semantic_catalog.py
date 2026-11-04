@@ -123,6 +123,7 @@ class MetricDefinition:
     allowed_dimensions: tuple[str, ...]
     recommended_chart: str
     role_visibility: frozenset[str]
+    temporal_mode: Literal["event", "current_snapshot"] = "event"
     result_value_constraints: Mapping[str, float | bool] = field(
         default_factory=lambda: MappingProxyType({})
     )
@@ -274,6 +275,7 @@ class ResultContract:
     join_source_keys: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     join_source_grains: Mapping[str, str] = field(default_factory=dict)
     metric_value_sources: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    metric_definitions: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_selection(
@@ -366,6 +368,7 @@ class ResultContract:
             join_source_keys={t.table_id: catalog.row_keys[t.table_id] for t in selection.tables if t.table_id in catalog.row_keys},
             join_source_grains={t.table_id: t.grain for t in selection.tables},
             metric_value_sources=cls._amount_value_sources(selection, catalog),
+            metric_definitions={m.metric_id: m.description for m in selection.metrics},
         )
 
     @staticmethod
@@ -466,6 +469,7 @@ class ResultContract:
             result["join_source_keys"] = {t: list(keys) for t, keys in self.join_source_keys.items()}
             result["join_source_grains"] = dict(self.join_source_grains)
             result['metric_value_sources'] = {m: dict(rule) for m, rule in self.metric_value_sources.items()}
+            result["metric_definitions"] = dict(self.metric_definitions)
         return result
 
     def as_evidence(self) -> dict[str, Any]:
@@ -690,7 +694,7 @@ class CatalogLoader:
             "recommended_chart", "role_visibility",
         }
         missing = required - set(item)
-        unknown = set(item) - required - {"dimension_policies", "result_value_constraints"}
+        unknown = set(item) - required - {"dimension_policies", "result_value_constraints", "temporal_mode"}
         if missing or unknown:
             detail = []
             if missing:
@@ -722,6 +726,11 @@ class CatalogLoader:
             f"{metric_id}.dimension_policies",
             allowed_dimensions=allowed_dimensions,
         )
+        temporal_mode = item.get("temporal_mode", "event")
+        if temporal_mode not in {"event", "current_snapshot"}:
+            raise CatalogValidationError(f"invalid temporal_mode for {metric_id}")
+        if temporal_mode == "current_snapshot" and "date" in allowed_dimensions:
+            raise CatalogValidationError(f"current snapshot cannot declare date grouping: {metric_id}")
         return MetricDefinition(
             metric_id=metric_id,
             name=self._nonempty(item["name"], f"{metric_id}.name"),
@@ -731,10 +740,11 @@ class CatalogLoader:
             time_field=time_field,
             source_tables=source_tables,
             source_columns=source_columns,
-            default_filters=self._strings(item["default_filters"], f"{metric_id}.default_filters"),
+            default_filters=self._strings(item["default_filters"], f"{metric_id}.default_filters", allow_empty=True),
             allowed_dimensions=allowed_dimensions,
             recommended_chart=self._nonempty(item["recommended_chart"], f"{metric_id}.recommended_chart"),
             role_visibility=roles,
+            temporal_mode=temporal_mode,
             result_value_constraints=self._result_value_constraints(
                 item.get("result_value_constraints", {}), metric_id
             ),
@@ -904,7 +914,9 @@ class CatalogLoader:
         return value
 
     @staticmethod
-    def _strings(value: Any, label: str) -> tuple[str, ...]:
+    def _strings(value: Any, label: str, *, allow_empty: bool = False) -> tuple[str, ...]:
+        if allow_empty and isinstance(value, (list, tuple)) and not value:
+            return ()
         values = CatalogLoader._sequence(value, label)
         if any(not isinstance(item, str) or not item.strip() for item in values):
             raise CatalogValidationError(f"{label} must contain non-empty strings")

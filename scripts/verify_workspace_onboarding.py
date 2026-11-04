@@ -59,7 +59,19 @@ def case_groups(suite, selected=None):
     return [group for group in groups.values() if not selected or any(case["id"] in selected for case in group)]
 
 
-def compare_values(observed, expected):
+def compare_values(observed, expected, *, null_labels=None, label_aliases=None):
+    # Some displays name the missing-dimension group. This fixture-owned
+    # mapping changes only its label, never row counts or numeric values.
+    if null_labels:
+        observed, expected = observed.copy(), expected.copy()
+        for column, label in null_labels.items():
+            observed[column] = observed[column].replace(label, None)
+            expected[column] = expected[column].replace(label, None)
+    if label_aliases:
+        observed, expected = observed.copy(), expected.copy()
+        for column, mapping in label_aliases.items():
+            observed[column] = observed[column].replace(mapping)
+            expected[column] = expected[column].replace(mapping)
     assert_frame_equal(canonical(observed), canonical(expected), check_dtype=False,
                        check_exact=False, rtol=1e-7, atol=1e-7)
 
@@ -120,6 +132,8 @@ def run_partition(args, suite, groups, worker):
                     results.append(result)
                     started = time.monotonic()
                     try:
+                        if spec.get("refresh"):
+                            page.reload(wait_until="networkidle")
                         page.wait_for_function("() => !document.querySelector('vanna-chat').shadowRoot.querySelector('textarea.message-input').disabled")
                         question = spec["question"]
                         chat.locator("textarea.message-input").fill(question)
@@ -141,6 +155,10 @@ def run_partition(args, suite, groups, worker):
                         (output / f"{spec['id']}.sql.json").write_text(audits.to_json(orient="records", force_ascii=False, indent=2))
                         ct = trace["catalog_trace"] or {}
                         result.update({"termination_reason": trace["termination_reason"], "sql_calls_used": int(trace["sql_calls_used"] or 0), "route_state": ct.get("route_state")})
+                        explanation = ct.get("result_explanation") or {}
+                        if explanation:
+                            result["explanation"] = {key: explanation.get(key) for key in
+                                                     ("answer_status", "review_count", "revision_count", "issue_codes", "calls")}
                         artifact = detail.get("trusted_result_artifact")
                         if spec.get("no_sql"):
                             assert result["sql_calls_used"] == 0, "Unexpected SQL for boundary request"
@@ -164,7 +182,14 @@ def run_partition(args, suite, groups, worker):
                             expected = query(spec["reference_sql"]) if spec.get("reference_sql") else previous_values
                             if spec.get("reference_sql"):
                                 (output / f"{spec['id']}.expected.csv").write_text(expected.to_csv(index=False))
-                            compare_values(observed, expected)
+                            aliases = {}
+                            for column, sql in spec.get("label_alias_queries", {}).items():
+                                names = query(sql).dropna()
+                                assert names.groupby("alias")["canonical"].nunique().max() <= 1, "Ambiguous label aliases"
+                                aliases[column] = dict(zip(names["alias"], names["canonical"]))
+                            compare_values(observed, expected, null_labels=spec.get("null_labels"), label_aliases=aliases)
+                            if aliases:
+                                result["independent_label_mapping"] = list(aliases)
                             if spec.get("reference_sql"):
                                 compare_ranking(observed, spec["reference_sql"])
                             result["independent_values"] = "passed"
@@ -181,11 +206,11 @@ def run_partition(args, suite, groups, worker):
                                 assert preview.ok, "Second result page unavailable"
                                 page_data = preview.json()
                                 assert page_data["total_rows"] == len(observed)
-                                assert page_data["cursor"] == 200 and page_data["page_rows"] == 200
+                                assert page_data["cursor"] == 200 and page_data["page_rows"] == min(200, len(observed) - 200)
                                 compare_values(pd.DataFrame(page_data["rows"]), observed.iloc[200:400])
                                 (output / f"{spec['id']}.page2.json").write_text(json.dumps(page_data, ensure_ascii=False, indent=2))
                             previous_artifact, previous_values = artifact["artifact_id"], expected
-                        result["status"] = "passed"
+                        result["status"] = "degraded" if explanation.get("answer_status") == "unverified" else "passed"
                     except Exception as exc:
                         result["error"] = str(exc)
                     finally:
@@ -227,8 +252,10 @@ def main():
             records.extend(future.result())
     order = {case["id"]: i for i, case in enumerate(suite["cases"])}
     records.sort(key=lambda case: order[case["id"]])
-    report = {"status": "passed" if all(case["status"] == "passed" for case in records) else "failed",
+    status = "failed" if any(case["status"] == "failed" for case in records) else "degraded" if any(case["status"] == "degraded" for case in records) else "passed"
+    report = {"status": status,
               "count": len(records), "passed": sum(case["status"] == "passed" for case in records),
+              "explanation_fallbacks": [case["id"] for case in records if (case.get("explanation") or {}).get("answer_status") == "unverified"],
               "numeric_checked": sum(case.get("independent_values") == "passed" for case in records),
               "categories": dict(Counter(case["category"] for case in records)), "cases": records}
     (args.output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))

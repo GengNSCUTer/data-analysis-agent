@@ -29,6 +29,7 @@
 | 回顾 Week 2--4 的依赖顺序和小任务验收门 | [`../plan/process-project-v1-week2-4.md`](../plan/process-project-v1-week2-4.md) | 已推进至 W4-04，实际实现以当前代码与 PROJECT.md 为准 |
 | 查看 A--E 产品能力基线测试合同与阶段门 | [`../plan/feature-product-capability-baseline-test-v1.md`](../plan/feature-product-capability-baseline-test-v1.md) | 先量能力，再做产品/模型优化 |
 | 了解运行、数据、指标和权限边界 | 下方“架构与运行时” | 当前设计/运行说明 |
+| 核对在线首批八个新增指标 | [`workspaces/online-metrics-v1.md`](workspaces/online-metrics-v1.md) | Olist 23、TheLook 24；支付/复购/取消/库存口径、运行时限制及验收入口 |
 | 核对质量结论和历史实验 | 下方“评测与后训练实验” | 不可改写的证据记录 |
 
 ## 文档分层

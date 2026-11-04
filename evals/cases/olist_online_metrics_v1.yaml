@@ -1,0 +1,89 @@
+# 在线新增指标验收；问题由人编写，数值用独立SQL核对，不用于训练。
+workspace_id: olist-demo
+metric_count: 23
+categories: {metric: 5, continuous: 5, grouped: 3, boundary: 3, empty: 1}
+cases:
+  - id: o-total
+    category: metric
+    question: 全部时间一共有多少订单？包含取消和不可用状态，我问的是全部订单数。
+    reference_sql: SELECT COUNT(DISTINCT order_id) AS total_order_count FROM analytics.fact_orders
+  - id: o-payment
+    category: metric
+    question: 全部有效订单的支付金额合计是多少？不是商品成交额。
+    reference_sql: SELECT COALESCE(SUM(p.payment_value),0) AS payment_amount FROM analytics.fact_payments p JOIN analytics.fact_orders o ON o.order_id=p.order_id WHERE o.order_status NOT IN ('canceled','unavailable')
+  - id: o-freight-share
+    category: metric
+    question: 全部有效订单中，运费占商品加运费总金额的比例是多少？
+    reference_sql: SELECT SUM(i.freight_value)/NULLIF(SUM(i.price)+SUM(i.freight_value),0) AS freight_share FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id WHERE o.order_status NOT IN ('canceled','unavailable')
+  - id: o-repeat
+    category: metric
+    question: 全部时间的期间复购客户率是多少？用同一客户的有效订单计算。
+    reference_sql: WITH customers AS (SELECT c.customer_unique_id,COUNT(DISTINCT o.order_id) AS orders FROM analytics.fact_orders o JOIN analytics.dim_customers c ON c.customer_id=o.customer_id WHERE o.order_status NOT IN ('canceled','unavailable') AND c.customer_unique_id IS NOT NULL GROUP BY c.customer_unique_id) SELECT COUNT(*) FILTER(WHERE orders>=2)::numeric/NULLIF(COUNT(*),0) AS period_repeat_customer_rate FROM customers
+  - id: o-aov-existing
+    category: metric
+    question: 全部时间的有效订单客单价是多少？先算每个订单的商品成交额再平均。
+    reference_sql: WITH amounts AS (SELECT o.order_id,SUM(i.price) AS amount FROM analytics.fact_orders o JOIN analytics.fact_order_items i ON i.order_id=o.order_id WHERE o.order_status NOT IN ('canceled','unavailable') GROUP BY o.order_id) SELECT AVG(amount) AS average_order_value FROM amounts
+  - id: o-pay-states
+    category: continuous
+    conversation_group: payments
+    question: 按客户州汇总全部时间的有效订单支付金额，画柱状图。
+    chart: bar
+    reference_sql: SELECT c.customer_state,SUM(p.payment_value) AS payment_amount FROM analytics.fact_payments p JOIN analytics.fact_orders o ON o.order_id=p.order_id JOIN analytics.dim_customers c ON c.customer_id=o.customer_id WHERE o.order_status NOT IN ('canceled','unavailable') GROUP BY c.customer_state
+  - id: o-pay-sp
+    category: continuous
+    conversation_group: payments
+    question: 只看SP州，取消分组，给我合计。
+    reference_sql: SELECT SUM(p.payment_value) AS payment_amount FROM analytics.fact_payments p JOIN analytics.fact_orders o ON o.order_id=p.order_id JOIN analytics.dim_customers c ON c.customer_id=o.customer_id WHERE o.order_status NOT IN ('canceled','unavailable') AND c.customer_state='SP'
+  - id: o-pay-months
+    category: continuous
+    conversation_group: payments
+    question: 其他条件不变，改成2017年按月看，画折线图。
+    chart: line
+    reference_sql: SELECT DATE_TRUNC('month',o.order_purchase_timestamp) AS time,SUM(p.payment_value) AS payment_amount FROM analytics.fact_payments p JOIN analytics.fact_orders o ON o.order_id=p.order_id JOIN analytics.dim_customers c ON c.customer_id=o.customer_id WHERE o.order_status NOT IN ('canceled','unavailable') AND c.customer_state='SP' AND o.order_purchase_timestamp>='2017-01-01' AND o.order_purchase_timestamp<'2018-01-01' GROUP BY 1
+  - id: o-pay-explain
+    category: continuous
+    conversation_group: payments
+    question: 不用重新查询，解释一下这些数能不能称为GMV，数据有什么局限？
+    reuse: true
+  - id: o-pay-refresh
+    category: continuous
+    conversation_group: payments
+    refresh: true
+    question: 继续解释刚才的支付金额结果，为什么它不能直接叫退款后的净收入？不要重新查库。
+    reuse: true
+  - id: o-freight-categories
+    category: grouped
+    null_labels: {product_category_name: 未分类}
+    label_alias_queries:
+      product_category_name: SELECT product_category_name_english AS alias,product_category_name AS canonical FROM analytics.dim_category_translation
+    question: 按商品品类比较全部时间运费占比，画柱状图，未分类商品也要保留。
+    chart: bar
+    reference_sql: SELECT d.product_category_name,SUM(i.freight_value)/NULLIF(SUM(i.price)+SUM(i.freight_value),0) AS freight_share FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id JOIN analytics.dim_products d ON d.product_id=i.product_id WHERE o.order_status NOT IN ('canceled','unavailable') GROUP BY d.product_category_name
+  - id: o-repeat-months
+    category: grouped
+    question: 按月统计2017年期间复购客户率，各月只看当月有效订单，不是累计老客率。
+    reference_sql: WITH customers AS (SELECT DATE_TRUNC('month',o.order_purchase_timestamp) AS time,c.customer_unique_id,COUNT(DISTINCT o.order_id) AS orders FROM analytics.fact_orders o JOIN analytics.dim_customers c ON c.customer_id=o.customer_id WHERE o.order_status NOT IN ('canceled','unavailable') AND c.customer_unique_id IS NOT NULL AND o.order_purchase_timestamp>='2017-01-01' AND o.order_purchase_timestamp<'2018-01-01' GROUP BY 1,2) SELECT time,COUNT(*) FILTER(WHERE orders>=2)::numeric/NULLIF(COUNT(*),0) AS period_repeat_customer_rate FROM customers GROUP BY time
+  - id: o-payment-types
+    category: grouped
+    question: 按支付方式汇总全部有效订单的支付金额，画环形图。
+    chart: donut
+    reference_sql: SELECT p.payment_type,SUM(p.payment_value) AS payment_amount FROM analytics.fact_payments p JOIN analytics.fact_orders o ON o.order_id=p.order_id WHERE o.order_status NOT IN ('canceled','unavailable') GROUP BY p.payment_type
+  - id: o-pay-unsupported-category
+    category: boundary
+    question: 请把有效订单支付金额按商品品类分摊。
+    no_sql: true
+    expected_routes: [clarification_required, unsupported]
+  - id: o-sensitive
+    category: boundary
+    question: 返回所有客户的customer_unique_id原始明细列表。
+    no_sql: true
+    expected_routes: [clarification_required, unsupported, out_of_scope, unauthorized]
+  - id: o-definition
+    category: boundary
+    question: 期间复购客户率的定义是什么？不用查询数值，说明与终身老客率的区别。
+    no_sql: true
+    expected_routes: [catalog_answered]
+  - id: o-zero-orders
+    category: empty
+    question: 2000年全部订单数是多少？包括所有订单状态。
+    reference_sql: SELECT COUNT(DISTINCT order_id) AS total_order_count FROM analytics.fact_orders WHERE order_purchase_timestamp>='2000-01-01' AND order_purchase_timestamp<'2001-01-01'

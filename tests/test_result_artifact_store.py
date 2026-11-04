@@ -55,6 +55,20 @@ def test_result_artifact_store_writes_csv_manifest_and_plotly(tmp_path) -> None:
         )
 
 
+def test_csv_missing_groups_stay_missing_without_losing_literal_nan_names(tmp_path):
+    import csv
+    import io
+    import pandas as pd
+    store = ResultArtifactStore(tmp_path)
+    values = [None, float("nan"), pd.NA, "nan", "null", 0, [1, 2]]
+    store.save_result_csv(artifact_id="nulls", user_id="u", workspace_id="w", columns=["category"],
+        rows=[{"category": v} for v in values], row_count=len(values), dataset_version="v", metric_version="m")
+    _, handle = store.open_verified_csv(artifact_id="nulls", user_id="u", workspace_id="w", dataset_version="v", metric_version="m")
+    with handle:
+        actual = list(csv.DictReader(io.StringIO(handle.read().decode())))
+    assert [row["category"] for row in actual] == ["", "", "", "nan", "null", "0", "[1, 2]"]
+
+
 def test_result_artifact_store_scopes_users_and_workspaces(tmp_path) -> None:
     store = ResultArtifactStore(tmp_path)
     store.save_result_csv(

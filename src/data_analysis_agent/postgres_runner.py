@@ -472,6 +472,9 @@ class SecurePostgresRunner(SqlRunner):
                 connection.set_session(readonly=True, autocommit=False, isolation_level="REPEATABLE READ")
                 timeout = result_budget.statement_timeout_ms if result_budget else self.settings.statement_timeout_ms
                 with connection.cursor() as control:
+                    # Calendar ranges and timestamptz buckets use the same UTC
+                    # semantics regardless of the database/host's local zone.
+                    control.execute("SET LOCAL TIME ZONE 'UTC'")
                     control.execute("SET LOCAL statement_timeout = %s", (timeout,))
                 with connection.cursor(
                     name="daa_" + uuid.uuid4().hex,
@@ -618,6 +621,7 @@ class SecurePostgresRunner(SqlRunner):
                     top_n=plan.get("top_n"),
                     query_scope=plan,
                     metric_semantics=context.metadata.get("metric_semantics", {}),
+                    metric_definitions=context.metadata.get("metric_definitions", {}),
                     inspections=usage.result_inspections if usage is not None else (),
                     numerator_overrides=usage.result_numerators if usage is not None else None,
                     max_tokens=usage.result_evidence_limit() if usage is not None else None,

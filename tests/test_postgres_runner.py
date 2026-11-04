@@ -63,6 +63,25 @@ def make_context(user_id: str, role: str = "analyst") -> ToolContext:
 
 
 @pytest.mark.asyncio
+async def test_runtime_month_buckets_use_utc_even_if_database_connection_defaults_to_local_zone(monkeypatch):
+    connect = psycopg2.connect
+
+    def local_zone_connection(*args, **kwargs):
+        if kwargs.get("user") == "daa_analytics_reader":
+            kwargs["options"] = "-c timezone=Asia/Shanghai"
+        return connect(*args, **kwargs)
+
+    monkeypatch.setattr(psycopg2, "connect", local_zone_connection)
+    context = make_context("utc-calendar-test")
+    context.metadata.update({"required_result_columns": ["time", "paid_order_count"],
+                             "metric_result_columns": ["paid_order_count"], "result_time_column": "time"})
+    statement = ("SELECT DATE_TRUNC('month', TIMESTAMPTZ '2023-01-31 23:30:00+00') AS time, "
+                 "COUNT(*) AS paid_order_count FROM analytics.fact_orders")
+    frame = await SecurePostgresRunner().run_sql(RunSqlToolArgs(sql=statement), context)
+    assert frame.iloc[0]["time"].isoformat() == "2023-01-01T00:00:00+00:00"
+
+
+@pytest.mark.asyncio
 async def test_runtime_join_probe_rejects_repeated_item_inputs():
     """Actual reader evidence rejects a fanout even when SUM returns one row."""
     context = make_context(f"join-proof-{uuid.uuid4().hex}")

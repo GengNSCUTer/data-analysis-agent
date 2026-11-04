@@ -14,6 +14,9 @@ import threading
 import time
 from typing import Any, BinaryIO, Iterable, Mapping
 
+from pandas import isna
+from pandas.api.types import is_scalar
+
 
 class ResultArtifactIntegrityError(ValueError):
     """An external artifact no longer matches its persisted manifest."""
@@ -420,4 +423,4 @@ def _stream_sha256_size(handle: BinaryIO) -> tuple[str, int]:
 
 
 def _csv_value(value: Any) -> str:
-    return "" if value is None else str(value)
+    return "" if value is None or is_scalar(value) and isna(value) else str(value)

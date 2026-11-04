@@ -127,6 +127,15 @@ class SemanticIntent(BaseModel):
     action: Literal["new_task", "update_task", "keep", "clear_task"] = "new_task"
     state_patch: StatePatch | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def canonical_time_dimension(cls, value):
+        # Catalog's virtual date capability is represented by time_grain,
+        # not a second business dimension with an unknown cardinality.
+        if isinstance(value, dict) and value.get("time_grain") and isinstance(value.get("dimensions"), (list, tuple)):
+            return {**value, "dimensions": tuple(d for d in value["dimensions"] if d != "date")}
+        return value
+
     @model_validator(mode="after")
     def unambiguous_fields(self) -> "SemanticIntent":
         if self.time_range and self.relative_time:
@@ -257,6 +266,7 @@ def resolve_state_intent(
             intent = intent.model_copy(update={"result_inspections": inspections})
         effective = {**intent.as_dict(), **proposed.scope(), "relative_time": None}
         resolved = parse_semantic_intent(json.dumps(effective), catalog, user=user)
+        proposed = replace(proposed, dimensions=resolved.dimensions, time_grain=resolved.time_grain)
     except (ValueError, TypeError, AttributeError) as exc:
         raise SemanticIntentError("invalid_state_patch") from exc
     return resolved, proposed
@@ -292,7 +302,9 @@ class SemanticIntentInterpreter:
                 "name": item.name,
                 "aliases": item.aliases,
                 "description": item.description,
-                "dimensions": item.allowed_dimensions,
+                "dimensions": tuple(d for d in item.allowed_dimensions if d != "date"),
+                "supports_time_grouping": "date" in item.allowed_dimensions,
+                "temporal_mode": item.temporal_mode,
             }
             for item in self.catalog.metrics
             if role in item.role_visibility

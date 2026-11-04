@@ -133,6 +133,7 @@ def build_result_evidence(
     inspections: Sequence[ResultInspection] = (),
     query_scope: Mapping[str, Any] | None = None,
     metric_semantics: Mapping[str, Mapping[str, str]] | None = None,
+    metric_definitions: Mapping[str, str] | None = None,
     numerator_overrides: Mapping[int, Mapping[str, Any]] | None = None,
     max_tokens: int | None = None,
     counter: TokenCounter = DEFAULT_TOKEN_COUNTER,
@@ -199,6 +200,8 @@ def build_result_evidence(
         "metric_columns": metric_columns,
         "metric_semantics": {metric_id: dict(spec) for metric_id, spec in (metric_semantics or {}).items()
                              if metric_id in metric_ids},
+        "metric_definitions": {metric_id: description for metric_id, description in (metric_definitions or {}).items()
+                               if metric_id in metric_ids},
         "column_labels": {name: _label(name, column_labels or {}) for name in columns},
         "source_row_count": source_count, "row_count": population_count,
         "scope": "returned_top_n" if top_n is not None else "returned_result",

@@ -125,7 +125,66 @@ def sql_plan_mismatch(
             return "按支付方式拆金额时，SQL 必须用 payment_value 占比分摊，并按 payment_type 汇总。"
         if mode == "multi_membership" and dimension and dimension.casefold() not in columns:
             return f"SQL 必须包含分组列 {dimension}，并允许同一订单进入多个分组。"
-    return _metric_value_source_mismatch(sql, plan, metric_value_sources or {}, column_schema or {})
+    missing_groups = _unrequested_null_group_filter(sql, plan, column_schema or {})
+    return missing_groups or _metric_value_source_mismatch(sql, plan, metric_value_sources or {}, column_schema or {})
+
+
+def _unrequested_null_group_filter(sql, plan, schema):
+    """Catch the observed deletion of an unclassified group, including CTEs.
+
+    Only explicit positive IS NOT NULL on a grouped dimension is covered;
+    this does not attempt to detect arbitrary extra predicates or join loss.
+    """
+    if plan.get("query_mode") != "aggregate" or not plan.get("dimensions") or not schema:
+        return None
+    try:
+        root = build_scope(parse_one(sql, read="postgres"))
+    except (ParseError, TokenError, RecursionError):
+        return None
+    if root is None:
+        return None
+    known = {(table, column) for table, columns in schema.items() for column in columns}
+    fixed = {f["dimension"] for f in plan.get("filters", ())}
+    grouped_sources = {}
+    for projection in root.expression.selects:
+        dimension = projection.alias_or_name
+        if dimension in plan["dimensions"] and dimension not in fixed:
+            grouped_sources[dimension] = _column_lineage(projection.unalias(), root, known)
+
+    def excludes(node, scope, sources):
+        if isinstance(node, (exp.Where, exp.Having, exp.Paren)):
+            return excludes(node.this, scope, sources)
+        if isinstance(node, exp.And):
+            return excludes(node.this, scope, sources) or excludes(node.expression, scope, sources)
+        if isinstance(node, exp.Or):
+            return excludes(node.this, scope, sources) and excludes(node.expression, scope, sources)
+        predicate = node if isinstance(node, exp.Is) and node.args.get("negate") else (
+            node.this if isinstance(node, exp.Not) and isinstance(node.this, exp.Is) and not node.this.args.get("negate") else None
+        )
+        if predicate is not None and isinstance(predicate.expression, exp.Null):
+            actual = _column_lineage(predicate.this, scope, known)
+            return bool(actual) and actual <= sources
+        return False
+
+    def contributing(scope):
+        yield scope
+        for _, source in scope.selected_sources.values():
+            if isinstance(source, Scope):
+                yield from contributing(source)
+        for branch in scope.set_operation_scopes:
+            yield from contributing(branch)
+
+    for scope in contributing(root):
+        group = scope.expression.args.get("group")
+        if group is None:
+            continue
+        group_sources = set().union(*(_column_lineage(expr, scope, known) for expr in group.expressions))
+        for dimension, sources in grouped_sources.items():
+            if sources and sources <= group_sources and any(
+                excludes(scope.expression.args.get(clause), scope, sources) for clause in ("where", "having")
+            ):
+                return f"SQL 自行排除了分组 {dimension} 的缺失值；计划未要求排除未分类组，请保留NULL分组。"
+    return None
 
 
 def _metric_value_source_mismatch(sql, plan, rules, schema):

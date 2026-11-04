@@ -85,6 +85,27 @@ def test_numeric_comparison_detects_wrong_denominator_and_missing_groups():
         compare(expected.iloc[:1], expected)
 
 
+def test_explicit_missing_dimension_label_does_not_hide_numeric_errors_or_missing_groups():
+    compare = script("verify_workspace_onboarding").compare_values
+    expected = pd.DataFrame({"category": ["A", None], "freight_share": [0.2, 0.3]})
+    displayed = expected.assign(category=["A", "未分类"])
+    compare(displayed, expected, null_labels={"category": "未分类"})
+    with pytest.raises(AssertionError):
+        compare(displayed.assign(freight_share=[0.2, 0.4]), expected, null_labels={"category": "未分类"})
+    with pytest.raises(AssertionError):
+        compare(displayed.iloc[:1], expected, null_labels={"category": "未分类"})
+
+
+def test_independently_declared_label_translation_never_changes_metric_values():
+    compare = script("verify_workspace_onboarding").compare_values
+    observed = pd.DataFrame({"category": ["sports", "未分类"], "share": [0.2, 0.3]})
+    expected = pd.DataFrame({"category": ["esporte", None], "share": [0.2, 0.3]})
+    options = {"label_aliases": {"category": {"sports": "esporte"}}, "null_labels": {"category": "未分类"}}
+    compare(observed, expected, **options)
+    with pytest.raises(AssertionError):
+        compare(observed.assign(share=[0.2, 0.4]), expected, **options)
+
+
 def test_csv_comparison_preserves_literal_city_names():
     runner = script("verify_workspace_onboarding")
     observed = runner.read_result_csv("customer_city,completed_order_count\nnull,292\nNA,2\n,1\n")
@@ -123,7 +144,13 @@ def test_thelook_cases_cover_all_metrics_and_independent_readonly_references():
         assert isinstance(tree, exp.Query)
         assert all(table.db in ("", "analytics") for table in tree.find_all(exp.Table))
         tested.update(alias for alias in tree.named_selects if alias in catalog.metrics_by_id)
-    assert tested == set(catalog.metrics_by_id)
+    # The original 60 questions still cover their original 20 metrics; new
+    # online metrics have separate independently checked rollout cases.
+    assert tested == set(catalog.metrics_by_id) - {
+        "total_order_count", "cancellation_rate", "period_repeat_customer_rate",
+        "current_unsold_inventory_cost",
+    }
+    assert suite["metric_count"] == len(catalog.metrics)
 
 
 def test_continuous_cases_keep_order_and_use_independent_expected_sql():
