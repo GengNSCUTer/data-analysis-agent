@@ -36,7 +36,7 @@ def test_result_budget_manifest_freezes_separate_modes_and_budgets() -> None:
     actual = ResultBudget.aggregate()
     for key in ("preview_rows", "llm_context_rows", "llm_context_chars"):
         assert getattr(actual, key) == manifest["budgets"][key]
-    assert actual.execution_max_rows == manifest["current_online_compatibility"]["legacy_execution_cap"]
+    assert actual.execution_max_rows == 5_000
 
 
 def test_perf_shop_fixture_is_isolated_from_business_workspaces() -> None:
@@ -58,7 +58,7 @@ def test_budget_evidence_names_each_layer_without_changing_contract_payload() ->
     budget = ResultBudget.aggregate(execution_max_rows=100_000)
     evidence = budget.as_evidence()
 
-    assert evidence["process_row_ceiling"] == 100_000
+    assert evidence["request_execution_row_ceiling"] == 100_000
     assert evidence["query_result_row_ceiling"] == 100_000
     assert evidence["frontend_preview_row_limit"] == 200
     assert evidence["offline_sample_row_limit"] == 8
@@ -82,8 +82,8 @@ def test_query_modes_have_distinct_roundtrippable_budgets(mode):
 @pytest.mark.parametrize("changes", [
     {"query_mode": "raw"}, {"contract_id": "v0"},
     {"execution_max_rows": True}, {"statement_timeout_ms": 0},
-    {"aggregate_result_rows": None}, {"aggregate_result_rows": 1_001},
-    {"preview_rows": 201}, {"llm_context_rows": 9}, {"llm_context_chars": 1_201},
+    {"aggregate_result_rows": None}, {"aggregate_result_rows": 5_001},
+    {"preview_rows": 5_001}, {"llm_context_rows": 9}, {"llm_context_chars": 1_201},
     {"llm_context_rows": 1.5}, {"detail_page_rows": 200}, {"export_max_bytes": 1},
     {"query_mode": "detail_page", "aggregate_result_rows": None, "detail_page_rows": 501},
 ])

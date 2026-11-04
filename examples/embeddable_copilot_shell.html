@@ -178,7 +178,18 @@
           <div id="conversation-list" class="conversation-list"><p class="conversation-empty">正在读取会话历史…</p></div>
           <p id="conversation-error" class="conversation-error" aria-live="polite"></p>
           <details class="memory-panel">
-            <summary>展示偏好</summary>
+            <summary>查询与展示设置</summary>
+            <form id="result-settings-form" class="preference-form">
+              <label>查询结果行数上限
+                <input name="execution_max_rows" type="number" min="1" step="1" value="5000" required />
+              </label>
+              <label>表格预览行数
+                <input name="preview_rows" type="number" min="1" step="1" value="200" required />
+              </label>
+              <p class="conversation-empty" id="result-settings-help">查询默认最多5,000行，预览默认200行。设置从下次查询生效；超过查询上限不会返回部分统计。完整结果可分页或下载，模型仍只读取预算内的证据。</p>
+              <button class="action" type="submit" disabled>保存查询与展示设置</button>
+            </form>
+            <p id="result-settings-status" class="conversation-error" role="status"></p>
             <h2 class="sr-only">展示偏好</h2>
             <p class="conversation-empty">这些偏好会保存，但还不会改变本轮回答的语言、时区、图表或数字格式。</p>
             <form id="preference-form" class="preference-form">
@@ -313,6 +324,39 @@
         });
       }
       const preferenceForm = document.querySelector("#preference-form");
+      const resultSettingsForm = document.querySelector("#result-settings-form");
+      const resultSettingsStatus = document.querySelector("#result-settings-status");
+      function applyResultSettings(settings) {
+        for (const name of ["execution_max_rows", "preview_rows"]) {
+          resultSettingsForm.elements[name].value = settings[name];
+          resultSettingsForm.elements[name].max = settings[name + "_ceiling"];
+        }
+        document.querySelector("#result-settings-help").textContent =
+          `从下次查询生效。查询上限最多${settings.execution_max_rows_ceiling.toLocaleString()}行，预览最多${settings.preview_rows_ceiling.toLocaleString()}行且不超过查询上限。完整结果可分页或下载，模型证据预算不变。`;
+        resultSettingsForm.querySelector("button").disabled = false;
+      }
+      resultSettingsForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        resultSettingsStatus.textContent = "";
+        const button = resultSettingsForm.querySelector("button");
+        button.disabled = true;
+        try {
+          const response = await fetch("/api/project/result-settings", withAuth({
+            method: "PUT", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              execution_max_rows: Number(resultSettingsForm.elements.execution_max_rows.value),
+              preview_rows: Number(resultSettingsForm.elements.preview_rows.value)
+            })
+          }));
+          if (!response.ok) throw new Error("请填写正整数；预览不能超过查询上限，两项均不能超过服务端上限。");
+          applyResultSettings(await response.json());
+          resultSettingsStatus.textContent = "已保存，从下次查询生效。已有结果及下载文件保持原样。";
+        } catch (error) {
+          resultSettingsStatus.textContent = error.message || "设置保存失败。";
+        } finally {
+          button.disabled = false;
+        }
+      });
       const preferenceStatus = document.querySelector("#preference-status");
       const savedList = document.querySelector("#saved-list");
       const diagnostics = document.querySelector("#diagnostics");
@@ -452,6 +496,9 @@
       });
       async function loadPreferences() {
         try {
+          const settingsResponse = await fetch("/api/project/result-settings", withAuth());
+          if (!settingsResponse.ok) throw new Error("result settings unavailable");
+          applyResultSettings(await settingsResponse.json());
           const response = await fetch("/api/project/preferences", withAuth());
           if (!response.ok) return;
           for (const item of await response.json()) {

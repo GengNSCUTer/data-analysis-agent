@@ -9,9 +9,33 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Literal, Mapping
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 
 RESULT_BUDGET_CONTRACT_ID = "result-budget-v2"
 QueryMode = Literal["aggregate", "detail_page", "export"]
+DEFAULT_EXECUTION_MAX_ROWS = 5_000
+MAX_PREVIEW_ROWS = 5_000
+
+
+class ResultSettings(BaseModel):
+    """User resource preferences, scoped by the authenticated workspace."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    execution_max_rows: int = Field(default=DEFAULT_EXECUTION_MAX_ROWS, gt=0)
+    preview_rows: int = Field(default=200, gt=0, le=MAX_PREVIEW_ROWS)
+
+    @model_validator(mode="after")
+    def check_preview(self) -> "ResultSettings":
+        if self.preview_rows > self.execution_max_rows:
+            raise ValueError("preview_rows must fit execution_max_rows")
+        return self
+
+    def to_budget(self, ceiling: "ResultBudget") -> "ResultBudget":
+        # An operator may lower the process ceiling after preferences were saved.
+        rows = min(self.execution_max_rows, ceiling.execution_max_rows)
+        return replace(ceiling, execution_max_rows=rows, aggregate_result_rows=rows,
+                       preview_rows=min(self.preview_rows, rows))
 
 
 class ResultBudgetError(ValueError):
@@ -22,15 +46,15 @@ class ResultBudgetError(ValueError):
 class ResultBudget:
     """Immutable per-request budget; counts never describe fact scan rows.
 
-    aggregate_result_rows is the plan's output cardinality bound, independent
-    of the process ceiling. detail_page/export are artifact delivery modes.
+    aggregate_result_rows is the plan's output cardinality bound, within the
+    user's execution ceiling. detail_page/export are artifact delivery modes.
     """
 
     query_mode: QueryMode = "aggregate"
     contract_id: str = RESULT_BUDGET_CONTRACT_ID
-    execution_max_rows: int = 1_000
+    execution_max_rows: int = DEFAULT_EXECUTION_MAX_ROWS
     statement_timeout_ms: int = 5_000
-    aggregate_result_rows: int | None = 1_000
+    aggregate_result_rows: int | None = DEFAULT_EXECUTION_MAX_ROWS
     detail_page_rows: int | None = None
     export_max_bytes: int | None = None
     preview_rows: int = 200
@@ -56,8 +80,10 @@ class ResultBudget:
                 continue
             if type(value) is not int or value <= 0:
                 raise ResultBudgetError(f"{name} must be a positive integer")
-        if self.preview_rows > 200 or self.llm_context_rows > 8 or self.llm_context_chars > 1_200:
-            raise ResultBudgetError("preview/LLM budget exceeds the frozen output budget")
+        if self.preview_rows > min(MAX_PREVIEW_ROWS, self.execution_max_rows):
+            raise ResultBudgetError("preview_rows exceeds the display/execution budget")
+        if self.llm_context_rows > 8 or self.llm_context_chars > 1_200:
+            raise ResultBudgetError("LLM budget exceeds the historical offline sample budget")
         if self.query_mode == "aggregate":
             if self.aggregate_result_rows is None or self.aggregate_result_rows > self.execution_max_rows:
                 raise ResultBudgetError("aggregate_result_rows must fit the execution budget")
@@ -73,19 +99,20 @@ class ResultBudget:
 
     @classmethod
     def aggregate(
-        cls, *, execution_max_rows: int = 1_000, statement_timeout_ms: int = 5_000,
+        cls, *, execution_max_rows: int = DEFAULT_EXECUTION_MAX_ROWS, statement_timeout_ms: int = 5_000,
+        preview_rows: int = 200,
         result_max_bytes: int = 32 * 1024 * 1024,
     ) -> "ResultBudget":
         return cls(
             execution_max_rows=execution_max_rows,
             aggregate_result_rows=execution_max_rows,
             statement_timeout_ms=statement_timeout_ms,
-            preview_rows=min(200, execution_max_rows),
+            preview_rows=min(preview_rows, execution_max_rows),
             result_max_bytes=result_max_bytes,
         )
 
     def for_result_rows(self, rows: int) -> "ResultBudget":
-        """Derive output cardinality without changing the process resource ceiling."""
+        """Derive output cardinality without changing the request resource ceiling."""
         return replace(self, aggregate_result_rows=max(1, rows))
 
     def as_metadata(self) -> dict[str, Any]:
@@ -98,14 +125,14 @@ class ResultBudget:
 
         ``as_metadata`` is the strict plan/contract payload and keeps its
         frozen field names. This view is only for logs and UI diagnostics, so
-        readers do not mistake the process ceiling, aggregate cardinality,
+        readers do not mistake the request ceiling, aggregate cardinality,
         frontend preview and historical offline sample for one row limit.
         Online result evidence is separately bounded by RequestBudget tokens.
         """
         return {
             "contract_id": self.contract_id,
             "query_mode": self.query_mode,
-            "process_row_ceiling": self.execution_max_rows,
+            "request_execution_row_ceiling": self.execution_max_rows,
             "query_result_row_ceiling": self.aggregate_result_rows,
             "detail_page_row_limit": self.detail_page_rows,
             "frontend_preview_row_limit": self.preview_rows,

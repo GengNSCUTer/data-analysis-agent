@@ -73,7 +73,7 @@ from data_analysis_agent.postgres_runner import (
     SecurePostgresRunner,
 )
 from data_analysis_agent.result_validator import ResultValidator
-from data_analysis_agent.result_budget import ResultBudget
+from data_analysis_agent.result_budget import MAX_PREVIEW_ROWS, ResultBudget, ResultSettings
 from data_analysis_agent.result_artifact_store import (
     ResultArtifactExpired,
     ResultArtifactIntegrityError,
@@ -194,6 +194,18 @@ def create_app(*, llm_provider=None) -> FastAPI:
     workspace = runtime_workspace.profile
     settings = replace(PostgresConnectionSettings.from_environment(),
                        reader_user=workspace.reader_role, writer_user=workspace.writer_role)
+    user_memory = UserMemoryStore(settings)
+    result_ceiling = ResultBudget.aggregate(
+        execution_max_rows=settings.max_aggregate_rows,
+        statement_timeout_ms=settings.statement_timeout_ms,
+        result_max_bytes=settings.max_result_bytes,
+    )
+
+    async def user_result_budget(user):
+        preferences = await asyncio.to_thread(
+            user_memory.get_result_settings, user.id, workspace.workspace_id,
+        )
+        return preferences.to_budget(result_ceiling)
     runner = SecurePostgresRunner(
         settings=settings,
         model_name=model_name,
@@ -379,11 +391,8 @@ def create_app(*, llm_provider=None) -> FastAPI:
             question_router,
             workspace=workspace,
             result_artifact_store=result_artifact_store,
-            result_budget=ResultBudget.aggregate(
-                execution_max_rows=settings.max_aggregate_rows,
-                statement_timeout_ms=settings.statement_timeout_ms,
-                result_max_bytes=settings.max_result_bytes,
-            ),
+            result_budget=result_ceiling,
+            result_budget_resolver=user_result_budget,
             semantic_interpreter=SemanticIntentInterpreter(
                 question_router.retriever.catalog,
                 complete_semantic_intent,
@@ -657,8 +666,37 @@ def create_app(*, llm_provider=None) -> FastAPI:
             return JSONResponse({"detail": "artifact integrity check failed"}, status_code=409)
         return JSONResponse(page)
 
-    user_memory = UserMemoryStore(settings)
     runtime_diagnostics = RuntimeDiagnostics(settings)
+
+    def result_settings_response(preferences: ResultSettings) -> dict:
+        effective = preferences.to_budget(result_ceiling)
+        return {
+            "execution_max_rows": effective.execution_max_rows,
+            "preview_rows": effective.preview_rows,
+            "execution_max_rows_ceiling": settings.max_aggregate_rows,
+            "preview_rows_ceiling": min(MAX_PREVIEW_ROWS, settings.max_aggregate_rows),
+        }
+
+    @app.get("/api/project/result-settings")
+    async def get_result_settings(request: Request) -> dict:
+        user = await role_resolver.resolve_user(_request_user_context(request))
+        preferences = await asyncio.to_thread(
+            user_memory.get_result_settings, user.id, workspace.workspace_id,
+        )
+        return result_settings_response(preferences)
+
+    @app.put("/api/project/result-settings")
+    async def put_result_settings(body: ResultSettings, request: Request) -> JSONResponse:
+        user = await role_resolver.resolve_user(_request_user_context(request))
+        if body.execution_max_rows > settings.max_aggregate_rows:
+            return JSONResponse(
+                {"detail": f"查询行数不能超过服务端上限 {settings.max_aggregate_rows}"},
+                status_code=422,
+            )
+        await asyncio.to_thread(
+            user_memory.put_result_settings, user.id, workspace.workspace_id, body,
+        )
+        return JSONResponse(result_settings_response(body))
 
     @app.get("/api/project/preferences")
     async def list_preferences(request: Request) -> JSONResponse:

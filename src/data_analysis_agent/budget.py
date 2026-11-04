@@ -455,12 +455,17 @@ class BudgetUsage:
         # Covers instructions/JSON wrappers; actual requests are checked again by the LLM boundary.
         used = DEFAULT_TOKEN_COUNTER.count_text(non_result) + 1024
         available = self.budget.max_prompt_tokens - self.budget.max_output_tokens - used
+        # The SQL tool's evidence is also part of the current message history.
+        # A large complete result must fit that envelope before the Agent's
+        # history filter runs, even when the full request still has space.
+        available = min(available, self.budget.max_history_tokens - used)
         if self.budget.max_result_evidence_tokens is not None:
             available = min(available, self.budget.max_result_evidence_tokens)
         if available <= 0:
             raise ContextCapacityError("当前上下文没有结果证据空间，请先压缩历史。")
         self.record_catalog({"result_evidence_budget": {"limit": available, "non_result_tokens": used,
                              "output_reserve": self.budget.max_output_tokens,
+                             "history_limit": self.budget.max_history_tokens,
                              "request_limit": self.budget.max_prompt_tokens,
                              "tokenizer_mode": DEFAULT_TOKEN_COUNTER.mode}})
         return available

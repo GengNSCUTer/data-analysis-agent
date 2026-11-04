@@ -15,6 +15,7 @@ import pandas as pd
 from vanna.components import RichTextComponent, SimpleTextComponent, StatusCardComponent, UiComponent
 from vanna.core.llm import LlmMessage, LlmRequest, LlmResponse
 from vanna.core.storage import Conversation, Message
+from vanna.core.user import User
 from vanna.servers.base import ChatHandler
 from vanna.servers.base.models import ChatRequest, ChatStreamChunk
 
@@ -98,6 +99,7 @@ class BudgetedChatHandler(ChatHandler):
         catalog_grounder: ConstrainedCatalogGrounder | None = None,
         semantic_interpreter: SemanticIntentInterpreter | None = None,
         result_budget: ResultBudget | None = None,
+        result_budget_resolver: Callable[[User], Awaitable[ResultBudget]] | None = None,
         context_builder: AnalysisContextBuilder | None = None,
         filter_source_resolver: Callable[[tuple[QueryFilter, ...]], Awaitable[tuple[QueryFilter, ...]]] | None = None,
         require_semantic_interpreter: bool = False,
@@ -111,6 +113,7 @@ class BudgetedChatHandler(ChatHandler):
         self.catalog_grounder = catalog_grounder
         self.semantic_interpreter = semantic_interpreter
         self.result_budget = result_budget or ResultBudget.aggregate()
+        self.result_budget_resolver = result_budget_resolver
         self.context_builder = context_builder
         self.filter_source_resolver = filter_source_resolver
         self.require_semantic_interpreter = require_semantic_interpreter
@@ -165,6 +168,10 @@ class BudgetedChatHandler(ChatHandler):
                 async for chunk in super().handle_stream(request):
                     yield chunk
                 return
+            result_budget = (
+                await self.result_budget_resolver(user)
+                if self.result_budget_resolver is not None else self.result_budget
+            )
             # Agent Run has a foreign key to the conversation. Create an empty
             # owner-scoped row before recording the run; Agent appends messages
             # through ConversationStore after this boundary is established.
@@ -367,6 +374,7 @@ class BudgetedChatHandler(ChatHandler):
                         self.question_router,
                         selection,
                         route_state,
+                        max_result_rows=result_budget.execution_max_rows,
                     )
                     if reference_error is not None:
                         route = QuestionRoute(
@@ -445,7 +453,10 @@ class BudgetedChatHandler(ChatHandler):
                             selection = self.question_router.retriever.retrieve(
                                 retrieval_question, user, metric_ids=semantic_intent.metric_ids,
                             )
-                            route = route_semantic_intent(semantic_intent, self.question_router, selection, route_state)
+                            route = route_semantic_intent(
+                                semantic_intent, self.question_router, selection, route_state,
+                                max_result_rows=result_budget.execution_max_rows,
+                            )
                             usage.result_inspections = semantic_intent.result_inspections
                             usage.record_catalog({"analysis_acquisition": {"requirements": requirements}})
                         else:
@@ -538,7 +549,7 @@ class BudgetedChatHandler(ChatHandler):
                         retrieval_question,
                         route,
                         plan_state,
-                        result_budget=self.result_budget,
+                        result_budget=result_budget,
                     )
                     if query_plan.filters and self.filter_source_resolver is not None:
                         query_plan = replace(query_plan, filters=await self.filter_source_resolver(query_plan.filters))

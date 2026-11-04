@@ -2,7 +2,7 @@
 title: Result Budget Contract v2
 status: implemented
 date: 2026-10-12
-last_updated: 2026-10-23
+last_updated: 2026-11-04
 ---
 
 # Result Budget Contract v2
@@ -23,15 +23,25 @@ last_updated: 2026-10-23
 
 | 数值 | 默认策略 | 作用 |
 | --- | --- | --- |
-| `execution_max_rows` | 在线资源兜底 100,000，可配置 | 防止服务保留无限结果，不是每条业务查询的配额 |
+| `execution_max_rows` | 用户默认5,000，可在网页设置 | 本次请求的结果行数上限，不限制底层扫描的事实行数 |
+| 进程行数上限 | 100,000，运维可配置 | 用户设置不得超过`DATA_ANALYSIS_MAX_AGGREGATE_ROWS` |
 | `aggregate_result_rows` | 按维度基数 × 时间桶数，结合可用事实行数边界、明确 Top-N 派生 | 单个请求应有多少组；标量为 1，州分组最多 27 等 |
 | `statement_timeout_ms` | 5,000，可配置 | PostgreSQL statement timeout；执行与读取另有相同墙钟预算，逐批检查 |
 | `result_max_bytes` | 32 MiB，可配置 | 读取时估算 JSON UTF-8 字节并拒绝超界；不是精确 Python RSS 预算 |
-| 前端初始预览 | 200 行 | 不把完整结果一次塞入组件 |
+| 前端初始预览 | 默认200，网页可设置至5,000，且不超过查询上限 | 只改变新查询的表格预览，不扩大模型上下文或截断工件 |
 | 工件分页 | 默认 200，硬上限 500 | 每次仅读取/返回一页，稀疏 CSV 索引避免深页逐行跳过 |
 | 在线模型结果证据 | 按请求剩余 token 动态分配；可配置额外上限 | 优先计算结论，再提供预算内的行；不截断服务端计算总体 |
 
-例如“2017 年按日统计各州有效订单数”最多 365 × 27 = 9,855 组，不再因超过 1,000 被预检拦截。“按客户城市统计有效订单数”使用当前 Olist 快照的 4,119 城市边界，不能擅自改成前 20 名；用户明确说“前五名”才使用 Top-N=5。其他 workspace 使用自己的 DimensionBinding 基数配置。
+例如“2017 年按日统计各州有效订单数”最多365 × 27 = 9,855组，用户须把查询上限提高到足以
+容纳该范围，或缩小范围；不能在默认5,000行下返回部分统计。“按客户城市统计有效订单数”
+使用当前Olist快照的4,119城市边界，在默认上限内。不能擅自改成前20名；用户明确说
+“前五名”才使用Top-N=5。其他workspace使用自己的DimensionBinding基数配置。
+
+网页会话侧栏的“查询与展示设置”通过已认证的`GET/PUT /api/project/result-settings`读写。
+两项值原子保存在现有`app.user_preferences`，由登录身份与当前workspace定位，刷新后恢复；
+不接受客户端指定用户、workspace、SQL或时间/字节预算。服务端每轮开始读取一次并形成
+局部`ResultBudget`，预检与QueryPlan使用同一上限，不修改共享Router。运维后续调低进程
+上限时，已保存设置也不能绕过新上限。更改从下一次查询生效，已保存结果及CSV保持原样。
 
 在线 SQL 的顶层模型附加 LIMIT/OFFSET 会被完整聚合模式去除，再由服务端计划应用资源上限或明确 Top-N；内部 CTE/子查询 LIMIT 不被改写。这不证明内部 SQL 语义正确，指标粒度和条件仍需要合同与语义审核。没有预算 envelope 的旧离线调用保持原策略，不重写冻结 Prompt、历史数据和评测成绩。
 
@@ -47,13 +57,13 @@ Runner 使用 PostgreSQL named cursor，每批最多 1,000 行；资源 LIMIT �
 → SqlPolicy：AST、表/列白名单、敏感投影和本请求 LIMIT
 → PostgreSQL reader：named cursor、分批、时间/字节/行数边界
 → ResultValidator：列、时间、数值、粒度与完整性
-→ 完整 CSV 工件 + 200 行 Presenter + 有 token 预算的结果证据
-→ 服务端计算并直接呈现分析事实；普通概览需要时才由无工具模型解释
+→ 完整 CSV 工件 + 按用户设置预览的 Presenter + 有 token 预算的结果证据
+→ 无工具模型根据服务端计算证据解释，正文经事实核验后展示
 → 工件分页或鉴权 CSV 下载（不调用模型、不重跑 SQL）
 ```
 
 - `query_plan.py:preflight/from_selection`：估计结果基数并派生请求预算。
-- `result_budget.py`：预算 DTO、配对和资源兜底检查；客户端不能扩大权限或预算。
+- `result_budget.py`：用户资源设置、预算DTO、配对和资源兜底检查；用户不能扩大权限或进程上限。
 - `sql_policy.py:evaluate`：保留安全检查，应用完整聚合/Top-N 规则。
 - `postgres_runner.py:read_bounded_rows/_run_sql_sync`：分批读取、完整性及资源边界。
 - `result_validator.py:validate`：完整 aggregate 超界拒绝；旧离线 degraded 语义不变。
@@ -92,7 +102,8 @@ Runner 使用 PostgreSQL named cursor，每批最多 1,000 行；资源 LIMIT �
 和输出预留，必要时缩小证据；计算结论先于普通样本行，细节裁剪会标注，计算本身仍读取完整
 结果。默认总预算64K、输出预留4K，均由现有RequestBudget配置；不是提供方精确窗口声明。
 `DATA_ANALYSIS_MAX_RESULT_EVIDENCE_TOKENS`现在仅为可选的运维上限，默认不设置；长历史
-会减少本轮结果空间。保存/刷新不按字符截断，下次请求按当时配置重新安排可见证据。
+会减少本轮结果空间。证据作为当前工具消息时也服从48K历史消息预算，避免大结果在后续
+上下文过滤处失败；这不随用户提高预览行数而扩大。保存/刷新不按字符截断，下次请求按当时配置重新安排可见证据。
 token计数使用本地估算器，trace记录方法与分配量，不等于提供方计费。
 
 历史离线的8行/1,200字符样本、既有预算DTO字段与候选SQL Prompt保持原协议；诊断中的

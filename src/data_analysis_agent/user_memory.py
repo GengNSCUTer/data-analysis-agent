@@ -12,6 +12,7 @@ import psycopg2
 import psycopg2.extras
 
 from .postgres_runner import PostgresConnectionSettings
+from .result_budget import ResultSettings
 
 
 ORGANIZATION_ID = "demo"
@@ -78,6 +79,36 @@ class UserMemoryStore:
                         DO UPDATE SET value_text = EXCLUDED.value_text, updated_at = CURRENT_TIMESTAMP
                         """,
                         (ORGANIZATION_ID, subject_id, workspace_id, memory_kind, value),
+                    )
+        finally:
+            connection.close()
+
+    def get_result_settings(self, subject_id: str, workspace_id: str) -> ResultSettings:
+        values = {item["memory_kind"]: item["value"]
+                  for item in self.list_preferences(subject_id, workspace_id)}
+        return ResultSettings(**{
+            name: int(values[f"result_{name}"])
+            for name in ResultSettings.model_fields if f"result_{name}" in values
+        })
+
+    def put_result_settings(
+        self, subject_id: str, workspace_id: str, settings: ResultSettings,
+    ) -> None:
+        # Save the pair atomically so concurrent queries cannot see half a change.
+        connection = self._connect()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.executemany(
+                        """
+                        INSERT INTO app.user_preferences (
+                            organization_id, subject_id, workspace_id, memory_kind, value_text
+                        ) VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (organization_id, subject_id, workspace_id, memory_kind)
+                        DO UPDATE SET value_text = EXCLUDED.value_text, updated_at = CURRENT_TIMESTAMP
+                        """,
+                        [(ORGANIZATION_ID, subject_id, workspace_id, f"result_{name}", str(value))
+                         for name, value in settings.model_dump().items()],
                     )
         finally:
             connection.close()

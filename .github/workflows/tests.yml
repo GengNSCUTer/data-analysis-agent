@@ -84,6 +84,7 @@ jobs:
           tests/test_result_analysis.py \
           tests/test_result_budget_contract.py \
           tests/test_result_budget_runtime.py \
+          tests/test_result_settings.py \
           tests/test_local_auth.py \
           tests/test_trusted_workflow.py \
           tests/test_demo_session.py \

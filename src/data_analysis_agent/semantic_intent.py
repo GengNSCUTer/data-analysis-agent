@@ -485,6 +485,7 @@ def route_semantic_intent(
     router: QuestionRouter,
     selection: CatalogSelection,
     state: Mapping[str, object] | None = None,
+    *, max_result_rows: int | None = None,
 ) -> QuestionRoute:
     """Validate business capabilities, without speech-act regex gates."""
     kind = intent.request_kind
@@ -592,14 +593,18 @@ def route_semantic_intent(
         selection.metrics,
         "",
         plan_state,
-        max_result_rows=router.max_result_rows,
+        max_result_rows=router.max_result_rows if max_result_rows is None else max_result_rows,
         workspace=selection.workspace,
         full_results=router.full_results,
     )
     if not preflight.allowed:
+        resource_hint = (
+            f" 当前查询上限为{max_result_rows:,}行，可在侧栏“查询与展示设置”中调整，仍受服务端上限约束。"
+            if preflight.reason_code == "result_row_budget_exceeded" and max_result_rows is not None else ""
+        )
         return clarify(
             preflight.reason_code or "result_budget",
-            preflight.clarification or "请缩小查询范围。",
+            (preflight.clarification or "请缩小查询范围。") + resource_hint,
         )
     return QuestionRoute(
         "answerable",
