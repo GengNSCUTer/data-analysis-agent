@@ -66,6 +66,24 @@ recommendation）和指向本次证据的`evidence_refs`。`AnswerDraft.text()`�
 
 本地模型如果以后接入，只能接在「在线模型写候选 SQL」那个位置，后面的策略、只读执行和结果合同不变。现在没有这条接入。
 
+## 完整 CSV 下载与文件生命周期
+
+`server.py:download_result_csv()`先验证身份与会话归属，使用当前workspace版本下的可信工件引用。
+`result_download.py:open_csv_download()`在线程内调用Store的`open_verified_csv()`，验证manifest
+的归属、有效期、数据/指标版本和已有payload哈希；每个payload只扫描一次。CSV通过同一已打开
+句柄计算哈希、回到起点再传输，不先返回路径后重新打开，避免路径替换或过期清理影响已验证下载。
+已有Plotly完整性检查保留。未新增哈希、数据库表或缓存；工件依旧假定由受信任存储不可变保存。
+
+审计成功后，`ArtifactCsvResponse`在线程里按64KiB读取CSV，异步发送并服从下游背压；不调用
+read_text、read_bytes或Pandas加载完整CSV。响应包含文件长度、行数与附件名，并设置private/no-store。
+校验期间取消会等待线程并关闭返回句柄；响应结束、客户端断连或发送失败也关闭句柄。下载已打开
+的文件可在POSIX路径删除后继续读取，后续新下载仍检查有效期。完整性验证仍需读完文件才开始发送，
+这部分启动延迟未消除。
+
+保留流式响应而非换成按路径重新打开的FileResponse，是为了复用已校验句柄及现有清理语义。
+本实现属于有界内存流式下载，不宣称sendfile、ASGI零拷贝或反向代理卸载；动态查询结果生成
+仍是独立链路，本次没有扩展动态CSV边生成边下载。
+
 ## 入口、输入输出与代码/模型分工
 
 `src/data_analysis_agent/server.py:create_app()` 在进程启动时装配当前工作区、模型服务、Catalog、语义解释器、数据库runner、会话存储和工具，再注册HTTP路由。每条消息由 `chat_sse()` 调用 `ManagedChatHandler.handle_stream()` 管理容量与取消，再进入 `BudgetedChatHandler.handle_stream()` 执行分析，不是每次重建应用。安装入口是 `data-analysis-agent`，详见[部署说明](../deployment.md)。

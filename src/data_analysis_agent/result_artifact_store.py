@@ -12,7 +12,7 @@ from pathlib import Path
 import tempfile
 import threading
 import time
-from typing import Any, Iterable, Mapping
+from typing import Any, BinaryIO, Iterable, Mapping
 
 
 class ResultArtifactIntegrityError(ValueError):
@@ -216,20 +216,29 @@ class ResultArtifactStore:
         }
 
     @_artifact_access
-    def verified_csv_path(
-        self, *, artifact_id: str, user_id: str, workspace_id: str
-    ) -> Path:
-        """Return the complete validated CSV only after its manifest checks pass."""
-
-        self.verify_manifest(
-            artifact_id=artifact_id, user_id=user_id, workspace_id=workspace_id
+    def open_verified_csv(
+        self, *, artifact_id: str, user_id: str, workspace_id: str,
+        dataset_version: str, metric_version: str,
+    ) -> tuple[dict[str, Any], BinaryIO]:
+        """Verify once and stream the same descriptor, even after path cleanup."""
+        manifest = self.load_manifest(artifact_id=artifact_id, user_id=user_id, workspace_id=workspace_id)
+        if (manifest['dataset_version'], manifest['metric_version']) != (dataset_version, metric_version):
+            raise ResultArtifactIntegrityError("result versions no longer match the workspace")
+        scope = self._scope(user_id, workspace_id, artifact_id)
+        handle = self._open_verified_file(
+            scope=scope, ref=manifest.get('csv_ref'), expected_ref='result.csv',
+            expected_sha256=manifest.get('csv_sha256'), expected_bytes=manifest.get('csv_bytes'),
         )
-        return self._scope(user_id, workspace_id, artifact_id) / "result.csv"
-
-    @_artifact_access
-    def open_verified_csv(self, **scope):
-        """Open before streaming: an ongoing download survives retention cleanup."""
-        return self.verified_csv_path(**scope).open('rb')
+        try:
+            if manifest.get('plotly_ref') is not None:
+                self._verify_file(
+                    scope=scope, ref=manifest.get('plotly_ref'), expected_ref='chart.plotly.json',
+                    expected_sha256=manifest.get('plotly_sha256'), expected_bytes=manifest.get('plotly_bytes'),
+                )
+        except BaseException:
+            handle.close()
+            raise
+        return manifest, handle
 
     @_artifact_access
     def read_result_frame(
@@ -322,13 +331,20 @@ class ResultArtifactStore:
 
     @staticmethod
     def _verify_file(
+        **kwargs,
+    ) -> None:
+        with ResultArtifactStore._open_verified_file(**kwargs):
+            pass
+
+    @staticmethod
+    def _open_verified_file(
         *,
         scope: Path,
         ref: object,
         expected_ref: str,
         expected_sha256: object,
         expected_bytes: object,
-    ) -> None:
+    ) -> BinaryIO:
         if ref != expected_ref:
             raise ResultArtifactIntegrityError("artifact manifest file reference is invalid")
         if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
@@ -338,9 +354,16 @@ class ResultArtifactStore:
         path = scope / expected_ref
         if not path.is_file():
             raise ResultArtifactIntegrityError("artifact payload is missing")
-        digest, size = _sha256_size(path)
-        if digest != expected_sha256 or size != expected_bytes:
-            raise ResultArtifactIntegrityError("artifact payload integrity check failed")
+        handle = path.open('rb')
+        try:
+            digest, size = _stream_sha256_size(handle)
+            if digest != expected_sha256 or size != expected_bytes:
+                raise ResultArtifactIntegrityError("artifact payload integrity check failed")
+            handle.seek(0)
+        except BaseException:
+            handle.close()
+            raise
+        return handle
 
     def _scope(self, user_id: str, workspace_id: str, artifact_id: str) -> Path:
         if not all(isinstance(value, str) and value.strip() for value in (user_id, workspace_id, artifact_id)):
@@ -383,12 +406,16 @@ def _safe_component(value: str) -> str:
 
 
 def _sha256_size(path: Path) -> tuple[str, int]:
+    with path.open("rb") as handle:
+        return _stream_sha256_size(handle)
+
+
+def _stream_sha256_size(handle: BinaryIO) -> tuple[str, int]:
     digest = sha256()
     size = 0
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-            size += len(block)
+    for block in iter(lambda: handle.read(1024 * 1024), b""):
+        digest.update(block)
+        size += len(block)
     return digest.hexdigest(), size
 
 

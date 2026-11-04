@@ -1,5 +1,25 @@
 # Data Analysis Agent（可信业务数据分析智能体）
 
+## 2026-11-04｜CSV 下载优化完成
+
+目标：消除下载前重复完整性扫描和异步接口中的同步文件读取；输入为已授权会话的可信工件，
+输出为有界内存CSV响应。保留用户/workspace/版本、哈希、到期及导出审计检查，不改查询生成、
+前端或动态导出，不声称零拷贝。通过分块读取、事件循环不阻塞、文件篡改拒绝、断连关闭和
+清理期间已打开下载可完成的测试验收。
+
+原接口已经64KiB分块传输，实际问题是路由verify_manifest与open_verified_csv重复扫描，以及
+同步哈希占用事件循环。现在open_csv_download在线程内一次验证并返回manifest和已打开的
+同一CSV句柄，校验数据/指标版本后用于传输；删除无运行时调用方的verified_csv_path。
+ArtifactCsvResponse提供Content-Length、禁止敏感结果缓存，结束/取消/发送失败均关闭文件。
+校验期间取消则等待工作线程结束并关闭其句柄，不遗留后台文件。完整性检查仍需先完整扫描
+一次文件，且不防止受信任存储被外部进程原地修改；保留既有不可变工件存储假设。
+
+实测25项定向回归通过（含真实PG的认证、分页、CSV、归属/版本与篡改检查，以及ASGI断连）；Ruff和diff
+检查通过。合成2MiB与32MiB文件经校验和ASGI分块发送，tracemalloc的Python内存峰值分别
+2.01/2.02MiB，校验耗时13.3/119.2ms，总耗时25.6/267.7ms。发送端丢弃数据、不经过真实
+网络；这是本地有界内存实验，不是RSS、吞吐或线上SLA，也未验证sendfile零拷贝。
+未重启现有在线实例或重新调用模型，本次不改查询/回答链。
+
 > 文档导航：先看 [`docs/README.md`](docs/README.md)。本文是项目需求、架构、技术决策和当前阶段的本地基线；后训练学习材料统一从 [`docs/post-training/README.md`](docs/post-training/README.md) 进入。
 
 当前交付状态（2026-10-20）：[六项产品工程](plan/process-agent-product-readiness-v1.md)已收口。

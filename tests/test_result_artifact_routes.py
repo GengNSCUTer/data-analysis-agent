@@ -3,6 +3,7 @@ import asyncio
 import csv
 import io
 import os
+import threading
 import uuid
 
 from fastapi.testclient import TestClient
@@ -26,6 +27,15 @@ def test_pages_download_and_scope_use_the_same_verified_artifact(monkeypatch, tm
     monkeypatch.setenv("DATA_ANALYSIS_BOOTSTRAP_PASSWORD", "budget-route-test-password")
     monkeypatch.setattr(demo, "RESULT_ARTIFACT_DIRECTORY", tmp_path)
     store = ResultArtifactStore(tmp_path)
+    open_calls = []
+    original_open = ResultArtifactStore.open_verified_csv
+    caller_thread = threading.get_ident()
+
+    def tracked_open(self, **identity):
+        open_calls.append(threading.get_ident())
+        return original_open(self, **identity)
+
+    monkeypatch.setattr(ResultArtifactStore, "open_verified_csv", tracked_open)
     conversations = PostgresConversationStore()
     workspace = load_runtime_workspace().profile
     artifact = ResultArtifact(
@@ -59,6 +69,8 @@ def test_pages_download_and_scope_use_the_same_verified_artifact(monkeypatch, tm
             downloaded = client.get(f"/api/project/conversations/{conversation.id}/result.csv")
             assert downloaded.status_code == 200 and downloaded.headers["x-row-count"] == "1205"
             assert len(list(csv.DictReader(io.StringIO(downloaded.content.decode("utf-8"))))) == 1205
+            assert downloaded.headers['content-length'] == str(len(downloaded.content))
+            assert len(open_calls) == 1 and open_calls[0] != caller_thread
             # Own login cannot retrieve another owner's stored conversation.
             alien = conversation.model_copy(deep=True, update={"id": "alien-" + uuid.uuid4().hex, "user": User(id="other-owner", group_memberships=["analyst"])})
             alien.metadata.pop("state_version", None)

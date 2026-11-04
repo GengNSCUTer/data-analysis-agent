@@ -67,13 +67,17 @@ def test_result_artifact_store_scopes_users_and_workspaces(tmp_path) -> None:
         dataset_version="v1",
         metric_version="m1",
     )
-    csv_path = store.verified_csv_path(
-        artifact_id="rta_test", user_id="user-a", workspace_id="olist_analytics"
+    manifest, handle = store.open_verified_csv(
+        artifact_id="rta_test", user_id="user-a", workspace_id="olist_analytics",
+        dataset_version="v1", metric_version="m1",
     )
-    assert csv_path.read_text(encoding="utf-8").splitlines()[0] == "gmv"
+    with handle:
+        assert handle.read().decode().splitlines()[0] == "gmv"
+    assert manifest["row_count"] == 1
     with pytest.raises(FileNotFoundError):
-        store.verified_csv_path(
-            artifact_id="rta_test", user_id="user-b", workspace_id="olist_analytics"
+        store.open_verified_csv(
+            artifact_id="rta_test", user_id="user-b", workspace_id="olist_analytics",
+            dataset_version="v1", metric_version="m1",
         )
     with pytest.raises(FileNotFoundError):
         store.load_manifest(
@@ -110,7 +114,7 @@ def test_expiry_cleanup_is_scoped_and_open_download_can_finish(tmp_path):
     store = ResultArtifactStore(tmp_path / 'runtime', retention_seconds=60)
     identity = dict(artifact_id='rta_expire', user_id='user', workspace_id='olist')
     store.save_result_csv(**identity, columns=['n'], rows=[{'n': 1}], row_count=1, dataset_version='v1', metric_version='m1')
-    handle = store.open_verified_csv(**identity)
+    _, handle = store.open_verified_csv(**identity, dataset_version='v1', metric_version='m1')
     scope = store._scope('user', 'olist', 'rta_expire')
     manifest = scope / 'manifest.json'
     os.utime(manifest, (time.time() - 120, time.time() - 120))
@@ -130,6 +134,54 @@ def test_expiry_cleanup_is_scoped_and_open_download_can_finish(tmp_path):
     assert handle.read().decode().splitlines() == ['n', '1']
     handle.close()
     assert store.cleanup_expired()['artifacts'] == 0
+
+
+def test_download_verifies_once_and_keeps_verified_descriptor(tmp_path, monkeypatch):
+    from data_analysis_agent import result_artifact_store as module
+
+    store = ResultArtifactStore(tmp_path)
+    identity = dict(artifact_id='download', user_id='user', workspace_id='shop')
+    store.save_result_csv(**identity, columns=['n'], rows=[{'n': 42}], row_count=1,
+                          dataset_version='v1', metric_version='m1')
+    original = module._stream_sha256_size
+    calls = []
+
+    def counted(handle):
+        calls.append(handle)
+        return original(handle)
+
+    monkeypatch.setattr(module, '_stream_sha256_size', counted)
+    manifest, handle = store.open_verified_csv(**identity, dataset_version='v1', metric_version='m1')
+    try:
+        assert calls == [handle] and handle.tell() == 0
+        path = store._scope('user', 'shop', 'download') / 'result.csv'
+        replacement = path.with_suffix('.replacement')
+        replacement.write_bytes(b'n\r\n999\r\n')
+        os.replace(replacement, path)
+        assert handle.read() == b'n\r\n42\r\n'
+        assert manifest['csv_bytes'] == 7
+    finally:
+        handle.close()
+    with pytest.raises(ResultArtifactIntegrityError):
+        store.open_verified_csv(**identity, dataset_version='v1', metric_version='m1')
+
+
+@pytest.mark.parametrize('change', ['dataset_version', 'metric_version', 'csv', 'chart'])
+def test_download_rejects_version_drift_and_tampered_payloads(tmp_path, change):
+    store = ResultArtifactStore(tmp_path)
+    identity = dict(artifact_id='download', user_id='user', workspace_id='shop')
+    store.save_result_csv(**identity, columns=['n'], rows=[{'n': 42}], row_count=1,
+                          dataset_version='v1', metric_version='m1')
+    store.save_plotly_json(**identity, figure={'data': [], 'layout': {}})
+    scope = store._scope('user', 'shop', 'download')
+    versions = dict(dataset_version='v1', metric_version='m1')
+    if change in versions:
+        versions[change] = 'other'
+    else:
+        filename = 'result.csv' if change == 'csv' else 'chart.plotly.json'
+        (scope / filename).write_text('changed')
+    with pytest.raises(ResultArtifactIntegrityError):
+        store.open_verified_csv(**identity, **versions)
 
 
 def test_retention_survives_restart_and_skips_artifact_in_use(tmp_path):

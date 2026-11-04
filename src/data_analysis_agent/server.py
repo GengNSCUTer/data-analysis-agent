@@ -14,11 +14,12 @@ from dataclasses import replace
 load_dotenv(Path(os.getenv("DATA_ANALYSIS_ENV_FILE", ".env")))
 from fastapi import FastAPI, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict
 
 from data_analysis_agent.demo_session import SESSION_COOKIE_NAME
 from data_analysis_agent.export_audit import ExportAudit
+from data_analysis_agent.result_download import ArtifactCsvResponse, open_csv_download
 from data_analysis_agent.local_auth import (
     LOCAL_SESSION_COOKIE,
     SESSION_MAX_AGE_SECONDS as LOCAL_SESSION_MAX_AGE_SECONDS,
@@ -938,15 +939,13 @@ def create_app(*, llm_provider=None) -> FastAPI:
         if artifact is None or not artifact.artifact_id:
             return JSONResponse({"detail": "no validated result to download"}, status_code=404)
         try:
-            manifest = result_artifact_store.verify_manifest(
+            manifest, csv_file = await open_csv_download(
+                result_artifact_store,
                 artifact_id=artifact.artifact_id,
                 user_id=user.id,
                 workspace_id=workspace.workspace_id,
-            )
-            csv_file = result_artifact_store.open_verified_csv(
-                artifact_id=artifact.artifact_id,
-                user_id=user.id,
-                workspace_id=workspace.workspace_id,
+                dataset_version=workspace.dataset_version_id,
+                metric_version=workspace.metric_version,
             )
         except ResultArtifactExpired:
             return JSONResponse({"detail": "保存的结果已到期，请重新运行分析。"}, status_code=410)
@@ -963,17 +962,9 @@ def create_app(*, llm_provider=None) -> FastAPI:
         except BaseException:
             csv_file.close()
             raise
-        async def stream_csv():
-            try:
-                while chunk := await asyncio.to_thread(csv_file.read, 64 * 1024):
-                    yield chunk
-            finally:
-                csv_file.close()
-        return StreamingResponse(
-            stream_csv(),
-            media_type="text/csv",
-            headers={"X-Row-Count": str(manifest["row_count"]),
-                     "Content-Disposition": f'attachment; filename="{artifact.artifact_id}.csv"'},
+        return ArtifactCsvResponse(
+            csv_file, artifact_id=artifact.artifact_id,
+            byte_count=int(manifest["csv_bytes"]), row_count=int(manifest["row_count"]),
         )
 
     @app.get("/api/project/session")
