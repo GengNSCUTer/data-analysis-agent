@@ -1,6 +1,7 @@
 from data_analysis_agent.join_evidence import build_join_probes
 from data_analysis_agent.sql_policy import SqlPolicy
 from sqlglot import parse_one, exp
+import pytest
 
 
 def test_internal_probe_can_group_by_private_foreign_key_without_exposing_it():
@@ -191,3 +192,46 @@ def test_legitimate_multimembership_keeps_the_full_group_identity():
     # Numeric IDs only exercise identity semantics; they are not a business AOV.
     assert probes[0].table == "fact_orders"
     assert "GROUP BY p.product_category_name" in probes[0].sql
+
+
+@pytest.mark.parametrize('query,high_risk', [
+    ('SELECT SUM(i.price*p.payment_value) AS gmv FROM analytics.fact_order_items i JOIN analytics.fact_payments p ON p.order_id=i.order_id', True),
+    ('SELECT SUM(i.price) AS gmv FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id HAVING SUM(i.price)>0', False),
+    ('WITH a AS (SELECT order_id, SUM(price) AS amount FROM analytics.fact_order_items GROUP BY order_id) SELECT SUM(a.amount) AS gmv FROM a JOIN analytics.fact_orders o ON o.order_id=a.order_id', False),
+    ('WITH a AS (SELECT order_id, SUM(price) AS amount FROM analytics.fact_order_items GROUP BY order_id) SELECT SUM(a.amount) AS gmv FROM a JOIN analytics.fact_payments p ON p.order_id=a.order_id', True),
+    ('SELECT SUM(i.price) OVER (PARTITION BY i.order_id) AS gmv FROM analytics.fact_order_items i JOIN analytics.fact_payments p ON p.order_id=i.order_id', True),
+    ('WITH a AS (SELECT order_id, SUM(price) AS amount FROM analytics.fact_order_items GROUP BY order_id) SELECT SUM(a.amount) AS gmv FROM a JOIN analytics.unregistered_source x ON x.order_id=a.order_id', True),
+])
+def test_partial_join_risk_distinguishes_preserved_keys_from_cross_fact_fanout(query, high_risk):
+    _, uncovered = build_join_probes(
+        query, row_keys={'fact_order_items': ('order_id','order_item_id'), 'fact_orders': ('order_id',),
+                         'fact_payments': ('order_id','payment_sequential')},
+        source_grains={'fact_order_items':'order_item', 'fact_orders':'order', 'fact_payments':'payment'},
+        metric_grains={'gmv':'order_item'},
+    )
+    assert uncovered
+    assert any(item['high_risk'] for item in uncovered) is high_risk
+
+
+def test_summarize_diagnostics_does_not_invent_false_rejection_labels():
+    from data_analysis_agent.join_evidence import summarize_join_evidence
+
+    evidence = dict(status='partial', covered_aggregates=1, planned_checks=1,
+                    uncovered_aggregates=1, elapsed_ms=10, rejected=True)
+    summary = summarize_join_evidence([{'evidence': evidence}])
+    assert summary['aggregate_coverage_ratio'] == .5
+    assert summary['diagnostic_rejection_rate'] == 1
+    assert summary['false_rejection_rate'] is None
+    summary = summarize_join_evidence([{'evidence': evidence, 'expected_safe': True}])
+    assert summary['false_rejection_rate'] == 1
+
+
+def test_unused_unsafe_cte_does_not_reject_or_probe_a_safe_result():
+    probes, uncovered = build_join_probes(
+        'WITH unused AS (SELECT SUM(i.price*p.payment_value) AS amount '
+        'FROM analytics.fact_order_items i JOIN analytics.fact_payments p ON p.order_id=i.order_id) '
+        'SELECT SUM(price) AS gmv FROM analytics.fact_order_items',
+        row_keys={'fact_order_items':('order_id','order_item_id'), 'fact_payments':('order_id','payment_sequential')},
+        source_grains={'fact_order_items':'order_item','fact_payments':'payment'}, metric_grains={'gmv':'order_item'},
+    )
+    assert not probes and not uncovered

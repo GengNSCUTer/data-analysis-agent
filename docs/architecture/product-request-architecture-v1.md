@@ -66,6 +66,10 @@ recommendation）和指向本次证据的`evidence_refs`。`AnswerDraft.text()`�
 
 本地模型如果以后接入，只能接在「在线模型写候选 SQL」那个位置，后面的策略、只读执行和结果合同不变。现在没有这条接入。
 
+在线JOIN诊断与金额来源的检查范围、状态、成本口径及复跑证据见
+[JOIN诊断与Catalog来源检查](../../evals/results/join_catalog_checks_20261104.md)。其中partial不等于
+安全，只有未核实的高风险SUM会收紧；金额lineage检查不等于Gold renderer或完整公式等价证明。
+
 ## 完整 CSV 下载与文件生命周期
 
 `server.py:download_result_csv()`先验证身份与会话归属，使用当前workspace版本下的可信工件引用。

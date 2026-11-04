@@ -129,7 +129,7 @@ class TrustedRunSqlTool(RunSqlTool):
         # same request context. A stale error must not repair a policy refusal.
         context.metadata.pop("safe_sql_error", None)
         context.metadata.pop("sql_error", None)
-        mismatch = sql_plan_mismatch(args.sql, context.metadata.get("query_plan"))
+        mismatch = self._candidate_mismatch(args.sql, context)
         if mismatch:
             await self._audit_plan_rejection(context, args.sql, mismatch)
             context.metadata["safe_sql_error"] = SanitizedSqlError("unknown", mismatch, True)
@@ -243,9 +243,7 @@ class TrustedRunSqlTool(RunSqlTool):
         # tool call and inherits the same server-owned result contract.
         context.metadata.pop("safe_sql_error", None)
         context.metadata.pop("sql_error", None)
-        repaired_mismatch = sql_plan_mismatch(
-            outcome.repaired_sql, context.metadata.get("query_plan")
-        )
+        repaired_mismatch = self._candidate_mismatch(outcome.repaired_sql, context)
         if repaired_mismatch:
             await self._audit_plan_rejection(context, outcome.repaired_sql, repaired_mismatch)
             evidence["repair_execution_status"] = "failed"
@@ -275,6 +273,17 @@ class TrustedRunSqlTool(RunSqlTool):
             context,
             evidence=evidence,
             detail="修复后的 SQL 仍未通过可信执行链，系统未输出未经验证的数字。",
+        )
+
+    def _candidate_mismatch(self, sql, context):
+        workspace = getattr(self.sql_runner, 'workspace', None)
+        schema = {workspace.analytics_schema: {
+            table: dict.fromkeys(columns, 'UNKNOWN')
+            for table, columns in workspace.allowed_columns.items()
+        }} if workspace is not None else {}
+        return sql_plan_mismatch(
+            sql, context.metadata.get('query_plan'),
+            metric_value_sources=context.metadata.get('metric_value_sources'), column_schema=schema,
         )
 
     async def _audit_plan_rejection(self, context, sql, reason):

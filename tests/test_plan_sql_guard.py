@@ -3,6 +3,26 @@ import pytest
 from data_analysis_agent.plan_sql_guard import sql_plan_mismatch
 
 
+@pytest.mark.parametrize('sql,allowed', [
+    ('SELECT SUM(i.price) AS gmv FROM analytics.fact_order_items i', True),
+    ("SELECT SUM(i.price) FILTER (WHERE p.payment_type='credit_card') AS gmv FROM analytics.fact_order_items i JOIN analytics.fact_payments p ON p.order_id=i.order_id", True),
+    ("SELECT SUM(CASE WHEN p.payment_value>0 THEN i.price ELSE 0 END) AS gmv FROM analytics.fact_order_items i JOIN analytics.fact_payments p ON p.order_id=i.order_id", True),
+    ('WITH a AS (SELECT SUM(price) AS v FROM analytics.fact_order_items) SELECT COALESCE(v,0) AS gmv FROM a', True),
+    ('WITH a AS (SELECT payment_value AS price FROM analytics.fact_payments) SELECT SUM(price) AS gmv FROM a', False),
+    ('WITH unused AS (SELECT price FROM analytics.fact_order_items) SELECT SUM(p.payment_value) AS gmv FROM analytics.fact_payments p', False),
+    ('SELECT SUM(p.payment_value) AS gmv FROM analytics.fact_payments p WHERE EXISTS (SELECT 1 FROM analytics.fact_order_items i WHERE i.price>0)', False),
+    ('SELECT SUM(p.payment_value)+SUM(i.price)*0 AS gmv FROM analytics.fact_order_items i JOIN analytics.fact_payments p ON p.order_id=i.order_id', False),
+    ('SELECT 0 AS gmv', False),
+    ('SELECT MAX(price) AS gmv FROM analytics.fact_order_items', False),
+    ('SELECT SUM(DISTINCT price) AS gmv FROM analytics.fact_order_items', False),
+    ('SELECT SUM(i.price) AS gmv FROM analytics.fact_order_items i UNION ALL SELECT SUM(p.payment_value) AS gmv FROM analytics.fact_payments p', False),
+])
+def test_amount_provenance_follows_output_through_ctes_and_ignores_decoys(sql, allowed):
+    rules = {'gmv': {'aggregation':'sum', 'required':['fact_order_items.price'], 'allowed':['fact_order_items.price','fact_orders.order_status']}}
+    mismatch = sql_plan_mismatch(sql, {'metric_ids':['gmv']}, metric_value_sources=rules)
+    assert (mismatch is None) is allowed
+
+
 @pytest.mark.parametrize("column,accepted", [("order_id", True), ("status", False)])
 def test_preaggregate_can_rejoin_the_same_catalog_target_key_but_not_non_key(column, accepted):
     plan = {"metric_ids": ["average_order_value"], "lookup_joins": [

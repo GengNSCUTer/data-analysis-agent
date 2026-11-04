@@ -13,6 +13,8 @@ from typing import Any, Mapping
 from sqlglot import exp, parse_one
 from sqlglot.errors import ParseError, TokenError
 from sqlglot.optimizer.scope import Scope, build_scope
+from sqlglot.lineage import lineage
+from sqlglot.errors import OptimizeError, SqlglotError
 
 
 _LIMIT = re.compile(r"\blimit\s+(\d+)\b", re.IGNORECASE)
@@ -23,7 +25,11 @@ _TIME_PARTITION_HINT = re.compile(
 )
 
 
-def sql_plan_mismatch(sql: str, plan: Mapping[str, Any] | None) -> str | None:
+def sql_plan_mismatch(
+    sql: str, plan: Mapping[str, Any] | None, *,
+    metric_value_sources: Mapping[str, Mapping[str, Any]] | None = None,
+    column_schema: Mapping[str, Any] | None = None,
+) -> str | None:
     """Return a safe reason for a detected, covered mismatch; otherwise None."""
 
     if not isinstance(sql, str) or not sql.strip() or not isinstance(plan, Mapping):
@@ -119,6 +125,57 @@ def sql_plan_mismatch(sql: str, plan: Mapping[str, Any] | None) -> str | None:
             return "按支付方式拆金额时，SQL 必须用 payment_value 占比分摊，并按 payment_type 汇总。"
         if mode == "multi_membership" and dimension and dimension.casefold() not in columns:
             return f"SQL 必须包含分组列 {dimension}，并允许同一订单进入多个分组。"
+    return _metric_value_source_mismatch(sql, plan, metric_value_sources or {}, column_schema or {})
+
+
+def _metric_value_source_mismatch(sql, plan, rules, schema):
+    """Check output value lineage, not mentions anywhere in WHERE/unused CTEs.
+
+    This proves only a bounded source constraint. It does not establish SUM
+    equivalence, status filtering, weighting or arbitrary metric correctness.
+    """
+    allocations = {r.get('metric_id') for r in plan.get('attribution_requirements', ())
+                   if r.get('policy_mode') == 'payment_share'}
+    if not rules:
+        return None
+    try:
+        values_only = parse_one(sql, read='postgres')
+    except (ParseError, TokenError, RecursionError):
+        return None
+    # FILTER/CASE predicates and window partition keys govern which rows
+    # contribute, not which monetary column supplies the value. Other checks
+    # own those conditions; do not reject valid conditional sums as new money.
+    for node in list(values_only.find_all(exp.Filter)):
+        node.replace(node.this.copy())
+    for node in values_only.find_all(exp.If):
+        node.set('this', exp.true())
+    for node in values_only.find_all(exp.Case):
+        node.set('this', None)
+    for node in list(values_only.find_all(exp.Window)):
+        node.replace(node.this.copy())
+    for metric, rule in rules.items():
+        try:
+            node = lineage(metric, values_only, schema=dict(schema), dialect='postgres')
+        except (SqlglotError, OptimizeError, RecursionError):
+            # Malformed/unknown columns still go through policy/DB handling;
+            # unsupported lineage is not silently called a semantic proof.
+            continue
+        leaves = [n for n in node.walk() if not n.downstream]
+        if any(not isinstance(n.expression, exp.Table) and
+               (isinstance(n.expression, exp.Placeholder) or n.expression.find(exp.Column)) for n in leaves):
+            continue
+        sources = {f'{n.expression.name}.{n.name.rsplit(".", 1)[-1]}' for n in leaves
+                   if isinstance(n.expression, exp.Table)}
+        if rule.get('aggregation') == 'sum':
+            for entry in node.walk():
+                for aggregate in entry.expression.find_all(exp.AggFunc):
+                    if not isinstance(aggregate, exp.Sum) or isinstance(aggregate.this, exp.Distinct):
+                        return f'指标 {metric} 应累加 Catalog 金额，不能改成均值、极值或按金额去重。'
+        allowed = set(rule['allowed'])
+        if metric in allocations:
+            allowed.update(rule.get('allocation_allowed', ()))
+        if not set(rule['required']) <= sources or sources - allowed:
+            return f'指标 {metric} 的金额来源与 Catalog 不符；必须使用 {", ".join(rule["required"])}，不能用其他金额列冒名。'
     return None
 
 

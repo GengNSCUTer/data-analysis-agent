@@ -273,6 +273,7 @@ class ResultContract:
     metric_semantics: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     join_source_keys: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     join_source_grains: Mapping[str, str] = field(default_factory=dict)
+    metric_value_sources: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def from_selection(
@@ -364,7 +365,40 @@ class ResultContract:
             metric_semantics={m: dict(catalog.metric_semantics.get(m, {})) for m in metric_ids},
             join_source_keys={t.table_id: catalog.row_keys[t.table_id] for t in selection.tables if t.table_id in catalog.row_keys},
             join_source_grains={t.table_id: t.grain for t in selection.tables},
+            metric_value_sources=cls._amount_value_sources(selection, catalog),
         )
+
+    @staticmethod
+    def _amount_value_sources(selection, catalog):
+        """Constrain only amounts with one explicitly declared numeric measure.
+
+        No formula is inferred from a Chinese label or a metric ID. Complex
+        metrics remain outside this bounded provenance check.
+        """
+        result = {}
+        tables = catalog.tables_by_id
+        additive_metrics = set(catalog.additive_metrics_for(tuple(m.metric_id for m in selection.metrics), ()))
+        for metric in selection.metrics:
+            if metric.metric_id not in additive_metrics or catalog.metric_semantics.get(metric.metric_id, {}).get('kind') != 'amount':
+                continue
+            measures = []
+            for source in metric.source_columns:
+                table, column = source.split('.')
+                definition = tables[table]
+                numeric = definition.columns_by_name[column].type.lower()
+                if (definition.grain == metric.grain
+                    and column not in catalog.row_keys.get(table, ())
+                    and numeric in {'numeric', 'decimal', 'float', 'double', 'double precision', 'real', 'integer', 'bigint'}):
+                    measures.append(f'{definition.physical_name}.{column}')
+            if len(measures) == 1:
+                result[metric.metric_id] = {
+                    'aggregation': 'sum',
+                    'required': measures,
+                    'allowed': [f'{tables[t].physical_name}.{c}' for t, c in (s.split('.') for s in metric.source_columns)],
+                    'allocation_allowed': [f'{t.physical_name}.{c.name}' for t in selection.tables for c in t.columns
+                                           if c.name == 'payment_value' or c.name in catalog.row_keys.get(t.table_id, ())],
+                }
+        return result
 
     @staticmethod
     def _attribution_requirements(
@@ -431,6 +465,7 @@ class ResultContract:
             result["metric_semantics"] = {m: dict(v) for m, v in self.metric_semantics.items()}
             result["join_source_keys"] = {t: list(keys) for t, keys in self.join_source_keys.items()}
             result["join_source_grains"] = dict(self.join_source_grains)
+            result['metric_value_sources'] = {m: dict(rule) for m, rule in self.metric_value_sources.items()}
         return result
 
     def as_evidence(self) -> dict[str, Any]:

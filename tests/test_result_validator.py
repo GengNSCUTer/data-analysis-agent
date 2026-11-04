@@ -6,6 +6,18 @@ import pytest
 from data_analysis_agent.result_validator import ResultValidator, build_result_summary
 
 
+@pytest.mark.parametrize('status,high_risk,valid', [
+    ('partial', True, False), ('partial', False, True), ('checked', False, True), ('not_applicable', False, True),
+    ('amplified', False, False),
+])
+def test_partial_join_evidence_only_rejects_unverified_high_risk_sum(status, high_risk, valid):
+    result = ResultValidator().validate(
+        pd.DataFrame({'gmv':[12]}), metric_columns=['gmv'],
+        join_evidence={'status':status, 'uncovered':[{'high_risk':high_risk}]},
+    )
+    assert result.safe_to_answer is valid
+
+
 @pytest.mark.parametrize("years", [[2017, 2018], [2017.0, 2018.0]])
 def test_year_bucket_numbers_are_not_epoch_nanoseconds(years):
     validation = ResultValidator().validate(

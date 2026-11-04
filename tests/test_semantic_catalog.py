@@ -44,6 +44,23 @@ def _table(raw: dict, table_id: str) -> dict:
     return next(item for item in raw["tables"] if item["table_id"] == table_id)
 
 
+@pytest.mark.parametrize('name,metric,source', [
+    ('olist','gmv','fact_order_items.price'),
+    ('thelook','completed_sale_amount','order_items.sale_price'),
+])
+def test_runtime_amount_provenance_is_derived_from_each_workspace_catalog(name, metric, source):
+    from data_analysis_agent.runtime_workspace import load_runtime_workspace
+    from data_analysis_agent.runtime_paths import RESOURCES
+    from data_analysis_agent.result_budget import ResultBudget
+    workspace = load_runtime_workspace(RESOURCES / 'workspaces' / f'{name}.yaml').profile
+    catalog = CatalogLoader(workspace=workspace).load()
+    selection = CatalogRetriever(catalog).retrieve('销售额', _user('analyst'), metric_ids=[metric])
+    contract = ResultContract.from_selection(selection, '销售额', None, catalog=catalog,
+                                             result_budget=ResultBudget.aggregate())
+    assert contract.as_tool_metadata()['metric_value_sources'][metric]['required'] == [source]
+    assert 'metric_value_sources' not in contract.as_tool_metadata(include_result_budget=False)
+
+
 def test_default_catalog_matches_policy_and_expected_versions(catalog) -> None:
     assert catalog.catalog_version == "olist-catalog-v2"
     assert catalog.metric_version == "0.2-frozen"

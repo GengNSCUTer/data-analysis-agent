@@ -203,6 +203,7 @@ class ResultValidator:
         execution_truncated: bool | None = None,
         complete_required: bool = False,
         join_multiplicity: Mapping[str, int] | None = None,
+        join_evidence: Mapping[str, Any] | None = None,
         exact_columns: bool = False,
         metric_value_constraints: Mapping[str, Mapping[str, float | bool]] | None = None,
     ) -> ResultValidation:
@@ -241,12 +242,21 @@ class ResultValidator:
             unexpected = tuple(
                 column for column in columns if column not in allowed_actual_columns
             )
-        if join_multiplicity and any(value > 1 for value in join_multiplicity.values()):
+        if (join_multiplicity and any(value > 1 for value in join_multiplicity.values())) or (
+            join_evidence and join_evidence.get('status') == 'amplified'
+        ):
             return ResultValidation(
                 "refuse",
                 "关联粒度可能造成重复放大，未输出确定性数字。",
                 len(frame),
                 columns,
+            )
+        if join_evidence and join_evidence.get('status') == 'partial' and any(
+            item.get('high_risk') for item in join_evidence.get('uncovered', ())
+        ):
+            return ResultValidation(
+                'refuse', '跨事实来源金额聚合的关联放大风险尚未核实，请先分别聚合再关联。',
+                len(frame), columns,
             )
         shape_notes: list[str] = []
         if unexpected:

@@ -336,6 +336,77 @@ class SecurePostgresRunner(SqlRunner):
     def _role_for_context(self, context: ToolContext) -> str:
         return "admin" if "admin" in context.user.group_memberships else "analyst"
 
+    def _check_join_evidence(self, connection, sql, context, role, deadline, frame):
+        started = perf_counter()
+        probes, uncovered = [], []
+        counts, checks = {}, []
+        failure = None
+        try:
+            probes, uncovered = build_join_probes(
+                sql, row_keys=context.metadata['join_source_keys'],
+                source_grains=context.metadata.get('join_source_grains', {}),
+                metric_grains=context.metadata.get('metric_fact_grains', {}),
+                column_schema={self.workspace.analytics_schema: {
+                    table: dict.fromkeys(columns, 'UNKNOWN')
+                    for table, columns in self.workspace.allowed_columns.items()
+                }},
+                allocation_sources={req['metric_id']: context.metadata.get('metric_value_sources', {}).get(req['metric_id'], {}).get('required', ())
+                                    for req in (context.metadata.get('query_plan') or {}).get('attribution_requirements', ())
+                                    if req.get('policy_mode') == 'payment_share'},
+            )
+            with connection.cursor() as control:
+                for probe in probes:
+                    remaining_ms = int((deadline - perf_counter()) * 1000)
+                    if remaining_ms <= 0:
+                        raise TimeoutError('join_evidence_budget_exhausted')
+                    diagnostic = self.policy.evaluate(probe.sql, role=role, complete_result=True, result_limit=1)
+                    control.execute('SET LOCAL statement_timeout = %s', (remaining_ms,))
+                    control.execute(diagnostic.final_sql)
+                    inputs, facts = (int(n) for n in control.fetchone())
+                    count = (2 if inputs else 1) if probe.mode == 'allocation' else ((inputs + facts - 1) // facts if facts else 1)
+                    counts[probe.name] = count
+                    check = {
+                        'source_table': probe.table, 'aggregate': probe.aggregate,
+                        'mode': probe.mode,
+                    }
+                    if probe.mode == 'allocation':
+                        check.update(allocation_violating_facts=inputs, allocation_checked_facts=facts)
+                    else:
+                        check.update(duplicate_group_input_rows=inputs, duplicate_group_distinct_facts=facts,
+                                     multiplicity_lower_bound=count)
+                    checks.append(check)
+                    if count > 1:
+                        break
+        except (psycopg2.Error, PolicyViolation, TimeoutError) as exc:
+            failure = 'timeout' if isinstance(exc, TimeoutError) or getattr(exc, 'pgcode', None) == '57014' else 'diagnostic_failed'
+            # No raw SQL/driver error enters the safe trace.
+            uncovered.append({'reason': failure, 'high_risk': True})
+            raise ResultValidationError(ResultValidation(
+                'refuse', '关联证据检查未完成，系统未输出未经核实的结果。', len(frame), tuple(frame.columns),
+            )) from exc
+        finally:
+            amplified = any(n > 1 for n in counts.values())
+            high_risk = any(item.get('high_risk') for item in uncovered)
+            status = 'amplified' if amplified else 'partial' if uncovered else 'checked' if counts else 'not_applicable'
+            rejection = failure or ('amplified' if amplified else 'unverified_high_risk_sum' if high_risk else None)
+            total = len(probes) + len(uncovered)
+            evidence = {
+                'status': status, 'checks': checks, 'uncovered': uncovered,
+                'elapsed_ms': round((perf_counter() - started) * 1000, 3),
+                'planned_checks': len(probes), 'executed_checks': len(checks),
+                'covered_aggregates': len(checks), 'uncovered_aggregates': len(uncovered),
+                'coverage_ratio': len(checks) / total if total else None,
+                'rejected': rejection is not None, 'rejection_reason': rejection,
+            }
+            context.metadata['join_multiplicity'] = counts
+            context.metadata['join_evidence'] = evidence
+            self._record_timing(context, 'join_evidence', started)
+            usage = context.metadata.get('budget_usage')
+            if usage is not None:
+                attempts = list((usage.catalog_trace or {}).get('join_evidence_attempts', ()))
+                attempts.append(evidence)
+                usage.record_catalog({'join_evidence': evidence, 'join_evidence_attempts': attempts})
+
     def _run_sql_sync(self, args: RunSqlToolArgs, context: ToolContext, cancellation=None) -> pd.DataFrame:
         # Each attempt owns its own validation; a repair must not inherit it.
         context.metadata.pop("result_validation", None)
@@ -425,55 +496,16 @@ class SecurePostgresRunner(SqlRunner):
                         policy_limit_applied=decision.policy_limit_applied,
                     )
                     frame = pd.DataFrame(rows, columns=[column.name for column in cursor.description])
-                if context.metadata.get("join_source_keys"):
-                    probes, uncovered = build_join_probes(
-                        decision.final_sql,
-                        row_keys=context.metadata["join_source_keys"],
-                        source_grains=context.metadata.get("join_source_grains", {}),
-                        metric_grains=context.metadata.get("metric_fact_grains", {}),
-                        column_schema={self.workspace.analytics_schema: {
-                            table: dict.fromkeys(columns, "UNKNOWN")
-                            for table, columns in self.workspace.allowed_columns.items()
-                        }},
-                    )
-                    counts, evidence = {}, []
-                    check_started = perf_counter()
-                    with connection.cursor() as control:
-                        for probe in probes:
-                            remaining_ms = int((deadline - perf_counter()) * 1_000)
-                            if remaining_ms <= 0:
-                                raise ResultValidationError(ResultValidation(
-                                    "refuse", "查询及关联证据检查超过执行时间预算。", len(frame), tuple(frame.columns)))
-                            diagnostic = self.policy.evaluate(probe.sql, role=role, complete_result=True, result_limit=1)
-                            control.execute("SET LOCAL statement_timeout = %s", (remaining_ms,))
-                            control.execute(diagnostic.final_sql)
-                            inputs, facts = (int(n) for n in control.fetchone())
-                            # Pigeonhole lower bound: proves repetition, not
-                            # the exact maximum copies of any individual row.
-                            count = (inputs + facts - 1) // facts if facts else 1
-                            counts[probe.name] = count
-                            evidence.append({"source_table":probe.table, "aggregate":probe.aggregate,
-                                             "duplicate_group_input_rows":inputs, "duplicate_group_distinct_facts":facts,
-                                             "multiplicity_lower_bound":count})
-                            if count > 1:
-                                break
-                    context.metadata["join_multiplicity"] = counts
-                    context.metadata["join_evidence"] = {
-                        "status": "amplified" if any(n>1 for n in counts.values()) else "partial" if uncovered else "checked" if counts else "not_applicable",
-                        "checks":evidence, "uncovered":uncovered,
-                        "elapsed_ms":int((perf_counter()-check_started)*1_000),
-                    }
-                    self._record_timing(context, "join_evidence", check_started)
-                    usage = context.metadata.get("budget_usage")
-                    if usage is not None:
-                        usage.record_catalog({"join_evidence":context.metadata["join_evidence"]})
+                if 'join_source_keys' in context.metadata:
+                    self._check_join_evidence(connection, decision.final_sql, context, role, deadline, frame)
             finally:
                 cancellation.close(connection) if cancellation is not None else connection.close()
         except ResultValidationError as exc:
             context.metadata["result_validation"] = exc.validation.as_dict()
+            failure_stage = 'join_evidence' if (context.metadata.get('join_evidence') or {}).get('rejected') else 'result_budget'
             self.audit.record(
                 context, role, args.sql, status="execution_error", final_sql=decision.final_sql,
-                reason="result_budget:" + exc.validation.reason,
+                reason=failure_stage + ':' + exc.validation.reason,
                 elapsed_ms=int((perf_counter() - started_at) * 1000),
                 row_count=exc.validation.row_count,
             )
@@ -522,6 +554,7 @@ class SecurePostgresRunner(SqlRunner):
                 execution_truncated=execution_truncated,
                 complete_required=result_budget is not None,
                 join_multiplicity=context.metadata.get("join_multiplicity"),
+                join_evidence=context.metadata.get("join_evidence"),
                 exact_columns=bool(context.metadata.get("exact_result_columns", False)),
                 metric_value_constraints=context.metadata.get(
                     "metric_value_constraints", {}

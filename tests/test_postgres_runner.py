@@ -87,14 +87,100 @@ async def test_runtime_join_probe_rejects_repeated_item_inputs():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('shape,accepted,status', [
+    ('weighted', False, 'partial'), ('missing_identity', False, 'partial'), ('missing_all_identity', False, 'partial'),
+    ('preaggregate', True, 'partial'), ('max', True, 'partial'), ('distinct', True, 'not_applicable'),
+])
+async def test_partial_join_admission_and_telemetry_use_real_reader(shape, accepted, status):
+    context = make_context('partial-' + uuid.uuid4().hex)
+    keys = {'fact_order_items':['order_id','order_item_id'], 'fact_orders':['order_id'],
+            'fact_payments':['order_id','payment_sequential']}
+    context.metadata.update({
+        'required_result_columns':['gmv'], 'metric_result_columns':['gmv'],
+        'metric_fact_grains':{'gmv':'order_item'}, 'join_source_keys':keys,
+        'join_source_grains':{'fact_order_items':'order_item','fact_orders':'order','fact_payments':'payment'},
+        'budget_usage': BudgetUsage(RequestBudget()),
+    })
+    if shape == 'preaggregate':
+        sql = ('WITH amounts AS (SELECT order_id,SUM(price) AS amount FROM analytics.fact_order_items GROUP BY order_id) '
+               'SELECT SUM(a.amount) AS gmv FROM amounts a JOIN analytics.fact_orders o ON o.order_id=a.order_id')
+    else:
+        aggregate = {'weighted':'SUM(i.price*p.payment_value)', 'missing_identity':'SUM(i.price)', 'missing_all_identity':'SUM(i.price)',
+                     'max':'MAX(i.price)', 'distinct':'SUM(DISTINCT i.price)'}[shape]
+        sql = f'SELECT {aggregate} AS gmv FROM analytics.fact_order_items i JOIN analytics.fact_payments p ON p.order_id=i.order_id'
+        if shape == 'missing_identity':
+            del keys['fact_order_items']
+        elif shape == 'missing_all_identity':
+            keys.clear()
+    runner = SecurePostgresRunner()
+    if accepted:
+        assert len(await runner.run_sql(RunSqlToolArgs(sql=sql), context)) == 1
+    else:
+        with pytest.raises(ResultValidationError, match='尚未核实'):
+            await runner.run_sql(RunSqlToolArgs(sql=sql), context)
+    evidence = context.metadata['join_evidence']
+    assert evidence['status'] == status
+    assert evidence['rejected'] is not accepted
+    assert evidence['elapsed_ms'] >= 0
+    assert evidence['executed_checks'] == len(evidence['checks'])
+    assert context.metadata['budget_usage'].catalog_trace['join_evidence_attempts'] == [evidence]
+
+
+@pytest.mark.asyncio
+async def test_payment_value_aliased_as_gmv_is_rejected_before_database(tmp_path):
+    context = make_context('gmv-source-' + uuid.uuid4().hex)
+    context.metadata.update({
+        'query_plan':{'metric_ids':['gmv']}, 'required_result_columns':['gmv'], 'metric_result_columns':['gmv'],
+        'metric_value_sources':{'gmv':{'required':['fact_order_items.price'], 'allowed':['fact_order_items.price','fact_orders.order_status']}},
+    })
+    runner = SecurePostgresRunner()
+    tool = TrustedRunSqlTool(runner, file_system=LocalFileSystem(str(tmp_path)))
+    result = await tool.execute(context, RunSqlToolArgs(sql='SELECT SUM(p.payment_value) AS gmv FROM analytics.fact_payments p'))
+    assert not result.success and 'Catalog' in result.error
+    assert context.metadata['safe_sql_error'].retryable
+    assert 'result_artifact' not in context.metadata and 'result_validation' not in context.metadata
+    # A correctly sourced candidate still runs the complete real execution chain.
+    result = await tool.execute(context, RunSqlToolArgs(sql='SELECT SUM(i.price) AS gmv FROM analytics.fact_order_items i'))
+    assert result.success and context.metadata['result_validation']['state'] == 'valid'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('duplicate', [False, True])
+async def test_valid_payment_share_allocation_and_duplicated_weights(duplicate):
+    context = make_context('allocation-' + uuid.uuid4().hex)
+    context.metadata.update({
+        'required_result_columns':['payment_type','gmv'], 'metric_result_columns':['gmv'],
+        'metric_fact_grains':{'gmv':'order_item'},
+        'join_source_keys':{'fact_order_items':['order_id','order_item_id'], 'fact_payments':['order_id','payment_sequential']},
+        'join_source_grains':{'fact_order_items':'order_item', 'fact_payments':'payment'},
+        'metric_value_sources':{'gmv':{'required':['fact_order_items.price']}},
+        'query_plan':{'attribution_requirements':[{'metric_id':'gmv', 'policy_mode':'payment_share'}]},
+    })
+    extra = ' CROSS JOIN (SELECT 1 AS n UNION ALL SELECT 2 AS n) copies' if duplicate else ''
+    sql = ('WITH totals AS (SELECT order_id,SUM(payment_value) AS total FROM analytics.fact_payments GROUP BY order_id) '
+           'SELECT p.payment_type,SUM(i.price*p.payment_value/NULLIF(t.total,0)) AS gmv '
+           'FROM analytics.fact_order_items i JOIN analytics.fact_payments p ON p.order_id=i.order_id '
+           'JOIN totals t ON t.order_id=i.order_id' + extra + ' GROUP BY p.payment_type')
+    if duplicate:
+        with pytest.raises(ResultValidationError, match='重复放大'):
+            await SecurePostgresRunner().run_sql(RunSqlToolArgs(sql=sql), context)
+    else:
+        assert len(await SecurePostgresRunner().run_sql(RunSqlToolArgs(sql=sql), context)) > 0
+    evidence = context.metadata['join_evidence']
+    assert evidence['status'] == ('amplified' if duplicate else 'checked')
+    assert evidence['checks'][0]['mode'] == 'allocation'
+    assert bool(evidence['checks'][0]['allocation_violating_facts']) is duplicate
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("duplicate", [False, True])
 async def test_private_key_preaggregation_probe_runs_as_analyst_and_still_detects_fanout(duplicate):
     context = make_context(f"private-group-{uuid.uuid4().hex}")
     context.metadata.update({
         "required_result_columns": ["customer_state", "gmv"], "metric_result_columns": ["gmv"],
         "metric_fact_grains": {"gmv": "order_item"},
-        "join_source_keys": {"fact_order_items": ["order_id", "order_item_id"], "fact_orders": ["order_id"]},
-        "join_source_grains": {"fact_order_items": "order_item", "fact_orders": "order"},
+        "join_source_keys": {"fact_order_items": ["order_id", "order_item_id"], "fact_orders": ["order_id"], "dim_customers": ["customer_id"]},
+        "join_source_grains": {"fact_order_items": "order_item", "fact_orders": "order", "dim_customers": "customer"},
     })
     extra = " CROSS JOIN (SELECT 1 AS n UNION ALL SELECT 2 AS n) copies" if duplicate else ""
     sql = (
@@ -291,7 +377,7 @@ async def test_runner_executes_allowed_query_and_audits_policy_rejection() -> No
     import json
     evidence = json.loads(context.metadata["validated_result_summary"].removeprefix(RESULT_EVIDENCE_PREFIX))
     assert evidence["coverage"] == "complete"
-    assert evidence["statistics"]["paid_order_count"]["sum_of_returned_rows"] == sum(expected.values())
+    assert evidence["statistics"]["paid_order_count"]["sum_of_returned_rows"] == sum(sorted(expected.values(), reverse=True)[:5])
 
     with pytest.raises(PolicyViolation, match="only SELECT"):
         await runner.run_sql(RunSqlToolArgs(sql="DELETE FROM fact_orders"), context)

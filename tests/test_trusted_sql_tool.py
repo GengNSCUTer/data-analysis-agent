@@ -113,6 +113,24 @@ class FakeRepairProvider:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('repaired_is_correct', [True, False])
+async def test_amount_source_rule_is_rechecked_on_the_one_repair(tmp_path, repaired_is_correct):
+    context = _context()
+    context.metadata.update({
+        'query_plan': {'metric_ids':['gmv']}, 'required_result_columns':['gmv'], 'metric_result_columns':['gmv'],
+        'metric_value_sources':{'gmv':{'required':['fact_order_items.price'], 'allowed':['fact_order_items.price']}},
+    })
+    good = 'SELECT SUM(price) AS gmv FROM analytics.fact_order_items'
+    bad = 'SELECT SUM(payment_value) AS gmv FROM analytics.fact_payments'
+    provider = FakeRepairProvider(good if repaired_is_correct else bad)
+    runner = SequenceRunner([pd.DataFrame({'gmv':[12]})])
+    result = await _tool(runner, provider, tmp_path).execute(context, RunSqlToolArgs(sql=bad))
+    assert result.success is repaired_is_correct
+    assert runner.calls == ([good] if repaired_is_correct else [])
+    assert len(provider.prompts) == 1
+
+
+@pytest.mark.asyncio
 async def test_plan_rejection_records_original_candidate_without_executing(tmp_path):
     from unittest.mock import Mock
     context = _context()
