@@ -26,6 +26,8 @@ ALTER TABLE app.conversations
     ADD COLUMN IF NOT EXISTS workspace_id TEXT;
 ALTER TABLE app.conversations
     ADD COLUMN IF NOT EXISTS state_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE app.conversations
+    ADD COLUMN IF NOT EXISTS context_epoch INTEGER NOT NULL DEFAULT 0;
 UPDATE app.conversations
 SET workspace_id = 'olist-demo'
 WHERE workspace_id IS NULL OR btrim(workspace_id) = '';
@@ -171,6 +173,35 @@ CREATE INDEX IF NOT EXISTS agent_runs_user_started_idx
     ON app.agent_runs (user_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS agent_runs_conversation_started_idx
     ON app.agent_runs (conversation_id, started_at DESC);
+
+-- Only committed, validated result descriptors. Full CSV/Plotly stays outside PostgreSQL.
+CREATE TABLE IF NOT EXISTS app.result_artifacts (
+    artifact_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL REFERENCES app.conversations(conversation_id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    context_epoch INTEGER NOT NULL,
+    result_ordinal INTEGER NOT NULL,
+    source_message_index INTEGER NOT NULL,
+    run_id TEXT NOT NULL REFERENCES app.agent_runs(run_id) ON DELETE CASCADE,
+    parent_artifact_id TEXT,
+    user_role TEXT NOT NULL CHECK (user_role IN ('analyst', 'admin')),
+    dataset_version TEXT NOT NULL,
+    metric_version TEXT NOT NULL,
+    catalog_version TEXT NOT NULL,
+    policy_version TEXT NOT NULL,
+    descriptor JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    last_access_at TIMESTAMPTZ,
+    status TEXT NOT NULL DEFAULT 'READY' CHECK (status IN ('READY', 'EXPIRED', 'INVALID', 'REVOKED')),
+    PRIMARY KEY (user_id, workspace_id, artifact_id),
+    UNIQUE (conversation_id, result_ordinal),
+    CHECK (expires_at > created_at),
+    CHECK (source_message_index >= 0 AND context_epoch >= 0)
+);
+CREATE INDEX IF NOT EXISTS result_artifacts_candidates_idx
+    ON app.result_artifacts (user_id, workspace_id, conversation_id, context_epoch, status, created_at DESC);
 
 DO $$
 BEGIN

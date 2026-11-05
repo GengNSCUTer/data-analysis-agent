@@ -69,6 +69,7 @@ def prepare_analysis_state(
     conversation: Conversation, workspace: WorkspaceProfile,
 ) -> tuple[AnalysisState, str | None]:
     if not analysis_scope_is_current(conversation.metadata, workspace):
+        conversation.metadata["context_epoch"] = conversation.metadata.get("context_epoch", 0) + 1
         _rebind_scope(conversation, workspace)
         state = AnalysisState.new(workspace, history_start_index=conversation.metadata.get("message_count", len(conversation.messages)))
         conversation.metadata["working_memory"] = state.as_dict()
@@ -82,6 +83,8 @@ def clear_active_analysis_state(
     conversation: Conversation, workspace: WorkspaceProfile
 ) -> None:
     """Drop R2 and the active R3 reference while keeping R1 and R4."""
+
+    conversation.metadata["context_epoch"] = conversation.metadata.get("context_epoch", 0) + 1
 
     summary = conversation.metadata.get("history_summary")
     raw_memory = conversation.metadata.get("working_memory")

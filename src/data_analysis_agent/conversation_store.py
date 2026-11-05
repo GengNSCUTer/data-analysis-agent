@@ -18,6 +18,9 @@ from vanna.core.user import User
 
 from .postgres_runner import PostgresConnectionSettings, complete_database_io
 from .budget import CURRENT_BUDGET
+from .artifact_history import ArtifactHistory
+from .analysis_state import AnalysisState
+from .result_artifact import ResultArtifact
 
 
 CURRENT_MESSAGE_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar("message_context", default=None)
@@ -47,6 +50,7 @@ class PostgresConversationStore(ConversationStore):
         default_workspace_id: str = "olist-demo",
         default_dataset_version: str = "olist-kaggle-v2-2026-08-03",
         default_metric_version: str = "0.1-draft",
+        enable_artifact_history: bool = False,
     ):
         self.settings = settings or PostgresConnectionSettings.from_environment()
         if not isinstance(default_workspace_id, str) or not default_workspace_id.strip():
@@ -54,6 +58,7 @@ class PostgresConversationStore(ConversationStore):
         self.default_workspace_id = default_workspace_id.strip()
         self.default_dataset_version = default_dataset_version
         self.default_metric_version = default_metric_version
+        self.enable_artifact_history = enable_artifact_history
 
     async def create_conversation(
         self, conversation_id: str, user: User, initial_message: str
@@ -256,7 +261,7 @@ class PostgresConversationStore(ConversationStore):
                 messages = [self._message_from_row(row) for row in cursor.fetchall()]
             return Conversation(
                 id=conversation_row["conversation_id"],
-                user=self._user_from_row(conversation_row),
+                user=user,
                 messages=messages,
                 created_at=conversation_row["created_at"],
                 updated_at=conversation_row["updated_at"],
@@ -267,6 +272,7 @@ class PostgresConversationStore(ConversationStore):
                     "metric_version": conversation_row["metric_version"],
                     "workspace_id": conversation_row["workspace_id"],
                     "state_version": conversation_row["state_version"],
+                    "context_epoch": conversation_row["context_epoch"],
                     "working_memory": conversation_row.get("working_memory") or {},
                     "history_summary": (conversation_row.get("working_memory") or {}).get("__history_summary"),
                     "summary_attempt": (conversation_row.get("working_memory") or {}).get("__summary_attempt"),
@@ -278,6 +284,24 @@ class PostgresConversationStore(ConversationStore):
             connection.close()
 
     def _update_sync(self, conversation: Conversation) -> None:
+        usage = CURRENT_BUDGET.get()
+        if (self.enable_artifact_history and usage is not None and usage.sql_calls_used
+                and usage.result_summary and usage.termination_reason in {"running", "completed"}
+                and not conversation.metadata.get("pending_history_artifact")):
+            trace = usage.catalog_trace or {}
+            external = trace.get("result_artifact") or {}
+            memory = AnalysisState.from_mapping(conversation.metadata.get("working_memory"))
+            if external.get("csv_sha256") and memory.status == "executing" and memory.turn_id == (trace.get("analysis_state") or {}).get("turn_id"):
+                artifact = ResultArtifact.from_trusted_usage(request_id=memory.run_id,
+                    summary=usage.result_summary, catalog_trace=trace, chart_rendered=usage.deterministic_chart_rendered)
+                conversation.metadata["working_memory"] = memory.with_result_artifact(artifact).as_dict()
+                contract = trace["result_contract"]
+                decision = trace.get("artifact_reuse") or {}
+                conversation.metadata["pending_history_artifact"] = {
+                    "artifact":artifact.as_dict(), "manifest":external, "run_id":memory.run_id,
+                    "catalog_version":contract["catalog_version"], "policy_version":contract["policy_version"],
+                    "parent_artifact_id":decision.get("artifact_id") if decision.get("mode")=="DERIVED_QUERY" else None,
+                }
         role = self._role_for_user(conversation.user)
         dataset_version = conversation.metadata.get(
             "dataset_version_id", self.default_dataset_version
@@ -326,7 +350,7 @@ class PostgresConversationStore(ConversationStore):
                     )
                     cursor.execute(
                         """
-                        SELECT user_id, workspace_id, state_version, working_memory
+                        SELECT user_id, workspace_id, state_version, working_memory, context_epoch
                         FROM app.conversations WHERE conversation_id = %s FOR UPDATE
                         """,
                         (conversation.id,),
@@ -342,6 +366,9 @@ class PostgresConversationStore(ConversationStore):
                         raise ConversationStateConflict(
                             "conversation state_version is stale"
                         )
+                    epoch = conversation.metadata.get("context_epoch", owner[4])
+                    if epoch < owner[4] or epoch > owner[4] + 1:
+                        raise ConversationStateConflict("conversation context epoch is stale")
                     # A background summary may have advanced after this object
                     # was loaded. Never replace it with a stale foreground copy.
                     db_memory = owner[3] or {}
@@ -402,7 +429,7 @@ class PostgresConversationStore(ConversationStore):
                         UPDATE app.conversations
                         SET title = %s, message_count = %s, updated_at = %s,
                             dataset_version_id = %s, metric_version = %s,
-                            working_memory = %s, state_version = state_version + 1
+                            working_memory = %s, state_version = state_version + 1, context_epoch = %s
                         WHERE conversation_id = %s AND workspace_id = %s
                           AND state_version = %s
                         """,
@@ -415,6 +442,7 @@ class PostgresConversationStore(ConversationStore):
                             psycopg2.extras.Json(
                                 stored_memory
                             ),
+                            epoch,
                             conversation.id,
                             workspace_id,
                             expected_state_version,
@@ -422,10 +450,17 @@ class PostgresConversationStore(ConversationStore):
                     )
                     if cursor.rowcount != 1:
                         raise ConversationStateConflict("conversation state_version is stale")
+                    pending = conversation.metadata.get("pending_history_artifact")
+                    if pending is not None:
+                        ArtifactHistory.commit(cursor, conversation, pending)
+                    conversation.metadata.pop("pending_history_artifact", None)
+                    conversation.metadata["context_epoch"] = epoch
                     conversation.metadata["workspace_id"] = workspace_id
                     conversation.metadata["state_version"] = expected_state_version + 1
                     conversation.metadata["message_count"] = offset + len(conversation.messages)
                     conversation.metadata["loaded_message_count"] = len(conversation.messages)
+            if pending is not None and usage is not None:
+                usage.record_catalog({"artifact_history_committed":pending["artifact"]["artifact_id"]})
         finally:
             connection.close()
 
@@ -480,6 +515,9 @@ class PostgresConversationStore(ConversationStore):
                         """,
                         (conversation_id, user_index),
                     )
+                    cursor.execute("UPDATE app.result_artifacts SET status='REVOKED' "
+                                   "WHERE conversation_id=%s AND source_message_index >= %s",
+                                   (conversation_id, user_index))
                     cursor.execute(
                         """
                         SELECT COUNT(*) FROM app.messages WHERE conversation_id = %s

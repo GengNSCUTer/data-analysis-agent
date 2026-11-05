@@ -162,6 +162,7 @@
             <button class="action" id="evidence-toggle" type="button" aria-expanded="false">查看依据</button>
             <button class="action" id="download-result" type="button">下载完整结果</button>
             <button class="action" id="browse-result" type="button">分页查看完整结果</button>
+            <button class="action" id="history-results" type="button">历史可信结果</button>
             <button class="action" id="save-analysis" type="button">保存本次分析</button>
             <button class="action" id="clear-analysis" type="button">清空分析上下文</button>
             <button class="action" id="admin-toggle" type="button" aria-pressed="false">管理</button>
@@ -285,6 +286,10 @@
         <button class="action" id="result-page-close" type="button">关闭</button>
       </div>
       <div id="result-page-table" style="overflow:auto;max-height:65vh;margin-top:12px"></div>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px">
+        <label>历史结果 <select id="history-result-select" style="max-width:70vw"></select></label>
+        <button class="action" id="history-result-download" type="button">下载原始完整结果</button>
+      </div>
     </dialog>
     <script>
       const chat = document.querySelector("vanna-chat");
@@ -301,6 +306,7 @@
       const pageTable = document.querySelector("#result-page-table");
       const pagePrev = document.querySelector("#result-page-prev");
       const pageNext = document.querySelector("#result-page-next");
+      const historySelect = document.querySelector("#history-result-select");
       let resultPageScope = null;
       let resultPage = null;
       const logout = document.querySelector("#logout");
@@ -593,17 +599,50 @@
           const artifact = body.trusted_result_artifact;
           if (!response.ok || !artifact?.artifact_id) return showAnalysisNotice("当前没有已验证的查询结果。");
           resultPageScope = { conversationId, artifactId: artifact.artifact_id };
+          await loadHistoryChoices(artifact.artifact_id);
           resultBrowser.showModal();
           await loadResultPage(0);
         } catch (_) {
           showAnalysisNotice("结果暂时读不到，请稍后再试。");
         }
       });
+      async function loadHistoryChoices(selectedId) {
+        const conversationId = currentConversationId();
+        const response = await fetch(`/api/project/conversations/${encodeURIComponent(conversationId)}/artifacts`, withAuth());
+        if (!response.ok) throw new Error("历史结果暂时无法读取。");
+        const body = await response.json();
+        historySelect.replaceChildren();
+        for (const item of body.artifacts) {
+          const option = document.createElement("option");
+          option.value = item.artifact_id;
+          const scope = item.query_scope;
+          const bounds = scope.time_range;
+          option.textContent = `#${item.ordinal} ${(scope.metric_ids || []).join("、")} · ${bounds ? bounds.start + " 至 " + bounds.end : "全部时间"} · ${item.row_count}行`;
+          option.selected = item.artifact_id === selectedId;
+          historySelect.append(option);
+        }
+        return body.artifacts;
+      }
+      document.querySelector("#history-results").addEventListener("click", async () => {
+        try {
+          const items = await loadHistoryChoices();
+          if (!items.length) return showAnalysisNotice("本会话还没有可读取的历史可信结果。完成新查询后会自动保存。");
+          resultPageScope = { conversationId: currentConversationId(), artifactId: historySelect.value };
+          resultBrowser.showModal();
+          await loadResultPage(0);
+        } catch (error) {
+          showAnalysisNotice(error.message);
+        }
+      });
+      historySelect.addEventListener("change", () => {
+        resultPageScope = { conversationId: currentConversationId(), artifactId: historySelect.value };
+        loadResultPage(0);
+      });
       pagePrev.addEventListener("click", () => loadResultPage(resultPage.previous_cursor));
       pageNext.addEventListener("click", () => loadResultPage(resultPage.next_cursor));
       document.querySelector("#result-page-close").addEventListener("click", () => resultBrowser.close());
 
-      downloadResult.addEventListener("click", async () => {
+      async function downloadCsv(artifactId = null) {
         const conversationId = currentConversationId();
         if (!conversationId) {
           showAnalysisNotice("当前没有可下载的分析结果。");
@@ -612,12 +651,12 @@
         downloadResult.disabled = true;
         try {
           const response = await fetch(
-            `/api/project/conversations/${encodeURIComponent(conversationId)}/result.csv`,
+            `/api/project/conversations/${encodeURIComponent(conversationId)}/result.csv${artifactId ? "?artifact_id=" + encodeURIComponent(artifactId) : ""}`,
             withAuth()
           );
           if (!response.ok) {
             const body = await response.json().catch(() => ({}));
-            showAnalysisNotice(body.detail || "当前没有已校验的完整结果可下载。界面预览仍最多 200 行。");
+            showAnalysisNotice(body.detail || "当前没有已校验的完整结果可下载。表格预览不代表完整结果。");
             return;
           }
           const blob = await response.blob();
@@ -634,7 +673,9 @@
         } finally {
           downloadResult.disabled = false;
         }
-      });
+      }
+      downloadResult.addEventListener("click", () => downloadCsv());
+      document.querySelector("#history-result-download").addEventListener("click", () => downloadCsv(historySelect.value));
       logout.addEventListener("click", async () => {
         await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
         embedToken = "";

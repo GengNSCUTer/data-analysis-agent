@@ -141,7 +141,7 @@ async def test_runtime_reuse_checks_scope_owner_versions_and_payload(tmp_path):
         csv_sha256=manifest["csv_sha256"], query_scope=scope, result_metadata=manifest["result_metadata"],
     )
     state = state.with_result_artifact(artifact)
-    handler = SimpleNamespace(workspace=OLIST_WORKSPACE, result_artifact_store=store)
+    handler = SimpleNamespace(workspace=OLIST_WORKSPACE, result_artifact_store=store, artifact_reuse_planner=None)
     handler._verified_previous_artifact = MethodType(BudgetedChatHandler._verified_previous_artifact, handler)
     owner = User(id="owner")
 
@@ -195,7 +195,7 @@ async def test_reference_reads_only_requested_rows_from_owned_full_artifact(tmp_
         query_scope={"dimensions": ["product_category_name"]}, csv_sha256=manifest["csv_sha256"],
         result_metadata=manifest["result_metadata"])
     state = replace(AnalysisState.new(RUNTIME_WORKSPACE), top_n=5, status="failed", previous_result_artifact=artifact)
-    handler = SimpleNamespace(workspace=RUNTIME_WORKSPACE, result_artifact_store=store)
+    handler = SimpleNamespace(workspace=RUNTIME_WORKSPACE, result_artifact_store=store, artifact_reuse_planner=None)
     handler._verified_previous_artifact = MethodType(BudgetedChatHandler._verified_previous_artifact, handler)
     store.read_csv_page = Mock(wraps=store.read_csv_page)
     owner = User(id="owner")
@@ -262,6 +262,7 @@ async def test_chart_only_followup_uses_bounded_verified_csv(tmp_path, chart_typ
     state = state.with_result_artifact(artifact)
     handler = SimpleNamespace(
         workspace=workspace, result_artifact_store=store, result_budget=ResultBudget.aggregate(),
+        artifact_reuse_planner=None,
         question_router=QuestionRouter(CatalogRetriever(CatalogLoader(workspace).load()), full_results=True),
     )
     handler._verified_previous_artifact = MethodType(BudgetedChatHandler._verified_previous_artifact, handler)

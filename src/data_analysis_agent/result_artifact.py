@@ -86,7 +86,7 @@ class ResultArtifact:
         plan = plan if isinstance(plan, Mapping) else {}
         query_scope = _query_scope(trace, state, plan, external)
         return cls(
-            artifact_id="rta_" + sha256(request_id.encode("utf-8")).hexdigest()[:20],
+            artifact_id=external.get("artifact_id") or "rta_" + sha256(request_id.encode("utf-8")).hexdigest()[:20],
             summary=bound_result_evidence(summary) or "",
             metric_ids=metric_ids,
             result_columns=result_columns,

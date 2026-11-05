@@ -12,7 +12,7 @@ from typing import Awaitable, Callable
 
 import pandas as pd
 
-from vanna.components import RichTextComponent, SimpleTextComponent, StatusCardComponent, UiComponent
+from vanna.components import DataFrameComponent, RichTextComponent, SimpleTextComponent, StatusCardComponent, UiComponent
 from vanna.core.llm import LlmMessage, LlmRequest, LlmResponse
 from vanna.core.storage import Conversation, Message
 from vanna.core.user import User
@@ -47,6 +47,8 @@ from .result_reference import (
     resolve_ranked_entity,
 )
 from .result_budget import ResultBudget
+from .artifact_reuse_planner import ArtifactReusePlanner
+from .result_presentation import build_result_presentation, display_records
 from .result_evidence import RESULT_EVIDENCE_PREFIX, build_result_evidence
 from .result_explanation import result_evidence_view
 from .result_analysis import ResultInspectionError
@@ -71,7 +73,7 @@ def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
         "version", "artifact_id", "workspace_id", "dataset_version",
         "metric_version", "row_count", "columns", "csv_sha256", "csv_bytes",
         "csv_ref", "plotly_sha256", "plotly_bytes", "plotly_ref",
-        "result_metadata",
+        "result_metadata", "created_at", "expires_at",
     }
     return {key: manifest[key] for key in allowed if key in manifest}
 
@@ -103,6 +105,7 @@ class BudgetedChatHandler(ChatHandler):
         context_builder: AnalysisContextBuilder | None = None,
         filter_source_resolver: Callable[[tuple[QueryFilter, ...]], Awaitable[tuple[QueryFilter, ...]]] | None = None,
         require_semantic_interpreter: bool = False,
+        artifact_reuse_planner: ArtifactReusePlanner | None = None,
     ):
         super().__init__(agent)
         self.budget = budget
@@ -117,6 +120,7 @@ class BudgetedChatHandler(ChatHandler):
         self.context_builder = context_builder
         self.filter_source_resolver = filter_source_resolver
         self.require_semantic_interpreter = require_semantic_interpreter
+        self.artifact_reuse_planner = artifact_reuse_planner
         if self.require_semantic_interpreter and self.semantic_interpreter is None:
             raise ValueError(
                 "the online chat composition requires SemanticIntentInterpreter; "
@@ -201,7 +205,8 @@ class BudgetedChatHandler(ChatHandler):
                 metric_version=self.workspace.metric_version,
             )
             request.request_context.metadata["run_id"] = run.run_id
-            message_context_token = CURRENT_MESSAGE_CONTEXT.set({"turn_id": run.run_id, "run_id": run.run_id})
+            message_context_token = CURRENT_MESSAGE_CONTEXT.set({"turn_id": run.run_id, "run_id": run.run_id,
+                                                               "conversation_id": conversation_id})
 
             if usage.termination_reason == "input_too_long":
                 yield self._budget_chunk(
@@ -240,6 +245,15 @@ class BudgetedChatHandler(ChatHandler):
             }:
                 route_started_at = perf_counter()
                 route_state = memory.as_dict()
+                if self.artifact_reuse_planner is not None:
+                    route_state["artifact_candidates"] = await self.artifact_reuse_planner.cards(conversation_id, user)
+                    last_reply = next((m for m in reversed(conversation.messages) if m.role == "assistant" and not m.tool_calls), None)
+                    focus = last_reply.metadata.get("artifact_reuse") if last_reply else None
+                    route_state["last_history_view"] = {
+                        k: focus[k] for k in ("source_artifact_id", "requested_scope", "result_ordinal") if k in focus
+                    } if focus else None
+                    if packet is not None:
+                        packet["artifact_candidates"] = route_state["artifact_candidates"]
                 if packet is not None:
                     route_state["context_packet"] = packet
                 elif isinstance(memory, AnalysisState):
@@ -263,8 +277,25 @@ class BudgetedChatHandler(ChatHandler):
                     if semantic_intent is not None:
                         assert isinstance(memory, AnalysisState)
                         try:
+                            intent_base = memory
+                            history_ref = semantic_intent.history_reference
+                            if self.artifact_reuse_planner is not None and history_ref and history_ref.mutation_intent == "derive_query":
+                                choices = await self.artifact_reuse_planner.history.candidates(conversation_id, user,
+                                    artifact_id=history_ref.artifact_id)
+                                choices = [i for i in choices if history_ref.ordinal is None or i.ordinal == history_ref.ordinal]
+                                if len(choices) != 1:
+                                    raise SemanticIntentError("ambiguous_history_reference")
+                                selected, _ = await self.artifact_reuse_planner.verified(conversation_id, user, choices[0].artifact.artifact_id)
+                                scope = selected.artifact.query_scope
+                                intent_base = replace(memory, **{
+                                    k: tuple(v or ()) if k in {"metric_ids", "dimensions"} else v
+                                    for k, v in scope.items() if k in memory.scope() and k != "filters"
+                                }, filters=tuple(f"{f['dimension']}={f['value']}" for f in scope.get("filters", ())))
+                                semantic_intent = semantic_intent.model_copy(update={"action": "update_task", "request_kind": "data_query"})
+                                usage.record_catalog({"artifact_reuse": {"mode": "DERIVED_QUERY", "artifact_id": selected.artifact.artifact_id}})
+                                request.request_context.metadata["parent_artifact_id"] = selected.artifact.artifact_id
                             semantic_intent, proposed_state = resolve_state_intent(
-                                semantic_intent, memory, self.semantic_interpreter.catalog, user,
+                                semantic_intent, intent_base, self.semantic_interpreter.catalog, user,
                                 message_count=conversation.metadata.get("message_count", len(conversation.messages)),
                             )
                             if proposed_state.task_id != memory.task_id:
@@ -280,6 +311,7 @@ class BudgetedChatHandler(ChatHandler):
                             try:
                                 reference_binding = await self._resolve_result_reference(
                                     memory, semantic_intent.reference_requests[0], user,
+                                    conversation_id=conversation_id,
                                 )
                             except ResultReferenceError as exc:
                                 reference_error = exc
@@ -303,6 +335,52 @@ class BudgetedChatHandler(ChatHandler):
                                     }
                                 })
                     if semantic_intent is not None:
+                        if (self.artifact_reuse_planner is not None
+                                and semantic_intent.request_kind in {"data_query", "data_analysis", "mixed_request", "result_followup"}
+                                and semantic_intent.action != "clear_task" and reference_error is None
+                                and not semantic_intent.reference_requests):
+                            plan = await self.artifact_reuse_planner.plan(
+                                conversation_id, user, semantic_intent, proposed_state, memory)
+                            usage.record_catalog({"artifact_reuse": {**plan.decision.as_dict(),
+                                                  "candidate_attempts": list(plan.attempts)}})
+                            if plan.decision.mode in {"DIRECT_REUSE", "LOCAL_COMPUTE"}:
+                                async for chunk in self._answer_history_result(
+                                    request, conversation, memory, user, semantic_intent, plan, usage, result_budget,
+                                    proposed_state=proposed_state):
+                                    yield chunk
+                                return
+                            if plan.decision.mode == "CLARIFY":
+                                detail = "请确认要回看哪份分析结果（指标、期间或历史结果序号）；当前分析条件保持不变。"
+                                conversation.add_message(Message(role="user", content=request.message))
+                                conversation.add_message(Message(role="assistant", content=detail))
+                                await self.agent.conversation_store.update_conversation(conversation)
+                                usage.terminate("clarification_required")
+                                yield self._budget_chunk(conversation_id, request_id, "需要确认历史结果", detail)
+                                return
+                            if (plan.decision.mode == "SQL_REQUIRED" and semantic_intent.request_kind == "result_followup"
+                                    and (semantic_intent.requested_answer is not None or semantic_intent.history_reference is not None
+                                         or plan.item is not None)):
+                                spec = semantic_intent.requested_answer or plan.spec
+                                if spec is None or not spec.metric_ids:
+                                    raise SemanticIntentError("history_query_scope_missing")
+                                requirements = plan.decision.operation_plan.get("query_requirements", {})
+                                usage.result_numerators.update(plan.decision.operation_plan.get("numerators", {}))
+                                inspections = []
+                                for inspection in semantic_intent.result_inspections:
+                                    if inspection.operation == "sum" and requirements.get("dimensions") == []:
+                                        inspection = inspection.model_copy(update={"operation":"rows"})
+                                    if inspection.operation == "share" and inspection.denominator == "business_total":
+                                        inspection = inspection.model_copy(update={"numerator_top_n":inspection.numerator_top_n or spec.top_n})
+                                    inspections.append(inspection)
+                                semantic_intent = SemanticIntent.model_validate({
+                                    **semantic_intent.as_dict(), **spec.scope(),
+                                    **requirements, "request_kind": "data_query", "result_inspections":inspections,
+                                    "action": "new_task", "state_patch": None, "history_reference": None, "requested_answer":None,
+                                })
+                                semantic_intent, proposed_state = resolve_state_intent(
+                                    semantic_intent, memory, self.semantic_interpreter.catalog, user,
+                                    message_count=conversation.metadata["message_count"],
+                                )
                         route_state = {
                             **route_state,
                             "time_range": semantic_intent.time_range.model_dump() if semantic_intent.time_range else None,
@@ -602,6 +680,7 @@ class BudgetedChatHandler(ChatHandler):
                     result_contract.as_tool_metadata()
                 )
                 request.request_context.metadata["workspace_id"] = self.workspace.workspace_id
+                request.request_context.metadata["history_index_required"] = self.artifact_reuse_planner is not None
                 catalog_context = selection.prompt
                 if query_plan is not None:
                     catalog_context += query_plan.prompt_context()
@@ -794,8 +873,16 @@ class BudgetedChatHandler(ChatHandler):
                     )
                     return
 
+            pending_chunks = []
             async for chunk in super().handle_stream(request):
-                yield chunk
+                if (self.artifact_reuse_planner is not None and usage.result_summary
+                        and not usage.catalog_trace.get("artifact_history_committed")):
+                    pending_chunks.append(chunk)
+                else:
+                    for pending in pending_chunks:
+                        yield pending
+                    pending_chunks.clear()
+                    yield chunk
                 if (
                     chart_contract is not None
                     and chart_contract.safe_to_visualize
@@ -837,9 +924,11 @@ class BudgetedChatHandler(ChatHandler):
                                 }
                             )
                             usage.record_timing('chart_render', int((perf_counter() - chart_started) * 1000))
-                            yield ChatStreamChunk.from_component(
-                                component, conversation_id, request_id
-                            )
+                            chart_chunk = ChatStreamChunk.from_component(component, conversation_id, request_id)
+                            if self.artifact_reuse_planner is not None and not usage.catalog_trace.get("artifact_history_committed"):
+                                pending_chunks.append(chart_chunk)
+                            else:
+                                yield chart_chunk
             if usage.result_summary:
                 try:
                     await self._persist_result_artifact(
@@ -853,8 +942,22 @@ class BudgetedChatHandler(ChatHandler):
                     # validated answer into an SSE failure.  The run still
                     # records the error type for diagnosis.
                     usage.error_type = "result_summary_persistence"
+                    if self.artifact_reuse_planner is not None:
+                        usage.terminate("execution_error", "result_summary_persistence")
+                        fresh = await self._get_conversation(conversation_id, user)
+                        if fresh is not None:
+                            fresh.metadata["working_memory"] = replace(
+                                AnalysisState.from_mapping(fresh.metadata.get("working_memory")), status=AnalysisTaskStatus.FAILED).as_dict()
+                            fresh.add_message(Message(role="user", content=request.message))
+                            fresh.add_message(Message(role="assistant", content="结果未能与来源一同保存，请重试。"))
+                            await self.agent.conversation_store.update_conversation(fresh)
+                        yield self._budget_chunk(conversation_id, request_id, "结果未保存",
+                            "查询结果未能与会话来源一同保存，本次未展示结果，请重试。")
+                        return
             elif self.semantic_interpreter is not None:
                 await self._finish_analysis_attempt(conversation_id, user, run.run_id)
+            for chunk in pending_chunks:
+                yield chunk
             if usage.result_contract_satisfied:
                 # The model's natural-language answer and its tool call are
                 # separate SSE components.  Give the user a small, explicit
@@ -978,6 +1081,11 @@ class BudgetedChatHandler(ChatHandler):
             + f"指标：{metric_text}；结果字段：{column_text}；"
             f"数据版本：{dataset_version}；指标版本：{metric_version}。"
         )
+        reuse = trace.get("artifact_reuse") or {}
+        if reuse.get("source_artifact_id"):
+            content += (f"来源：历史结果#{reuse['result_ordinal']}（{reuse['source_artifact_id']}），"
+                        f"快照创建于{reuse['snapshot_created_at']}；原工件{reuse['source_row_count']}行，"
+                        f"本次计算得到{reuse['computed_row_count']}行；本次为{reuse['mode']}，未重新查询业务库。")
         if view:
             content += (f"完整查询结果{view['source_row_count']}行；本次选定{view['row_count']}行，"
                         f"解释依据含{view['included_row_count']}行明细及服务端统计。")
@@ -1104,6 +1212,132 @@ class BudgetedChatHandler(ChatHandler):
         content = (response.content or "").strip()
         yield content
 
+    async def _answer_history_result(self, request, conversation, state, user, intent, plan, usage, budget, *, proposed_state):
+        """Inspect without mutation, or publish a locally derived task result."""
+        artifact, frame, spec = plan.item.artifact, plan.frame, plan.spec
+        catalog = self.question_router.retriever.catalog
+        selection = self.question_router.retriever.retrieve(request.message, user, metric_ids=spec.metric_ids)
+        columns = tuple(frame.columns)
+        contract = ResultContract.from_selection(selection, request.message, spec.scope()["time_range"],
+            catalog=catalog, required_result_columns=columns, requested_dimensions=spec.dimensions)
+        summary = await asyncio.to_thread(build_result_evidence, frame,
+            required_columns=columns, metric_ids=spec.metric_ids,
+            column_labels=contract.result_column_labels,
+            additive_metric_ids=catalog.additive_metrics_for(spec.metric_ids, spec.dimensions),
+            time_column="time" if spec.time_grain else None, top_n=spec.top_n,
+            inspections=intent.result_inspections, query_scope=spec.scope(), metric_semantics=catalog.metric_semantics,
+            metric_definitions=contract.metric_definitions, max_tokens=usage.result_evidence_limit())
+        provenance = {**plan.decision.as_dict(), "source_artifact_id": artifact.artifact_id,
+            "source_scope": artifact.query_scope, "requested_scope": spec.scope(),
+            "result_ordinal": plan.item.ordinal, "snapshot_created_at": artifact.result_metadata.get(
+                "snapshot_created_at", plan.item.created_at.isoformat()),
+            "source_row_count": artifact.result_metadata["row_count"], "computed_row_count": len(frame),
+            "candidate_attempts": list(plan.attempts)}
+        usage.record_catalog({"artifact_reuse": provenance, "result_reuse": "validated_result",
+            "result_contract": contract.as_evidence(),
+            "result_inspection": {"artifact_id": artifact.artifact_id, "query_scope": spec.scope(),
+                "metric_ids": list(spec.metric_ids), "columns": list(columns),
+                "dataset_version": artifact.dataset_version, "metric_version": artifact.metric_version}})
+        usage.set_result_summary(summary)
+        usage.mark_result_contract_satisfied()
+        activates_task = (intent.action in {"new_task", "update_task"}
+                          and intent.request_kind != "result_followup" and intent.history_reference is None)
+        materializes_result = activates_task and any(
+            artifact.query_scope.get(k) != v for k, v in spec.scope().items())
+        manifest = None
+        if materializes_result:
+            # A normal new/updated question remains the current task even on a
+            # cache hit. Materialize its exact answer scope, preserving the
+            # source snapshot deadline; never relabel the original full CSV.
+            metadata = {**artifact.result_metadata, "row_count": len(frame),
+                "result_shape": "time_series" if spec.time_grain else "grouped" if spec.dimensions else "scalar",
+                "population_coverage": "top_n" if spec.top_n else artifact.result_metadata["population_coverage"],
+                "ordering": [] if plan.decision.operation_plan.get("rollup") else artifact.result_metadata.get("ordering", []),
+                "entities": [], "ranked_entities": [], "history_index_required": True,
+                "snapshot_created_at": provenance["snapshot_created_at"]}
+            manifest = await asyncio.to_thread(self.result_artifact_store.save_result_csv,
+                artifact_id="rta_" + request.request_context.metadata["run_id"], user_id=user.id,
+                workspace_id=artifact.workspace_id, columns=columns,
+                rows=json.loads(frame.to_json(orient="records", date_format="iso", double_precision=15)),
+                row_count=len(frame), dataset_version=artifact.dataset_version, metric_version=artifact.metric_version,
+                result_metadata=metadata, expires_at=plan.item.expires_at.timestamp())
+            artifact = replace(artifact, artifact_id=manifest["artifact_id"], query_scope=spec.scope(),
+                result_columns=columns, metric_ids=spec.metric_ids, summary=summary, result_metadata=metadata,
+                csv_sha256=manifest["csv_sha256"], csv_bytes=manifest["csv_bytes"], chart_state="not_rendered",
+                plotly_ref=None, plotly_sha256=None, plotly_bytes=None)
+            provenance["output_artifact_id"] = artifact.artifact_id
+            usage.record_catalog({"artifact_reuse": provenance, "result_artifact": _safe_artifact_manifest(manifest)})
+        # A temporary view is passed to the existing no-tools answer pipeline.
+        # It is never assigned to conversation.working_memory.
+        view = replace(artifact, query_scope=spec.scope(), result_columns=columns, metric_ids=spec.metric_ids, summary=summary)
+        answer_state = replace(state, previous_result_artifact=view, previous_result_summary=summary)
+        route = QuestionRoute("result_followup", (), spec.metric_ids, None, "proven_history_reuse")
+        chart_component = None
+        detail = ""
+        if intent.chart_request:
+            chart = ChartContract.from_result_artifact(view, contract, chart_request=intent.chart_request)
+            usage.record_catalog({"chart_contract": chart.as_evidence()})
+            if not chart.safe_to_visualize:
+                detail = chart.clarification or "这份结果不支持所请求的图表。"
+            elif len(frame) > chart.max_rows:
+                detail = f"历史结果共{len(frame)}行，超过当前绘图上限{chart.max_rows}行；可以先筛选或排名后绘图。"
+            else:
+                chart_component = build_server_chart_component(chart, frame, source_file=artifact.artifact_id)
+                manifest = await asyncio.to_thread(self.result_artifact_store.save_plotly_json,
+                    artifact_id=artifact.artifact_id, user_id=user.id, workspace_id=artifact.workspace_id,
+                    figure=chart_component.rich_component.data)
+                usage.record_catalog({"result_artifact": _safe_artifact_manifest(manifest)})
+                usage.mark_deterministic_chart_rendered()
+                detail = "已用历史可信结果绘图，没有重新查询数据库。"
+        if not intent.chart_request or intent.result_inspections:
+            async for piece in self._tool_free_answer(request, route, answer_state, user, intent=intent):
+                if isinstance(piece, str):
+                    detail = piece
+        await self.artifact_reuse_planner.verified(conversation.id, user, plan.item.artifact.artifact_id)
+        if activates_task:
+            artifact = replace(artifact, summary=summary)
+            target = {**intent.as_dict(), **spec.scope()}
+            task_route = QuestionRoute("answerable", (), spec.metric_ids, None, "proven_history_reuse",
+                                       intent="data_query", preflight_estimated_rows=len(frame))
+            query_plan = QueryPlan.from_selection(selection, request.message, task_route,
+                {**proposed_state.as_dict(), "semantic_intent": target}, result_budget=budget)
+            if usage.deterministic_chart_rendered:
+                artifact = replace(artifact, chart_state="rendered", plotly_ref=manifest["plotly_ref"],
+                    plotly_sha256=manifest["plotly_sha256"], plotly_bytes=manifest["plotly_bytes"])
+            next_state = replace(proposed_state, run_id=request.request_context.metadata["run_id"],
+                turn_id=request.request_context.metadata["run_id"], active_plan=query_plan.as_dict(),
+                result_shape=artifact.result_metadata["result_shape"]).with_result_artifact(artifact)
+            conversation.metadata["working_memory"] = next_state.as_dict()
+            if materializes_result:
+                conversation.metadata["pending_history_artifact"] = {
+                    "artifact": artifact.as_dict(), "manifest": manifest,
+                    "run_id": request.request_context.metadata["run_id"], "catalog_version": catalog.catalog_version,
+                    "policy_version": catalog.policy_version, "parent_artifact_id": plan.item.artifact.artifact_id}
+            usage.set_query_plan(query_plan.as_dict(), query_plan.prompt_context())
+        conversation.add_message(Message(role="user", content=request.message))
+        conversation.add_message(Message(role="assistant", content=detail,
+                                         metadata={"artifact_reuse": provenance}))
+        await self.agent.conversation_store.update_conversation(conversation)
+        # Only committed history can be presented. UI rows have an independent
+        # budget; the complete source CSV and the model evidence stay separate.
+        records = json.loads(frame.head(budget.preview_rows).to_json(orient="records", date_format="iso"))
+        presentation = build_result_presentation(total_row_count=len(frame), preview_row_count=len(records),
+            columns=columns, labels=contract.result_column_labels, units={}, workspace_id=artifact.workspace_id,
+            dataset_version=artifact.dataset_version, metric_version=artifact.metric_version,
+            audit_ref=artifact.result_metadata.get("execution_id") or artifact.artifact_id, artifact_id=artifact.artifact_id)
+        if records:
+            rendered, _ = display_records(records, columns=columns, labels=contract.result_column_labels)
+            component = DataFrameComponent.from_records(records=rendered,
+                title="历史结果 · 本地计算" if plan.decision.mode == "LOCAL_COMPUTE" else "历史可信结果",
+                max_rows_displayed=budget.preview_rows, exportable=False,
+                **{k:v for k,v in presentation.as_dict().items() if k not in {"columns", "artifact_id"}})
+            yield ChatStreamChunk.from_component(UiComponent(rich_component=component), conversation.id, request.request_id)
+        if chart_component is not None:
+            yield ChatStreamChunk.from_component(chart_component, conversation.id, request.request_id)
+        yield self._text_chunk(conversation.id, request.request_id, detail)
+        yield self._trusted_result_evidence_chunk(conversation.id, request.request_id, usage)
+        usage.terminate("completed")
+
     async def _inspect_previous_result(self, memory, user, intent) -> str:
         artifact = await self._verified_previous_artifact(memory, user)
         if artifact is None:
@@ -1189,6 +1423,15 @@ class BudgetedChatHandler(ChatHandler):
         memory = (AnalysisState if self.semantic_interpreter is not None else WorkingMemory).from_mapping(conversation.metadata.get("working_memory"))
         if isinstance(memory, AnalysisState) and memory.turn_id != (usage.catalog_trace.get("analysis_state") or {}).get("turn_id"):
             raise ConversationStateConflict("result belongs to an older analysis turn")
+        if (self.artifact_reuse_planner is not None and memory.status == AnalysisTaskStatus.COMPLETED
+                and memory.active_artifact_id == (usage.catalog_trace.get("result_artifact") or {}).get("artifact_id")):
+            await self.artifact_reuse_planner.verified(conversation_id, user, memory.active_artifact_id)
+            if usage.deterministic_chart_rendered:
+                artifact = ResultArtifact.from_trusted_usage(request_id=request_id, summary=usage.result_summary or "",
+                    catalog_trace=usage.catalog_trace, chart_rendered=True)
+                conversation.metadata["working_memory"] = memory.with_result_artifact(artifact).as_dict()
+                await self.agent.conversation_store.update_conversation(conversation)
+            return
         artifact = ResultArtifact.from_trusted_usage(
             request_id=request_id,
             summary=usage.result_summary or "",
@@ -1198,6 +1441,16 @@ class BudgetedChatHandler(ChatHandler):
         conversation.metadata["working_memory"] = memory.with_result_artifact(
             artifact
         ).as_dict()
+        if self.artifact_reuse_planner is not None:
+            manifest = await asyncio.to_thread(self.result_artifact_store.verify_manifest,
+                artifact_id=artifact.artifact_id, user_id=user.id, workspace_id=self.workspace.workspace_id)
+            catalog = self.question_router.retriever.catalog
+            conversation.metadata["pending_history_artifact"] = {
+                "artifact": artifact.as_dict(), "manifest": manifest, "run_id": memory.run_id,
+                "catalog_version": catalog.catalog_version, "policy_version": catalog.policy_version,
+                "parent_artifact_id": (usage.catalog_trace.get("artifact_reuse") or {}).get("artifact_id")
+                    if (usage.catalog_trace.get("artifact_reuse") or {}).get("mode") == "DERIVED_QUERY" else None,
+            }
         await self.agent.conversation_store.update_conversation(conversation)
 
     async def _verified_previous_artifact(self, state: AnalysisState, user) -> ResultArtifact | None:
@@ -1205,6 +1458,13 @@ class BudgetedChatHandler(ChatHandler):
         artifact = state.previous_result_artifact
         if artifact is None or self.result_artifact_store is None:
             return None
+        if self.artifact_reuse_planner is not None:
+            context = CURRENT_MESSAGE_CONTEXT.get() or {}
+            try:
+                item, _ = await self.artifact_reuse_planner.verified(context.get("conversation_id"), user, artifact.artifact_id)
+                return item.artifact
+            except (FileNotFoundError, PermissionError, ResultArtifactIntegrityError):
+                return None
         if (artifact.workspace_id, artifact.dataset_version, artifact.metric_version) != (
             self.workspace.workspace_id, self.workspace.dataset_version_id, self.workspace.metric_version,
         ) or artifact.result_metadata.get("validation_status") != "valid":
@@ -1237,8 +1497,15 @@ class BudgetedChatHandler(ChatHandler):
         )
         return decision
 
-    async def _resolve_result_reference(self, state, request, user):
-        artifact = await self._verified_previous_artifact(state, user)
+    async def _resolve_result_reference(self, state, request, user, *, conversation_id=None):
+        if self.artifact_reuse_planner is not None and request.expected_source_artifact_id and conversation_id:
+            try:
+                selected, _ = await self.artifact_reuse_planner.verified(conversation_id, user, request.expected_source_artifact_id)
+                artifact = selected.artifact
+            except (FileNotFoundError, PermissionError, ResultArtifactIntegrityError):
+                artifact = None
+        else:
+            artifact = await self._verified_previous_artifact(state, user)
         if artifact is None:
             raise ResultReferenceError(
                 "reference_artifact_unavailable", "上一份成功结果已失效或无法读取，请重新查询后再引用。",

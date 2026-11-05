@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+from contextlib import contextmanager
+import fcntl
 from functools import wraps
 from hashlib import sha256
 import json
@@ -33,7 +35,8 @@ def _artifact_access(method):
         with self._lock:
             self._busy[scope] = self._busy.get(scope, 0) + 1
         try:
-            return method(self, *args, **kwargs)
+            with self._access_lock(scope, write=method.__name__.startswith("save_")):
+                return method(self, *args, **kwargs)
         finally:
             with self._lock:
                 self._busy[scope] -= 1
@@ -50,6 +53,26 @@ class ResultArtifactStore:
         self.retention_seconds = retention_seconds
         self._lock = threading.RLock()
         self._busy = {}
+        self._thread_locks = threading.local()
+
+    @contextmanager
+    def _access_lock(self, scope, *, write=False, blocking=True):
+        """POSIX shared readers/exclusive writers and GC on the same filesystem."""
+        held = getattr(self._thread_locks, "held", set())
+        if scope in held:
+            yield
+            return
+        if write:
+            scope.mkdir(parents=True, exist_ok=True)
+        with (scope / ".access.lock").open("a+b") as handle:
+            fcntl.flock(handle, (fcntl.LOCK_EX if write else fcntl.LOCK_SH)
+                        | (0 if blocking else fcntl.LOCK_NB))
+            self._thread_locks.held = held | {scope}
+            try:
+                yield
+            finally:
+                self._thread_locks.held = held
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
     @_artifact_access
     def save_result_csv(
@@ -64,10 +87,13 @@ class ResultArtifactStore:
         dataset_version: str,
         metric_version: str,
         result_metadata: Mapping[str, Any] | None = None,
+        expires_at: float | None = None,
     ) -> dict[str, Any]:
         scope = self._scope(user_id, workspace_id, artifact_id)
         scope.mkdir(parents=True, exist_ok=True)
         path = scope / "result.csv"
+        if path.exists():
+            raise FileExistsError("result CSV artifacts are immutable")
         names = [str(item) for item in columns]
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", newline="", dir=scope, delete=False
@@ -82,6 +108,7 @@ class ResultArtifactStore:
             temp_name = handle.name
         os.replace(temp_name, path)
         digest, size = _sha256_size(path)
+        created_at = time.time()
         manifest = {
             "version": "result-artifact-manifest-v1",
             "artifact_id": artifact_id,
@@ -98,6 +125,9 @@ class ResultArtifactStore:
             "page_offsets": page_offsets,
             "plotly_ref": None,
             "result_metadata": dict(result_metadata or {}),
+            "created_at": created_at,
+            "expires_at": expires_at if expires_at is not None else created_at + (
+                self.retention_seconds if self.retention_seconds is not None else 7 * 86400),
         }
         self._write_json_atomic(scope / "manifest.json", manifest)
         return manifest
@@ -115,6 +145,7 @@ class ResultArtifactStore:
         manifest_path = scope / "manifest.json"
         if not manifest_path.is_file():
             raise FileNotFoundError("result artifact manifest does not exist")
+        self.load_manifest(artifact_id=artifact_id, user_id=user_id, workspace_id=workspace_id)
         path = scope / "chart.plotly.json"
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", dir=scope, delete=False
@@ -138,9 +169,11 @@ class ResultArtifactStore:
         path = self._scope(user_id, workspace_id, artifact_id) / "manifest.json"
         if not path.is_file():
             raise FileNotFoundError("result artifact not found")
-        if self.retention_seconds is not None and time.time() - path.stat().st_mtime >= self.retention_seconds:
-            raise ResultArtifactExpired("saved result expired; run the analysis again")
         value = json.loads(path.read_text(encoding="utf-8"))
+        if "expires_at" not in value:
+            raise ResultArtifactIntegrityError("artifact has no fixed retention deadline; run the analysis again")
+        if time.time() >= value["expires_at"]:
+            raise ResultArtifactExpired("saved result expired; run the analysis again")
         if value.get("artifact_id") != artifact_id or value.get("workspace_id") != workspace_id:
             raise PermissionError("result artifact scope mismatch")
         return value
@@ -265,28 +298,35 @@ class ResultArtifactStore:
             raise ResultArtifactIntegrityError("result row count no longer matches the manifest")
         return frame
 
-    def cleanup_expired(self, *, now: float | None = None) -> dict[str, int]:
+    def cleanup_expired(self, *, now: float | None = None, registered_scopes: set[Path] | None = None) -> dict[str, int]:
         """Delete only known runtime payloads, never experiment directories."""
         removed = removed_bytes = 0
         if self.retention_seconds is None:
             return {'artifacts': 0, 'bytes': 0}
-        cutoff = (time.time() if now is None else now) - self.retention_seconds
+        now = time.time() if now is None else now
         for manifest in self.root.glob('*/*/*/manifest.json'):
             scope = manifest.parent
             # Never follow links outside the configured runtime root.
             if any(path.is_symlink() for path in (manifest, scope, scope.parent, scope.parent.parent)):
                 continue
             with self._lock:
-                if scope in self._busy or not manifest.exists() or manifest.stat().st_mtime > cutoff:
+                if scope in self._busy or not manifest.exists():
                     continue
-                for name in ('result.csv', 'chart.plotly.json', 'manifest.json'):
-                    path = scope / name
-                    if path.is_file() and not path.is_symlink():
-                        removed_bytes += path.stat().st_size
-                        path.unlink()
-                if not any(scope.iterdir()):
-                    scope.rmdir()
-                removed += 1
+                value = json.loads(manifest.read_text(encoding="utf-8"))
+                orphan = (registered_scopes is not None and value.get("result_metadata", {}).get("history_index_required")
+                          and scope not in registered_scopes and now - value.get("created_at", now) > 3600)
+                if not orphan and value.get("expires_at", manifest.stat().st_mtime + self.retention_seconds) > now:
+                    continue
+                try:
+                    with self._access_lock(scope, write=True, blocking=False):
+                        for name in ('result.csv', 'chart.plotly.json', 'manifest.json'):
+                            path = scope / name
+                            if path.is_file() and not path.is_symlink():
+                                removed_bytes += path.stat().st_size
+                                path.unlink()
+                        removed += 1
+                except BlockingIOError:
+                    continue
         return {'artifacts': removed, 'bytes': removed_bytes}
 
     @_artifact_access

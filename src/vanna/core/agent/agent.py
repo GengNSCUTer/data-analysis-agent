@@ -720,6 +720,7 @@ class Agent:
 
                 # Collect all tool results first
                 tool_results = []
+                pending_result_ui = []
                 for i, tool_call in enumerate(response.tool_calls or []):
                     # Add task for this tool execution
                     tool_task = Task(
@@ -1000,8 +1001,10 @@ class Agent:
                             if has_tool_error_access:
                                 yield result.ui_component
                         else:
-                            # Success results are always shown if they exist
-                            yield result.ui_component
+                            if result.metadata.get("persist_before_presentation"):
+                                pending_result_ui.append(result.ui_component)
+                            else:
+                                yield result.ui_component
 
                     # Collect tool result data
                     tool_results.append(
@@ -1024,6 +1027,14 @@ class Agent:
                         tool_call_id=tool_result["tool_call_id"],
                     )
                     conversation.add_message(tool_response_message)
+
+                if pending_result_ui:
+                    # The product store atomically publishes result provenance
+                    # with this complete tool-call/response pair. Display the
+                    # table immediately after commit, before model explanation.
+                    await self.conversation_store.update_conversation(conversation)
+                    for component in pending_result_ui:
+                        yield component
 
                 # Rebuild request with tool responses
                 request = await self._build_llm_request(

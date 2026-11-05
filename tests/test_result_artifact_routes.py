@@ -5,6 +5,7 @@ import io
 import os
 import threading
 import uuid
+from dataclasses import replace
 
 from fastapi.testclient import TestClient
 import pytest
@@ -55,7 +56,20 @@ def test_pages_download_and_scope_use_the_same_verified_artifact(monkeypatch, tm
         )
         scope = dict(artifact_id=artifact.artifact_id, user_id=user.id, workspace_id=workspace.workspace_id)
         rows = [{"customer_city": "城市" + str(n), "paid_order_count": n} for n in range(1205)]
-        store.save_result_csv(**scope, columns=artifact.result_columns, rows=rows, row_count=len(rows), dataset_version=artifact.dataset_version, metric_version=artifact.metric_version)
+        manifest = store.save_result_csv(**scope, columns=artifact.result_columns, rows=rows, row_count=len(rows), dataset_version=artifact.dataset_version, metric_version=artifact.metric_version)
+        asyncio.run(conversations.update_conversation(conversation))
+        from data_analysis_agent.run_recorder import PostgresRunRecorder
+        from data_analysis_agent.budget import RequestBudget
+        from vanna.core.storage import Message
+        run = asyncio.run(PostgresRunRecorder().start(request_id=uuid.uuid4().hex,
+            conversation_id=conversation.id,user=user,question="受控分页工件",budget=RequestBudget(),
+            dataset_version_id=workspace.dataset_version_id,metric_version=workspace.metric_version))
+        artifact = replace(artifact, csv_sha256=manifest['csv_sha256'],csv_ref='result.csv',
+            result_metadata={'row_count':len(rows),'validation_status':'valid'})
+        conversation.add_message(Message(role='user',content='受控分页工件',metadata={'run_id':run.run_id}))
+        conversation.metadata['working_memory']['previous_result_artifact'] = artifact.as_dict()
+        conversation.metadata['pending_history_artifact'] = {'artifact':artifact.as_dict(),'manifest':manifest,
+            'run_id':run.run_id,'catalog_version':workspace.catalog_version,'policy_version':workspace.policy_version}
         asyncio.run(conversations.update_conversation(conversation))
         route = f"/api/project/conversations/{conversation.id}/artifacts/{artifact.artifact_id}/rows"
         try:

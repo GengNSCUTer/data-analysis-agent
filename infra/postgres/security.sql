@@ -32,6 +32,7 @@ GRANT USAGE, SELECT ON SEQUENCE app.query_audits_audit_id_seq TO daa_app_writer;
 GRANT USAGE, SELECT ON SEQUENCE app.messages_message_id_seq TO daa_app_writer;
 
 GRANT INSERT, SELECT, UPDATE, DELETE ON app.user_preferences, app.saved_analyses TO daa_app_writer;
+GRANT INSERT, SELECT, UPDATE, DELETE ON app.result_artifacts TO daa_app_writer;
 
 GRANT INSERT, SELECT, UPDATE, DELETE ON app.accounts TO daa_app_writer;
 GRANT INSERT, SELECT ON app.export_audits TO daa_app_writer;

@@ -313,7 +313,7 @@ class TrustedRunSqlTool(RunSqlTool):
         if not isinstance(columns, list) or not isinstance(rows, list):
             return
         workspace_id = str(context.metadata.get("workspace_id") or "unknown")
-        artifact_id = "rta_" + sha256(context.request_id.encode("utf-8")).hexdigest()[:20]
+        artifact_id = "rta_" + sha256(f"{context.conversation_id}\n{context.request_id}".encode("utf-8")).hexdigest()[:20]
         manifest = self.result_artifact_store.save_result_csv(
             artifact_id=artifact_id,
             user_id=context.user.id,
@@ -326,6 +326,7 @@ class TrustedRunSqlTool(RunSqlTool):
             result_metadata=self._result_metadata(context, columns, rows),
         )
         context.metadata["result_artifact"] = manifest
+        result.metadata["persist_before_presentation"] = bool(context.metadata.get("history_index_required"))
         usage = CURRENT_BUDGET.get()
         if usage is not None:
             usage.record_catalog({"result_artifact": _safe_artifact_manifest(manifest)})
@@ -357,6 +358,13 @@ class TrustedRunSqlTool(RunSqlTool):
             "execution_id": f"audit-{context.metadata['query_audit_id']}" if context.metadata.get("query_audit_id") else None,
             "result_shape": "time_series" if plan.get("time_grain") else "grouped" if dimensions else "scalar",
             "validation_status": "valid",
+            "result_complete": not context.metadata.get("result_validation", {}).get("execution_truncated", False),
+            "history_index_required": bool(context.metadata.get("history_index_required")),
+            "population_coverage": "top_n" if plan.get("top_n") else "complete",
+            "row_count": len(rows),
+            "source_tables": list(context.metadata.get("join_source_grains", {})),
+            "catalog_version": context.metadata.get("catalog_version"),
+            "policy_version": context.metadata.get("policy_version"),
             "ordering": ordering,
             "entities": [
                 {name: row[name][:128] for name in dimensions if isinstance(row.get(name), str)}
@@ -540,6 +548,6 @@ def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
         "version", "artifact_id", "workspace_id", "dataset_version",
         "metric_version", "row_count", "columns", "csv_sha256", "csv_bytes",
         "csv_ref", "plotly_sha256", "plotly_bytes", "plotly_ref",
-        "result_metadata",
+        "result_metadata", "created_at", "expires_at",
     }
     return {key: manifest[key] for key in allowed if key in manifest}

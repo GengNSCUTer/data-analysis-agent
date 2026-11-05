@@ -172,13 +172,14 @@ class PostgresRunRecorder:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """
-                        SELECT question, catalog_trace
-                        FROM app.agent_runs
-                        WHERE conversation_id = %s AND user_id = %s
-                          AND catalog_trace #>> '{result_artifact,plotly_ref}'
-                              = 'chart.plotly.json'
-                        ORDER BY started_at ASC
-                        LIMIT 8
+                        SELECT question, catalog_trace FROM (
+                            SELECT DISTINCT ON (catalog_trace #>> '{result_artifact,artifact_id}')
+                                question, catalog_trace, started_at
+                            FROM app.agent_runs
+                            WHERE conversation_id = %s AND user_id = %s
+                              AND catalog_trace #>> '{result_artifact,plotly_ref}' = 'chart.plotly.json'
+                            ORDER BY catalog_trace #>> '{result_artifact,artifact_id}', started_at DESC
+                        ) latest ORDER BY started_at DESC LIMIT 8
                         """,
                         (conversation_id, user_id),
                     )

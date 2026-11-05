@@ -13,6 +13,53 @@ from data_analysis_agent.result_artifact_store import (
 )
 
 
+def _hold_artifact_reader(root, identity, pipe):
+    store = ResultArtifactStore(root, retention_seconds=60)
+    verify = store._verify_file
+    def pause(**kwargs):
+        pipe.send("reading")
+        pipe.recv()
+        return verify(**kwargs)
+    store._verify_file = pause
+    pipe.send(store.read_csv_page(**identity)["rows"])
+
+
+def test_fixed_deadline_is_not_extended_by_charts_or_manifest_mtime(tmp_path):
+    store = ResultArtifactStore(tmp_path, retention_seconds=60)
+    identity = dict(artifact_id="deadline",user_id="u",workspace_id="w")
+    manifest = store.save_result_csv(**identity,columns=["n"],rows=[{"n":1}],row_count=1,dataset_version="d",metric_version="m")
+    path = store._scope("u","w","deadline")/"manifest.json"
+    os.utime(path,(0,0))
+    assert store.load_manifest(**identity)["expires_at"]==manifest["expires_at"]
+    chart = store.save_plotly_json(**identity,figure={"data":[{"type":"bar","x":["a"],"y":[1]}],"layout":{}})
+    assert chart["created_at"]==manifest["created_at"] and chart["expires_at"]==manifest["expires_at"]
+
+
+def test_other_process_reader_prevents_cleanup_mid_read(tmp_path):
+    import multiprocessing
+    store = ResultArtifactStore(tmp_path,retention_seconds=60)
+    identity = dict(artifact_id="locked",user_id="u",workspace_id="w")
+    manifest = store.save_result_csv(**identity,columns=["n"],rows=[{"n":1}],row_count=1,dataset_version="d",metric_version="m")
+    context = multiprocessing.get_context("spawn")
+    parent, child = context.Pipe()
+    reader = context.Process(target=_hold_artifact_reader,args=(tmp_path,identity,child))
+    reader.start()
+    try:
+        assert parent.poll(10) and parent.recv()=="reading"
+        assert store.cleanup_expired(now=manifest["expires_at"]+1)["artifacts"]==0
+        parent.send("finish")
+        assert parent.poll(10) and parent.recv()==[{"n":"1"}]
+        reader.join(timeout=10)
+        assert reader.exitcode==0
+        assert store.cleanup_expired(now=manifest["expires_at"]+1)["artifacts"]==1
+    finally:
+        if reader.is_alive():
+            reader.terminate()
+            reader.join(timeout=5)
+        parent.close()
+        child.close()
+
+
 def test_result_artifact_store_writes_csv_manifest_and_plotly(tmp_path) -> None:
     store = ResultArtifactStore(tmp_path)
     manifest = store.save_result_csv(
@@ -131,7 +178,9 @@ def test_expiry_cleanup_is_scoped_and_open_download_can_finish(tmp_path):
     _, handle = store.open_verified_csv(**identity, dataset_version='v1', metric_version='m1')
     scope = store._scope('user', 'olist', 'rta_expire')
     manifest = scope / 'manifest.json'
-    os.utime(manifest, (time.time() - 120, time.time() - 120))
+    value = json.loads(manifest.read_text())
+    value["expires_at"] = time.time() - 1
+    manifest.write_text(json.dumps(value))
     with pytest.raises(ResultArtifactExpired):
         store.read_csv_page(**identity)
     external = tmp_path / 'experiment'
@@ -205,7 +254,10 @@ def test_retention_survives_restart_and_skips_artifact_in_use(tmp_path):
     restarted = ResultArtifactStore(tmp_path, retention_seconds=60)
     assert restarted.read_csv_page(**identity)['rows'] == [{'n': '1'}]
     scope = store._scope('user', 'olist', 'rta_keep')
-    os.utime(scope / 'manifest.json', (0, 0))
+    manifest = scope / 'manifest.json'
+    value = json.loads(manifest.read_text())
+    value['expires_at'] = time.time() - 1
+    manifest.write_text(json.dumps(value))
     store._busy[scope] = 1
     assert store.cleanup_expired()['artifacts'] == 0
     del store._busy[scope]

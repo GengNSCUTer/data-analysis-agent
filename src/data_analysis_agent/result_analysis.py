@@ -85,7 +85,7 @@ def select_rows(frame: pd.DataFrame, request: ResultInspection, metric_ids: Sequ
         key = column(name, frame.columns)
         if key in metrics:
             raise ResultInspectionError("结果筛选只能选择已返回的维度或时间列。")
-        selected = selected.loc[selected[key].map(lambda v: str(scalar(v))) == value]
+        selected = selected.loc[selected[key].map(lambda v, expected=value: pd.notna(v) and str(scalar(v)) == expected)]
     if request.row_numbers:
         if max(request.row_numbers) > len(frame):
             raise ResultInspectionError("所请求的行超出这份完整结果，不能从样本猜测。")

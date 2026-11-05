@@ -22,6 +22,7 @@
 | 查看有证据支持的产品优化候选与暂不处理项 | [`architecture/project-v1-gap-map.md`](architecture/project-v1-gap-map.md) | Week 1 缺口地图，不是实时任务台账 |
 | 查看嵌入式 Copilot 与长对话状态的目标架构 | [`architecture/embedded-copilot-and-memory-design-v1.md`](architecture/embedded-copilot-and-memory-design-v1.md) | M1 宿主合同入口；按 M1–M7 状态阅读 |
 | 查看对话历史、分析状态、执行记忆与上下文装配 | [`../plan/architecture-analysis-context-memory-v2.md`](../plan/architecture-analysis-context-memory-v2.md) / [`architecture/analysis-context-memory-v2.md`](architecture/analysis-context-memory-v2.md) | Phase 0–4：可信实体下钻、任务内近期问答、持久增量摘要和整体请求预算；实际验收证据见 PROJECT.md |
+| 查看历史结果自动检索、覆盖证明及状态隔离 | [`architecture/historical-artifact-reuse-v2.md`](architecture/historical-artifact-reuse-v2.md) | 单Artifact复用、五种决策、固定TTL及来源事务；不自动JOIN多份结果 |
 | 查看 Codex CLI 与开源 Agent 的上下文实现调研 | [`architecture/open-source-agent-context-research-v1.md`](architecture/open-source-agent-context-research-v1.md) | 代码级外部参考与“不采用”边界 |
 | 了解目录、模块所有权和代码审阅顺序 | [`architecture/repository-map.md`](architecture/repository-map.md) | 当前架构地图 |
 | 了解后训练项目状态和学习入口 | [`post-training/README.md`](post-training/README.md) | 后训练唯一入口 |

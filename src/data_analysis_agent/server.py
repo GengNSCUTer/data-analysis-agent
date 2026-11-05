@@ -74,6 +74,8 @@ from data_analysis_agent.postgres_runner import (
 )
 from data_analysis_agent.result_validator import ResultValidator
 from data_analysis_agent.result_budget import MAX_PREVIEW_ROWS, ResultBudget, ResultSettings
+from data_analysis_agent.artifact_history import ArtifactHistory
+from data_analysis_agent.artifact_reuse_planner import ArtifactReusePlanner
 from data_analysis_agent.result_artifact_store import (
     ResultArtifactExpired,
     ResultArtifactIntegrityError,
@@ -216,6 +218,7 @@ def create_app(*, llm_provider=None) -> FastAPI:
     conversation_store = PostgresConversationStore(
         settings, default_workspace_id=workspace.workspace_id,
         default_dataset_version=workspace.dataset_version, default_metric_version=workspace.metric_version,
+        enable_artifact_history=True,
     )
     run_recorder = PostgresRunRecorder(settings, model_name=model_name)
     agent_memory = DemoAgentMemory()
@@ -258,6 +261,8 @@ def create_app(*, llm_provider=None) -> FastAPI:
     registry = BudgetedToolRegistry()
     query_file_system = LocalFileSystem(str(QUERY_RESULTS_DIRECTORY))
     result_artifact_store = ResultArtifactStore(RESULT_ARTIFACT_DIRECTORY, retention_seconds=limits.artifact_retention_seconds)
+    artifact_history = ArtifactHistory(settings, workspace, catalog_retriever.catalog)
+    reuse_planner = ArtifactReusePlanner(artifact_history, result_artifact_store, catalog_retriever.catalog)
     provider_llm_service = llm_provider or OpenAILlmService(
         api_key=api_key,
         base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
@@ -320,7 +325,10 @@ def create_app(*, llm_provider=None) -> FastAPI:
         async def cleanup():
             while True:
                 try:
-                    result = await asyncio.to_thread(result_artifact_store.cleanup_expired)
+                    expired_entries = await artifact_history.expire()
+                    registered = await artifact_history.registered_scopes(result_artifact_store)
+                    result = await asyncio.to_thread(result_artifact_store.cleanup_expired, registered_scopes=registered)
+                    result["expired_history_entries"] = expired_entries
                     result['query_cache_files'] = await asyncio.to_thread(cleanup_query_files, QUERY_RESULTS_DIRECTORY, limits.artifact_retention_seconds)
                     logging.getLogger(__name__).info("artifact_cleanup %s", result)
                 except OSError:
@@ -400,6 +408,7 @@ def create_app(*, llm_provider=None) -> FastAPI:
             context_builder=context_builder,
             filter_source_resolver=runner.resolve_filter_sources,
             require_semantic_interpreter=True,
+            artifact_reuse_planner=reuse_planner,
         ), control, workspace.workspace_id),
         config={"cdn_url": "/static/vanna-components.js", "sse_only": True},
     )
@@ -483,12 +492,12 @@ def create_app(*, llm_provider=None) -> FastAPI:
             for item in items
         ]
 
-    async def _conversation_charts(user_id: str, conversation) -> list[dict[str, object]]:
+    async def _conversation_charts(user, conversation) -> list[dict[str, object]]:
         """Replay every saved chart for this user and workspace after hash checks."""
         memory = WorkingMemory.from_mapping(conversation.metadata.get("working_memory"))
         artifact = memory.previous_result_artifact
         recorded = await run_recorder.list_rendered_charts(
-            conversation_id=conversation.id, user_id=user_id
+            conversation_id=conversation.id, user_id=user.id
         )
         ordered: list[tuple[object, str | None]] = list(recorded)
         seen = {ref.artifact_id for ref, _question in ordered}
@@ -504,9 +513,11 @@ def create_app(*, llm_provider=None) -> FastAPI:
             elif workspace_id != workspace.workspace_id:
                 continue
             try:
+                await reuse_planner.authorized(conversation.id, user,
+                                               ref.artifact_id, include_previous_context=True)
                 figure = result_artifact_store.load_verified_plotly(
                     artifact_id=ref.artifact_id,
-                    user_id=user_id,
+                    user_id=user.id,
                     workspace_id=workspace_id,
                 )
             except (
@@ -538,6 +549,11 @@ def create_app(*, llm_provider=None) -> FastAPI:
         if conversation is None:
             return JSONResponse({"detail": "conversation not found"}, status_code=404)
         artifact = current_result_artifact(conversation, workspace)
+        if artifact is not None:
+            try:
+                await reuse_planner.authorized(conversation_id, user, artifact.artifact_id)
+            except (FileNotFoundError, PermissionError):
+                artifact = None
         scope_current = analysis_scope_is_current(
             conversation.metadata, workspace
         )
@@ -572,8 +588,12 @@ def create_app(*, llm_provider=None) -> FastAPI:
                 # export. The client may render it after a reload without
                 # triggering the model or database.
                 "trusted_result_artifact": artifact.as_dict() if artifact else None,
-                "analysis_state": conversation.metadata.get("working_memory") if scope_current else None,
-                "charts": await _conversation_charts(user.id, conversation),
+                "analysis_state": {
+                    **conversation.metadata.get("working_memory", {}),
+                    "previous_result_artifact": artifact.as_dict() if artifact else None,
+                    "previous_result_summary": artifact.summary if artifact else None,
+                } if scope_current else None,
+                "charts": await _conversation_charts(user, conversation),
             }
         )
 
@@ -618,20 +638,8 @@ def create_app(*, llm_provider=None) -> FastAPI:
         conversation = await conversation_store.get_conversation(conversation_id, user)
         if conversation is None:
             return JSONResponse({"detail": "conversation not found"}, status_code=404)
-        artifact = current_result_artifact(conversation, workspace)
-        if artifact is None or artifact.artifact_id != artifact_id:
-            return JSONResponse({"detail": "artifact not found"}, status_code=404)
-        workspace_id = conversation.metadata.get(
-            "workspace_id", workspace.workspace_id
-        )
-        if artifact.workspace_id != workspace_id:
-            return JSONResponse({"detail": "artifact not found"}, status_code=404)
         try:
-            manifest = result_artifact_store.verify_manifest(
-                artifact_id=artifact_id,
-                user_id=user.id,
-                workspace_id=workspace_id,
-            )
+            _, manifest = await reuse_planner.verified(conversation_id, user, artifact_id, include_previous_context=True)
         except ResultArtifactExpired:
             return JSONResponse({"detail": "保存的结果已到期，请重新运行分析。"}, status_code=410)
         except (FileNotFoundError, PermissionError, ResultArtifactIntegrityError, ValueError):
@@ -648,10 +656,10 @@ def create_app(*, llm_provider=None) -> FastAPI:
             conversation = await conversation_store.get_conversation(conversation_id, user)
         except InvalidConversationId as exc:
             return JSONResponse({"detail": str(exc)}, status_code=400)
-        artifact = current_result_artifact(conversation, workspace) if conversation else None
-        if artifact is None or artifact.artifact_id != artifact_id:
+        if conversation is None:
             return JSONResponse({"detail": "artifact not found"}, status_code=404)
         try:
+            await reuse_planner.verified(conversation_id, user, artifact_id, include_previous_context=True)
             page = await asyncio.to_thread(
                 result_artifact_store.read_csv_page,
                 artifact_id=artifact_id, user_id=user.id,
@@ -665,6 +673,15 @@ def create_app(*, llm_provider=None) -> FastAPI:
         except ResultArtifactIntegrityError:
             return JSONResponse({"detail": "artifact integrity check failed"}, status_code=409)
         return JSONResponse(page)
+
+    @app.get("/api/project/conversations/{conversation_id}/artifacts")
+    async def list_history_artifacts(conversation_id: str, request: Request):
+        user = await role_resolver.resolve_user(_request_user_context(request))
+        conversation = await conversation_store.get_conversation(conversation_id, user)
+        if conversation is None:
+            return JSONResponse({"detail": "conversation not found"}, status_code=404)
+        items = await artifact_history.candidates(conversation_id, user, include_previous_context=True)
+        return {"artifacts": [i.card() for i in items]}
 
     runtime_diagnostics = RuntimeDiagnostics(settings)
 
@@ -963,7 +980,7 @@ def create_app(*, llm_provider=None) -> FastAPI:
         )
 
     @app.get("/api/project/conversations/{conversation_id}/result.csv")
-    async def download_result_csv(conversation_id: str, request: Request):
+    async def download_result_csv(conversation_id: str, request: Request, artifact_id: str | None = None):
         user = await role_resolver.resolve_user(_request_user_context(request))
         try:
             conversation = await conversation_store.get_conversation(conversation_id, user)
@@ -975,8 +992,12 @@ def create_app(*, llm_provider=None) -> FastAPI:
             else None
         )
         if artifact is None or not artifact.artifact_id:
-            return JSONResponse({"detail": "no validated result to download"}, status_code=404)
+            if artifact_id is None:
+                return JSONResponse({"detail": "no validated result to download"}, status_code=404)
         try:
+            item = await reuse_planner.authorized(conversation_id, user,
+                artifact_id or artifact.artifact_id, include_previous_context=True)
+            artifact = item.artifact
             manifest, csv_file = await open_csv_download(
                 result_artifact_store,
                 artifact_id=artifact.artifact_id,
@@ -985,6 +1006,10 @@ def create_app(*, llm_provider=None) -> FastAPI:
                 dataset_version=workspace.dataset_version_id,
                 metric_version=workspace.metric_version,
             )
+            if (manifest["csv_sha256"], manifest["row_count"]) != (
+                    artifact.csv_sha256, artifact.result_metadata["row_count"]):
+                csv_file.close()
+                raise ResultArtifactIntegrityError("history descriptor differs from stored CSV")
         except ResultArtifactExpired:
             return JSONResponse({"detail": "保存的结果已到期，请重新运行分析。"}, status_code=410)
         except FileNotFoundError:

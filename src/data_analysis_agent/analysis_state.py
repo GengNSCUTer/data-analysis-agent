@@ -126,6 +126,12 @@ class AnalysisState(WorkingMemory):
                 state = AnalysisState(
                     workspace_id=self.workspace_id, dataset_version=self.dataset_version,
                     metric_version=self.metric_version, history_start_index=message_count,
+                    previous_result_artifact=self.previous_result_artifact,
+                    previous_result_summary=self.previous_result_summary,
+                    chart_history=self.chart_history,
+                    last_successful_plan=self.last_successful_plan,
+                    last_successful_state_version=self.last_successful_state_version,
+                    last_successful_run_id=self.last_successful_run_id,
                 )
                 continue
             name = operation.field

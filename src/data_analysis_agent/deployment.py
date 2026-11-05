@@ -91,7 +91,7 @@ def provision_metadata_writer(cursor, writer_role: str, reader_role: str) -> Non
     database = sql.Identifier(cursor.fetchone()[0])
     cursor.execute(sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(database, writer))
     cursor.execute(sql.SQL("GRANT USAGE ON SCHEMA app TO {}").format(writer))
-    cursor.execute(sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON app.conversations, app.messages, app.agent_runs, app.user_preferences, app.saved_analyses, app.accounts TO {}").format(writer))
+    cursor.execute(sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON app.conversations, app.messages, app.agent_runs, app.user_preferences, app.saved_analyses, app.accounts, app.result_artifacts TO {}").format(writer))
     cursor.execute(sql.SQL("GRANT SELECT, INSERT ON app.query_audits, app.export_audits TO {}").format(writer))
     cursor.execute(sql.SQL("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA app TO {}").format(writer))
 

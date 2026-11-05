@@ -160,7 +160,7 @@ def build_result_evidence(
         column = _column(name, columns)
         if column in metric_columns:
             raise ResultInspectionError("结果筛选只能选择已返回的维度或时间列。")
-        selected = selected.loc[selected[column].map(lambda item: str(_scalar(item))) == value]
+        selected = selected.loc[selected[column].map(lambda item, expected=value: pd.notna(item) and str(_scalar(item)) == expected)]
     if request.row_numbers:
         if max(request.row_numbers) > source_count:
             raise ResultInspectionError("所请求的行超出这份完整结果，不能从样本猜测。")
