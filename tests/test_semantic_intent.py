@@ -45,6 +45,42 @@ def test_parse_semantic_intent_rejects_invalid_json_or_kind() -> None:
         parse_semantic_intent('{"request_kind":"sql"}', catalog)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("incomplete", [{}, {"metric_ids": []}])
+async def test_incomplete_answer_scope_retries_structure_and_retains_current_metric(incomplete):
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.semantic_intent import resolve_state_intent
+
+    catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
+    patch = {"request_kind":"data_query", "action":"update_task", "state_patch":{"operations":[
+        {"op":"set", "field":"time_range", "value":{"start":"2017-10-01","end":"2018-01-01"}}]}}
+    prompts = []
+    async def complete(prompt, user):
+        prompts.append(prompt)
+        return json.dumps({**patch, "requested_answer":incomplete} if len(prompts)==1 else patch)
+    interpreter = SemanticIntentInterpreter(catalog, complete)
+    state = replace(AnalysisState.new(OLIST_RUNTIME_WORKSPACE), metric_ids=("gmv",), time_grain="month",
+        time_range={"start":"2017-01-01","end":"2018-01-01","end_semantics":"exclusive"})
+    user = User(id="u", group_memberships=["analyst"])
+    intent = await interpreter.interpret("改为只看第四季度", user, state.as_dict())
+    _, result = resolve_state_intent(intent, state, catalog, user, message_count=4)
+    assert len(prompts)==2 and "校验错误" in prompts[1]
+    assert result.metric_ids==("gmv",) and result.time_grain=="month"
+    assert result.time_range=={"start":"2017-10-01","end":"2018-01-01","end_semantics":"exclusive"}
+
+
+@pytest.mark.asyncio
+async def test_unknown_answer_metric_is_not_a_repairable_structure_error():
+    calls = []
+    async def complete(prompt, user):
+        calls.append(prompt)
+        return '{"request_kind":"data_query","requested_answer":{"metric_ids":["secret_metric"]}}'
+    interpreter = SemanticIntentInterpreter(CatalogLoader(OLIST_RUNTIME_WORKSPACE).load(), complete)
+    with pytest.raises(SemanticIntentError, match="unknown_or_invisible_metric"):
+        await interpreter.interpret("查秘密指标", User(id="u",group_memberships=["analyst"]))
+    assert len(calls)==1
+
+
 def test_intent_preserves_structured_shape_without_reparsing_text() -> None:
     catalog = CatalogLoader().load()
     intent = parse_semantic_intent(

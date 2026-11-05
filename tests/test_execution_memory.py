@@ -217,6 +217,57 @@ async def test_reference_reads_only_requested_rows_from_owned_full_artifact(tmp_
 
 
 @pytest.mark.asyncio
+async def test_previous_result_inspection_records_actual_source_selection_and_evidence(tmp_path):
+    import json
+    from dataclasses import replace
+    from types import SimpleNamespace, MethodType
+
+    from vanna.core.user import User
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
+    from data_analysis_agent.chat_runtime import BudgetedChatHandler
+    from data_analysis_agent.question_router import QuestionRouter
+    from data_analysis_agent.result_artifact import ResultArtifact
+    from data_analysis_agent.result_artifact_store import ResultArtifactStore
+    from data_analysis_agent.result_evidence import RESULT_EVIDENCE_PREFIX
+    from data_analysis_agent.runtime_workspace import load_runtime_workspace
+    from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
+    from data_analysis_agent.semantic_intent import SemanticIntent
+
+    workspace = load_runtime_workspace().profile
+    store = ResultArtifactStore(tmp_path)
+    state = replace(AnalysisState.new(workspace), metric_ids=("gmv",),
+                    dimensions=("product_category_name",), top_n=10, result_shape="grouped")
+    manifest = store.save_result_csv(artifact_id="inspection-audit", user_id="owner", workspace_id=workspace.workspace_id,
+        dataset_version=workspace.dataset_version_id, metric_version=workspace.metric_version, row_count=10,
+        columns=["product_category_name", "gmv"],
+        rows=[{"product_category_name": f"category-{i}", "gmv": 100-i} for i in range(1, 11)],
+        result_metadata={"validation_status":"valid", "row_count":10})
+    artifact = ResultArtifact("inspection-audit", "可信结果", ("gmv",), ("product_category_name", "gmv"),
+        workspace.dataset_version_id, workspace.metric_version, "not_rendered", workspace_id=workspace.workspace_id,
+        csv_sha256=manifest["csv_sha256"], query_scope=state.scope(), result_metadata=manifest["result_metadata"])
+    state = state.with_result_artifact(artifact)
+    handler = SimpleNamespace(workspace=workspace, result_artifact_store=store, artifact_reuse_planner=None,
+        question_router=QuestionRouter(CatalogRetriever(CatalogLoader(workspace).load()), full_results=True))
+    handler._verified_previous_artifact = MethodType(BudgetedChatHandler._verified_previous_artifact, handler)
+    usage = BudgetUsage(RequestBudget())
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        summary = await BudgetedChatHandler._inspect_previous_result(handler, state,
+            User(id="owner", group_memberships=["analyst"]), SemanticIntent.model_validate({
+                "request_kind":"result_followup", "action":"keep",
+                "result_inspections":[{"operation":"rows", "row_numbers":[9,10]}]}))
+    finally:
+        CURRENT_BUDGET.reset(token)
+    trace = usage.catalog_trace["result_inspection"]
+    assert (trace["source_row_count"], trace["selected_row_count"], trace["included_row_count"]) == (10, 2, 2)
+    assert trace["request"]["row_numbers"] == [9, 10] and trace["coverage"] == "complete"
+    payload = json.loads(summary.removeprefix(RESULT_EVIDENCE_PREFIX))
+    assert [r["product_category_name"] for r in payload["sample_rows"]] == ["category-9", "category-10"]
+    assert [r["gmv"] for r in payload["sample_rows"]] == [91, 90]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("chart_type,rows,accepted", [
     ("donut", [{"customer_state": "SP", "gmv": 10}, {"customer_state": "RJ", "gmv": 5}], True),
     ("horizontal_bar", [{"customer_state": "SP", "gmv": 10}], True),

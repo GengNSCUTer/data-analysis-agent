@@ -173,6 +173,6 @@ def test_requested_answer_is_catalog_validated_and_not_an_execution_permission(c
         requested_answer=RequestedAnswerSpec(metric_ids=("secret_metric",))).model_dump_json()
     with pytest.raises(SemanticIntentError, match="unknown_or_invisible_metric"):
         parse_semantic_intent(text, catalog)
-    text = SemanticIntent(request_kind="result_followup", requested_answer=RequestedAnswerSpec()).model_dump_json()
-    with pytest.raises(SemanticIntentError, match="requested_answer_metric_missing"):
+    text = '{"request_kind":"result_followup","requested_answer":{"metric_ids":[]}}'
+    with pytest.raises(SemanticIntentError, match="invalid_intent_output"):
         parse_semantic_intent(text, catalog)

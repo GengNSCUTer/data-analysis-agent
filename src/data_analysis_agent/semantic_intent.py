@@ -86,7 +86,8 @@ class HistoryReference(BaseModel):
 class RequestedAnswerSpec(BaseModel):
     """Proposed answer requirements; never a claim that a result covers them."""
     model_config = ConfigDict(extra="forbid", frozen=True)
-    metric_ids: tuple[str, ...] = ()
+    metric_ids: tuple[str, ...] = Field(min_length=1,
+        description="完整回答范围必须填写指标；仅修改当前任务时可省略requested_answer并只给state_patch。")
     dimensions: tuple[str, ...] = ()
     filters: tuple[IntentFilter, ...] = ()
     time_range: DateRange | None = None
@@ -242,8 +243,6 @@ def parse_semantic_intent(
         raise SemanticIntentError("unknown_or_invisible_filter")
     if intent.requested_answer:
         spec = intent.requested_answer
-        if not spec.metric_ids:
-            raise SemanticIntentError("requested_answer_metric_missing")
         if not set(spec.metric_ids) <= visible.keys() or len(spec.metric_ids) > max_metrics:
             raise SemanticIntentError("unknown_or_invisible_metric")
         if not (set(spec.dimensions) | {f.dimension for f in spec.filters}) <= dimensions:

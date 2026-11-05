@@ -193,6 +193,8 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
             send(questions[5],1,"SQL_REQUIRED")
             before = client.get(f"/api/project/conversations/{cid}").json()["analysis_state"]
             _, detail, run, _ = send(questions[6],0,"LOCAL_COMPUTE")
+            inspection = run["catalog_trace"]["result_inspection"]
+            assert (inspection["source_row_count"], inspection["selected_row_count"], inspection["included_row_count"]) == (12, 1, 1)
             assert detail["analysis_state"]["time_range"]=={**q1["time_range"],"end_semantics":"exclusive"}
             assert detail["trusted_result_artifact"]["query_scope"]["time_grain"] is None
             assert detail["trusted_result_artifact"]["artifact_id"]!=before["previous_result_artifact"]["artifact_id"]

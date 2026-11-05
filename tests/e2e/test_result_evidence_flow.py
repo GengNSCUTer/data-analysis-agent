@@ -125,8 +125,10 @@ def test_browser_result_evidence_continuity_and_refresh(result_evidence_data, mo
         "另按客户州统计客单价": {"request_kind":"data_query", "action":"new_task", "metric_ids":["average_order_value"], "dimensions":["customer_state"]},
         "这些州合在一起算总体客单价": {"request_kind":"result_followup", "action":"keep",
             "result_inspections":[{"operation":"sum", "metric_id":"average_order_value"}]},
-        "重新查销售额检查重复关联": {"request_kind":"data_query", "action":"new_task", "metric_ids":["gmv"]},
-        "重新正确查询销售额": {"request_kind":"data_query", "action":"update_task", "metric_ids":["gmv"]},
+        "重新查销售额检查重复关联": {"request_kind":"data_query", "action":"new_task", "metric_ids":["gmv"],
+            "requested_answer":{"metric_ids":["gmv"],"refresh":True}},
+        "重新正确查询销售额": {"request_kind":"data_query", "action":"update_task", "metric_ids":["gmv"],
+            "requested_answer":{"metric_ids":["gmv"],"refresh":True}},
     }
     statements = {
         "category": """SELECT p.product_category_name, SUM(i.price) AS gmv
@@ -265,8 +267,8 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                     observations.append({"question":question, "join_evidence":run["catalog_trace"]["join_evidence"],
                                          "termination_reason":run["termination_reason"]})
                     continue
-                assert run["termination_reason"] == "completed", run
-                assert run["sql_calls_used"] == int(question in {categories_question, monthly_question, "刚才前两名占全部品类销售额多少", "另查2017年十二月商品成交额，按月", "补上一个月对比环比", "再看十二月同比，没有基期就说明", "另按客户州统计客单价", "这些州合在一起算总体客单价", "重新正确查询销售额"})
+                assert run["termination_reason"] == "completed", (question, run)
+                assert run["sql_calls_used"] == int(question in {categories_question, monthly_question, "刚才前两名占全部品类销售额多少", "补上一个月对比环比", "再看十二月同比，没有基期就说明", "另按客户州统计客单价", "这些州合在一起算总体客单价", "重新正确查询销售额"}), (question, run)
                 if run["sql_calls_used"]:
                     assert run["catalog_trace"]["join_evidence"]["status"] in {"checked", "partial"}
                 assert detail["trusted_result_artifact"]
@@ -289,6 +291,9 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                 elif question == "第九名和第十名的金额分别是多少":
                     assert current["row_numbers"] == [9, 10]
                     assert run["catalog_trace"]["result_inspection"]["source_row_count"] == 10
+                    assert run["catalog_trace"]["result_inspection"]["selected_row_count"] == 2
+                    assert run["catalog_trace"]["result_inspection"]["included_row_count"] == 2
+                    assert run["catalog_trace"]["result_inspection"]["request"]["row_numbers"] == [9, 10]
                 elif question == "这十个品类合计销售额是多少":
                     assert current["analyses"][0]["value"] == sum(row["gmv"] for row in current["sample_rows"])
                     assert current["scope"] == "returned_top_n"
@@ -304,6 +309,10 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                     assert current["sample_rows"][-1]["time"].startswith("2017-12")
                 elif question == "最后一个月表现怎么样":
                     assert current["row_numbers"] == [12]
+                elif question == "另查2017年十二月商品成交额，按月":
+                    assert run["catalog_trace"]["artifact_reuse"]["mode"] == "LOCAL_COMPUTE"
+                    assert current["source_row_count"] == 1
+                    assert detail["analysis_state"]["time_range"]["start"] == "2017-12-01"
                 elif question == "全年每个月都在增长吗":
                     assert current["analyses"][0]["groups"][0]["judgment"] == "false"
                     assert "不成立" in answer and "反例" in answer

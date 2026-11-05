@@ -67,6 +67,9 @@ class ArtifactReusePlanner:
     async def plan(self, conversation_id, user, intent, effective, state):
         reference = intent.history_reference
         initial = intent.requested_answer
+        if not reference and initial is None and not effective.metric_ids:
+            # No answer scope to prove: the normal route owns metric clarification.
+            return ReusePlan(CoverageDecision("SQL_REQUIRED", missing_requirements=("requested_metric_missing",)))
         metrics = initial.metric_ids if initial else effective.metric_ids
         if not metrics:
             metrics = tuple(dict.fromkeys(r.metric_id for r in intent.result_inspections if r.metric_id))

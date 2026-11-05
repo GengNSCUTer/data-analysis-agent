@@ -180,3 +180,13 @@ async def test_selected_history_scope_is_not_erased_by_empty_task_fields(history
         assert plan.spec.metric_ids == ("gmv",)
         assert list(plan.frame["gmv"]) == [300, 200]
         assert state.as_dict() == before
+
+
+async def test_missing_query_metric_defers_to_existing_admission(history_setup):
+    workspace, catalog, _, files, history, user, conversation, _ = history_setup
+    state = AnalysisState.new(workspace)
+    planner = ArtifactReusePlanner(history, files, catalog)
+    intent = SemanticIntent(request_kind="data_query", action="new_task")
+    plan = await planner.plan(conversation.id, user, intent, state, state)
+    assert plan.decision.mode == "SQL_REQUIRED" and plan.spec is None
+    assert plan.decision.missing_requirements == ("requested_metric_missing",)

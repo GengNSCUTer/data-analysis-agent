@@ -78,6 +78,19 @@ def _safe_artifact_manifest(manifest: dict[str, object]) -> dict[str, object]:
     return {key: manifest[key] for key in allowed if key in manifest}
 
 
+def _result_inspection_trace(artifact, summary, *, source_row_count, query_scope, metric_ids, columns):
+    """Record the source, selected rows and evidence actually used by either path."""
+    payload = json.loads(summary.removeprefix(RESULT_EVIDENCE_PREFIX))
+    return {
+        "artifact_id": artifact.artifact_id, "query_scope": query_scope,
+        "metric_ids": list(metric_ids), "columns": list(columns),
+        "dataset_version": artifact.dataset_version, "metric_version": artifact.metric_version,
+        "request": payload["selection"], "source_row_count": source_row_count,
+        "selected_row_count": payload["row_count"], "coverage": payload["coverage"],
+        "included_row_count": payload["included_row_count"],
+    }
+
+
 TOOL_FREE_SYSTEM_PROMPT = """
 你是一个通用业务解释助手，当前请求没有数据库工具。
 
@@ -364,6 +377,8 @@ class BudgetedChatHandler(ChatHandler):
                                 if spec is None or not spec.metric_ids:
                                     raise SemanticIntentError("history_query_scope_missing")
                                 requirements = plan.decision.operation_plan.get("query_requirements", {})
+                                if requirements:
+                                    usage.record_catalog({"analysis_acquisition": {"requirements": requirements}})
                                 usage.result_numerators.update(plan.decision.operation_plan.get("numerators", {}))
                                 inspections = []
                                 for inspection in semantic_intent.result_inspections:
@@ -1235,9 +1250,9 @@ class BudgetedChatHandler(ChatHandler):
             "candidate_attempts": list(plan.attempts)}
         usage.record_catalog({"artifact_reuse": provenance, "result_reuse": "validated_result",
             "result_contract": contract.as_evidence(),
-            "result_inspection": {"artifact_id": artifact.artifact_id, "query_scope": spec.scope(),
-                "metric_ids": list(spec.metric_ids), "columns": list(columns),
-                "dataset_version": artifact.dataset_version, "metric_version": artifact.metric_version}})
+            "result_inspection": _result_inspection_trace(artifact, summary,
+                source_row_count=artifact.result_metadata["row_count"], query_scope=spec.scope(),
+                metric_ids=spec.metric_ids, columns=columns)})
         usage.set_result_summary(summary)
         usage.mark_result_contract_satisfied()
         activates_task = (intent.action in {"new_task", "update_task"}
@@ -1374,16 +1389,9 @@ class BudgetedChatHandler(ChatHandler):
         )
         usage = CURRENT_BUDGET.get()
         if usage is not None:
-            payload = json.loads(summary.split("：", 1)[1])
-            usage.record_catalog({"result_inspection": {
-                "artifact_id": artifact.artifact_id,
-                "request": payload["selection"], "source_row_count": len(frame),
-                "selected_row_count": payload["row_count"], "coverage": payload["coverage"],
-                "included_row_count": payload["included_row_count"],
-                "metric_ids": list(artifact.metric_ids), "columns": list(artifact.result_columns),
-                "dataset_version": artifact.dataset_version, "metric_version": artifact.metric_version,
-                "query_scope": artifact.query_scope,
-            }})
+            usage.record_catalog({"result_inspection": _result_inspection_trace(artifact, summary,
+                source_row_count=len(frame), query_scope=artifact.query_scope,
+                metric_ids=artifact.metric_ids, columns=artifact.result_columns)})
         return summary
 
     async def _ground_unmatched_question(self, question: str, user):
