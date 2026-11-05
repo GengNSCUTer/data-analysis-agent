@@ -18,8 +18,9 @@ Olist/TheLook的app元数据已升级，业务表和reader权限未改变。
 
 ## 自动化回归
 
-联合回归包含CI确定性测试清单与真实PostgreSQL的runner、conversation、artifact routes及
-trusted routes，结果为894 passed、5 deselected。原日志在仓库外`final-regression-r3.log`。
+初次发布的本地联合回归包含CI确定性测试清单与真实PostgreSQL的runner、conversation、
+artifact routes及trusted routes，结果为894 passed、5 deselected。它没有包含原有完整
+结果追问浏览器回归；这项遗漏随后由Actions发现。原日志在仓库外`final-regression-r3.log`。
 定向Ruff和`git diff --check`通过。
 
 受控模型、真实浏览器/PostgreSQL/SSE的两套业务库测试各13轮，通过场景包括：
@@ -68,3 +69,45 @@ Olist原始结果为2017年GMV、当前任务为2018年有效订单；TheLook分
 当前支持同会话、单Artifact、有界元数据候选及有限可加运算；不支持自动联合多源、任意公式、
 无充分统计量的均值/比率/distinct汇总、企业行级权限或多实例请求协调。历史元数据检索最多
 64份、语义卡片最多8份，不保证无限历史召回。旧的无索引/固定期限结果需重新查询。
+
+## Actions失败修复与追加完整对话
+
+提交a06754a对应运行41965072147的build通过，postgres-and-browser在
+`test_browser_result_evidence_continuity_and_refresh`第九/十名检查失败：新历史复用路径
+的result_inspection漏记source_row_count。修复提交为5331ece。
+
+修复保留原断言，统一历史/最近结果的审计构造：原始工件行数、选中行数、模型证据行数、
+选择操作与coverage都来自实际证据；补查基期/总体的分支也记录analysis_acquisition。
+十二月子查询现在明确验证LOCAL_COMPUTE与0 SQL；关联放大拒绝/正确重查负例显式refresh，
+确保没有被缓存绕过。结构空指标改用类型校验和已有的一次纠错重试，未知/越权指标不重试。
+缺少当前指标则交回原准入澄清，不构造空回答需求。
+
+追加验证：899项联合Python回归通过；隔离合成库的完整26轮浏览器回归通过，包含行选择、
+合计/占比、趋势/环比/同比、滚动/排名/分布、客单价重算、刷新、文字核验降级及JOIN放大拒绝。
+与历史事务/工件路由一同执行为9项通过。Olist和TheLook各13轮受控浏览器回归也通过。
+
+真实DeepSeek-V3.2的两组新会话各6轮：
+
+| 顺序 | 连续提问/动作 | 验证 |
+| --- | --- | --- |
+| 1 | 全年按月成交额，时间先后排列 | 1次业务SQL，完整CSV逐月与独立UTC SQL一致 |
+| 2 | 修改为第四季度，仍按月 | LOCAL_COMPUTE，0 SQL，当前范围与3行CSV正确 |
+| 3 | 三个月合计 | 0 SQL，合计与独立SQL一致，三种行数审计正确 |
+| 4 | 第一行减第三行 | 0 SQL，差额与独立SQL一致，当前状态不变 |
+| 5 | 当前三个月折线图 | 0 SQL，实际Plotly可见，当前状态不变 |
+| 6 | 浏览器刷新，回看全年合计且保留当前第四季度 | 0 SQL，正确引用首份全年工件，合计正确，当前状态不变 |
+
+本轮5组完整对话共64轮：26轮隔离合成、13轮×2业务库受控、6轮×2业务库真实模型。
+这里的通过指预先定义的验收断言，包括预期拒绝/解释降级，不表示每轮都应输出成功数字。
+最终真实模型12轮全部通过且没有文字解释降级；不是全业务质量或生产SLA结论。
+
+追加证据均在仓库外evals：`ci-history-6g4oetl3/`保留首次复现，`ci-history-lyv1sr48/`
+保存最终隔离回归，`history-ci-browser-iRe2AV/`保存两套业务库受控对话，
+`history-ci-live-olist-seu2t69f/`、`history-ci-live-thelook-3gs22s7c/`保存最终真实对话。
+联合日志为`history-ci-fix-final-regression-20261105.log`。
+初轮Olist季度被拒绝的记录也保留；TheLook初轮测试读到running状态是脚本未等SSE结束，
+已修正测试等待并重新执行完整6轮，没有改写初轮记录。
+
+修复5331ece已推送；GitHub Actions运行41973195118的build与postgres-and-browser
+均为success，原先失败的完整结果追问浏览器检查已通过。此结论对应实际远端运行结果，
+不是仅依据本地测试推断。
