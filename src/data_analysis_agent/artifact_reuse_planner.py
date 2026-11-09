@@ -91,7 +91,8 @@ class ArtifactReusePlanner:
         for item in candidates:
             spec = self.requested_spec(intent, effective, state, item if reference else None)
             decision = self.prover.prove(spec, item.artifact, inspections=intent.result_inspections,
-                                         chart=bool(intent.chart_request))
+                                         chart=bool(intent.chart_request),
+                                         snapshot_read=intent.request_kind=='result_followup' and intent.action=='keep')
             attempts.append(decision.as_dict())
             if decision.mode in {"DIRECT_REUSE", "LOCAL_COMPUTE"}:
                 proven.append((item, spec, decision))

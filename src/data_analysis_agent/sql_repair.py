@@ -175,6 +175,8 @@ def build_repair_prompt(
         f"安全提示：{error.public_reason}\n"
         "请只返回一条修复后的 SQL，不要解释、不要写库、不要访问 Catalog 未列出的对象。\n"
         "严格保留 current_query_plan 的指标、筛选、时间、分组和排名数量；不能通过删除条件修复错误。\n"
+        "最终行的粒度必须等于计划time_grain与dimensions。time_grain=month时返回真实月份及每月指标，"
+        "不能仅将半年度文字标签改名time；比较窗口合计、差额和增长率由服务器随后计算，SQL不再二次汇总。\n"
         f"<original_sql>\n{sql}\n</original_sql>\n"
     )
     if context:

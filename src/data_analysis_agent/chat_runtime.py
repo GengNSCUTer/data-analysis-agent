@@ -348,6 +348,7 @@ class BudgetedChatHandler(ChatHandler):
                                     }
                                 })
                     if semantic_intent is not None:
+                        usage.record_catalog({'semantic_intent': semantic_intent.as_dict()})
                         if (self.artifact_reuse_planner is not None
                                 and semantic_intent.request_kind in {"data_query", "data_analysis", "mixed_request", "result_followup"}
                                 and semantic_intent.action != "clear_task" and reference_error is None

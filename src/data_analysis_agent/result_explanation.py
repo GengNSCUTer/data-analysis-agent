@@ -37,6 +37,8 @@ statistics和analyses是服务端计算，样本之外的结论只用已有统�
 期间比较明确current是本期、baseline是基期，增长率分母是baseline；负增长不能取绝对值后换成反方向的增长。
 行比较的operands是实际行顺序，不是语义解释阶段假定的顺序；反方向比较引用reverse_comparison，不能只把difference取绝对值并沿用原增长率。
 时间端点只表示最早/最晚，不表示最大/最小。下降次数使用down_count；first_counterexample只是第一个反例，largest_drop只是最大跌幅，不能把两者当成全部下降月份。
+分区排名使用rank的rows和entity_appearances：rank是返回分区内的名次，partition_count是实际出现次数。
+没有进入某期返回Top-N不表示金额为0，也不能推断其准确名次。分区排名已在表格完整展示时，正文简述即可，不重复完整明细或另算无关趋势。
 Top-N合计不等于全业务总额，并列极值不能称唯一；不简单累加均值、比率或非可加计数。
 允许正常四舍五入、万/亿和百分数表达，保留Catalog币种，未知币种不要说成人民币/美元。
 没有原因证据时明确说“可能、假设、尚需验证”，不要把相关性说成确定因果。
@@ -56,6 +58,7 @@ verdict为supported、revise或insufficient，issues用简短中文说明待纠�
 允许四舍五入/缩放、不同措辞，以及明确标注的假设、示例数字和建议；推测不是已证实原因。
 例如12345.67写成约1.23万、比例12.345%写成约12.3%均可，不要求正文数字逐字存在于证据。
 可以结合完整明细和statistics核对简单合计、占比、极值及分组数量；不能只看作者引用的一行。
+分区排名优先核对analyses中rank的rows和entity_appearances；只知道返回Top-N之外，不能编造第六名或缺失实体金额。
 检查疑点不是已证实错误。只列真正的矛盾或缺口，不因合理精度、已提供统计的极值或不同段落分类而修订。
 不要因未使用固定句式拒绝，不要把“建议进一步验证”视为声称已有因果证据。
 逐句检查hypothesis/recommendation中的确定事实，不能因段首有“可能”就整体放行；证据外背景只能作为待验证假设。
@@ -248,7 +251,7 @@ def _numbers(
         return [
             (Decimal(str(node)), ('__growth_percent__' if parts[-1]=='relative_change_percent' else '__share_percent__')
              if parts[0]=='analyses' and parts[-1] in {'relative_change_percent','share_percent'}
-             else "__count__" if parts[-1].endswith("count") else metric)
+             else "__count__" if parts[-1].endswith("count") or parts[-1] == 'rank' else metric)
         ]
     values = []
     if isinstance(node, dict):
@@ -268,7 +271,7 @@ def _numbers(
                         (
                             Decimal(str(value)),
                             ('__growth_percent__' if key=='relative_change_percent' else '__share_percent__') if key in {'relative_change_percent','share_percent'}
-                            else "__count__" if key.endswith("count") else metric,
+                            else "__count__" if key.endswith("count") or key == 'rank' else metric,
                         )
                     )
     elif isinstance(node, list):
@@ -307,15 +310,20 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
     for index, paragraph in enumerate(draft.paragraphs):
         prefix = f"第{index + 1}段："
         nodes, numbers, entities = [], [], set()
+        referenced_metrics = set()
         for ref in paragraph.evidence_refs:
             try:
                 node = resolve_evidence_ref(evidence, ref)
             except (ValueError, KeyError, IndexError):
                 result.errors.append(
-                    prefix + "invalid_reference：引用不存在或不在本次证据中"
+                    prefix + f"invalid_reference：引用 {ref!r} 不存在或不在本次证据中"
                 )
                 continue
             nodes.append(node)
+            parts = ref.split('/')[1:]
+            if parts[0] in {'metric_semantics', 'metric_definitions', 'statistics'} and len(parts) > 1:
+                if parts[1] in evidence['metric_ids']:
+                    referenced_metrics.add(parts[1])
             numbers.extend(_numbers(node, ref, evidence))
             entities.update(_entities(node, evidence))
             # A scalar amount still belongs to its row, not a global number pool.
@@ -512,9 +520,17 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
         currencies = _CURRENCY.findall(text)
         units = {
             evidence.get("metric_semantics", {}).get(m, {}).get("unit", "")
-            for _, m in numbers
+            for m in referenced_metrics | {m for _, m in numbers}
             if m
         }
+        # A scope-only introduction may legitimately name the currency without
+        # citing an amount. Missing association is a review doubt, not proof
+        # that the Catalog does not declare that currency.
+        if currencies and not units and all(any(
+            _currency(c) in spec.get('unit', '').upper()
+            for spec in evidence.get('metric_semantics', {}).values()) for c in currencies):
+            result.doubts.append(prefix + 'unit_scope：币种已声明，需核对本段对应的指标范围')
+            currencies = []
         if currencies and not all(
             any(_currency(c) in unit.upper() for unit in units) for c in currencies
         ):

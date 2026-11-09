@@ -49,6 +49,22 @@ def test_equivalent_snapshot_can_be_reused_and_sp_filter_is_computed_without_sql
     assert len(frame) == 3
 
 
+def test_current_snapshot_chart_read_is_distinct_from_a_new_current_inventory_query(monkeypatch):
+    from data_analysis_agent.runtime_paths import RESOURCES
+    monkeypatch.delenv('DATA_ANALYSIS_DATASET_VERSION', raising=False)
+    monkeypatch.delenv('DATA_ANALYSIS_CATALOG_PATH', raising=False)
+    workspace=load_runtime_workspace(RESOURCES/'workspaces/thelook.yaml').profile
+    current_catalog=CatalogLoader(workspace).load()
+    source=artifact(metrics=('current_unsold_inventory_cost',),dimensions=('product_department',))
+    source=replace(source,workspace_id=workspace.workspace_id,dataset_version=workspace.dataset_version_id,
+                   metric_version=workspace.metric_version)
+    wanted=RequestedAnswerSpec(metric_ids=('current_unsold_inventory_cost',),dimensions=('product_department',))
+    prover=CoverageProver(current_catalog)
+    assert prover.prove(wanted,source,chart=True).mode=='SQL_REQUIRED'
+    assert prover.prove(wanted,source,chart=True,snapshot_read=True).mode=='DIRECT_REUSE'
+    assert prover.prove(wanted.model_copy(update={'refresh':True}),source,chart=True,snapshot_read=True).mode=='SQL_REQUIRED'
+
+
 @pytest.mark.parametrize("change,reason", [
     ({"metric_ids":("paid_order_count",)}, "missing_metrics"),
     ({"dimensions":("customer_city",)}, "finer_grain_required"),

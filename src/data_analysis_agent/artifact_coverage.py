@@ -61,7 +61,7 @@ class CoverageProver:
     def __init__(self, catalog):
         self.catalog = catalog
 
-    def prove(self, spec: RequestedAnswerSpec, artifact, *, inspections=(), chart=False):
+    def prove(self, spec: RequestedAnswerSpec, artifact, *, inspections=(), chart=False, snapshot_read=False):
         source, metadata = artifact.query_scope, artifact.result_metadata
         predicates = ["authorized_candidate", "current_versions", "unexpired_snapshot"]
         def missing(reason):
@@ -74,7 +74,7 @@ class CoverageProver:
             return missing("missing_metrics")
         if source.get("dimensions") and set(spec.metric_ids) != set(artifact.metric_ids):
             return missing("group_population_depends_on_other_metrics")
-        if any(self.catalog.metrics_by_id[m].temporal_mode == "current_snapshot" for m in spec.metric_ids):
+        if not snapshot_read and any(self.catalog.metrics_by_id[m].temporal_mode == "current_snapshot" for m in spec.metric_ids):
             return missing("current_snapshot_requires_refresh")
         predicates.extend(("metric_definitions_match", "validated_complete_csv"))
         sf, tf = _filters(source.get("filters")), _filters(spec.scope()["filters"])

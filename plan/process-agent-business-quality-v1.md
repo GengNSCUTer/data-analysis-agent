@@ -21,7 +21,7 @@ SQL执行、返回一张表或通过校验。沿用现有单Agent、Catalog、Qu
 当前任务、模型可自由表达但不能编造事实。先测量，再按失败集中度修复，一阶段一交付。
 
 本计划是工程优化顺序，不替代两周学习计划；结合Day 5–8审阅真实实现和失败样本，不把工程
-通过写成用户已经掌握代码。当前提交参考f34bc34，项目事实截至2026-11-05。
+通过写成用户已经掌握代码。实施起点为f34bc34；最新事实以PROJECT.md及阶段记录为准。
 
 ## 1. Requirements & Constraints
 
@@ -85,7 +85,7 @@ Catalog可加性；输出为每组两期合计、差额、增长率及零/负基
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
 | TASK-007 | 已审阅并归因复用Catalog缺失继承筛选、分区TopN上限漏乘月份、年数值误解析、行比较方向被错当期间增长，以及半年SQL输出形态偏离计划。半年窗口表达/总体补查仍待收口。 | 否 | 部分完成 |
-| TASK-008 | 两库连续下钻及建议追问已在第二批10项/22轮真实复测中通过，整批7通过3未完成。新增显式两个日期窗口及覆盖获取、可加合计/差额/增长率；缺月/NULL/零基期/非可加反例及31轮受控浏览器中的复用/刷新窗口比较通过。两库真实半年题与解释问题待复测。 | 否 | 部分完成 |
+| TASK-008 | 两库连续下钻及建议追问已在第二批10项/22轮真实复测中通过，整批7通过3未完成。显式两个日期窗口及可加合计/差额/增长率通过31轮受控链路；第三批真实9项/14轮4通过5未完成，两库年度及TheLook半年通过，Olist半年SQL仍返回文字标签。本轮补取数/计算分工及一次修复指引，保持原回归与反例。 | 否 | 部分完成 |
 
 依赖：TASK-007依赖TASK-003；TASK-008依赖TASK-007及影响该样本的Phase 2修复。
 验收例：“下半年比上半年增长多少”必须核对两期值、差额、增长率和零基期处理；
@@ -98,7 +98,7 @@ Catalog可加性；输出为每组两期合计、差额、增长率及零/负基
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
 | TASK-009 | 已完成60项及36次重复的正文复核，独立标记错误分母、错误峰值、范围冲突与解释降级；新增派生百分数单位与错误直接引用回归。引用宽泛/负向表述、误拒及有用性需继续归因，不能以生成模型自评代替。 | 否 | 部分完成 |
-| TASK-010 | 已补compare反向计算证据、派生增长/占比单位及增长方向校验，明确负增长不能取绝对值沿用分母；保留下降正幅度表达、一次修订与四调用上限。现有调用审计记录具体代码/复核错误，未发草稿。尚需真实解释降级归因、分层统计与最终有用性复核。 | 否 | 部分完成 |
+| TASK-010 | 第三批两库年度增长正确；新增审计定位币种介绍无数字时的关联误拦、分区排名复核自相矛盾、广告追问引用不存在。本轮增加服务端分区名次/出现次数，正确币种说明保留、未知币种仍拒绝，错误路径明确反馈。保留自由回答、一次修订与四调用上限；真实复测和最终有用性统计仍待完成。 | 否 | 部分完成 |
 
 依赖：TASK-009依赖TASK-003；TASK-010依赖TASK-009及相关数据正确性修复。
 本阶段不恢复服务端正常回答模板，不允许为避免降级而放行已知事实错误；
@@ -110,8 +110,8 @@ Catalog可加性；输出为每组两期合计、差额、增长率及零/负基
 
 | Task | Description | Completed | Date |
 | --- | --- | --- | --- |
-| TASK-011 | 扩展tests/e2e/test_artifact_history_browser.py与任务用例：A→B→回看A→继续B、多份相似年度结果、修改/取消筛选、刷新/重启、显式最新数据、期限/角色/版本变化、Top-N不覆盖总体、不可加指标。独立标注是否存在可复用授权来源，统计安全可复用任务命中率、误复用、无效澄清、SQL节省和当前状态被改写次数。 | 否 | 未执行 |
-| TASK-012 | 只对TASK-011暴露的失败改artifact_history.py、artifact_reuse_planner.py:ArtifactReusePlanner和artifact_coverage.py:CoverageProver。例如存在有效旧来源却因候选截断漏检时，先优化受限元数据检索/按需取下一页；不直接扩大所有上下文或加入向量库。完整性、时效与权限不满足仍重查；只读回看始终保留当前任务。跨会话、多Artifact JOIN、任意公式留作独立需求。 | 否 | 未执行 |
+| TASK-011 | 两库受控历史浏览器通过A→B→回看A→继续B、年度/季度范围、本地合计、刷新、清空和索引提交失败隔离；TheLook增加库存原结果换图/显式刷新及独立SQL。权限、版本、epoch和跨用户负例由真实元数据事务测试覆盖。重启及复用收益的独立汇总仍待完成。 | 否 | 部分完成 |
+| TASK-012 | 第三批真实库存换图被current_snapshot_requires_refresh转为新查询，已在CoverageProver/Planner区分result_followup+keep的旧快照读取与当前值新查询，refresh优先且不绕过授权、版本和TTL；两库浏览器已验证，真实复测待完成。未发现需扩大候选上限的证据，不增加向量库、跨会话或多Artifact JOIN。 | 否 | 部分完成 |
 
 依赖：TASK-011依赖TASK-003；TASK-012仅在TASK-011有具体失败时实施，否则跳过并说明。
 无意义重查属于效率问题，错误复用属于正确性问题，二者分开计分；不把零SQL当作首要目标。
@@ -145,7 +145,7 @@ Catalog可加性；输出为每组两期合计、差额、增长率及零/负基
 
 ## 5. Files
 
-- **FILE-001**: evals/cases/agent_business_tasks_v1.yaml、scripts/evals/run_agent_business_tasks.py、scripts/evals/check_agent_business_values.py是拟新增的任务评测入口；复用现有SSE客户端与审计采集，不复制在线运行时。
+- **FILE-001**: evals/cases/agent_business_tasks_v1.yaml、scripts/evals/run_agent_business_tasks.py、scripts/evals/check_agent_business_values.py是本计划的任务评测入口；复用现有SSE客户端与审计采集，不复制在线运行时。
 - **FILE-002**: scripts/run_product_release_dev.py、scripts/audit_product_release_dev.py、evals/cases/product_release_dev_v1.yaml是现有评测参考，保留历史结果和旧套件语义。
 - **FILE-003**: src/data_analysis_agent/plan_sql_guard.py、join_evidence.py、postgres_runner.py、semantic_catalog.py、result_validator.py负责已归因SQL正确性缺口的局部修复。
 - **FILE-004**: src/data_analysis_agent/semantic_intent.py、query_plan.py、result_analysis.py、chat_runtime.py负责分析要求、可信状态、必要补查和任务完成。

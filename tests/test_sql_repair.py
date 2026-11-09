@@ -76,6 +76,7 @@ def test_repair_prompt_preserves_complete_catalog_and_plan() -> None:
     prompt = build_repair_prompt(sql, error, catalog_context=catalog)
     assert sql in prompt and catalog in prompt
     assert "column x does not exist" not in prompt
+    assert '不能仅将半年度文字标签改名time' in prompt
 
 
 @pytest.mark.parametrize(("code", "category", "retryable"), [

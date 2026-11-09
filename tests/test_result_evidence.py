@@ -118,6 +118,37 @@ def test_only_allowed_columns_and_top_n_scope_are_exposed():
     assert result["statistics"]["gmv"]["sum_of_returned_rows"] == 30
 
 
+def test_partition_top_n_receives_rank_evidence_instead_of_unrequested_trends():
+    frame = pd.DataFrame({
+        'time': ['2024-01-01'] * 3 + ['2024-02-01'] * 3,
+        'state': ['SP', 'RJ', 'MG', 'RJ', 'SP', 'PR'],
+        'gmv': [30, 20, 10, 40, 25, 15],
+    })
+    scope = {'dimensions': ['state'], 'time_grain': 'month'}
+    data = payload(evidence(frame, time_column='time', top_n=3, query_scope=scope))
+    assert [a['operation'] for a in data['analyses']] == ['rank']
+    ranked = data['analyses'][0]
+    assert ranked['partition_count'] == 2
+    assert ranked['entity_appearances'] == [
+        {'state': 'RJ', 'partition_count': 2}, {'state': 'SP', 'partition_count': 2},
+        {'state': 'MG', 'partition_count': 1}, {'state': 'PR', 'partition_count': 1},
+    ]
+    assert [(r['time'], r['state'], r['rank']) for r in ranked['rows']] == [
+        ('2024-01-01', 'SP', 1), ('2024-01-01', 'RJ', 2), ('2024-01-01', 'MG', 3),
+        ('2024-02-01', 'RJ', 1), ('2024-02-01', 'SP', 2), ('2024-02-01', 'PR', 3),
+    ]
+    assert ranked['scope'] == 'returned_top_n'
+
+
+def test_explicit_trend_request_is_not_replaced_by_automatic_partition_rank():
+    frame = pd.DataFrame({'time': ['2024-01-01', '2024-02-01'], 'state': ['SP', 'SP'], 'gmv': [10, 20]})
+    data = payload(evidence(frame, time_column='time', top_n=1,
+        query_scope={'dimensions': ['state'], 'time_grain': 'month'},
+        inspections=[ResultInspection(operation='trend', metric_id='gmv')]))
+    assert data['analyses'][0]['operation'] == 'trend'
+    assert data['analyses'][0]['groups'][0]['top_n_limited']
+
+
 def test_non_additive_metrics_never_get_group_sum_or_average():
     frame = pd.DataFrame({"state": ["SP", "RJ"], "positive_review_rate": [0.9, 0.5]})
     result = payload(build_result_evidence(frame, required_columns=frame.columns,

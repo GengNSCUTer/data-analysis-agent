@@ -81,7 +81,7 @@ def _fit_calculations(payload: dict, limit: int, counter: TokenCounter) -> None:
     while counter.count_text(_render(payload)) > limit:
         choices = []
         for result in payload["analyses"]:
-            for key in ("rows", "comparisons", "groups", "contributions"):
+            for key in ("rows", "comparisons", "groups", "contributions", "entity_appearances"):
                 if result.get(key):
                     choices.append((result, key, result[key]))
             for group in result.get("groups", []):
@@ -171,9 +171,15 @@ def build_result_evidence(
     if time_column:
         time_names = {_normalized(n) for n in (time_column, *(column_aliases or {}).get(time_column, ()))}
         canonical_time = next((n for n in columns if _normalized(n) in time_names), None)
-    # A normal trend query also receives computed facts, even without an explicit operation.
+    # A per-period Top-N is a ranking, not a complete time series for every
+    # entity. Missing membership cannot be interpreted as zero or a trend.
     if not requests and canonical_time and scope.get("time_grain"):
-        requests = tuple(ResultInspection(operation="trend", metric_id=m) for m in metric_ids)
+        if top_n and scope.get('dimensions') and len(metric_ids) == 1:
+            n = min(top_n.values()) if isinstance(top_n, Mapping) else top_n
+            requests = (ResultInspection(operation='rank', metric_id=metric_ids[0],
+                group_by=(canonical_time,), limit=n),)
+        else:
+            requests = tuple(ResultInspection(operation="trend", metric_id=m) for m in metric_ids)
     analyses = analyze_result(frame.loc[:, columns].reset_index(drop=True), requests=requests,
                              metric_ids=metric_ids, scope=scope, additive_metric_ids=additive_metric_ids,
                              metric_semantics=metric_semantics, time_column=canonical_time, numerator_overrides=numerator_overrides)

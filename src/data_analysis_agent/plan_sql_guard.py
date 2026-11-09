@@ -8,6 +8,7 @@ a proof of SQL equivalence or metric correctness.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from fractions import Fraction
 from typing import Any, Mapping
 
@@ -149,6 +150,22 @@ def _metric_plan_field_mismatch(sql, plan, schema, table_grains):
         return None
     if scope is None:
         return None
+    if plan.get('time_grain'):
+        branches = scope.set_operation_scopes if isinstance(scope.expression, exp.SetOperation) else (scope,)
+        for branch in branches:
+            for projection in branch.expression.selects:
+                if projection.alias_or_name != 'time':
+                    continue
+                value = projection.unalias()
+                invalid = isinstance(value, exp.Null)
+                if isinstance(value, exp.Literal) and value.is_string:
+                    try:
+                        datetime.fromisoformat(value.this)
+                    except ValueError:
+                        invalid = True
+                if invalid:
+                    return ('计划要求可验证的时间桶，time不能是非日期期间文本或NULL；'
+                            '请按计划time_grain返回事实时间分组，期间合计和增长率由服务器计算。')
     for metric in metrics:
         metric_id = metric['metric_id']
         for condition in metric.get('default_filters', ()):

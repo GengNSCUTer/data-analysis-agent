@@ -62,10 +62,25 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
             "requested_answer":{**monthly,"refresh":True}},
         "清空后回看之前销售额排行": {"request_kind":"result_followup","action":"keep","history_reference":{"ordinal":1}},
     }
+    if dataset == 'thelook':
+        cases.update({
+            '另看当前各部门未售库存成本': {'request_kind': 'data_query', 'action': 'new_task',
+                'metric_ids': ['current_unsold_inventory_cost'], 'dimensions': ['product_department']},
+            '只把刚才库存结果换成横向图': {'request_kind': 'result_followup', 'action': 'keep',
+                'chart_request': 'horizontal_bar'},
+            '刷新当前各部门未售库存成本': {'request_kind': 'data_query', 'action': 'new_task',
+                'metric_ids': ['current_unsold_inventory_cost'], 'dimensions': ['product_department'],
+                'requested_answer': {'metric_ids': ['current_unsold_inventory_cost'],
+                    'dimensions': ['product_department'], 'refresh': True}},
+        })
     sql_plans = []
 
     def statement(plan):
         m = plan["metric_ids"][0]
+        if m == 'current_unsold_inventory_cost':
+            return ('SELECT p.department AS product_department, SUM(i.cost) AS current_unsold_inventory_cost '
+                    'FROM analytics.inventory_items i JOIN analytics.products p ON p.id=i.product_id '
+                    'WHERE i.sold_at IS NULL GROUP BY p.department ORDER BY current_unsold_inventory_cost DESC')
         if dataset == "olist":
             source = "analytics.fact_orders o JOIN analytics.dim_customers c ON c.customer_id=o.customer_id"
             timestamp, location, status = "o.order_purchase_timestamp", "c.customer_state", "o.order_status NOT IN ('canceled','unavailable')"
@@ -236,6 +251,28 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
             listing = client.get(f"/api/project/conversations/{cid}/artifacts").json()["artifacts"]
             download = client.get(f"/api/project/conversations/{cid}/result.csv",params={"artifact_id":listing[-1]["artifact_id"]})
             assert download.is_success and len(list(csv.DictReader(io.StringIO(download.content.decode()))))==10
+            if dataset == 'thelook':
+                _, inventory, _, _ = send('另看当前各部门未售库存成本', 1, 'SQL_REQUIRED')
+                original = inventory['analysis_state']
+                artifact_id = inventory['trusted_result_artifact']['artifact_id']
+                inventory_csv = client.get(f'/api/project/conversations/{cid}/result.csv').content
+                page.reload(wait_until='networkidle')
+                _, reread, _, _ = send('只把刚才库存结果换成横向图', 0, 'DIRECT_REUSE')
+                assert reread['analysis_state'] == original
+                assert reread['trusted_result_artifact']['artifact_id'] == artifact_id
+                assert client.get(f'/api/project/conversations/{cid}/result.csv').content == inventory_csv
+                assert chat.locator('.js-plotly-plot').last.evaluate('el => el._fullData[0].orientation') == 'h'
+                with psycopg2.connect(host='/tmp', port=35434, database='thelook_analytics',
+                                     user='daa_thelook_reader') as conn:
+                    with conn.cursor() as cur:
+                        cur.execute('SELECT product_department,SUM(cost) FROM analytics.inventory_items '
+                                    'WHERE sold_at IS NULL GROUP BY product_department')
+                        expected = {department: float(value) for department, value in cur.fetchall()}
+                actual = {row['product_department']: float(row['current_unsold_inventory_cost'])
+                          for row in csv.DictReader(io.StringIO(inventory_csv.decode()))}
+                assert actual == pytest.approx(expected)
+                _, refreshed, _, _ = send('刷新当前各部门未售库存成本', 1, 'SQL_REQUIRED')
+                assert refreshed['trusted_result_artifact']['artifact_id'] != artifact_id
             assert client.post(f"/api/project/conversations/{cid}/analysis-context").is_success
             send(questions[10],0,"CLARIFY")
             before_count = len(client.get(f"/api/project/conversations/{cid}/artifacts").json()["artifacts"])

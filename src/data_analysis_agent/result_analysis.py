@@ -498,6 +498,18 @@ def analyze_result(frame: pd.DataFrame, *, requests: Sequence[ResultInspection],
                 rows.extend(_records(ordered.loc[ordered["rank"] <= request.limit]))
             result = {"rows": rows, "rank_by": request.rank_by, "include_ties": request.include_ties, "ranked_count": len(rows),
                       "unrankable_count": int(rank_frame[sort_key].isna().sum())}
+            if partitions:
+                entities = [column(d, rank_frame.columns) for d in scope.get('dimensions', ())
+                            if column(d, rank_frame.columns) not in partitions]
+                ranked = pd.DataFrame(rows)
+                result['partition_columns'] = partitions
+                result['partition_count'] = len(ranked[partitions].drop_duplicates()) if rows else 0
+                if entities:
+                    appearances = (ranked.drop_duplicates([*partitions, *entities])
+                        .groupby(entities, dropna=False).size().reset_index(name='partition_count')
+                        .sort_values(['partition_count', *entities],
+                                     ascending=[False, *([True] * len(entities))], kind='stable')) if rows else pd.DataFrame()
+                    result['entity_appearances'] = _records(appearances)
         elif request.operation == "distribution":
             valid = values.dropna()
             result = {"population": "返回群组的指标值，不是原始订单分布", "count": len(valid),

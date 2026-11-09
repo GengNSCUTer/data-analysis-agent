@@ -247,6 +247,32 @@ def test_scaled_yuan_cannot_replace_catalog_currency(summary):
     )
 
 
+def test_currency_description_can_reference_catalog_without_an_observed_number(summary):
+    refs = ['/metric_semantics/gmv', '/scope']
+    assert not check('销售额单位为巴西雷亚尔（BRL）。', summary, refs).errors
+    assert check('销售额单位为人民币。', summary, refs).errors
+    scoped = check('本表金额单位为BRL。', summary, ['/scope'])
+    assert not scoped.errors and scoped.doubts
+
+
+def test_invalid_reference_feedback_identifies_the_path_to_repair(summary):
+    path = '/statistics/gmv/advertising_effect'
+    errors = check('目前无法说明广告带来了销售增长。', summary, [path]).errors
+    assert any(path in issue for issue in errors)
+
+
+def test_partition_rank_position_cannot_be_used_as_a_money_observation():
+    from data_analysis_agent.result_explanation import _numbers
+    frame = pd.DataFrame({'time': ['2024-01-01'] * 2, 'state': ['SP', 'RJ'], 'gmv': [20, 10]})
+    summary = build_result_evidence(frame, required_columns=frame.columns, metric_ids=('gmv',),
+        metric_semantics={'gmv': {'kind': 'amount', 'unit': 'BRL'}}, time_column='time', top_n=2,
+        query_scope={'dimensions': ['state'], 'time_grain': 'month'})
+    data = parse_result_evidence(summary)
+    assert _numbers(1, '/analyses/0/rows/0/rank', data)[0][1] == '__count__'
+    wrong = check('销售额为1 BRL。', summary, ['/analyses/0/rows/0/rank'])
+    assert wrong.errors
+
+
 def test_named_metric_must_match_the_cited_metric():
     summary = build_result_evidence(
         pd.DataFrame({"gmv": [20], "orders": [20]}),

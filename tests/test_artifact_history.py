@@ -230,6 +230,39 @@ async def test_selected_history_scope_is_not_erased_by_empty_task_fields(history
         assert state.as_dict() == before
 
 
+async def test_current_snapshot_followup_reads_existing_result_but_new_query_refreshes(history_setup):
+    _, catalog, _, files, history, user, conversation, add = history_setup
+    source = await add(conversation)
+    state = AnalysisState.from_mapping(conversation.metadata['working_memory'])
+    before = state.as_dict()
+    # Exercise the temporal policy with a real authorized index and CSV. This
+    # controlled Catalog does not change the production GMV definition.
+    snapshot_catalog = replace(catalog, metrics=tuple(
+        replace(metric, temporal_mode='current_snapshot') if metric.metric_id == 'gmv' else metric
+        for metric in catalog.metrics))
+    planner = ArtifactReusePlanner(history, files, snapshot_catalog)
+    for kind, action, refresh, mode in (
+        ('data_query', 'new_task', False, 'SQL_REQUIRED'),
+        ('data_query', 'keep', False, 'SQL_REQUIRED'),
+        ('result_followup', 'keep', False, 'DIRECT_REUSE'),
+        ('result_followup', 'keep', True, 'SQL_REQUIRED'),
+    ):
+        intent = SemanticIntent(request_kind=kind, action=action, metric_ids=('gmv',),
+            chart_request='bar', requested_answer=RequestedAnswerSpec(
+                metric_ids=('gmv',), dimensions=('customer_state',), refresh=refresh))
+        plan = await planner.plan(conversation.id, user, intent, state, state)
+        assert plan.decision.mode == mode
+        if mode == 'DIRECT_REUSE':
+            assert plan.item.artifact.artifact_id == source.artifact_id
+            assert plan.frame.to_dict('records') == [
+                {'customer_state': 'SP', 'gmv': 300}, {'customer_state': 'RJ', 'gmv': 200}]
+        assert state.as_dict() == before
+    outsider = User(id='other-user', group_memberships=['analyst'])
+    assert (await planner.plan(conversation.id, outsider, intent.model_copy(update={
+        'requested_answer': intent.requested_answer.model_copy(update={'refresh': False})
+    }), state, state)).decision.mode == 'SQL_REQUIRED'
+
+
 async def test_missing_query_metric_defers_to_existing_admission(history_setup):
     workspace, catalog, _, files, history, user, conversation, _ = history_setup
     state = AnalysisState.new(workspace)

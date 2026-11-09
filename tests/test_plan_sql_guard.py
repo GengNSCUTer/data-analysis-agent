@@ -145,6 +145,23 @@ def test_order_mean_cannot_average_raw_item_amounts_but_preaggregation_remains_l
     assert sql_plan_mismatch(right,plan,table_grains=grains) is None
 
 
+@pytest.mark.parametrize('projection', ["'2017年上半年'", "'not-a-date'", 'NULL'])
+def test_time_series_cannot_replace_real_month_buckets_with_literal_labels(projection):
+    plan = {'metric_ids': ['paid_order_count'], 'time_grain': 'month',
+        'metric_plans': [{'metric_id': 'paid_order_count', 'time_field': 'fact_orders.order_purchase_timestamp'}]}
+    sql = f'SELECT {projection} AS time, COUNT(*) AS paid_order_count FROM analytics.fact_orders'
+    assert sql_plan_mismatch(sql, plan)
+
+
+def test_one_month_query_can_label_its_known_bucket_with_a_valid_date_literal():
+    plan = {'metric_ids': ['paid_order_count'], 'time_grain': 'month',
+        'time_range': {'start': '2017-01-01', 'end': '2017-02-01'},
+        'metric_plans': [{'metric_id': 'paid_order_count', 'time_field': 'fact_orders.order_purchase_timestamp'}]}
+    sql = ("SELECT '2017-01-01' AS time, COUNT(*) AS paid_order_count FROM analytics.fact_orders "
+           "WHERE order_purchase_timestamp >= '2017-01-01' AND order_purchase_timestamp < '2017-02-01'")
+    assert sql_plan_mismatch(sql, plan) is None
+
+
 def test_conditional_average_uses_value_grain_not_status_predicate_grain():
     plan = {'metric_ids':['average_item_price'],
             'metric_plans':[{'metric_id':'average_item_price','grain':'order_item'}]}
