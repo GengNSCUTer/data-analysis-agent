@@ -24,6 +24,22 @@ def test_suite_has_balanced_independent_tasks_and_complete_conversations():
     assert len({task["goal"] for task in tasks}) == 60
 
 
+def test_fresh_twelve_task_suite_uses_declared_balanced_quota(tmp_path):
+    import yaml
+    suite = yaml.safe_load((ROOT / 'evals/cases/agent_business_tasks_v1.yaml').read_text())
+    selected = {}
+    for task in suite['tasks']:
+        selected.setdefault((task['dataset'], task['category']), task)
+    suite.update(tasks=list(selected.values()), tasks_per_category=1, tasks_per_workspace=6)
+    path = tmp_path / 'fresh.yaml'
+    path.write_text(yaml.safe_dump(suite, allow_unicode=True))
+    assert len(runner.load_tasks(path)) == 12
+    suite['tasks'].pop()
+    path.write_text(yaml.safe_dump(suite, allow_unicode=True))
+    with pytest.raises(ValueError):
+        runner.load_tasks(path)
+
+
 def test_reference_does_not_use_payment_fact_for_gmv_or_model_scope():
     statement, params = reference_sql("olist", {"metric":"gmv", "state":"SP", "start":"2017-01-01", "end":"2018-01-01"})
     assert "SUM(i.price)" in statement and "fact_payments" not in statement
@@ -143,12 +159,31 @@ def test_saved_chart_reassessment_replaces_old_chart_error_without_erasing_produ
         'errors':['chart_values','explanation_unverified'],
         'analysis_state':{'metric_ids':['gmv'],'dimensions':[],'time_grain':None,'top_n':None}}]}
     runner.write_json(directory / 'task.json',task)
+    runner.write_json(tmp_path / 'tasks.json', [{'id': 'o-basic-1', 'steps': [
+        {'question': '独立测试问题', 'reference': {'metric': 'gmv'}}]}])
     (directory / 'turn-1.expected.csv').write_text('gmv\n1\n')
     (directory / 'turn-1.csv').write_text('gmv\n1\n')
     runner.write_json(directory / 'turn-1.chart-rechecked.json',[{'type':'pie','values':[1]}])
     reviewed = runner.review_saved(tmp_path)
     assert reviewed['records'][0]['turns'][0]['errors'] == ['explanation_unverified']
     assert json.loads((directory / 'task.json').read_text()) == task
+
+
+def test_saved_review_uses_actual_suite_snapshot_instead_of_default_sixty_tasks(tmp_path):
+    import json
+    task_id = 'fresh-independent-question'
+    runner.write_json(tmp_path / 'tasks.json', [{'id': task_id, 'steps': [
+        {'question': '新的问题', 'reference': {'metric': 'gmv'}}]}])
+    runner.write_json(tmp_path / 'semantic-reviews.json', [{'id': task_id, 'attempt': 1, 'verdict': 'pass'}])
+    directory = tmp_path / (task_id + '-attempt-1')
+    directory.mkdir()
+    record = {'id': task_id, 'attempt': 1, 'turns': [{'turn': 1, 'answer': '独立复核正文', 'errors': [],
+        'analysis_state': {'metric_ids': ['gmv'], 'dimensions': [], 'time_grain': None, 'top_n': None}}]}
+    runner.write_json(directory / 'task.json', record)
+    for name in ['turn-1.expected.csv', 'turn-1.csv']:
+        (directory / name).write_text('gmv\n1\n')
+    assert runner.review_saved(tmp_path)['status_counts'] == {'passed': 1}
+    assert json.loads((directory / 'task.json').read_text()) == record
 
 
 def test_correct_csv_cannot_hide_a_stale_active_top_n_or_filter():

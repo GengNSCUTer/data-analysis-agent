@@ -39,9 +39,12 @@ def load_tasks(path: Path) -> list[dict]:
     tasks = suite["tasks"]
     if suite["usage"] != "online_development_only" or len({task["id"] for task in tasks}) != len(tasks):
         raise ValueError("Task usage/IDs invalid")
-    expected = Counter({(dataset, category): 5 for dataset in SETTINGS for category in CATEGORIES})
+    quota = suite['tasks_per_category']
+    if type(quota) is not int or quota < 1 or suite['tasks_per_workspace'] != quota * len(CATEGORIES):
+        raise ValueError('Task quota must be positive and consistent per workspace')
+    expected = Counter({(dataset, category): quota for dataset in SETTINGS for category in CATEGORIES})
     if Counter((task["dataset"], task["category"]) for task in tasks) != expected:
-        raise ValueError("Need 5 distinct tasks per category and dataset")
+        raise ValueError(f'Need {quota} distinct tasks per category and dataset')
     for task in tasks:
         if not task["goal"] or not task["steps"]:
             raise ValueError(task["id"])
@@ -181,7 +184,7 @@ def write_json(path, value):
 
 def review_saved(output):
     """Recompute numeric checks without another model call; retain original files."""
-    tasks = {task["id"]:task for task in load_tasks(ROOT / "evals/cases/agent_business_tasks_v1.yaml")}
+    tasks = {task['id']: task for task in json.loads((output / 'tasks.json').read_text())}
     review_path = output / "semantic-reviews.json"
     reviews = json.loads(review_path.read_text()) if review_path.exists() else []
     by_id = {(item["id"],item["attempt"]):item for item in reviews}

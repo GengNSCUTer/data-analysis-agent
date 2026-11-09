@@ -300,6 +300,12 @@ Playwright1.64浏览器，改用本机已验证的测试工具1.62/Chromium151�
 结束inflight/request/model槽均为0。真实provider延迟仍以业务任务记录单列，不混入100ms结果。
 六阶段仍需公式边界、生命周期汇总、最终60项及12项新变体验收；不据部署通过宣布整体收尾。
 
+为最终12项新变体补齐评测入口的两处实际限制：按suite已声明的每类/每库配额校验，
+不再把5题写死；保存后重审读取本次实际tasks.json，而不是全局默认60题清单。
+首次新增测试两项失败，修复后相关26项通过，原60题配额与原始task.json保留。
+日志为`agent-business-fresh-suite-before-20261109.log`和`agent-business-fresh-suite-after-20261109.log`。
+这只是评测入口准备，12项真实新题尚未生成或执行，不写成新增泛化成绩。
+
 ## 复核入口
 
 ```bash
