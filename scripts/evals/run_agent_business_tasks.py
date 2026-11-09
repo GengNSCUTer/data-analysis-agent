@@ -345,7 +345,25 @@ def audit_saved_charts(output):
             browser.close()
 
 
-def run_partition(dataset, tasks, output, repetitions, username):
+def restored_turns(folder, task):
+    """Read collected turns in order; never replace a failed attempt on resume."""
+    turns = []
+    frame = None
+    for number, step in enumerate(task['steps'], 1):
+        result = folder / f'turn-{number}.result.json'
+        if not result.exists():
+            break
+        item = json.loads(result.read_text())
+        if item['question'] != step['question']:
+            raise ValueError('Saved question differs from the authored task')
+        turns.append(item)
+        reference = folder / f'turn-{number}.expected.csv'
+        if reference.exists():
+            frame = read_csv(reference.read_text())
+    return turns, frame
+
+
+def run_partition(dataset, tasks, output, repetitions, username, resume=False):
     from playwright.sync_api import sync_playwright
     config = SETTINGS[dataset]
     base = f"http://127.0.0.1:{config['port']}"
@@ -362,15 +380,58 @@ def run_partition(dataset, tasks, output, repetitions, username):
                 raise RuntimeError(f"{dataset} login HTTP {login.status}")
             page.goto(base + "/embedded-copilot", wait_until="networkidle")
             runtime = page.request.get(base + "/api/project/runtime-contract").json()
-            write_json(output / f"{dataset}-runtime.json", runtime)
+            runtime_path = output / f"{dataset}-runtime.json"
+            if resume and runtime_path.exists() and json.loads(runtime_path.read_text()) != runtime:
+                raise RuntimeError('Workspace runtime changed since the interrupted evaluation')
+            if not runtime_path.exists():
+                write_json(runtime_path, runtime)
             for repetition in range(1, repetitions + 1):
                 for task in tasks:
                     folder = output / f"{task['id']}-attempt-{repetition}"
-                    folder.mkdir(mode=0o700)
+                    if resume and (folder / 'task.json').exists():
+                        completed.append(json.loads((folder / 'task.json').read_text()))
+                        continue
+                    folder.mkdir(mode=0o700, exist_ok=resume)
                     page.locator("#new-analysis").click()
                     chat = page.locator("vanna-chat")
-                    previous_state, previous_frame, turns = None, None, []
+                    turns, previous_frame = restored_turns(folder, task) if resume else ([], None)
+                    previous_state = turns[-1].get('analysis_state') if turns else None
+                    if turns:
+                        cid = turns[-1]['conversation_id']
+                        detail_response = page.request.get(base + f'/api/project/conversations/{cid}')
+                        if not detail_response.ok:
+                            raise RuntimeError(f'Resume conversation HTTP {detail_response.status}')
+                        detail = detail_response.json()
+                        chat.evaluate('(el,d)=>el.loadConversation(d.conversation_id,d.messages,d.charts)', detail)
+                        # A request may have reached the server before its SSE
+                        # was saved. Preserve its real cancellation/failure and
+                        # do not send the question again to obtain a better run.
+                        latest = run_evidence(dataset, cid)
+                        collected = {turn.get('request_id') for turn in turns}
+                        if latest['request_id'] not in collected and len(turns) < len(task['steps']):
+                            number = len(turns) + 1
+                            if latest['question'] != task['steps'][number-1]['question'] or latest['finished_at'] is None:
+                                raise RuntimeError('Uncollected request must match the next question and be finished')
+                            prefix = folder / f'turn-{number}'
+                            item = {'turn':number, 'question':latest['question'],
+                                'conversation_id':cid, 'request_id':latest['request_id'],
+                                'termination':latest['termination_reason'], 'sql_calls':latest['sql_calls_used'],
+                                'analysis_state':detail['analysis_state'], 'answer':'',
+                                'errors':['evaluation_interrupted', 'response_not_collected'],
+                                'prior_turn_failed':any(turn['errors'] for turn in turns)}
+                            write_json(Path(str(prefix)+'.run.json'), latest)
+                            write_json(Path(str(prefix)+'.conversation.json'), detail)
+                            write_json(Path(str(prefix)+'.result.json'), item)
+                            page.screenshot(path=str(prefix)+'.recovery.png', full_page=True)
+                            turns.append(item)
+                            expected_path = Path(str(prefix)+'.expected.csv')
+                            if expected_path.exists():
+                                previous_frame = read_csv(expected_path.read_text())
+                            previous_state = detail['analysis_state']
+                    collected_count = len(turns)
                     for number, step in enumerate(task["steps"], 1):
+                        if number <= collected_count:
+                            continue
                         item = {"turn":number, "question":step["question"], "errors":[],
                             "prior_turn_failed":any(turn["errors"] for turn in turns)}
                         turns.append(item)
@@ -511,6 +572,7 @@ def main():
     parser.add_argument("--case-id", action="append")
     parser.add_argument("--dataset", choices=SETTINGS)
     parser.add_argument("--repetitions", type=int, default=1)
+    parser.add_argument('--resume', action='store_true', help='Continue saved tasks without replaying collected turns')
     parser.add_argument("--username", default="analyst")
     parser.add_argument("--audit-references", action="store_true")
     parser.add_argument("--review-directory", type=Path)
@@ -547,15 +609,22 @@ def main():
         return 0
     if args.output is None or args.output.resolve().is_relative_to(ROOT):
         parser.error("--output must be a new external directory")
-    args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
-    write_json(args.output / "invocation.json", {"started_at":datetime.now(timezone.utc).isoformat(),
-        "case_ids":[task["id"] for task in tasks],"repetitions":args.repetitions,
-        "semantic_review":"required","cost":"unknown unless provider supplies it"})
-    write_json(args.output / "tasks.json",tasks)
+    if args.resume:
+        tasks = json.loads((args.output / 'tasks.json').read_text())
+        invocation = json.loads((args.output / 'invocation.json').read_text())
+        args.repetitions = invocation['repetitions']
+        write_json(args.output / f'resumed-{time.time_ns()}.json',
+                   {'resumed_at':datetime.now(timezone.utc).isoformat(), 'note':'Existing attempts retained; missing responses marked interrupted.'})
+    else:
+        args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
+        write_json(args.output / "invocation.json", {"started_at":datetime.now(timezone.utc).isoformat(),
+            "case_ids":[task["id"] for task in tasks],"repetitions":args.repetitions,
+            "semantic_review":"required","cost":"unknown unless provider supplies it"})
+        write_json(args.output / "tasks.json",tasks)
     records = []
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(run_partition,dataset,[task for task in tasks if task["dataset"]==dataset],
-            args.output,args.repetitions,args.username) for dataset in SETTINGS if any(task["dataset"]==dataset for task in tasks)]
+            args.output,args.repetitions,args.username,args.resume) for dataset in SETTINGS if any(task["dataset"]==dataset for task in tasks)]
         for future in futures:
             records.extend(future.result())
     summary = {"task_attempts":len(records),"status_counts":dict(Counter(record["status"] for record in records)),

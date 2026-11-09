@@ -34,6 +34,21 @@ def test_authored_final_variants_have_twelve_balanced_tasks_and_new_questions():
     assert {task['category'] for task in variants} == set(runner.CATEGORIES)
 
 
+def test_resume_retains_failed_turns_and_the_last_independent_reference(tmp_path):
+    import json
+    task = {'steps': [{'question':'first'}, {'question':'followup'}, {'question':'next'}]}
+    first = {'turn':1, 'question':'first', 'errors':['explanation_unverified']}
+    second = {'turn':2, 'question':'followup', 'errors':[]}
+    (tmp_path/'turn-1.result.json').write_text(json.dumps(first))
+    (tmp_path/'turn-2.result.json').write_text(json.dumps(second))
+    (tmp_path/'turn-1.expected.csv').write_text('gmv\n300\n')
+    turns, expected = runner.restored_turns(tmp_path, task)
+    assert turns == [first, second] and expected.iloc[0]['gmv'] == '300'
+    task['steps'][1]['question'] = 'changed'
+    with pytest.raises(ValueError, match='Saved question'):
+        runner.restored_turns(tmp_path, task)
+
+
 def test_fresh_twelve_task_suite_uses_declared_balanced_quota(tmp_path):
     import yaml
     suite = yaml.safe_load((ROOT / 'evals/cases/agent_business_tasks_v1.yaml').read_text())
