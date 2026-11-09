@@ -178,6 +178,16 @@ jobs:
           tests/test_result_artifact_routes.py
     - name: Install Chromium
       run: python -m playwright install --with-deps chromium
+    - name: Test metric counterexamples and history lifecycle on disposable data
+      env:
+        DATA_ANALYSIS_CATALOG_PATH: /tmp/copilot-ci-state/synthetic-catalog.yaml
+        DATA_ANALYSIS_DATASET_VERSION: synthetic-olist-v1
+        RESULT_EVIDENCE_TEST_ADMIN_DSN: postgresql://app_admin:ci-admin-password@127.0.0.1:5432/data_analysis_agent
+      run: |
+        python -m pytest -v \
+          tests/test_postgres_runner.py::test_one_order_two_items_two_payments_keeps_300_instead_of_600 \
+          tests/test_postgres_runner.py::test_order_mean_counterexample_with_unequal_items_and_empty_window \
+          tests/test_artifact_history.py
     - name: Test the browser with a controlled provider and real PostgreSQL
       run: python scripts/verify_runtime_capacity.py --browser-only --output /tmp/copilot-browser-evidence
     - name: Test complete result explanations and artifact follow-ups

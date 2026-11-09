@@ -95,6 +95,8 @@
 
 ### 评测与验收
 
+- [`../evals/results/agent_business_quality_final_20261109.md`](../evals/results/agent_business_quality_final_20261109.md)：当前在线业务质量结论；60项34通过、另12项新变体7通过，独立数值、解释、历史复用、生命周期及交付证据分层，保留失败与支持边界。
+
 - [`workspace-onboarding.md`](workspace-onboarding.md)：通过工作区配置接入第二个 PostgreSQL 业务库，包含 TheLook 示例、权限、安装包与真实验收方法。
 - [`templates/workspace/README.md`](templates/workspace/README.md)：新业务库填写清单与可复制workspace/Catalog模板；[`workspaces/thelook.md`](workspaces/thelook.md)为已填写实例。
 - [`../evals/results/thelook_product_queries.md`](../evals/results/thelook_product_queries.md)：TheLook新编60题、独立数值对照、模板实测与额外重复失败记录。

@@ -1,6 +1,6 @@
 # 面试项目事实与贡献
 
-更新于2026-10-20。此页汇总能由代码和报告支持的说法，不代替用户亲自审阅代码与复述。
+更新于2026-11-09。此页汇总能由代码和报告支持的说法，不代替用户亲自审阅代码与复述。
 在线产品、离线模型、工程回归分别计量，不拼成一个“准确率”。
 
 ## 如何介绍这个项目
@@ -23,17 +23,18 @@ Vanna 提供 Agent、工具注册、HTTP/SSE 和 Web Component 底座；本项�
 | 运行与交付 | `runtime_control.py`、`deployment.py`、`.github/workflows/tests.yml` | 单进程容量、取消、生命周期、wheel及合成数据初始化、分层 CI |
 
 代码路径均相对 `src/data_analysis_agent/`，最后一行工作流除外。阅读顺序和提问仍由
-[四周学习计划](../../plan/process-agent-internship-improvement-v1.md)与
+[两周学习计划](../../plan/process-agent-internship-improvement-v2-2week.md)与
 [代码学习记录](../learning/agent-project-walkthrough-v1.md)管理，本页不标记已经掌握。
 
 ## 已有证据能证明什么
 
 | 范围 | 实际结果 | 正确解释与来源 |
 | --- | --- | --- |
-| Olist 在线开发场景 | 60题；使用定向复测后的混合证据56/60，独立数值23/24 | 不是修复后完整重跑准确率；半年度比较、模糊问题等仍有缺口，见[报告](../../evals/results/product_release_dev_v1.md) |
-| TheLook 在线新场景 | 原全量复核58/60，两项定向成功；50次新非空查询的混合数值证据一致 | 额外重复城市查询仍出现最终分组遗漏，不能称稳定60/60，见[报告](../../evals/results/thelook_product_queries.md) |
-| 部署与恢复 | 新venv、wheel离仓库导入、独立PG18.3初始化/重启，含285行完整工件恢复 | 无训练框架；Docker配置已检查，但本机未实际运行容器，见[部署证据](../deployment.md) |
-| 单实例容量 | 受控provider每调用100ms；1/5/10并发各20次通过，整轮P95约0.87/1.80/2.98秒 | 真实在线模型另测约14/17秒；不是公网吞吐或生产SLA，见[报告](../../evals/results/runtime_capacity.md) |
+| 当前在线业务任务 | 两库60项122轮，严格34/60完整通过；另新变体12项24轮7/12通过 | Olist15/30、TheLook19/30；新题2/6与5/6。保留2次采集中断；不是任意问答准确率，目标90%尚未达，见[最终报告](../../evals/results/agent_business_quality_final_20261109.md) |
+| 独立结果对照 | 原60项115/120轮、新题19/24轮严格CSV对照通过 | 差异含形状/范围和提前舍入，不统称金额公式错误；已显示解释仍有误述和错误比较，不用数据检查代替完整任务成功 |
+| 历史复用 | 原60项32轮DIRECT_REUSE/LOCAL_COMPUTE均0SQL，回看未覆盖当前分析 | 有角色/版本/TTL/编辑删除/失败事务负例；新题仍有子范围只在正文体现的问题，0SQL不等于复用正确 |
+| 部署与恢复 | 新venv安装wheel、独立PG18.3、300行独立对照、分页下载/重启及数据库与工件联合恢复至新库新目录 | 同集群已有角色，不是集群灾难恢复；Docker实运行未验证，见[部署](../deployment.md)及最终报告 |
+| 单实例容量 | 受控provider每调用100ms；1/5/10并发各20项通过，整轮P95约1.02/2.00/2.99秒 | 真实模型原60项P50约44.4秒/P95约94.0秒，不能用受控容量宣传线上SLA |
 | 离线1.5B SQL-only LoRA | 6,000 train / 1,500 validation；两个750条留出集 ordered Gold为403/750、396/750 | 两个Schema均在训练中；未证明未见Schema泛化，也未接入在线默认路径，见[模型说明](../post-training/experiments/project-v1-model-baseline.md) |
 | 后续运行时输入对齐实验 | 1,500固定分母，1,453条可生成输入，发现704条Olist时间端点与旧Gold不一致 | 749条语义一致子集的诊断结果不能宣称全量100%，也不据此构造DPO负例，见[r3审计](../post-training/experiments/runtime-candidate-matching-v2-r3.md) |
 | 本轮交付回归 | 纯测试、真实PG集成、受控模型的真实Chromium分别记录 | 不调用付费模型、不重跑protected final；见[交付报告](../../evals/results/product_handoff.md) |
@@ -56,7 +57,7 @@ Vanna 提供 Agent、工具注册、HTTP/SSE 和 Web Component 底座；本项�
 > 基于Vanna、FastAPI/SSE与Web Component开发可嵌入式电商分析Copilot，构建Catalog驱动的
 > 语义计划、分析状态/可信结果记忆及PostgreSQL受控执行链；通过配置接入Olist和TheLook，
 > 完成中文连续分析、服务端图表、归属校验的分页下载、单实例排队/取消与wheel部署验证。
-> 对业务口径使用独立SQL核对；另完成1.5B模型bf16 LoRA与validation-best、Gold对照研究。
+> 对业务口径使用独立SQL和真实多轮任务核对，分开记录数据正确性、完整交付、复用收益和失败边界。
 
 具体数字只在能解释分母、条件和限制时加入。当前不声称任意数据库零配置接入、组织级行
 权限、企业SSO、多进程协调、生产SLA、企业使用或稳定全题正确。接库仍需定义指标、关联

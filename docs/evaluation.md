@@ -5,9 +5,16 @@
 前两层可以在本地或 CI 中重复运行，在线模型评测需要本地模型密钥，不能在 GitHub Actions
 中运行，也不能用 SQL 可执行代替语义正确。
 
-当前在线产品的开发质量审查见 [product_release_dev_v1](../evals/results/product_release_dev_v1.md)：
-60 个场景、73 轮，行为差异和独立数值对照分开记录。下方有日期的旧路由和在线批次保留为历史
-证据，不代表当前语义入口重新获得相同成绩。
+当前在线质量以[2026-11-09最终验收](../evals/results/agent_business_quality_final_20261109.md)为准：
+60项122轮34项完整通过，另12项24轮新变体7项通过；严格CSV分别115/120和19/24。
+采集中断、解释错误/降级、范围与精度差异分开记录。旧
+[product_release_dev_v1](../evals/results/product_release_dev_v1.md)及下方有日期的批次保留为历史，
+不能用修复后定向成功拼成当前全量成绩；工程CI不调用公网模型。
+
+两套清单为`evals/cases/agent_business_tasks_v1.yaml`和`agent_business_variants_v1.yaml`，入口
+为`scripts/evals/run_agent_business_tasks.py`；输出必须在仓库外。进程中断可用同一`--output`
+加`--resume`续跑，读取原tasks.json与已采集轮次，不覆盖失败或重发已到服务端的请求；缺失
+响应记中断，不宣称已交付。重审用`--review-directory`，图表重放用`--audit-saved-charts`。
 
 ## Text-to-SQL v2 确定性评测
 
