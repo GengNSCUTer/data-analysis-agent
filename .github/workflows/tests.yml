@@ -56,6 +56,7 @@ jobs:
           tests/test_visualization_policy.py \
           tests/test_chart_contract.py \
           tests/test_product_release_dev_contract.py \
+          tests/test_agent_business_tasks.py \
           tests/test_query_filters.py \
           tests/test_plan_sql_guard.py \
           tests/test_join_evidence.py \

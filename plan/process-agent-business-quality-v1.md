@@ -1,0 +1,178 @@
+---
+goal: 提高在线数据分析任务的真实完成率，并明确数值、解释、复用和部署边界
+version: 1.0
+date_created: 2026-11-09
+last_updated: 2026-11-09
+owner: Data Analysis Agent
+status: In progress
+tags: [online-agent, business-quality, evaluation, reliability]
+---
+
+# Introduction
+
+![Status: In progress](https://img.shields.io/badge/status-In%20progress-yellow)
+
+用户已授权逐阶段实施与测试，当前开始Phase 1。目标是让用户完成一项真实分析，而不只是让
+SQL执行、返回一张表或通过校验。沿用现有单Agent、Catalog、QueryPlan、安全执行、可信工件
+和模型自由解释链路，不新增通用编排框架，不启动后训练。
+
+任务卡：输入为真实中文业务任务、两套业务库和已有失败证据；输出为独立数值复核、逐层归因、
+必要的局部修复及端到端验收。关键不变量是权限不放宽、错误数据不成为可信结果、历史不改写
+当前任务、模型可自由表达但不能编造事实。先测量，再按失败集中度修复，一阶段一交付。
+
+本计划是工程优化顺序，不替代两周学习计划；结合Day 5–8审阅真实实现和失败样本，不把工程
+通过写成用户已经掌握代码。当前提交参考f34bc34，项目事实截至2026-11-05。
+
+## 1. Requirements & Constraints
+
+- **REQ-001**: 主指标是任务成功率，分开报告数值正确、任务完整、回答有据和交互成本；不能用HTTP成功、completed、SQL可执行或ResultValidator通过替代。
+- **REQ-002**: 每个数值结论均需有独立业务参考。参考依据原始问题和Catalog编写，不由实际SemanticIntent、QueryPlan、模型SQL或生产计算函数反推期望答案。
+- **REQ-003**: JOIN的checked/partial/amplified/not_applicable、金额来源检查和诊断耗时观测已经存在；本轮补实际缺口，不重做已有功能，也不宣称通用SQL语义证明。
+- **REQ-004**: 保留自由解释、代码事实检查、按疑点模型复核、最多一次修订以及失败保留表图；不用业务句式模板替代正常模型回答。
+- **REQ-005**: 同会话单Artifact优先做可靠，不因缺少跨会话或多Artifact能力就自动扩展；不可证明覆盖时回到安全SQL或最小澄清。
+- **SEC-001**: 保留身份/workspace隔离、当前权限、版本/期限、文件完整性、SQL AST、reader只读角色、结果准入与同事务发布；复杂业务不绕过这些措施。
+- **CON-001**: 不新增hash、冻结合同、通用gate、独立Agent框架、任意Python执行或分布式中间件；用现有类型、事务、测试、trace与普通版本管理承载改动。
+- **CON-002**: 原始对话、SQL、数据行、截图和完整运行日志存仓库外；仓库只保留用例、独立核对逻辑、脱敏报告及必要的小fixture。在线评测不使用受保护后训练final test。
+- **GUD-001**: 单元/受控模型测试测工程，真实模型评测测理解与回答，独立参考测数值；三类结果分别报告。修复后的完整重跑与定向复测也分别计分。
+
+## 2. Implementation Steps
+
+### Implementation Phase 1
+
+- **GOAL-001**: 先获得当前真实质量画像，确定后续修复排序；不先扩框架或大量补规则。
+
+| Task | Description | Completed | Date |
+| --- | --- | --- | --- |
+| TASK-001 | 已建立60项/122轮：两库六类各5项、连续任务4–5轮，逐项记录目标/交付要求和独立参考；已核对参考查询。加州问题明确使用真实值California，原错误部分运行保留并排除分母。 | 是 | 2026-11-09 |
+| TASK-002 | 已实现独立参考、真实浏览器/工件/图表/状态采集、数值与正文分离复核；19项评测器测试通过。原SSE、CSV和失败记录保留，不重跑候选SQL反推答案。 | 是 | 2026-11-09 |
+| TASK-003 | 12项/24轮试跑已完成语义复核：3通过、9失败；修正年份桶/Plotly压缩数组与采集来源误判后，60项/122轮全量r2正在screen执行。尚需全量复核及12项各3次稳定性检查，不提前发布准确率。 | 否 | 进行中 |
+
+依赖：TASK-002依赖TASK-001；TASK-003依赖TASK-002。用例与参考通过审阅后再调用真实模型，
+不等待把所有产品缺陷修好才开始测量。
+
+任务成功的定义：对于预期可完成的任务，所有必要检查点通过，最终数据独立对照正确，
+回答直接回应问题，要求的表/图/下载可用，且没有多余澄清或状态串线。需要澄清或拒绝的题
+按预先标注的合理行为评估，单列分母，不混进可完成任务成功率。无法核对记未确认，不计通过。
+
+初轮报告不预设已有准确率。以下只是后续目标：可完成任务成功率≥90%，复杂任务≥80%，
+独立数值检查通过率≥98%，不必要澄清率≤5%；安全负例零泄漏、已知严重错误零放行。
+同时展示实际分子/分母；小样本达标不等于生产SLA或开放域泛化。
+
+### Implementation Phase 2
+
+- **GOAL-002**: 优先降低“列名正确、数字错误”的业务风险，并控制误拒绝。
+
+| Task | Description | Completed | Date |
+| --- | --- | --- | --- |
+| TASK-004 | 根据TASK-003和已有边界，在tests/test_plan_sql_guard.py、tests/test_join_runtime_evidence.py、tests/test_online_metrics.py补正反例：SUM(price)*2、遗漏订单状态、错用支付额、平均值分母/NULL错误、错时间字段、预聚合后再JOIN、复杂CTE与加权分摊。新增小fixture只写隔离测试库；例如一单两商品两支付，核对GMV不会翻倍。每个错误SQL配一个合法等价写法。 | 否 | 未执行 |
+| TASK-005 | 只修复可明确识别且已有失败证据的规则：涉及src/data_analysis_agent/plan_sql_guard.py:sql_plan_mismatch、join_evidence.py:build_join_probes、semantic_catalog.py:ResultContract、result_validator.py:ResultValidator和postgres_runner.py。区分已检测错误、未覆盖与不适用；沿用已有高风险partial策略，不将所有未覆盖一律拒绝。比例、客单价等不能仅靠来源列证明公式。 | 否 | 未执行 |
+| TASK-006 | 对新增合法/非法SQL运行真实PG对照，统计漏检、误拒绝、诊断覆盖、拒绝原因与join_evidence.elapsed_ms，再重跑受影响真实业务任务。原候选和一次修复候选使用相同检查，保留原SQL预算；无法可靠判断的复杂公式记入能力边界，不以第二个模型意见当确定性证明。 | 否 | 未执行 |
+
+依赖：TASK-004依赖TASK-003；TASK-005依赖TASK-004；TASK-006依赖TASK-005。
+完成条件是已标注反例被阻断或明确报告不可验证、合法等价写法通过、端到端受影响任务复测完成。
+“报告不可验证”不能计成业务完成，也不能对当前已禁止的高风险SQL新增放行路径。
+
+### Implementation Phase 3
+
+- **GOAL-003**: 让复杂问题交付真正需要的比较或分析，而非只返回相关明细表。
+
+| Task | Description | Completed | Date |
+| --- | --- | --- | --- |
+| TASK-007 | 用TASK-003失败样本审阅semantic_intent.py:resolve_state_intent、query_plan.py:QueryPlan、result_analysis.py:acquisition_scope/analyze_result和chat_runtime.py。明确比较需要哪些时间窗口、基期、分子/分母、分组与运算；覆盖上下半年、同比/环比、各州各月Top-N、州→品类连续下钻、占比的总体范围。 | 否 | 未执行 |
+| TASK-008 | 在现有QueryPlan、ResultInspection和query_required补查链内补齐缺失的数据与计算。单条受控SQL足够就不拆多次；确需补基期/总体时使用现有有限补查，不增加通用规划器或自动递归。整轮/SQL/模型预算不自动增加。只在明确完成所需计算、覆盖范围和展示要求后标记任务完成；数据不可得时说明缺口，不能把月表当成半年比较完成。 | 否 | 未执行 |
+
+依赖：TASK-007依赖TASK-003；TASK-008依赖TASK-007及影响该样本的Phase 2修复。
+验收例：“下半年比上半年增长多少”必须核对两期值、差额、增长率和零基期处理；
+“为什么下降”可提供已验证分组贡献和假设，但观察性汇总不能证明因果。
+
+### Implementation Phase 4
+
+- **GOAL-004**: 提高解释的直接性和有用性，同时降低错误事实与核验误伤。
+
+| Task | Description | Completed | Date |
+| --- | --- | --- | --- |
+| TASK-009 | 在tests/test_result_explanation.py和真实任务复核中分别标注实体/数值/单位/范围正确、是否回答问题、是否区分假设与事实。使用已有AnswerDraft引用和generate_result_answer检查流程，覆盖数值调包、Top-N冒充总体、缺月断言连续增长、因果断言，以及合理四舍五入/百分数/建议。不要只让生成模型自己给答案打分。 | 否 | 未执行 |
+| TASK-010 | 只针对已归因问题调整result_explanation.py:check_answer/generate_result_answer和result_evidence.py，先给足必要证据，再优化提示与疑点判断；正常问题保留自由文本和一次生成，仍最多一次修订、最多四次解释模型调用。失败保留表图和依据，不输出未经核验的正文。单列复核率、修订率、错误放行率、误拦率、解释降级率和额外耗时；正确性复核后，人工抽查回答是否有用。 | 否 | 未执行 |
+
+依赖：TASK-009依赖TASK-003；TASK-010依赖TASK-009及相关数据正确性修复。
+本阶段不恢复服务端正常回答模板，不允许为避免降级而放行已知事实错误；
+最终数据正确但解释未通过核验，记录“数据可用、解释未完成”，不算完整任务成功。
+
+### Implementation Phase 5
+
+- **GOAL-005**: 先量清现有记忆能力的收益和错误，再决定是否扩大范围。
+
+| Task | Description | Completed | Date |
+| --- | --- | --- | --- |
+| TASK-011 | 扩展tests/e2e/test_artifact_history_browser.py与任务用例：A→B→回看A→继续B、多份相似年度结果、修改/取消筛选、刷新/重启、显式最新数据、期限/角色/版本变化、Top-N不覆盖总体、不可加指标。独立标注是否存在可复用授权来源，统计安全可复用任务命中率、误复用、无效澄清、SQL节省和当前状态被改写次数。 | 否 | 未执行 |
+| TASK-012 | 只对TASK-011暴露的失败改artifact_history.py、artifact_reuse_planner.py:ArtifactReusePlanner和artifact_coverage.py:CoverageProver。例如存在有效旧来源却因候选截断漏检时，先优化受限元数据检索/按需取下一页；不直接扩大所有上下文或加入向量库。完整性、时效与权限不满足仍重查；只读回看始终保留当前任务。跨会话、多Artifact JOIN、任意公式留作独立需求。 | 否 | 未执行 |
+
+依赖：TASK-011依赖TASK-003；TASK-012仅在TASK-011有具体失败时实施，否则跳过并说明。
+无意义重查属于效率问题，错误复用属于正确性问题，二者分开计分；不把零SQL当作首要目标。
+
+### Implementation Phase 6
+
+- **GOAL-006**: 形成可诚实交付的单实例自托管版本，而非宣称企业生产能力已经齐备。
+
+| Task | Description | Completed | Date |
+| --- | --- | --- | --- |
+| TASK-013 | 复用scripts/verify_runtime_capacity.py、docs/deployment.md和现有健康/审计/容量trace，补数据库与工件同时备份恢复、重启、断连、超时、取消、过期清理及只读/写入账号隔离；使用隔离部署和测试账号。受控provider容量与真实provider长尾分别测，报告环境、并发、成功率、P50/P95与失败原因，不把前者当真实模型SLA。 | 否 | 未执行 |
+| TASK-014 | 文档明确受支持拓扑为单Uvicorn进程、持久PostgreSQL和持久工件卷。企业SSO、组织行级权限、多实例列为未实现；仅在明确客户/容量需求后独立设计。届时SSO必须映射服务端身份，行权限必须在数据库执行与旧工件重授权同时生效，多实例必须有共享会话租约/取消与工件存储，不用增加worker或只靠state_version冒充解决。 | 否 | 未执行 |
+| TASK-015 | 在最终实现上完整重跑60项任务，保留开发期定向复测来源与最终全量成绩；追加12项未用于定向修复的人工业务变体作有限复验，不参与checkpoint选择或训练。更新PROJECT.md、docs/evaluation.md、相关架构说明、飞书项目事实及面试事实；说明支持范围、失败例和待办。得到代码修改授权后，按AGENTS执行审阅、CI与提交推送。 | 否 | 未执行 |
+
+依赖：TASK-013可在Phase 1后独立执行；TASK-014依赖TASK-013；TASK-015依赖前面实际实施项完成。
+不以实现完整企业SSO或多实例为本轮收尾前提；有真实企业接入需求时这些是独立上线前提，
+不能以“已有本地登录/只读账号/乐观锁”替代。没有真实环境、负载模型和观测周期，不承诺SLA。
+
+## 3. Alternatives
+
+- **ALT-001**: 立即引入多Agent/通用编排框架。未采用；现有缺陷主要是需求、数据口径、证据和完成条件，新增框架不直接提供独立正确答案。
+- **ALT-002**: 在线SQL全部改成Gold renderer。未采用；这会缩窄自然问题能力，也无法证明中文理解正确。独立参考与线上候选必须分离。
+- **ALT-003**: partial全部拒绝，或一律再用模型审SQL。未采用；前者会误伤合法查询，后者增加成本且不是确定性证明。
+- **ALT-004**: 继续SFT/DPO，或先扩大跨会话/多源记忆。暂不采用；先确认当前线上模型在哪一层失败，再判断是否值得另立任务。
+
+## 4. Dependencies
+
+- **DEP-001**: Olist与TheLook当前Catalog和只读数据库可用；所有参考均绑定同一数据快照和指标版本，动态源需保持可比较的快照，不能跨更新比较。
+- **DEP-002**: 在线模型凭据、真实登录及Playwright可用；CI继续跑确定性/受控模型测试，不写入公网模型凭据。
+- **DEP-003**: 数值参考及复杂任务标注需要用户能审阅；用户已授权依序进行真实模型测试与隔离验证，不修改业务事实数据，不抢占其他任务资源。
+
+## 5. Files
+
+- **FILE-001**: evals/cases/agent_business_tasks_v1.yaml、scripts/evals/run_agent_business_tasks.py、scripts/evals/check_agent_business_values.py是拟新增的任务评测入口；复用现有SSE客户端与审计采集，不复制在线运行时。
+- **FILE-002**: scripts/run_product_release_dev.py、scripts/audit_product_release_dev.py、evals/cases/product_release_dev_v1.yaml是现有评测参考，保留历史结果和旧套件语义。
+- **FILE-003**: src/data_analysis_agent/plan_sql_guard.py、join_evidence.py、postgres_runner.py、semantic_catalog.py、result_validator.py负责已归因SQL正确性缺口的局部修复。
+- **FILE-004**: src/data_analysis_agent/semantic_intent.py、query_plan.py、result_analysis.py、chat_runtime.py负责分析要求、可信状态、必要补查和任务完成。
+- **FILE-005**: src/data_analysis_agent/result_explanation.py、result_evidence.py及其测试负责解释质量与核验边界。
+- **FILE-006**: src/data_analysis_agent/artifact_history.py、artifact_reuse_planner.py、artifact_coverage.py、runtime_control.py及对应浏览器测试用于复用/生命周期检查；没有失败不重构。
+- **FILE-007**: PROJECT.md、docs/evaluation.md、docs/deployment.md、docs/interview/project-release-facts-v1.md和evals/results/agent_business_quality_20261109.md承载计划实施后的实际事实，不提前填写通过数字。
+
+## 6. Testing
+
+- **TEST-001**: 独立数值比较按维度键对齐、保留NULL/缺失与排名并列语义；整数精确相等，Catalog明确两位金额时用Decimal按该精度比较，比例/未声明货币的浮点值采用abs≤1e-6或rel≤1e-8。实际使用规则写入报告，不能为通过临时放大容差。排序只在用户要求时检验。
+- **TEST-002**: 合计、均值、比率、distinct、分摊分别验证；完整总体与Top-N、空值与零值不得混同。用隔离对抗fixture避免错误SQL在单一快照上巧合得到正确值。
+- **TEST-003**: 任务完成判定同时检查最终答案和证据，不仅查列；半年对比、补基期、多维Top-N、连续下钻与图表类型按用户实际要求判定。
+- **TEST-004**: 真实浏览器检查可见正文、图表值、完整CSV、依据卡片、刷新/重启恢复及历史/当前状态隔离；受控与真实provider结果独立列示。
+- **TEST-005**: 诊断/语义拦截既测错误阻断，也测合法写法误拒绝；解释复核同时测错误放行和正常表达误伤。报告unknown/pending，不计为通过。
+- **TEST-006**: 运行相关Python/PG/浏览器回归及CI；每阶段完成后才能声称其已验证。最终全量重跑不得用多次定向成功拼成同一次成绩，原失败证据保留。
+
+## 7. Risks & Assumptions
+
+- **RISK-001**: 两套电商库通过不代表任意schema或行业泛化；接入第三套库需另评估Catalog配置成本与新问题表现。
+- **RISK-002**: 独立SQL仍可能写错；高风险公式用不同粒度的分步计算和小fixture交叉检查，AI意见不能替代实际对照。
+- **RISK-003**: 不断加规则可能再次损害流畅度；每条新增拒绝都必须有真实失败场景和合法反例，规则由单一执行层负责。
+- **RISK-004**: 60项任务和12项变体只能描述样本；模型波动、更新和数据变化会影响结果，保留实际版本、原始分母和重复运行分布。
+- **RISK-005**: 同会话复用的候选遗漏与数据过期不能靠增大摘要解决；错误复用的代价通常高于多查一次SQL。
+- **ASSUMPTION-001**: 近期目标是可靠的单实例自托管及面试可复述证据；企业SSO、组织行权限和多实例目前没有明确部署需求，因此不在本轮自动实现。
+
+## 8. Related Specifications / Further Reading
+
+- [现有学习计划](process-agent-internship-improvement-v2-2week.md)
+- [项目当前事实](../PROJECT.md)
+- [产品60题与独立数值审查](../evals/results/product_release_dev_v1.md)
+- [JOIN与来源检查范围](../evals/results/join_catalog_checks_20261104.md)
+- [自由回答与疑点复核验收](../evals/results/free-result-answer-20261027.md)
+- [历史单Artifact复用](../docs/architecture/historical-artifact-reuse-v2.md)
+- [历史复用完整对话验收](../evals/results/historical_artifact_reuse_20261105.md)
+- [单实例容量与故障记录](../evals/results/runtime_capacity.md)
+- [部署说明](../docs/deployment.md)

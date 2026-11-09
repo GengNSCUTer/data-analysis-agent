@@ -1,0 +1,436 @@
+suite_id: agent-business-tasks-v1
+usage: online_development_only
+forbidden_uses: [training, checkpoint_selection, protected_final_test]
+categories: [basic, formula, comparison, continuity, history, explanation]
+tasks_per_workspace: 30
+tasks_per_category: 5
+task_defaults:
+  allowed_clarification: []
+  unsupported: []
+  deliverables: 按各step的独立reference核对实际CSV或计算证据，按chart核对实际绘图，最后人工核对正文是否回应goal
+# 每项是一个业务任务；steps属于同一会话。reference仅供独立审计，不进入模型上下文。
+# “完成”还需审阅实际正文是否回应目标；自动检查通过不代替人工语义复核。
+tasks:
+  - id: o-basic-1
+    dataset: olist
+    category: basic
+    goal: 获取商品成交额总量，区分含运费金额
+    steps:
+      - {question: 全部时间商品成交额是多少？不含运费，先给结论。, reference: &ogmv {metric: gmv}}
+  - id: o-basic-2
+    dataset: olist
+    category: basic
+    goal: 区分全部订单与有效订单
+    steps:
+      - {source: 'olist_metrics:o-total'}
+  - id: o-basic-3
+    dataset: olist
+    category: basic
+    goal: 正确使用客户归属州并列出排行
+    steps:
+      - {question: 商品成交额最高的十个客户州有哪些？按金额从高到低排列。, reference: &ostates {metric: gmv, group: customer_state, top_n: 10}, ordered: true}
+  - id: o-basic-4
+    dataset: olist
+    category: basic
+    goal: 返回完整月度序列
+    steps:
+      - {question: 请列出2017年逐月商品成交额，按月份顺序，不画图。, reference: &omonths {metric: gmv, grain: month, start: '2017-01-01', end: '2018-01-01'}, ordered: true}
+  - id: o-basic-5
+    dataset: olist
+    category: basic
+    goal: 无数据年份计数为零且不伪造交易
+    steps:
+      - {source: 'olist_metrics:o-zero-orders'}
+  - id: o-formula-1
+    dataset: olist
+    category: formula
+    goal: 按订单粒度计算客单价
+    steps:
+      - {source: 'olist_metrics:o-aov-existing'}
+  - id: o-formula-2
+    dataset: olist
+    category: formula
+    goal: 支付事实金额不与商品事实相乘
+    steps:
+      - {source: 'olist_metrics:o-payment'}
+  - id: o-formula-3
+    dataset: olist
+    category: formula
+    goal: 运费占比使用金额之和而非行比例的均值
+    steps:
+      - {source: 'olist_metrics:o-freight-share'}
+  - id: o-formula-4
+    dataset: olist
+    category: formula
+    goal: 复购率正确按客户去重且使用有效订单
+    steps:
+      - {source: 'olist_metrics:o-repeat'}
+  - id: o-formula-5
+    dataset: olist
+    category: formula
+    goal: 评价率使用评价事实时间和粒度
+    steps:
+      - {question: 2017年各月好评率是多少？按评价创建日期，不是订单购买日期。, reference: {metric: positive_review_rate, grain: month, start: '2017-01-01', end: '2018-01-01'}}
+  - id: o-comparison-1
+    dataset: olist
+    category: comparison
+    goal: 跨年比较要有两年数据与差额，不能用全期总数
+    steps:
+      - {question: 对比2017年与2018年的有效订单数，按年列出，并说明哪年更多。, reference: {metric: paid_order_count, grain: year, start: '2017-01-01', end: '2019-01-01'}}
+  - id: o-comparison-2
+    dataset: olist
+    category: comparison
+    goal: 半年比较应交付两期总值和增长幅度
+    steps:
+      - {question: 2017年下半年有效订单数比上半年增长多少？列两期总数、差额和增长率。, reference: {metric: paid_order_count, grain: half_year, start: '2017-01-01', end: '2018-01-01'}}
+  - id: o-comparison-3
+    dataset: olist
+    category: comparison
+    goal: 增长判断必须检查完整序列
+    steps:
+      - {question: 2017年每月商品成交额，按时间顺序列出。, reference: *omonths}
+      - {question: 是不是每个月都比前一个月增长？不要只比较年初年末。, reuse: true, analysis: {operation: trend}, evidence_note: 必须指出反例而非宣称持续增长}
+  - id: o-comparison-4
+    dataset: olist
+    category: comparison
+    goal: 每月州排名必须在各月内取前五
+    steps:
+      - {question: 2017年每个月商品成交额最高的五个客户州分别有哪些？各月单独排名。, reference: {metric: gmv, group: customer_state, grain: month, start: '2017-01-01', end: '2018-01-01', partition_top_n: 5}}
+  - id: o-comparison-5
+    dataset: olist
+    category: comparison
+    goal: 月度复购率不能跨月累计
+    steps:
+      - {source: 'olist_metrics:o-repeat-months'}
+  - id: o-continuity-1
+    dataset: olist
+    category: continuity
+    goal: 最高州下钻品类、改排名、换图时保留正确州
+    steps:
+      - {question: 全部时间哪个客户州商品成交额最高？, reference: {metric: gmv, group: customer_state, top_n: 1}, ordered: true}
+      - {question: 这个州哪些商品种类卖得好？先给成交额前十。, reference: &obestcats {metric: gmv, group: product_category_name, state: BEST, top_n: 10}, ordered: true}
+      - {question: 改成前五名，其他条件不变。, reference: {metric: gmv, group: product_category_name, state: BEST, top_n: 5}, ordered: true}
+      - {question: 只换成横向柱状图，不重新查询。, reuse: true, chart: horizontal_bar, preserve_state: true}
+  - id: o-continuity-2
+    dataset: olist
+    category: continuity
+    goal: 支付金额筛选与时间修改保持指标和归属
+    steps:
+      - {source: 'olist_metrics:o-pay-states'}
+      - {source: 'olist_metrics:o-pay-sp'}
+      - {source: 'olist_metrics:o-pay-months'}
+      - {question: 取消SP州筛选，仍然按2017年的月份看有效订单支付金额，不要图。, reference: {metric: payment_amount, grain: month, start: '2017-01-01', end: '2018-01-01'}}
+  - id: o-continuity-3
+    dataset: olist
+    category: continuity
+    goal: 年度切换不丢失州筛选与指标
+    steps:
+      - {question: SP州2017年有效订单数，按月列出。, reference: {metric: paid_order_count, state: SP, grain: month, start: '2017-01-01', end: '2018-01-01'}}
+      - {question: 年份改为2018年，其余条件不变。, reference: {metric: paid_order_count, state: SP, grain: month, start: '2018-01-01', end: '2019-01-01'}}
+      - {question: 去掉按月分组，给这段时间合计。, reference: {metric: paid_order_count, state: SP, start: '2018-01-01', end: '2019-01-01'}}
+      - {question: 取消州筛选，年份仍然保持2018年。, reference: {metric: paid_order_count, start: '2018-01-01', end: '2019-01-01'}}
+  - id: o-continuity-4
+    dataset: olist
+    category: continuity
+    goal: 更换指标不残留旧金额口径
+    steps:
+      - {question: 2017年各客户州商品成交额前五名。, reference: {metric: gmv, group: customer_state, start: '2017-01-01', end: '2018-01-01', top_n: 5}}
+      - {question: 同样范围改成有效订单数排名，仍要前五。, reference: {metric: paid_order_count, group: customer_state, start: '2017-01-01', end: '2018-01-01', top_n: 5}}
+      - {question: 不限前五，把各州都列出。, reference: {metric: paid_order_count, group: customer_state, start: '2017-01-01', end: '2018-01-01'}}
+      - {question: 只改变展示，画柱状图。, reuse: true, chart: bar, preserve_state: true}
+  - id: o-continuity-5
+    dataset: olist
+    category: continuity
+    goal: 用户更正指标后保持新口径并可移除时间
+    steps:
+      - {question: 2017年SP州商品成交额是多少？, reference: {metric: gmv, state: SP, start: '2017-01-01', end: '2018-01-01'}}
+      - {question: 我刚才说错了，要支付金额，不是商品成交额。州和年份不变。, reference: {metric: payment_amount, state: SP, start: '2017-01-01', end: '2018-01-01'}}
+      - {question: 取消年份限制，仍然只看SP。, reference: {metric: payment_amount, state: SP}}
+      - {question: 不用重查，说清楚为什么它不能直接当GMV。, reuse: true, preserve_state: true}
+  - id: o-history-1
+    dataset: olist
+    category: history
+    goal: 回看销售额不能覆盖当前订单分析
+    steps:
+      - {question: 全部时间各客户州商品成交额前十。, reference: *ostates}
+      - {question: 新分析，2018年有效订单数。, reference: {metric: paid_order_count, start: '2018-01-01', end: '2019-01-01'}}
+      - {question: 回看之前销售额排行榜，第一名减第二名差多少？当前订单分析不变。, reference: *ostates, analysis: {operation: compare, metric: gmv, rows: [1, 2]}, reuse: true, preserve_state: true}
+  - id: o-history-2
+    dataset: olist
+    category: history
+    goal: 全年月度来源覆盖季度，但回看不改季度任务
+    steps:
+      - {question: 列2017年逐月商品成交额，月份排序。, reference: *omonths}
+      - {question: 改成只看第四季度，仍然按月。, reference: &oq4 {metric: gmv, grain: month, start: '2017-10-01', end: '2018-01-01'}, reuse: true}
+      - {question: 回看刚才全年十二个月，全年合计多少？保持当前第四季度分析。, reference: *omonths, analysis: {operation: sum, metric: gmv}, reuse: true, preserve_state: true, reload: true}
+  - id: o-history-3
+    dataset: olist
+    category: history
+    goal: Top-N不能冒充所有州总体
+    steps:
+      - {question: 全部时间商品成交额最高的十个州。, reference: *ostates}
+      - {question: 所有客户州的商品成交额总共是多少？不是只算前十。, reference: *ogmv, require_sql: true}
+      - {question: 保持这次的总体数据，解释和前十合计有什么区别。, reuse: true, preserve_state: true}
+  - id: o-history-4
+    dataset: olist
+    category: history
+    goal: 明确要求刷新不能使用旧结果代替查询
+    steps:
+      - {question: 2017年逐月商品成交额。, reference: *omonths}
+      - {question: 请重新查询最新快照中2017年逐月商品成交额，不使用旧结果。, reference: *omonths, require_sql: true}
+      - {question: 将这份结果画成折线图，不要再查。, reuse: true, chart: line, preserve_state: true}
+  - id: o-history-5
+    dataset: olist
+    category: history
+    goal: 不把月均客单价直接相加或简单平均为全年客单价
+    steps:
+      - {question: 2017年每个月的有效订单客单价，按月列出。, reference: {metric: average_order_value, grain: month, start: '2017-01-01', end: '2018-01-01'}}
+      - {question: 那2017年全年的客单价呢？不能把月均值直接平均。, reference: {metric: average_order_value, start: '2017-01-01', end: '2018-01-01'}, require_sql: true}
+      - {question: 不重查，说明为什么月均值不能直接平均。, reuse: true, preserve_state: true}
+  - id: o-explanation-1
+    dataset: olist
+    category: explanation
+    goal: 单位和经营建议有边界
+    steps:
+      - {question: 全部时间各客户州商品成交额前十，画柱状图。, reference: *ostates, chart: bar}
+      - {question: 概括主要差异，给两点经营建议，没数据支持的原因请标为假设，不要重查。, reuse: true, preserve_state: true}
+  - id: o-explanation-2
+    dataset: olist
+    category: explanation
+    goal: 时间趋势解释不能由少数点推断逐月增长
+    steps:
+      - {question: 2017年每月商品成交额，画折线图。, reference: *omonths, chart: line}
+      - {question: 哪个月最高？能不能称为持续逐月增长？依据是什么？不要重查。, reuse: true, preserve_state: true}
+  - id: o-explanation-3
+    dataset: olist
+    category: explanation
+    goal: 支付额不能被解释成净收入
+    steps:
+      - {source: 'olist_metrics:o-payment-types'}
+      - {question: 解释支付方式构成；这个金额能直接说是扣除退款后的净收入吗？不要重查。, reuse: true, preserve_state: true}
+  - id: o-explanation-4
+    dataset: olist
+    category: explanation
+    goal: 完整品类含未分类且下载一致
+    steps:
+      - {question: 全部商品品类的商品成交额都列出来，未分类也保留，不要只列前十，不画图。, reference: {metric: gmv, group: product_category_name}}
+      - {question: 不重查，说明未分类和总量的关系，给我下载这份完整结果。, reuse: true, preserve_state: true, download: true}
+  - id: o-explanation-5
+    dataset: olist
+    category: explanation
+    goal: 不支持的原因归因不应伪造因果
+    steps:
+      - {question: 2017年每月商品成交额，按月排序。, reference: *omonths}
+      - {question: 11月比其他月高一定是广告投放导致的吗？根据已有数据说明能证实什么，不能证实什么，不要查库。, reuse: true, preserve_state: true}
+
+  - id: t-basic-1
+    dataset: thelook
+    category: basic
+    goal: 完成成交额不编造来源币种
+    steps:
+      - {source: 'thelook_queries:metric-01'}
+  - id: t-basic-2
+    dataset: thelook
+    category: basic
+    goal: 全部订单不默认只统计Complete
+    steps:
+      - {source: 'thelook_metrics:t-total'}
+  - id: t-basic-3
+    dataset: thelook
+    category: basic
+    goal: 品牌销量金额正确关联产品维度
+    steps:
+      - {source: 'thelook_queries:grouped-02'}
+  - id: t-basic-4
+    dataset: thelook
+    category: basic
+    goal: 事件不丢弃匿名用户
+    steps:
+      - {source: 'thelook_queries:grouped-06'}
+  - id: t-basic-5
+    dataset: thelook
+    category: basic
+    goal: 无历史交易年份返回真实零计数
+    steps:
+      - {source: 'thelook_metrics:t-zero-orders'}
+  - id: t-formula-1
+    dataset: thelook
+    category: formula
+    goal: 完成订单客单价先按订单归并
+    steps:
+      - {source: 'thelook_metrics:t-aov-existing'}
+  - id: t-formula-2
+    dataset: thelook
+    category: formula
+    goal: 取消率分母包括全部状态订单
+    steps:
+      - {source: 'thelook_metrics:t-cancel'}
+  - id: t-formula-3
+    dataset: thelook
+    category: formula
+    goal: 复购按客户而非商品行判定
+    steps:
+      - {source: 'thelook_metrics:t-repeat'}
+  - id: t-formula-4
+    dataset: thelook
+    category: formula
+    goal: 时间间隔保留不足一天且排除负时长
+    steps:
+      - {source: 'thelook_queries:metric-08'}
+  - id: t-formula-5
+    dataset: thelook
+    category: formula
+    goal: 库存成本仅来自当前未售单元
+    steps:
+      - {source: 'thelook_metrics:t-cost'}
+  - id: t-comparison-1
+    dataset: thelook
+    category: comparison
+    goal: 对比两年完成订单而非注册数
+    steps:
+      - {question: 2022年与2023年的已完成订单数，按年比较，说明哪年更多。, reference: {metric: completed_order_count, grain: year, start: '2022-01-01', end: '2024-01-01'}}
+  - id: t-comparison-2
+    dataset: thelook
+    category: comparison
+    goal: 上下半年对比有两个窗口与计算
+    steps:
+      - {question: 2023年下半年已完成成交额比上半年增长多少？给两期总值、差额和增长率。, reference: {metric: completed_sale_amount, grain: half_year, start: '2023-01-01', end: '2024-01-01'}}
+  - id: t-comparison-3
+    dataset: thelook
+    category: comparison
+    goal: 库存周转时长按真实时间计算
+    steps:
+      - {source: 'thelook_queries:metric-17'}
+  - id: t-comparison-4
+    dataset: thelook
+    category: comparison
+    goal: 各月独立客户州Top5
+    steps:
+      - {question: 2023年每个月已完成成交额最高的五个客户州有哪些？每个月分别取前五。, reference: {metric: completed_sale_amount, group: customer_state, grain: month, start: '2023-01-01', end: '2024-01-01', partition_top_n: 5}}
+  - id: t-comparison-5
+    dataset: thelook
+    category: comparison
+    goal: 完成订单复购率按月独立计算
+    steps:
+      - {source: 'thelook_metrics:t-repeat-months'}
+  - id: t-continuity-1
+    dataset: thelook
+    category: continuity
+    goal: 州→商品品类→改排名→换图保持实体指代
+    steps:
+      - {question: 全部时间哪个客户州已完成成交额最高？, reference: {metric: completed_sale_amount, group: customer_state, top_n: 1}}
+      - {question: 这个州哪些商品品类卖得好，成交额前十有哪些？, reference: {metric: completed_sale_amount, group: product_category, state: BEST, top_n: 10}}
+      - {question: 改为前五，别改其他条件。, reference: {metric: completed_sale_amount, group: product_category, state: BEST, top_n: 5}}
+      - {question: 这前五名画成横向条形图，不重新查。, reuse: true, chart: horizontal_bar, preserve_state: true}
+  - id: t-continuity-2
+    dataset: thelook
+    category: continuity
+    goal: 库存部门筛选和品类下钻保持快照含义
+    steps:
+      - {source: 'thelook_metrics:t-inventory-dept'}
+      - {source: 'thelook_metrics:t-inventory-filter'}
+      - {source: 'thelook_metrics:t-inventory-category'}
+      - {source: 'thelook_metrics:t-inventory-chart'}
+  - id: t-continuity-3
+    dataset: thelook
+    category: continuity
+    goal: 入库指标时间与取消筛选不串线
+    steps:
+      - {source: 'thelook_queries:continuous-06'}
+      - {source: 'thelook_queries:continuous-07'}
+      - {source: 'thelook_queries:continuous-08'}
+      - {source: 'thelook_queries:continuous-09'}
+      - {source: 'thelook_queries:continuous-10'}
+  - id: t-continuity-4
+    dataset: thelook
+    category: continuity
+    goal: 订单量年份改变不丢失客户州
+    steps:
+      - {question: 2022年加利福尼亚州（California）的已完成订单数，按月列出。, reference: {metric: completed_order_count, state: California, grain: month, start: '2022-01-01', end: '2023-01-01'}}
+      - {question: 改为2023年，其他条件不变。, reference: {metric: completed_order_count, state: California, grain: month, start: '2023-01-01', end: '2024-01-01'}}
+      - {question: 取消月份分组，给2023年合计。, reference: {metric: completed_order_count, state: California, start: '2023-01-01', end: '2024-01-01'}}
+      - {question: 去掉CA筛选，仍是2023年完成订单合计。, reference: {metric: completed_order_count, start: '2023-01-01', end: '2024-01-01'}}
+  - id: t-continuity-5
+    dataset: thelook
+    category: continuity
+    goal: 销售金额更正为商品行数后不残留金额解释
+    steps:
+      - {question: 2023年按商品部门汇总已完成成交额。, reference: {metric: completed_sale_amount, group: product_department, start: '2023-01-01', end: '2024-01-01'}}
+      - {question: 我想看的是已完成商品行数量，不是金额。年份与部门分组不变。, reference: {metric: completed_item_count, group: product_department, start: '2023-01-01', end: '2024-01-01'}}
+      - {question: 去掉年份限制，仍然按部门统计。, reference: {metric: completed_item_count, group: product_department}}
+      - {question: 换成柱状图就行，不要查询。, reuse: true, chart: bar, preserve_state: true}
+  - id: t-history-1
+    dataset: thelook
+    category: history
+    goal: 销售旧结果与订单当前任务互不覆盖
+    steps:
+      - {question: 全部时间客户州已完成成交额前十。, reference: &tstates {metric: completed_sale_amount, group: customer_state, top_n: 10}}
+      - {question: 新分析，统计2022年已完成订单总数。, reference: {metric: completed_order_count, start: '2022-01-01', end: '2023-01-01'}}
+      - {question: 回看之前成交额排行，第一名比第二名多多少？保持当前订单分析。, reference: *tstates, analysis: {operation: compare, metric: completed_sale_amount, rows: [1, 2]}, reuse: true, preserve_state: true}
+  - id: t-history-2
+    dataset: thelook
+    category: history
+    goal: 全年到季度本地复用、刷新后回看保持当前状态
+    steps:
+      - {question: 2023年逐月已完成成交额，按时间顺序列出。, reference: &tmonths {metric: completed_sale_amount, grain: month, start: '2023-01-01', end: '2024-01-01'}}
+      - {question: 改成只看2023年第四季度，仍按月。, reference: {metric: completed_sale_amount, grain: month, start: '2023-10-01', end: '2024-01-01'}, reuse: true}
+      - {question: 回看全年十二个月，全年成交额合计多少？不要改变当前第四季度分析。, reference: *tmonths, analysis: {operation: sum, metric: completed_sale_amount}, reuse: true, preserve_state: true, reload: true}
+  - id: t-history-3
+    dataset: thelook
+    category: history
+    goal: 所有州总额不能从前十州外推
+    steps:
+      - {question: 客户州已完成成交额前十名。, reference: *tstates}
+      - {question: 我要所有州的已完成成交额总量，不是前十合计。, reference: {metric: completed_sale_amount}, require_sql: true}
+      - {question: 不重新查，说清楚为何不能把前十合计叫作总体。, reuse: true, preserve_state: true}
+  - id: t-history-4
+    dataset: thelook
+    category: history
+    goal: 用户主动刷新时不返回缓存冒充新查询
+    steps:
+      - {question: 列出2023年各月已完成成交额。, reference: *tmonths}
+      - {question: 重新查最新快照，还是2023年各月已完成成交额，别用缓存。, reference: *tmonths, require_sql: true}
+      - {question: 用这份结果画折线图，不重查。, reuse: true, chart: line, preserve_state: true}
+  - id: t-history-5
+    dataset: thelook
+    category: history
+    goal: 不将月平均完成订单金额直接相加或平均
+    steps:
+      - {source: 'thelook_queries:time-08'}
+      - {question: 2023年全年平均完成订单金额是多少？不要直接平均月均值。, reference: {metric: average_order_value, start: '2023-01-01', end: '2024-01-01'}, require_sql: true}
+      - {question: 不重查，解释为什么刚才月均值不能直接平均。, reuse: true, preserve_state: true}
+  - id: t-explanation-1
+    dataset: thelook
+    category: explanation
+    goal: 未知币种下仍能给有据的比较和建议
+    steps:
+      - {question: 客户州已完成成交额前十名，画柱状图。, reference: *tstates, chart: bar}
+      - {question: 概括州之间的差异，给两点建议；不要假定币种或把原因猜测当事实，不重查。, reuse: true, preserve_state: true}
+  - id: t-explanation-2
+    dataset: thelook
+    category: explanation
+    goal: 原因追问能区分数据观察与待验证假设
+    steps:
+      - {question: 2023年每月已完成成交额，画折线图。, reference: *tmonths, chart: line}
+      - {question: 12月增长是因为广告有效吗？依据现有数据分析，无法证实的地方请说清楚，不重查。, reuse: true, preserve_state: true}
+  - id: t-explanation-3
+    dataset: thelook
+    category: explanation
+    goal: 库存成本不能说成利润，建议有事实边界
+    steps:
+      - {source: 'thelook_metrics:t-inventory-dept'}
+      - {question: 不重查，说明这些成本能否视作利润，并给库存管理建议。, reuse: true, preserve_state: true}
+  - id: t-explanation-4
+    dataset: thelook
+    category: explanation
+    goal: 两百行预览不影响完整下载和总体解释
+    steps:
+      - {source: 'thelook_metrics:t-cancel-and-total'}
+      - {question: 不重查，给这份完整结果下载，并说明表格预览是否代表全部记录。, reuse: true, preserve_state: true, download: true}
+  - id: t-explanation-5
+    dataset: thelook
+    category: explanation
+    goal: 事件会话统计不能凭空推断转化率
+    steps:
+      - {source: 'thelook_queries:grouped-07'}
+      - {question: 这些浏览器会话数能直接说明购买转化率吗？不重新查，给有边界的解释。, reuse: true, preserve_state: true}
