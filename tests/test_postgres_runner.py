@@ -354,6 +354,71 @@ async def test_one_order_two_items_two_payments_keeps_300_instead_of_600(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_order_mean_counterexample_with_unequal_items_and_empty_window(tmp_path, request):
+    admin_dsn = os.getenv('RESULT_EVIDENCE_TEST_ADMIN_DSN')
+    if not admin_dsn or os.getenv('DATA_ANALYSIS_DATASET_VERSION') != 'synthetic-olist-v1':
+        pytest.skip('requires the disposable synthetic database administrator')
+    from psycopg2 import sql as pg_sql
+    from psycopg2.extras import RealDictCursor
+    settings = PostgresConnectionSettings.from_environment()
+    orders = [uuid.uuid4().hex, uuid.uuid4().hex]
+
+    def clean():
+        with psycopg2.connect(admin_dsn) as connection:
+            with connection.cursor() as cursor:
+                for table in ('fact_order_items', 'fact_orders'):
+                    cursor.execute(pg_sql.SQL('DELETE FROM analytics.{} WHERE order_id=ANY(%s)').format(
+                        pg_sql.Identifier(table)), (orders,))
+
+    request.addfinalizer(clean)
+    with psycopg2.connect(admin_dsn) as connection:
+        assert connection.info.port == settings.port and connection.info.port != 35434
+        assert connection.info.dbname == settings.database
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            def insert(table, changes):
+                cursor.execute(pg_sql.SQL('SELECT * FROM analytics.{} LIMIT 1').format(pg_sql.Identifier(table)))
+                row = {**dict(cursor.fetchone()), **changes}
+                cursor.execute(pg_sql.SQL('INSERT INTO analytics.{} ({}) VALUES ({})').format(
+                    pg_sql.Identifier(table), pg_sql.SQL(',').join(map(pg_sql.Identifier, row)),
+                    pg_sql.SQL(',').join(pg_sql.Placeholder() for _ in row)), list(row.values()))
+            for order in orders:
+                insert('fact_orders', {'order_id': order, 'order_status': 'delivered'})
+            for order, number, price in [(orders[0], 1, 100), (orders[0], 2, 200),
+                                         (orders[1], 1, 900)]:
+                insert('fact_order_items', {'order_id': order, 'order_item_id': number, 'price': price})
+    condition = f"i.order_id IN ('{orders[0]}','{orders[1]}')"
+    source = f'FROM analytics.fact_order_items i WHERE {condition}'
+    good = (f'WITH amounts AS (SELECT i.order_id,SUM(i.price) amount {source} GROUP BY i.order_id) '
+            'SELECT AVG(amount) AS average_order_value FROM amounts')
+    bad = f'SELECT SUM(i.price)/NULLIF(COUNT(*),0) AS average_order_value {source}'
+    with psycopg2.connect(host=settings.host, port=settings.port, database=settings.database, user=settings.reader_user) as reader:
+        reader.set_session(readonly=True)
+        with reader.cursor() as cursor:
+            cursor.execute(good)
+            assert cursor.fetchone()[0] == 600
+            cursor.execute(bad)
+            assert cursor.fetchone()[0] == 400
+            cursor.execute(f'SELECT SUM(i.price)/NULLIF(COUNT(i.price),0) {source}')
+            assert cursor.fetchone()[0] == 400
+            cursor.execute(f'SELECT SUM(i.price)/NULLIF(COUNT(DISTINCT i.order_id),0) {source}')
+            assert cursor.fetchone()[0] == 600
+            cursor.execute(f'SELECT AVG(NULLIF(i.price,900)) {source}')
+            assert cursor.fetchone()[0] == 150
+            cursor.execute('SELECT SUM(price)/NULLIF(COUNT(*),0) FROM analytics.fact_order_items WHERE FALSE')
+            assert cursor.fetchone()[0] is None
+    tool = TrustedRunSqlTool(SecurePostgresRunner(), file_system=LocalFileSystem(str(tmp_path)))
+    def context():
+        ctx = make_context('mean-' + uuid.uuid4().hex)
+        ctx.metadata.update({'query_plan': {'metric_ids': ['average_order_value'],
+            'metric_plans': [{'metric_id': 'average_order_value', 'grain': 'order'}]},
+            'required_result_columns': ['average_order_value'], 'metric_result_columns': ['average_order_value'],
+            'join_source_grains': {'fact_order_items': 'order_item'}})
+        return ctx
+    assert (await tool.execute(context(), RunSqlToolArgs(sql=good))).success
+    assert not (await tool.execute(context(), RunSqlToolArgs(sql=bad))).success
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('duplicate', [False, True])
 async def test_valid_payment_share_allocation_and_duplicated_weights(duplicate):
     context = make_context('allocation-' + uuid.uuid4().hex)

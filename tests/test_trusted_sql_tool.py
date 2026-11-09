@@ -135,6 +135,25 @@ async def test_amount_source_rule_is_rechecked_on_the_one_repair(tmp_path, repai
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('repair_is_correct', [True, False])
+async def test_raw_count_mean_is_rechecked_before_original_and_repaired_execution(tmp_path, repair_is_correct):
+    context = _context()
+    context.metadata.update({'query_plan': {'metric_ids': ['average_order_value'],
+        'metric_plans': [{'metric_id': 'average_order_value', 'grain': 'order'}]},
+        'join_source_grains': {'fact_order_items': 'order_item'},
+        'required_result_columns': ['average_order_value'], 'metric_result_columns': ['average_order_value']})
+    bad = 'SELECT SUM(price)/NULLIF(COUNT(*),0) AS average_order_value FROM analytics.fact_order_items'
+    good = ('WITH totals AS (SELECT order_id,SUM(price) AS amount FROM analytics.fact_order_items GROUP BY order_id) '
+            'SELECT AVG(amount) AS average_order_value FROM totals')
+    provider = FakeRepairProvider(good if repair_is_correct else bad)
+    runner = SequenceRunner([pd.DataFrame({'average_order_value': [600]})])
+    result = await _tool(runner, provider, tmp_path).execute(context, RunSqlToolArgs(sql=bad))
+    assert result.success is repair_is_correct
+    assert runner.calls == ([good] if repair_is_correct else [])
+    assert len(provider.prompts) == 1
+
+
+@pytest.mark.asyncio
 async def test_plan_rejection_records_original_candidate_without_executing(tmp_path):
     from unittest.mock import Mock
     context = _context()

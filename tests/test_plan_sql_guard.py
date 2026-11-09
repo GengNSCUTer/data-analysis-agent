@@ -145,6 +145,44 @@ def test_order_mean_cannot_average_raw_item_amounts_but_preaggregation_remains_l
     assert sql_plan_mismatch(right,plan,table_grains=grains) is None
 
 
+@pytest.mark.parametrize('denominator', ['COUNT(*)', 'COUNT(i.price)', 'COUNT(o.order_id)'])
+def test_order_mean_cannot_divide_item_totals_by_raw_joined_row_count(denominator):
+    plan = {'metric_ids': ['average_order_value'], 'metric_plans': [
+        {'metric_id': 'average_order_value', 'grain': 'order'}]}
+    statement = (f'SELECT SUM(i.price)/NULLIF({denominator},0) AS average_order_value '
+                 'FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id')
+    assert sql_plan_mismatch(statement, plan, table_grains={
+        'fact_orders': 'order', 'fact_order_items': 'order_item'})
+
+
+@pytest.mark.parametrize('statement', [
+    'SELECT SUM(i.price)/NULLIF(COUNT(DISTINCT i.order_id),0) AS average_order_value FROM analytics.fact_order_items i',
+    'WITH totals AS (SELECT order_id,SUM(price) AS amount FROM analytics.fact_order_items GROUP BY order_id) '
+    'SELECT SUM(amount)/NULLIF(COUNT(*),0) AS average_order_value FROM totals',
+    'SELECT SUM(price)/NULLIF(COUNT(*),0) AS average_item_price FROM analytics.fact_order_items',
+])
+def test_distinct_orders_and_preaggregated_counts_are_not_raw_item_denominators(statement):
+    metric = 'average_item_price' if 'AS average_item_price' in statement else 'average_order_value'
+    plan = {'metric_ids': [metric], 'metric_plans': [
+        {'metric_id': metric, 'grain': 'order_item' if metric == 'average_item_price' else 'order'}]}
+    assert sql_plan_mismatch(statement, plan, table_grains={
+        'fact_orders': 'order', 'fact_order_items': 'order_item'}) is None
+
+
+@pytest.mark.parametrize('value,accepted', [
+    ('SUM(CASE WHEN i.price>0 THEN i.price*2 ELSE 0 END)', False),
+    ('SUM(CASE WHEN i.price>0 THEN i.price/2 ELSE NULL END)', False),
+    ('SUM(CASE WHEN i.price>0 THEN i.price ELSE 0 END)', True),
+    ('SUM(CASE WHEN i.price>0 THEN i.price*2 ELSE 0 END)/2', True),
+    ('SUM(CASE WHEN i.price>0 THEN i.price ELSE NULL END)', True),
+])
+def test_conditional_amount_preserves_scalar_checks_and_equivalent_rescaling(value, accepted):
+    rule = {'gmv': {'aggregation': 'sum', 'required': ['fact_order_items.price'],
+                    'allowed': ['fact_order_items.price']}}
+    statement = f'SELECT {value} AS gmv FROM analytics.fact_order_items i'
+    assert (sql_plan_mismatch(statement, {'metric_ids': ['gmv']}, metric_value_sources=rule) is None) is accepted
+
+
 @pytest.mark.parametrize('projection', ["'2017年上半年'", "'not-a-date'", 'NULL'])
 def test_time_series_cannot_replace_real_month_buckets_with_literal_labels(projection):
     plan = {'metric_ids': ['paid_order_count'], 'time_grain': 'month',

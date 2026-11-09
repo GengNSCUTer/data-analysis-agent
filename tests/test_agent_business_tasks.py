@@ -24,6 +24,16 @@ def test_suite_has_balanced_independent_tasks_and_complete_conversations():
     assert len({task["goal"] for task in tasks}) == 60
 
 
+def test_authored_final_variants_have_twelve_balanced_tasks_and_new_questions():
+    original = runner.load_tasks(ROOT / 'evals/cases/agent_business_tasks_v1.yaml')
+    variants = runner.load_tasks(ROOT / 'evals/cases/agent_business_variants_v1.yaml')
+    assert len(variants) == 12
+    previous = {step['question'] for task in original for step in task['steps']}
+    questions = [step['question'] for task in variants for step in task['steps']]
+    assert len(questions) == len(set(questions)) and not previous.intersection(questions)
+    assert {task['category'] for task in variants} == set(runner.CATEGORIES)
+
+
 def test_fresh_twelve_task_suite_uses_declared_balanced_quota(tmp_path):
     import yaml
     suite = yaml.safe_load((ROOT / 'evals/cases/agent_business_tasks_v1.yaml').read_text())

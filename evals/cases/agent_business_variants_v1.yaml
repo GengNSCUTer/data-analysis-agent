@@ -1,0 +1,134 @@
+suite_id: agent-business-variants-v1
+usage: online_development_only
+forbidden_uses: [training, checkpoint_selection, protected_final_test]
+categories: [basic, formula, comparison, continuity, history, explanation]
+tasks_per_workspace: 6
+tasks_per_category: 1
+# 在最终实现验收前人工编写，预期来自问题及Catalog；不进入模型上下文，不用于定向调参。
+tasks:
+  - id: o-variant-basic
+    dataset: olist
+    category: basic
+    goal: 在指定季度独立核对运费排行而非商品金额排行
+    steps:
+      - question: 看一下2018年第一季度，运费总额排前三的客户州；从高到低列出来，不用图。
+        reference: {metric: freight_amount, group: customer_state, start: '2018-01-01', end: '2018-04-01', top_n: 3}
+        ordered: true
+  - id: o-variant-formula
+    dataset: olist
+    category: formula
+    goal: 州与季度筛选下按订单而非商品行计算平均商品金额
+    steps:
+      - question: SP州在2018年第一季度，一笔有效订单平均贡献多少商品金额？不含运费，也别用支付金额替代。
+        reference: {metric: average_order_value, state: SP, start: '2018-01-01', end: '2018-04-01'}
+  - id: o-variant-comparison
+    dataset: olist
+    category: comparison
+    goal: 对全年各季度运费作完整比较并指出最高季度
+    steps:
+      - question: 把2017年四个季度各自的运费总额列一下，哪个季度最高？按季度顺序，不画图。
+        reference: {metric: freight_amount, grain: quarter, start: '2017-01-01', end: '2018-01-01'}
+        ordered: true
+  - id: o-variant-continuity
+    dataset: olist
+    category: continuity
+    goal: 运费分析中依次增加州筛选与月份，取消州时保留年份和新指标
+    steps:
+      - question: 2018年各客户州承担的运费总额分别是多少？
+        reference: {metric: freight_amount, group: customer_state, start: '2018-01-01', end: '2019-01-01'}
+      - question: 只看SP州，不按州分组，先给这年的合计。
+        reference: {metric: freight_amount, state: SP, start: '2018-01-01', end: '2019-01-01'}
+      - question: 合计拆成每个月，州和年份都保持。
+        reference: {metric: freight_amount, state: SP, grain: month, start: '2018-01-01', end: '2019-01-01'}
+      - question: 取消州限制，其余不变，还是运费。
+        reference: {metric: freight_amount, grain: month, start: '2018-01-01', end: '2019-01-01'}
+  - id: o-variant-history
+    dataset: olist
+    category: history
+    goal: 在运费全年来源中筛选第一季度，再回看全年合计而不修改当前季度
+    steps:
+      - question: 请列2018年每个月的运费总额，按月份排列。
+        reference: &ofreight {metric: freight_amount, grain: month, start: '2018-01-01', end: '2019-01-01'}
+      - question: 从刚才结果里只看第一季度，仍然每月一行，不重查。
+        reference: {metric: freight_amount, grain: month, start: '2018-01-01', end: '2018-04-01'}
+        reuse: true
+      - question: 回看此前全年那份运费，全年合计多少？当前第一季度分析不要改。
+        reference: *ofreight
+        reuse: true
+        preserve_state: true
+        reload: true
+        analysis: {operation: sum, metric: freight_amount}
+  - id: o-variant-explanation
+    dataset: olist
+    category: explanation
+    goal: 评价事实时间与客户忠诚度推断分开，未观测的原因不作为事实
+    steps:
+      - question: 按评价创建月份列出2018年各月好评率，不是按购买月份。
+        reference: {metric: positive_review_rate, grain: month, start: '2018-01-01', end: '2019-01-01'}
+      - question: 只据这份结果，能证明客户忠诚度变高了吗？说清能看到什么、还缺什么证据，不用重查。
+        reuse: true
+        preserve_state: true
+  - id: t-variant-basic
+    dataset: thelook
+    category: basic
+    goal: 品牌按完成商品件数排行，不把件数理解成金额或订单数
+    steps:
+      - question: 2023年第四季度，已完成商品件数最多的三个品牌是谁？从高到低列，不用画图。
+        reference: {metric: completed_item_count, group: product_brand, start: '2023-10-01', end: '2024-01-01', top_n: 3}
+        ordered: true
+  - id: t-variant-formula
+    dataset: thelook
+    category: formula
+    goal: California州指定季度完成订单客单价保持订单粒度
+    steps:
+      - question: California州2023年第二季度，一笔完成订单的平均成交金额是多少？要按订单算，不按商品行平均。
+        reference: {metric: average_order_value, state: California, start: '2023-04-01', end: '2023-07-01'}
+  - id: t-variant-comparison
+    dataset: thelook
+    category: comparison
+    goal: 按季度完整对照已完成订单，并基于实际数据判断峰值
+    steps:
+      - question: 把2022年四个季度完成订单数按时间列出来，哪个季度最多？不需要图。
+        reference: {metric: completed_order_count, grain: quarter, start: '2022-01-01', end: '2023-01-01'}
+        ordered: true
+  - id: t-variant-continuity
+    dataset: thelook
+    category: continuity
+    goal: 完成成交额从部门切到品牌再改排名换图，不残留旧分组
+    steps:
+      - question: 2023年各商品部门的已完成成交额分别是多少？
+        reference: {metric: completed_sale_amount, group: product_department, start: '2023-01-01', end: '2024-01-01'}
+      - question: 年份和指标不变，改成按品牌看，先列前五。
+        reference: {metric: completed_sale_amount, group: product_brand, start: '2023-01-01', end: '2024-01-01', top_n: 5}
+      - question: 缩到前三名，其他不动。
+        reference: {metric: completed_sale_amount, group: product_brand, start: '2023-01-01', end: '2024-01-01', top_n: 3}
+      - question: 这三项换成横向柱状图即可，不要再查询。
+        reuse: true
+        preserve_state: true
+        chart: horizontal_bar
+  - id: t-variant-history
+    dataset: thelook
+    category: history
+    goal: 全年完成订单月表本地筛选下半年，回看全年合计不覆盖当前任务
+    steps:
+      - question: 列出2022年每个月的已完成订单数，月份顺序。
+        reference: &torders {metric: completed_order_count, grain: month, start: '2022-01-01', end: '2023-01-01'}
+      - question: 只保留下半年，沿用刚才数据，不重查。
+        reference: {metric: completed_order_count, grain: month, start: '2022-07-01', end: '2023-01-01'}
+        reuse: true
+      - question: 回看之前全年月表，全年已完成订单一共多少？保持现在的下半年分析。
+        reference: *torders
+        reuse: true
+        preserve_state: true
+        reload: true
+        analysis: {operation: sum, metric: completed_order_count}
+  - id: t-variant-explanation
+    dataset: thelook
+    category: explanation
+    goal: 真实完成件数序列不能单独证明促销效果或因果
+    steps:
+      - question: 2022年每月完成商品件数分别是多少？按月份给出。
+        reference: {metric: completed_item_count, grain: month, start: '2022-01-01', end: '2023-01-01'}
+      - question: 能不能据此断定双十一促销提高了销量？如果证据不够，说明还要看哪些资料，不查新数据。
+        reuse: true
+        preserve_state: true

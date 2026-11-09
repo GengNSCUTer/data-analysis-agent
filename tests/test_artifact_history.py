@@ -42,7 +42,7 @@ async def history_setup(tmp_path):
         "metric_version":workspace.metric_version, "working_memory":AnalysisState.new(workspace).as_dict()})
     await store.update_conversation(conversation)
 
-    async def add(conversation, *, metric="gmv", rows=None):
+    async def add(conversation, *, metric="gmv", rows=None, expires_at=None):
         run = await recorder.start(request_id=uuid4().hex, conversation_id=conversation.id, user=user,
             question="受控历史索引测试", budget=RequestBudget(), dataset_version_id=workspace.dataset_version_id,
             metric_version=workspace.metric_version)
@@ -50,7 +50,7 @@ async def history_setup(tmp_path):
         rows = rows or [{"customer_state":"SP",metric:300}, {"customer_state":"RJ",metric:200}]
         manifest = files.save_result_csv(artifact_id=aid, user_id=user.id, workspace_id=workspace.workspace_id,
             columns=["customer_state",metric], rows=rows, row_count=len(rows),
-            dataset_version=workspace.dataset_version_id, metric_version=workspace.metric_version,
+            dataset_version=workspace.dataset_version_id, metric_version=workspace.metric_version, expires_at=expires_at,
             result_metadata={"validation_status":"valid", "result_complete":True,
                 "population_coverage":"complete", "row_count":len(rows), "source_tables":["fact_orders"],
                 "history_index_required":True, "ordering":[{"column":metric,"direction":"desc"}]})
@@ -108,6 +108,21 @@ async def test_edit_revokes_only_removed_turn_and_delete_revokes_all(history_set
     assert [i.artifact.artifact_id for i in remaining] == [first.artifact_id]
     await store.delete_conversation(conversation.id,user)
     assert await history.candidates(conversation.id,user) == []
+
+
+async def test_expired_history_stays_unavailable_after_store_recreation_and_cleanup(history_setup, monkeypatch):
+    ws, catalog, store, files, history, user, conversation, add = history_setup
+    now = time.time()
+    with monkeypatch.context() as clock:
+        clock.setattr('data_analysis_agent.result_artifact_store.time.time', lambda: now-7200)
+        source = await add(conversation, expires_at=now-3600)
+    recreated = ArtifactHistory(store.settings, ws, catalog)
+    assert await recreated.candidates(conversation.id, user, include_previous_context=True) == []
+    planner = ArtifactReusePlanner(recreated, ResultArtifactStore(files.root, retention_seconds=3600), catalog)
+    with pytest.raises(FileNotFoundError):
+        await planner.verified(conversation.id, user, source.artifact_id, include_previous_context=True)
+    assert files.cleanup_expired(registered_scopes=await history.registered_scopes(files))['artifacts'] == 1
+    assert await recreated.candidates(conversation.id, user) == []
 
 
 async def test_failed_index_commit_rolls_back_state_and_orphan_is_not_visible(history_setup, monkeypatch):

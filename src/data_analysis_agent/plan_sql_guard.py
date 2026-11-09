@@ -135,7 +135,7 @@ def sql_plan_mismatch(
 
 
 def _metric_plan_field_mismatch(sql, plan, schema, table_grains):
-    """Catch omitted status fields, wrong simple bucket lineage and raw-grain AVG.
+    """Catch omitted status fields, wrong bucket lineage and raw-row means.
 
     Predicate *presence* is necessary, not a proof that every CASE, denominator
     or Boolean formula implements the Catalog. Opaque lineage remains outside
@@ -185,6 +185,22 @@ def _metric_plan_field_mismatch(sql, plan, schema, table_grains):
             except (SqlglotError,OptimizeError,RecursionError):
                 continue
             for item in output.walk():
+                # SUM(item amount)/COUNT(raw rows) is an item mean even when
+                # COUNT names the order FK. DISTINCT order counts and counts
+                # over already aggregated CTE rows are different, legal cases.
+                for division in item.expression.find_all(exp.Div):
+                    counts = list(division.expression.find_all(exp.Count))
+                    if not counts or any(isinstance(count.this, exp.Distinct) for count in counts):
+                        continue
+                    for total in division.this.find_all(exp.Sum):
+                        for column in total.find_all(exp.Column):
+                            child = next((part for part in item.downstream
+                                          if part.name == column.sql(dialect='postgres')), None)
+                            if child and isinstance(child.expression, exp.Table):
+                                actual = table_grains.get(child.expression.name)
+                                if actual and actual != metric['grain']:
+                                    return (f'指标 {metric_id} 应按 {metric["grain"]} 粒度计算均值，'
+                                            f'不能用 {actual} 原始行数作分母；请先按目标实体聚合或计数其去重键。')
                 for average in item.expression.find_all(exp.Avg):
                     value = average.this.copy()
                     # Conditional predicates select contributors; they are not
@@ -330,8 +346,9 @@ def _amount_affine_expression(entry):
 
     A variable identifies an amount column in one contributing row stream.
     Separate CTE streams stay separate: adding disjoint subtotals is not itself
-    proof of duplicate inputs. CASE, weighted formulas and unknown functions
-    remain outside this check; row filters and general equivalence are not proved.
+    proof of duplicate inputs. Equal-valued CASE branches with zero/NULL
+    exclusions admit scalar checks. Unequal branches, weighted formulas and
+    unknown functions remain outside; predicate equivalence is not proved.
     """
     def resolve(column):
         child = next((item for item in entry.downstream if item.name == column.sql(dialect='postgres')), None)
@@ -344,6 +361,19 @@ def _amount_affine_expression(entry):
     def linear(node):
         if isinstance(node, (exp.Alias, exp.Paren, exp.Cast, exp.Sum)):
             return linear(node.this)
+        if isinstance(node, (exp.Case, exp.If)):
+            branches = ([condition.args['true'] for condition in node.args.get('ifs', ())]
+                        + [node.args.get('default')] if isinstance(node, exp.Case)
+                        else [node.args.get('true'), node.args.get('false')])
+            values = [linear(branch) for branch in branches
+                      if branch is not None and not isinstance(branch, exp.Null)]
+            # Zero/NULL excludes a contributor. Only equal nonzero branch
+            # expressions admit this scalar check; arbitrary CASE equivalence
+            # remains unproved. Outer rescaling still participates normally.
+            if any(value is None for value in values):
+                return None
+            nonzero = [value for value in values if value != ({}, Fraction(0))]
+            return (nonzero[0] if all(value == nonzero[0] for value in nonzero) else None) if nonzero else ({}, Fraction(0))
         if isinstance(node, exp.Column):
             return resolve(node)
         if isinstance(node, exp.Literal) and not node.is_string:
