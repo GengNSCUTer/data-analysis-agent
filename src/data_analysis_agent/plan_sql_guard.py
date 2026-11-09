@@ -8,6 +8,7 @@ a proof of SQL equivalence or metric correctness.
 from __future__ import annotations
 
 import re
+from fractions import Fraction
 from typing import Any, Mapping
 
 from sqlglot import exp, parse_one
@@ -29,6 +30,7 @@ def sql_plan_mismatch(
     sql: str, plan: Mapping[str, Any] | None, *,
     metric_value_sources: Mapping[str, Mapping[str, Any]] | None = None,
     column_schema: Mapping[str, Any] | None = None,
+    table_grains: Mapping[str, str] | None = None,
 ) -> str | None:
     """Return a safe reason for a detected, covered mismatch; otherwise None."""
 
@@ -126,7 +128,71 @@ def sql_plan_mismatch(
         if mode == "multi_membership" and dimension and dimension.casefold() not in columns:
             return f"SQL 必须包含分组列 {dimension}，并允许同一订单进入多个分组。"
     missing_groups = _unrequested_null_group_filter(sql, plan, column_schema or {})
-    return missing_groups or _metric_value_source_mismatch(sql, plan, metric_value_sources or {}, column_schema or {})
+    return (missing_groups
+            or _metric_value_source_mismatch(sql, plan, metric_value_sources or {}, column_schema or {})
+            or _metric_plan_field_mismatch(sql,plan,column_schema or {},table_grains or {}))
+
+
+def _metric_plan_field_mismatch(sql, plan, schema, table_grains):
+    """Catch omitted status fields, wrong simple bucket lineage and raw-grain AVG.
+
+    Predicate *presence* is necessary, not a proof that every CASE, denominator
+    or Boolean formula implements the Catalog. Opaque lineage remains outside
+    these bounded checks instead of rejecting every complex query.
+    """
+    metrics = plan.get('metric_plans') or ()
+    if not metrics:
+        return None
+    try:
+        scope = build_scope(parse_one(sql,read='postgres'))
+    except (ParseError,TokenError,RecursionError):
+        return None
+    if scope is None:
+        return None
+    for metric in metrics:
+        metric_id = metric['metric_id']
+        for condition in metric.get('default_filters', ()):
+            required = parse_one(condition,read='postgres')
+            predicate = required.this if isinstance(required,exp.Not) else required
+            if not isinstance(predicate,(exp.EQ,exp.In)):
+                continue
+            values = predicate.expressions if isinstance(predicate,exp.In) else [predicate.expression]
+            if not values or not all(isinstance(value,exp.Literal) and value.is_string for value in values):
+                continue
+            columns = list(predicate.find_all(exp.Column))
+            if len(columns) == 1 and not _MetricFieldPresence(columns[0].table,columns[0].name).enforced(scope,metric_id):
+                return f'指标 {metric_id} 的 SQL 遗漏了 Catalog 默认状态口径字段 {columns[0].sql()}，请在实际指标计算路径保留对应条件。'
+        if table_grains and metric.get('grain'):
+            try:
+                output = lineage(metric_id,sql,schema=dict(schema),dialect='postgres')
+            except (SqlglotError,OptimizeError,RecursionError):
+                continue
+            for item in output.walk():
+                for average in item.expression.find_all(exp.Avg):
+                    value = average.this.copy()
+                    # Conditional predicates select contributors; they are not
+                    # the raw value whose entity grain the AVG operates on.
+                    for condition in value.find_all(exp.If):
+                        condition.set('this', exp.true())
+                    for condition in value.find_all(exp.Case):
+                        condition.set('this', None)
+                    for column in value.find_all(exp.Column):
+                        child = next((part for part in item.downstream if part.name == column.sql(dialect='postgres')),None)
+                        if child and isinstance(child.expression,exp.Table):
+                            actual_grain = table_grains.get(child.expression.name)
+                            if actual_grain and actual_grain != metric['grain']:
+                                return f'指标 {metric_id} 应按 {metric["grain"]} 粒度计算均值，不能直接平均 {actual_grain} 原始行；请先按目标实体聚合。'
+    if len(metrics) == 1 and plan.get('time_grain') and metrics[0].get('time_field'):
+        try:
+            output = lineage('time',sql,schema=dict(schema),dialect='postgres')
+        except (SqlglotError,OptimizeError,RecursionError):
+            return None
+        sources = {f'{item.expression.name}.{item.name.rsplit(".",1)[-1]}' for item in output.walk()
+                   if not item.downstream and isinstance(item.expression,exp.Table)}
+        expected = metrics[0]['time_field']
+        if len(sources) == 1 and sources != {expected}:
+            return f'指标 {metrics[0]["metric_id"]} 的时间分桶来源应为 {expected}，不能改用 {next(iter(sources))}。'
+    return None
 
 
 def _unrequested_null_group_filter(sql, plan, schema):
@@ -235,7 +301,69 @@ def _metric_value_source_mismatch(sql, plan, rules, schema):
             allowed.update(rule.get('allocation_allowed', ()))
         if not set(rule['required']) <= sources or sources - allowed:
             return f'指标 {metric} 的金额来源与 Catalog 不符；必须使用 {", ".join(rule["required"])}，不能用其他金额列冒名。'
+        if rule.get('aggregation') == 'sum' and metric not in allocations:
+            formula = _amount_affine_expression(node)
+            if formula is not None and (formula[1] != 0 or any(value != 1 for value in formula[0].values())):
+                return f'指标 {metric} 应按 Catalog 累加原金额，不能擅自倍增、缩减或加减常数。'
     return None
+
+
+def _amount_affine_expression(entry):
+    """Recognize bounded scalar changes, following contributing CTE outputs.
+
+    A variable identifies an amount column in one contributing row stream.
+    Separate CTE streams stay separate: adding disjoint subtotals is not itself
+    proof of duplicate inputs. CASE, weighted formulas and unknown functions
+    remain outside this check; row filters and general equivalence are not proved.
+    """
+    def resolve(column):
+        child = next((item for item in entry.downstream if item.name == column.sql(dialect='postgres')), None)
+        if child is None:
+            return None
+        if isinstance(child.expression, exp.Table):
+            return {(id(entry.source), child.expression.name, column.name): Fraction(1)}, Fraction(0)
+        return _amount_affine_expression(child)
+
+    def linear(node):
+        if isinstance(node, (exp.Alias, exp.Paren, exp.Cast, exp.Sum)):
+            return linear(node.this)
+        if isinstance(node, exp.Column):
+            return resolve(node)
+        if isinstance(node, exp.Literal) and not node.is_string:
+            return {}, Fraction(node.this)
+        if isinstance(node, exp.Coalesce):
+            if all(isinstance(value, exp.Literal) and not value.is_string and Fraction(value.this) == 0 for value in node.expressions):
+                return linear(node.this)
+            return None
+        if isinstance(node, exp.Neg):
+            value = linear(node.this)
+            return None if value is None else ({key:-coefficient for key,coefficient in value[0].items()}, -value[1])
+        if not isinstance(node, (exp.Add, exp.Sub, exp.Mul, exp.Div)):
+            return None
+        left, right = linear(node.this), linear(node.expression)
+        if left is None or right is None:
+            return None
+        if isinstance(node, (exp.Add, exp.Sub)):
+            sign = -1 if isinstance(node, exp.Sub) else 1
+            values = dict(left[0])
+            for key, coefficient in right[0].items():
+                values[key] = values.get(key, Fraction(0)) + sign * coefficient
+            return values, left[1] + sign * right[1]
+        if isinstance(node, exp.Mul):
+            if left[0] and right[0]:
+                return None
+            value, multiplier = (left, right[1]) if left[0] else (right, left[1])
+        else:
+            if right[0] or not right[1]:
+                return None
+            # Constant integer arithmetic has different PostgreSQL division
+            # semantics. Only exact constant divisions enter this small proof.
+            if not left[0] and (left[1] / right[1]).denominator != 1:
+                return None
+            value, multiplier = left, 1 / right[1]
+        return {key:coefficient * multiplier for key,coefficient in value[0].items()}, value[1] * multiplier
+
+    return linear(entry.expression)
 
 
 def _rank_partition_matches(window: exp.Window, dimensions: tuple[str, ...]) -> bool:
@@ -522,3 +650,36 @@ class _FilterCheck:
         if not paths and any(isinstance(p.unalias(), exp.Count) for p in projections):
             paths = [(source, None) for _, source in scope.selected_sources.values() if isinstance(source, Scope)]
         return bool(paths) and all(self.enforced(source, name) for source, name in paths)
+
+
+class _MetricFieldPresence(_FilterCheck):
+    """Reuse the contributing-path traversal for a necessary row-filter field."""
+
+    def __init__(self, table, column):
+        self.sources = {(table,column)}
+        self.values = frozenset()
+        self.value_sources = {}
+
+    def lineage(self, node, scope):
+        return _column_lineage(node,scope,self.sources)
+
+    def predicate(self, node, scope):
+        if node is None:
+            return False
+        if isinstance(node,(exp.Where,exp.Having,exp.Paren)):
+            return self.predicate(node.this,scope)
+        if isinstance(node,exp.And):
+            return self.predicate(node.this,scope) or self.predicate(node.expression,scope)
+        if isinstance(node,exp.Or):
+            return self.predicate(node.this,scope) and self.predicate(node.expression,scope)
+        if isinstance(node,exp.Exists):
+            return super().predicate(node,scope)
+        return any(self.lineage(column,scope) & self.sources for column in node.find_all(exp.Column))
+
+    def enforced(self, scope, output=None):
+        if super().enforced(scope,output):
+            return True
+        projections = [projection for projection in scope.expression.selects
+                       if output is None or projection.alias_or_name == output]
+        return any(self.predicate(condition.this,scope)
+                   for projection in projections for condition in projection.find_all(exp.If))

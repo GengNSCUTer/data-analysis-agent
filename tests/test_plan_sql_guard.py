@@ -48,6 +48,112 @@ def test_amount_provenance_follows_output_through_ctes_and_ignores_decoys(sql, a
     assert (mismatch is None) is allowed
 
 
+@pytest.mark.parametrize('expression,accepted', [
+    ('SUM(i.price)', True),
+    ('CAST(SUM(i.price) AS NUMERIC)', True),
+    ('COALESCE(SUM(i.price),0)', True),
+    ('SUM(i.price)*1', True),
+    ('SUM(i.price)*2/2', True),
+    ('SUM(i.price)/3*3', True),
+    ('SUM(i.price*2)/2', True),
+    ('SUM(i.price)+0', True),
+    ('SUM(i.price)*0+SUM(i.price)', True),
+    ('SUM(i.price)*2', False),
+    ('SUM(i.price/2)', False),
+    ('SUM(i.price)/2', False),
+    ('SUM(i.price)+1', False),
+    ('SUM(i.price+i.price)', False),
+    ('SUM(i.price)*0', False),
+])
+def test_amount_alias_cannot_hide_scalar_formula_changes(expression, accepted):
+    rules = {'gmv': {'aggregation':'sum', 'required':['fact_order_items.price'],
+                     'allowed':['fact_order_items.price']}}
+    statement = f'SELECT {expression} AS gmv FROM analytics.fact_order_items i'
+    assert (sql_plan_mismatch(statement, {'metric_ids':['gmv']}, metric_value_sources=rules) is None) is accepted
+
+
+def test_amount_formula_changes_are_checked_inside_contributing_ctes():
+    rules = {'gmv': {'aggregation':'sum', 'required':['fact_order_items.price'],
+                     'allowed':['fact_order_items.price']}}
+    for definition in ('SUM(price)*2 AS total', 'SUM(price*2) AS total'):
+        statement = f'WITH totals AS (SELECT {definition} FROM analytics.fact_order_items) SELECT total AS gmv FROM totals'
+        assert sql_plan_mismatch(statement, {'metric_ids':['gmv']}, metric_value_sources=rules)
+    equivalent = ('WITH totals AS (SELECT SUM(price)*2 AS total FROM analytics.fact_order_items) '
+                  'SELECT total/2 AS gmv FROM totals')
+    assert sql_plan_mismatch(equivalent, {'metric_ids':['gmv']}, metric_value_sources=rules) is None
+
+
+def test_split_amount_components_are_not_assumed_to_be_duplicate_inputs():
+    rules = {'gmv': {'aggregation':'sum', 'required':['fact_order_items.price'],
+                     'allowed':['fact_order_items.price','fact_orders.order_status']}}
+    statement = (
+        "WITH a AS (SELECT SUM(price) AS part FROM analytics.fact_order_items WHERE price<100), "
+        "b AS (SELECT SUM(price) AS part FROM analytics.fact_order_items WHERE price>=100) "
+        "SELECT COALESCE(a.part,0)+COALESCE(b.part,0) AS gmv FROM a CROSS JOIN b"
+    )
+    assert sql_plan_mismatch(statement, {'metric_ids':['gmv']}, metric_value_sources=rules) is None
+
+
+@pytest.mark.parametrize('suffix,accepted', [
+    ("WHERE o.order_status NOT IN ('canceled','unavailable')", True),
+    ("WHERE NOT o.order_status IN ('canceled','unavailable')", True),
+    ("WHERE o.order_status!='canceled' AND o.order_status!='unavailable'", True),
+    ('WHERE i.price>0', False),
+    ('', False),
+    ("WHERE o.order_status NOT IN ('canceled','unavailable') OR TRUE", False),
+])
+def test_missing_catalog_status_field_is_detected_on_actual_metric_paths(suffix, accepted):
+    plan = {'metric_ids':['gmv'], 'metric_plans':[{'metric_id':'gmv','grain':'order_item',
+        'time_field':'fact_orders.order_purchase_timestamp',
+        'default_filters':["fact_orders.order_status NOT IN ('canceled','unavailable')"]}]}
+    statement = ('SELECT SUM(i.price) AS gmv FROM analytics.fact_order_items i '
+                 'JOIN analytics.fact_orders o ON o.order_id=i.order_id ' + suffix)
+    assert (sql_plan_mismatch(statement,plan) is None) is accepted
+
+
+def test_catalog_status_can_be_applied_in_conditional_sum_but_not_an_unused_cte():
+    plan = {'metric_ids':['gmv'],'metric_plans':[{'metric_id':'gmv',
+        'default_filters':["fact_orders.order_status NOT IN ('canceled','unavailable')"]}]}
+    conditional = ("SELECT SUM(CASE WHEN o.order_status NOT IN ('canceled','unavailable') THEN i.price ELSE 0 END) AS gmv "
+        "FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id")
+    assert sql_plan_mismatch(conditional,plan) is None
+    decoy = ("WITH unused AS (SELECT order_id FROM analytics.fact_orders WHERE order_status NOT IN ('canceled','unavailable')) "
+        "SELECT SUM(i.price) AS gmv FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id")
+    assert sql_plan_mismatch(decoy,plan)
+
+
+@pytest.mark.parametrize('nested_schema', [False, True])
+@pytest.mark.parametrize('time_field,accepted', [('o.created_at',True),('i.created_at',False)])
+def test_time_bucket_follows_catalog_fact_time_not_another_created_at(time_field, accepted, nested_schema):
+    plan = {'metric_ids':['completed_sale_amount'],'time_grain':'month',
+        'metric_plans':[{'metric_id':'completed_sale_amount','time_field':'orders.created_at'}]}
+    schema = {'orders':{'order_id':'INT','created_at':'TIMESTAMPTZ'},
+              'order_items':{'order_id':'INT','created_at':'TIMESTAMPTZ','sale_price':'NUMERIC'}}
+    if nested_schema:
+        schema = {'analytics':schema}
+    statement = f"SELECT DATE_TRUNC('month',{time_field}) AS time,SUM(i.sale_price) AS completed_sale_amount FROM analytics.orders o JOIN analytics.order_items i ON i.order_id=o.order_id GROUP BY 1"
+    assert (sql_plan_mismatch(statement,plan,column_schema=schema) is None) is accepted
+
+
+def test_order_mean_cannot_average_raw_item_amounts_but_preaggregation_remains_legal():
+    plan = {'metric_ids':['average_order_value'],'metric_plans':[{'metric_id':'average_order_value','grain':'order'}]}
+    grains = {'fact_orders':'order','fact_order_items':'order_item'}
+    wrong = 'SELECT AVG(i.price) AS average_order_value FROM analytics.fact_order_items i'
+    right = ('WITH totals AS (SELECT order_id,SUM(price) AS amount FROM analytics.fact_order_items GROUP BY order_id) '
+             'SELECT AVG(amount) AS average_order_value FROM totals')
+    assert sql_plan_mismatch(wrong,plan,table_grains=grains)
+    assert sql_plan_mismatch(right,plan,table_grains=grains) is None
+
+
+def test_conditional_average_uses_value_grain_not_status_predicate_grain():
+    plan = {'metric_ids':['average_item_price'],
+            'metric_plans':[{'metric_id':'average_item_price','grain':'order_item'}]}
+    sql = ("SELECT AVG(CASE WHEN o.order_status='delivered' THEN i.price ELSE NULL END) AS average_item_price "
+           'FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id')
+    grains = {'fact_orders':'order','fact_order_items':'order_item'}
+    assert sql_plan_mismatch(sql,plan,table_grains=grains) is None
+
+
 @pytest.mark.parametrize("column,accepted", [("order_id", True), ("status", False)])
 def test_preaggregate_can_rejoin_the_same_catalog_target_key_but_not_non_key(column, accepted):
     plan = {"metric_ids": ["average_order_value"], "lookup_joins": [

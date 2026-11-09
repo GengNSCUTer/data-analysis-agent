@@ -87,15 +87,17 @@ def parse_sse(body):
 
 
 def wire_answer(events):
-    text, failures = [], []
+    text, failures = {}, []
     for event in events:
         rich = event.get("rich") or {}
         data = rich.get("data") or {}
         if rich.get("type") == "text" and data.get("content"):
-            text.append(data["content"])
+            # SSE updates replace a component's complete content, just as the
+            # web component renders them; they are not incremental text deltas.
+            text[rich.get("id") or len(text)] = data["content"]
         if rich.get("type") == "status_card" and data.get("title") == "本次分析未完成":
             failures.append(data.get("description", "本次分析未完成"))
-    return "\n\n".join(text or failures), failures
+    return "\n\n".join(text.values() if text else failures), failures
 
 
 def evidence_payload(trace):
@@ -141,7 +143,7 @@ def check_task_scope(reference, state):
         errors.append("scope:time_range")
     filters = (state or {}).get("filters") or []
     if reference.get("state") and reference["state"] != "BEST":
-        if filters != [{"dimension":"customer_state","value":reference["state"]}]:
+        if filters != ["customer_state=" + reference["state"]]:
             errors.append("scope:filters")
     elif reference.get("state") != "BEST" and filters:
         errors.append("scope:filters")
@@ -197,7 +199,9 @@ def review_saved(output):
             chart_path = Path(str(prefix) + ".chart-rechecked.json")
             if chart_path.exists() and expected is not None:
                 chart_errors = check_chart(json.loads(chart_path.read_text()),expected)
-                turn["errors"] = [error for error in turn["errors"] if error != "chart_series_shape"]
+                turn["errors"] = [error for error in turn["errors"] if error not in {
+                    "chart_series_shape", "chart_values", "chart_not_rendered",
+                }]
                 turn["errors"].extend(chart_errors)
             previous_expected = expected
         semantic = by_id.get((record["id"],record["attempt"]),{})

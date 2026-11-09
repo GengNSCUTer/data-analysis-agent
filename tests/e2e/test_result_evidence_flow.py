@@ -116,6 +116,13 @@ def test_browser_result_evidence_continuity_and_refresh(result_evidence_data, mo
                                       "result_inspections": [{"operation": "sum", "metric_id": "gmv"},
                                                              {"operation": "share", "metric_id": "gmv", "row_numbers": [12]}]},
         "继续解释全年结果": {"request_kind": "result_followup", "action": "keep"},
+        "新分析，SP州商品品类销售额前十": {"request_kind":"data_query","action":"new_task",
+            "metric_ids":["gmv"],"dimensions":["product_category_name"],"top_n":10,
+            "filters":[{"dimension":"customer_state","value":"SP"}]},
+        "改前五，继承其他条件": {"request_kind":"data_query","action":"update_task",
+            "state_patch":{"operations":[{"op":"set","field":"top_n","value":5}]}},
+        "这五个只换横向条形图，不查询": {"request_kind":"result_followup","action":"keep",
+            "chart_request":"horizontal_bar"},
         "另查2017年十二月商品成交额，按月": {"request_kind":"data_query", "action":"new_task", "metric_ids":["gmv"],
             "dimensions":[], "time_grain":"month", "time_range":{"start":"2017-12-01", "end":"2018-01-01"}},
         "补上一个月对比环比": {"request_kind":"result_followup", "action":"keep",
@@ -174,6 +181,8 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                 plan = usage.query_plan
                 monthly = bool(plan.get("time_grain"))
                 statement = statements["monthly" if monthly else "category"]
+                if any(item['dimension']=='customer_state' for item in plan.get('filters',())):
+                    statement = statement.replace("WHERE o.order_status", "JOIN analytics.dim_customers c ON c.customer_id=o.customer_id WHERE c.customer_state='SP' AND o.order_status")
                 if monthly:
                     bounds = plan["time_range"]
                     statement = statement.replace("2017-01-01", bounds["start"]).replace("2018-01-01", bounds["end"])
@@ -268,7 +277,7 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                                          "termination_reason":run["termination_reason"]})
                     continue
                 assert run["termination_reason"] == "completed", (question, run)
-                assert run["sql_calls_used"] == int(question in {categories_question, monthly_question, "刚才前两名占全部品类销售额多少", "补上一个月对比环比", "再看十二月同比，没有基期就说明", "另按客户州统计客单价", "这些州合在一起算总体客单价", "重新正确查询销售额"}), (question, run)
+                assert run["sql_calls_used"] == int(question in {categories_question, monthly_question, "刚才前两名占全部品类销售额多少", "补上一个月对比环比", "再看十二月同比，没有基期就说明", "另按客户州统计客单价", "这些州合在一起算总体客单价", "重新正确查询销售额", "新分析，SP州商品品类销售额前十"}), (question, run)
                 if run["sql_calls_used"]:
                     assert run["catalog_trace"]["join_evidence"]["status"] in {"checked", "partial"}
                 assert detail["trusted_result_artifact"]
@@ -283,7 +292,7 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                         assert "文字解释未通过核验" in answer
                     chat.get_by_text("本次回答的数据依据", exact=True).last.wait_for(state="visible")
                     page.screenshot(path=str(output / "reference-fallback.png"), full_page=True)
-                if question not in {"概述刚才的品类结果", "重新概述刚才的品类结果"}:
+                if question not in {"概述刚才的品类结果", "重新概述刚才的品类结果", "这五个只换横向条形图，不查询"}:
                     assert "模型说明" in answer
                 if question == categories_question:
                     assert len(current["sample_rows"]) == 10
@@ -338,6 +347,18 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                     assert current["sample_rows"][0]["average_order_value"] == pytest.approx(float(sum(prices)/len(prices)))
                 elif question == "继续解释全年结果":
                     assert current["coverage"] == "complete" and len(current["sample_rows"]) == 12
+                elif question in {'改前五，继承其他条件','这五个只换横向条形图，不查询'}:
+                    state = detail['analysis_state']
+                    assert state['filters'] == ['customer_state=SP']
+                    assert state['top_n'] == 5 and state['dimensions'] == ['product_category_name']
+                    assert run['catalog_trace']['artifact_reuse']['mode'] in {'LOCAL_COMPUTE','DIRECT_REUSE'}
+                    download = client.get(f'/api/project/conversations/{cid}/result.csv')
+                    import io
+                    assert len(pd.read_csv(io.StringIO(download.text))) == 5
+                    if question == '这五个只换横向条形图，不查询':
+                        plot = chat.locator('.js-plotly-plot').last
+                        plot.wait_for(state='visible')
+                        assert plot.evaluate('el=>el._fullData[0].orientation') == 'h'
                 elif question == "重新正确查询销售额":
                     assert run["catalog_trace"]["join_evidence"]["status"] == "checked"
                     assert run["catalog_trace"]["join_evidence"]["checks"][0]["multiplicity_lower_bound"] == 1

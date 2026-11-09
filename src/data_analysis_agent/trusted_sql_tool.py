@@ -284,6 +284,7 @@ class TrustedRunSqlTool(RunSqlTool):
         return sql_plan_mismatch(
             sql, context.metadata.get('query_plan'),
             metric_value_sources=context.metadata.get('metric_value_sources'), column_schema=schema,
+            table_grains=context.metadata.get('join_source_grains'),
         )
 
     async def _audit_plan_rejection(self, context, sql, reason):

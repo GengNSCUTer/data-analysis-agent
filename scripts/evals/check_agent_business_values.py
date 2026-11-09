@@ -29,7 +29,7 @@ COUNTS = {"paid_order_count", "total_order_count", "item_count", "completed_orde
           "sold_inventory_unit_count", "current_unsold_inventory_unit_count"}
 DIMENSIONS = {"customer_state", "customer_city", "product_category_name", "product_category",
               "product_brand", "product_department", "distribution_center", "event_type",
-              "event_browser", "event_traffic_source", "user_traffic_source", "user_country", "time"}
+              "event_browser", "event_traffic_source", "user_traffic_source", "user_country", "payment_type", "time"}
 
 
 def source_case(name: str) -> dict:

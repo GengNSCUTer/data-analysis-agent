@@ -114,14 +114,18 @@ class FakeRepairProvider:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('repaired_is_correct', [True, False])
-async def test_amount_source_rule_is_rechecked_on_the_one_repair(tmp_path, repaired_is_correct):
+@pytest.mark.parametrize('bad', [
+    'SELECT SUM(payment_value) AS gmv FROM analytics.fact_payments',
+    'SELECT SUM(price)*2 AS gmv FROM analytics.fact_order_items',
+    'SELECT SUM(price)+1 AS gmv FROM analytics.fact_order_items',
+])
+async def test_amount_source_rule_is_rechecked_on_the_one_repair(tmp_path, repaired_is_correct, bad):
     context = _context()
     context.metadata.update({
         'query_plan': {'metric_ids':['gmv']}, 'required_result_columns':['gmv'], 'metric_result_columns':['gmv'],
-        'metric_value_sources':{'gmv':{'required':['fact_order_items.price'], 'allowed':['fact_order_items.price']}},
+        'metric_value_sources':{'gmv':{'aggregation':'sum','required':['fact_order_items.price'], 'allowed':['fact_order_items.price']}},
     })
     good = 'SELECT SUM(price) AS gmv FROM analytics.fact_order_items'
-    bad = 'SELECT SUM(payment_value) AS gmv FROM analytics.fact_payments'
     provider = FakeRepairProvider(good if repaired_is_correct else bad)
     runner = SequenceRunner([pd.DataFrame({'gmv':[12]})])
     result = await _tool(runner, provider, tmp_path).execute(context, RunSqlToolArgs(sql=bad))

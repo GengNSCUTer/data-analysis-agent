@@ -159,6 +159,54 @@ async def test_automatic_retrieval_uses_older_metric_without_state_mutation_and_
     assert (await planner.plan(conversation.id,user,intent,state,state)).decision.mode == "SQL_REQUIRED"
 
 
+async def test_local_filter_activation_uses_proven_scope_for_catalog_binding(history_setup):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from data_analysis_agent.chat_runtime import BudgetedChatHandler
+    from data_analysis_agent.question_router import QuestionRouter
+    from data_analysis_agent.semantic_catalog import CatalogRetriever
+    from data_analysis_agent.semantic_intent import SemanticIntentInterpreter
+    from vanna.core.user import RequestContext
+    from vanna.servers.base.models import ChatRequest
+
+    workspace, catalog, store, files, history, user, conversation, add = history_setup
+    await add(conversation)
+    state = replace(AnalysisState.from_mapping(conversation.metadata['working_memory']),
+                    metric_ids=('gmv',),dimensions=('customer_state',))
+    conversation.metadata['working_memory'] = state.as_dict()
+    await store.update_conversation(conversation)
+    async def complete(prompt, owner):
+        return json.dumps({'request_kind':'data_query','action':'update_task',
+            'state_patch':{'operations':[
+                {'op':'set','field':'filters','value':['customer_state=SP']},
+                {'op':'clear','field':'dimensions'},
+            ]}})
+    async def explain(*args, **kwargs):
+        yield '受控说明'
+    agent = SimpleNamespace(user_resolver=SimpleNamespace(resolve_user=AsyncMock(return_value=user)),
+                            conversation_store=store)
+    handler = BudgetedChatHandler(agent, RequestBudget(), PostgresRunRecorder(store.settings),
+        workspace=workspace, question_router=QuestionRouter(CatalogRetriever(catalog),full_results=True),
+        semantic_interpreter=SemanticIntentInterpreter(catalog,complete),result_artifact_store=files,
+        artifact_reuse_planner=ArtifactReusePlanner(history,files,catalog))
+    handler._tool_free_answer = explain
+    request = ChatRequest(message='仅保留刚才指定的范围并给合计',conversation_id=conversation.id,
+                          request_context=RequestContext())
+    chunks = [piece async for piece in handler.handle_stream(request)]
+    saved = await store.get_conversation(conversation.id,user)
+    current = AnalysisState.from_mapping(saved.metadata['working_memory'])
+    assert current.filters == ('customer_state=SP',)
+    assert current.dimensions == () and current.metric_ids == ('gmv',)
+    assert current.active_artifact_id != state.active_artifact_id
+    output = current.previous_result_artifact
+    frame = files.read_result_frame(artifact_id=output.artifact_id,user_id=user.id,
+        workspace_id=workspace.workspace_id,dataset_version=workspace.dataset_version_id,
+        metric_version=workspace.metric_version)
+    assert frame.to_dict('records') == [{'gmv':300}]
+    assert output.artifact_id in {item.artifact.artifact_id for item in await history.candidates(conversation.id,user)}
+    assert any((chunk.rich or {}).get('type') == 'dataframe' for chunk in chunks)
+
+
 async def test_selected_history_scope_is_not_erased_by_empty_task_fields(history_setup):
     _, catalog, _, files, history, user, conversation, add = history_setup
     first = await add(conversation)

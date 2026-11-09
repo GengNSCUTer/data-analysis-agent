@@ -1231,7 +1231,11 @@ class BudgetedChatHandler(ChatHandler):
         """Inspect without mutation, or publish a locally derived task result."""
         artifact, frame, spec = plan.item.artifact, plan.frame, plan.spec
         catalog = self.question_router.retriever.catalog
-        selection = self.question_router.retriever.retrieve(request.message, user, metric_ids=spec.metric_ids)
+        # A short follow-up need not repeat its inherited dimension/filter.
+        # Bind the proven answer scope just as the SQL path binds effective intent.
+        selection = select_intent_catalog(intent.model_copy(update={
+            'metric_ids':spec.metric_ids, 'dimensions':spec.dimensions, 'filters':spec.filters,
+        }), self.question_router.retriever, user, question=request.message)
         columns = tuple(frame.columns)
         contract = ResultContract.from_selection(selection, request.message, spec.scope()["time_range"],
             catalog=catalog, required_result_columns=columns, requested_dimensions=spec.dimensions)

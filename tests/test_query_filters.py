@@ -190,7 +190,8 @@ def test_catalog_lookup_key_rejects_real_fanout_but_accepts_cte_and_aggregate_jo
               "JOIN analytics.dim_customers c ON c.customer_id=o.customer_id "
               "JOIN analytics.dim_products p ON p.product_id=i.product_id "
               "JOIN analytics.dim_category_translation t ON t.product_category_name=p.product_category_name "
-              "WHERE c.customer_state='SP' AND t.product_category_name_english='bed_bath_table') ")
+              "WHERE c.customer_state='SP' AND t.product_category_name_english='bed_bath_table' "
+              "AND o.order_status NOT IN ('canceled','unavailable')) ")
     bad = prefix + "SELECT SUM(fi.price) AS gmv FROM fi JOIN analytics.dim_products p ON fi.product_category_name=p.product_category_name"
     assert "多对一" in sql_plan_mismatch(bad, plan.as_dict())
     good = bad.replace("fi.product_category_name=p.product_category_name", "fi.pid=p.product_id")

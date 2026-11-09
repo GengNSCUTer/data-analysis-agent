@@ -505,7 +505,7 @@ async def test_budgeted_handler_passes_server_result_contract_to_tool_context(
     assert agent.metadata["query_plan"]["required_result_columns"] == ["time", "gmv"]
     assert agent.metadata["query_plan"]["query_mode"] == agent.metadata["query_mode"] == "aggregate"
     assert agent.metadata["query_plan"]["result_budget"] == agent.metadata["result_budget"]
-    assert agent.metadata["result_budget"]["execution_max_rows"] == 1_000
+    assert agent.metadata["result_budget"]["execution_max_rows"] == 5_000
     assert "result_budget_check" not in agent.metadata
     assert agent.metadata["result_time_column"] == "order_purchase_timestamp"
     assert "month" in agent.metadata["result_time_column_aliases"]

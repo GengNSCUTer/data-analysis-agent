@@ -85,6 +85,14 @@ def test_pagination_numbers_and_numeric_looking_dimension_keys():
     assert compare_frames(actual,expected) == ["dimension:customer_state"]
 
 
+def test_payment_type_is_a_dimension_and_money_aligns_by_payment_type():
+    actual = read_csv('payment_type,payment_amount\ncredit_card,20\nboleto,10\n')
+    expected = pd.DataFrame({'payment_type':['boleto','credit_card'],'payment_amount':[Decimal('10'),Decimal('20')]})
+    assert compare_frames(actual,expected) == []
+    actual['payment_amount'] = [10,20]
+    assert compare_frames(actual,expected) == ['numeric:payment_amount']
+
+
 def test_independent_analysis_and_rendered_chart_check_values():
     expected = pd.DataFrame({"customer_state":["SP","RJ"],"gmv":[20,10]})
     assert expected_calculation(expected,"gmv","compare",[1,2]) == Decimal(10)
@@ -100,10 +108,35 @@ def test_completed_request_without_semantic_review_is_not_task_success():
     assert runner.task_status([{"errors":[]}],"pass") == "passed"
 
 
+def test_sse_answer_replaces_cumulative_component_updates_and_keeps_distinct_paragraphs():
+    events = [{'rich':{'id':key,'type':'text','lifecycle':kind,'data':{'content':content}}}
+              for key,kind,content in [('a','create','主'),('a','update','主要结论'),
+                                       ('b','create','建'),('b','update','建议核查')]]
+    answer, failures = runner.wire_answer(events)
+    assert answer == '主要结论\n\n建议核查'
+    assert failures == []
+
+
+def test_saved_chart_reassessment_replaces_old_chart_error_without_erasing_product_failure(tmp_path):
+    import json
+    directory = tmp_path / 'o-basic-1-attempt-1'
+    directory.mkdir()
+    task = {'id':'o-basic-1','attempt':1,'turns':[{'turn':1,'answer':'',
+        'errors':['chart_values','explanation_unverified'],
+        'analysis_state':{'metric_ids':['gmv'],'dimensions':[],'time_grain':None,'top_n':None}}]}
+    runner.write_json(directory / 'task.json',task)
+    (directory / 'turn-1.expected.csv').write_text('gmv\n1\n')
+    (directory / 'turn-1.csv').write_text('gmv\n1\n')
+    runner.write_json(directory / 'turn-1.chart-rechecked.json',[{'type':'pie','values':[1]}])
+    reviewed = runner.review_saved(tmp_path)
+    assert reviewed['records'][0]['turns'][0]['errors'] == ['explanation_unverified']
+    assert json.loads((directory / 'task.json').read_text()) == task
+
+
 def test_correct_csv_cannot_hide_a_stale_active_top_n_or_filter():
     reference = {"metric":"gmv","group":"product_category_name","top_n":5,"state":"SP"}
     state = {"metric_ids":["gmv"],"dimensions":["product_category_name"],"top_n":10,"time_grain":None,
-        "filters":[{"dimension":"customer_state","value":"SP"}]}
+        "filters":["customer_state=SP"]}
     assert runner.check_task_scope(reference,state) == ["scope:top_n"]
     state["top_n"] = 5
     assert runner.check_task_scope(reference,state) == []

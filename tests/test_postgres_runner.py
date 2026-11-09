@@ -164,6 +164,120 @@ async def test_payment_value_aliased_as_gmv_is_rejected_before_database(tmp_path
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('expression', ['SUM(i.price)*2', 'SUM(i.price/2)', 'SUM(i.price)+1'])
+async def test_amount_formula_scalar_changes_are_refused_by_the_complete_tool(expression, tmp_path):
+    context = make_context('amount-formula-' + uuid.uuid4().hex)
+    context.metadata.update({
+        'query_plan':{'metric_ids':['gmv']}, 'required_result_columns':['gmv'], 'metric_result_columns':['gmv'],
+        'metric_value_sources':{'gmv':{'aggregation':'sum','required':['fact_order_items.price'],
+                                    'allowed':['fact_order_items.price']}},
+    })
+    tool = TrustedRunSqlTool(SecurePostgresRunner(), file_system=LocalFileSystem(str(tmp_path)))
+    result = await tool.execute(context, RunSqlToolArgs(sql=f'SELECT {expression} AS gmv FROM analytics.fact_order_items i'))
+    assert not result.success
+    assert 'result_artifact' not in context.metadata
+    assert context.metadata['safe_sql_error'].retryable
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('risk', ['status', 'mean_grain', 'time_source'])
+async def test_catalog_formula_fields_have_positive_and_negative_complete_tool_paths(risk, tmp_path):
+    context = make_context('formula-field-' + uuid.uuid4().hex)
+    metric = 'average_order_value' if risk == 'mean_grain' else 'gmv'
+    plan = {'metric_ids':[metric],'metric_plans':[{'metric_id':metric,
+        'grain':'order' if risk == 'mean_grain' else 'order_item',
+        'time_field':'fact_orders.order_purchase_timestamp',
+        'default_filters':["fact_orders.order_status NOT IN ('canceled','unavailable')"]}]}
+    context.metadata.update({'query_plan':plan, 'metric_result_columns':[metric],
+        'required_result_columns':[metric], 'metric_fact_grains':{metric:plan['metric_plans'][0]['grain']},
+        'join_source_keys':{'fact_orders':['order_id'],'fact_order_items':['order_id','order_item_id']},
+        'join_source_grains':{'fact_orders':'order','fact_order_items':'order_item'}})
+    source = 'analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id'
+    status = "o.order_status NOT IN ('canceled','unavailable')"
+    if risk == 'status':
+        wrong = f'SELECT SUM(i.price) AS gmv FROM {source}'
+        right = wrong + f' WHERE {status}'
+    elif risk == 'mean_grain':
+        wrong = f'SELECT AVG(i.price) AS average_order_value FROM {source} WHERE {status}'
+        right = (f'WITH totals AS (SELECT i.order_id,SUM(i.price) AS amount FROM {source} '
+                 f'WHERE {status} GROUP BY i.order_id) SELECT AVG(amount) AS average_order_value FROM totals')
+    else:
+        plan['time_grain'] = 'month'
+        context.metadata['required_result_columns'] = ['time','gmv']
+        context.metadata['result_time_column'] = 'time'
+        wrong = (f"SELECT DATE_TRUNC('month',o.order_approved_at) AS time,SUM(i.price) AS gmv "
+                 f'FROM {source} WHERE {status} GROUP BY 1')
+        right = wrong.replace('o.order_approved_at','o.order_purchase_timestamp')
+    tool = TrustedRunSqlTool(SecurePostgresRunner(),file_system=LocalFileSystem(str(tmp_path)))
+    rejected = await tool.execute(context,RunSqlToolArgs(sql=wrong))
+    assert not rejected.success and 'result_artifact' not in context.metadata
+    accepted = await tool.execute(context,RunSqlToolArgs(sql=right))
+    assert accepted.success, accepted.error
+    assert context.metadata['result_validation']['state'] == 'valid'
+
+
+@pytest.mark.asyncio
+async def test_one_order_two_items_two_payments_keeps_300_instead_of_600(tmp_path, request):
+    """Owned disposable database only: the same order can have two payments."""
+    admin_dsn = os.getenv('RESULT_EVIDENCE_TEST_ADMIN_DSN')
+    if not admin_dsn or os.getenv('DATA_ANALYSIS_DATASET_VERSION') != 'synthetic-olist-v1':
+        pytest.skip('requires the disposable synthetic database administrator')
+    from psycopg2 import sql as pg_sql
+    from psycopg2.extras import RealDictCursor
+    settings = PostgresConnectionSettings.from_environment()
+    order_id = uuid.uuid4().hex
+    with psycopg2.connect(admin_dsn) as admin:
+        # A mistaken DSN must never insert fixture rows in the real business DB.
+        assert admin.info.port == settings.port and admin.info.port != 35434
+        assert admin.info.dbname == settings.database
+        with admin.cursor(cursor_factory=RealDictCursor) as cursor:
+            def copy_row(table, changes):
+                cursor.execute(pg_sql.SQL('SELECT * FROM analytics.{} LIMIT 1').format(pg_sql.Identifier(table)))
+                row = dict(cursor.fetchone())
+                row.update(changes)
+                cursor.execute(pg_sql.SQL('INSERT INTO analytics.{} ({}) VALUES ({})').format(
+                    pg_sql.Identifier(table),pg_sql.SQL(',').join(map(pg_sql.Identifier,row)),
+                    pg_sql.SQL(',').join(pg_sql.Placeholder() for _ in row)),list(row.values()))
+            copy_row('fact_orders',{'order_id':order_id,'order_status':'delivered'})
+            for number,price in [(1,100),(2,200)]:
+                copy_row('fact_order_items',{'order_id':order_id,'order_item_id':number,'price':price})
+            for number in (1,2):
+                copy_row('fact_payments',{'order_id':order_id,'payment_sequential':number,'payment_value':150})
+    def remove_owned_rows():
+        with psycopg2.connect(admin_dsn) as connection:
+            with connection.cursor() as cursor:
+                for table in ('fact_payments','fact_order_items','fact_orders'):
+                    cursor.execute(pg_sql.SQL('DELETE FROM analytics.{} WHERE order_id=%s').format(
+                        pg_sql.Identifier(table)),(order_id,))
+    request.addfinalizer(remove_owned_rows)
+    source = 'analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id'
+    condition = f"o.order_id='{order_id}' AND o.order_status NOT IN ('canceled','unavailable')"
+    correct = f'SELECT SUM(i.price) AS gmv FROM {source} WHERE {condition}'
+    fanout = f'SELECT SUM(i.price) AS gmv FROM {source} JOIN analytics.fact_payments p ON p.order_id=o.order_id WHERE {condition}'
+    with psycopg2.connect(host=settings.host,port=settings.port,database=settings.database,user=settings.reader_user) as reader:
+        reader.set_session(readonly=True)
+        with reader.cursor() as cursor:
+            cursor.execute(correct)
+            assert cursor.fetchone()[0] == 300
+            cursor.execute(fanout)
+            assert cursor.fetchone()[0] == 600
+    def context():
+        result = make_context('minimal-join-' + uuid.uuid4().hex)
+        result.metadata.update({'required_result_columns':['gmv'],'metric_result_columns':['gmv'],
+            'metric_fact_grains':{'gmv':'order_item'},
+            'join_source_keys':{'fact_order_items':['order_id','order_item_id'],'fact_orders':['order_id'],
+                                'fact_payments':['order_id','payment_sequential']},
+            'join_source_grains':{'fact_order_items':'order_item','fact_orders':'order','fact_payments':'payment'}})
+        return result
+    tool = TrustedRunSqlTool(SecurePostgresRunner(),file_system=LocalFileSystem(str(tmp_path)))
+    good = await tool.execute(context(),RunSqlToolArgs(sql=correct))
+    assert good.success
+    rejected_context = context()
+    bad = await tool.execute(rejected_context,RunSqlToolArgs(sql=fanout))
+    assert not bad.success and rejected_context.metadata['join_evidence']['status'] == 'amplified'
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('duplicate', [False, True])
 async def test_valid_payment_share_allocation_and_duplicated_weights(duplicate):
     context = make_context('allocation-' + uuid.uuid4().hex)
