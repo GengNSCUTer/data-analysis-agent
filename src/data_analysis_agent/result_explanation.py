@@ -29,7 +29,8 @@ text就是用户看到的原文，服务端不会改成句式模板。kind为fac
 /statistics/gmv/sum_of_returned_rows、/analyses/0。数组下标从0开始。
 只使用证据中实际存在的路径。不确定子路径时引用确实存在的父对象，如/statistics/gmv或/analyses/0；不要编造字段。
 指标口径引用/metric_definitions/实际指标ID；它解释计算定义，不是观测数值。范围/单位可引用/scope、/metric_semantics或/column_labels。
-引用只能来自本次提供的sample_rows、statistics、analyses、time_endpoints、metric_semantics、metric_definitions、column_labels和结果行数/coverage范围字段。
+引用只能来自本次提供的sample_rows、statistics、analyses、time_endpoints、metric_semantics、metric_definitions、column_labels、metric_ids、columns和结果行数/coverage范围字段。
+metric_ids和columns只能说明本次结果包含哪些指标/字段、缺少什么证据，不能充当观测数值或证明整个数据库都没有该信息。
 尽量一个独立事实一段。界面已经提供数据表；除非用户明确要求在正文逐行列出，不要重复整张表。
 不能引用一个字段却替换它的实体、指标或单位。
 实体名称优先保留来源值。可以使用能确认对应的常见译名或别名；不确定州代码全称时保留代码，不能猜。
@@ -159,6 +160,8 @@ _REF_ROOTS = {
     "metric_semantics",
     "metric_definitions",
     "column_labels",
+    "metric_ids",
+    "columns",
 }
 _NUMBER = re.compile(r"(?<![0-9_.])[-+]?\d+(?:,\d{3})*(?:\.\d+)?\s*(?:万|亿)?\s*[%％]?")
 _DATE = re.compile(

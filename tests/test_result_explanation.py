@@ -261,6 +261,20 @@ def test_invalid_reference_feedback_identifies_the_path_to_repair(summary):
     assert any(path in issue for issue in errors)
 
 
+@pytest.mark.asyncio
+async def test_result_metric_and_column_metadata_can_support_a_limitations_explanation(summary):
+    data = parse_result_evidence(summary)
+    assert resolve_evidence_ref(data, '/metric_ids') == ['gmv']
+    assert resolve_evidence_ref(data, '/columns') == ['state', 'gmv']
+    text = '当前结果只有州与销售额，没有广告投放数据，不能据此确认广告造成增长。'
+    draft = answer(text, refs=['/metric_ids', '/columns'])
+    assert not check_answer(AnswerDraft.model_validate_json(draft), data).errors
+    outcome, requests = await run_answer(summary, [draft, '{"verdict":"supported","issues":[]}'])
+    assert outcome.status == 'accepted' and outcome.text == text
+    assert outcome.review_count == 1 and outcome.revision_count == 0 and len(requests) == 2
+    assert check('销售额为123。', summary, ['/metric_ids', '/columns']).errors
+
+
 def test_partition_rank_position_cannot_be_used_as_a_money_observation():
     from data_analysis_agent.result_explanation import _numbers
     frame = pd.DataFrame({'time': ['2024-01-01'] * 2, 'state': ['SP', 'RJ'], 'gmv': [20, 10]})
