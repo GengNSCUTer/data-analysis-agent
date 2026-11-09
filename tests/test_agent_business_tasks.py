@@ -111,6 +111,12 @@ def test_correct_csv_cannot_hide_a_stale_active_top_n_or_filter():
     assert runner.check_task_scope(reference,state) == ["scope:filters"]
 
 
+def test_partitioned_top_n_has_the_same_active_bound_without_global_limiting():
+    reference = {"metric":"completed_sale_amount","group":"customer_state","grain":"month","partition_top_n":5}
+    state = {"metric_ids":["completed_sale_amount"],"dimensions":["customer_state"],"time_grain":"month","top_n":5,"filters":[]}
+    assert runner.check_task_scope(reference,state) == []
+
+
 def test_sse_failure_cannot_reuse_a_previous_persisted_answer_as_current_prose():
     answer, failures = runner.wire_answer([{"rich":{"type":"status_card","data":{
         "title":"本次分析未完成","description":"服务调用失败"}}}])

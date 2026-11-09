@@ -130,7 +130,7 @@ def check_task_scope(reference, state):
     if not reference or "source" in reference:
         return []
     expected = {"metric_ids":[reference["metric"]], "dimensions":[reference["group"]] if reference.get("group") else [],
-        "time_grain":reference.get("grain"), "top_n":reference.get("top_n")}
+        "time_grain":reference.get("grain"), "top_n":reference.get("top_n",reference.get("partition_top_n"))}
     # Half-year is an analysis window, not an existing SQL bucket identifier.
     # Check the independently requested windows numerically and in prose.
     if reference.get("grain") == "half_year":
@@ -185,7 +185,8 @@ def review_saved(output):
                 if failures and "sse_runtime_failure" not in turn["errors"]:
                     turn["errors"].append("sse_runtime_failure")
             if not step.get("preserve_state"):
-                turn["errors"].extend(error for error in check_task_scope(step.get("reference"),turn.get("analysis_state")) if error not in turn["errors"])
+                turn["errors"] = [error for error in turn["errors"] if not error.startswith("scope:")]
+                turn["errors"].extend(check_task_scope(step.get("reference"),turn.get("analysis_state")))
             if csv_path.exists() and expected is not None:
                 errors = compare_frames(read_csv(csv_path.read_text()),expected,ordered=step.get("ordered",False))
                 # Replace only evaluator-owned numeric errors. SQL, narrative,
