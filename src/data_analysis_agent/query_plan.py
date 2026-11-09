@@ -322,7 +322,10 @@ class QueryPlan:
             partition_rows = max(1, estimated_rows // max(1, rank_cardinality))
             if time_grain:
                 partition_rows *= cls._series_bucket_bound(time_grain, question, state)
-            estimated_rows = min(estimated_rows, partition_rows * top_n_request)
+            # The ranked dimension's cardinality applies per partition. Capping
+            # all months at the one-month cardinality rejects a valid 12 x 5
+            # result as soon as it returns more than the 27 distinct states.
+            estimated_rows = partition_rows * min(rank_cardinality, top_n_request)
         elif time_grain:
             series_state = state
             if not resolved_range and workspace and workspace.fact_date_counts:

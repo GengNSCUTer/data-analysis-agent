@@ -71,6 +71,22 @@ def check(text, summary, refs=("/sample_rows/0",), kind="fact"):
     )
 
 
+def test_calculated_growth_percent_uses_its_own_unit_even_when_metric_is_a_count():
+    from data_analysis_agent.result_analysis import ResultInspection
+    summary = build_result_evidence(pd.DataFrame({'time':['2017-01-01','2018-01-01'],
+        'paid_order_count':[44379,53532]}),required_columns=('time','paid_order_count'),
+        metric_ids=('paid_order_count',),time_column='time',
+        query_scope={'time_grain':'year','time_range':{'start':'2017-01-01','end':'2019-01-01'}},
+        metric_semantics={'paid_order_count':{'kind':'count','unit':'单'}},
+        inspections=(ResultInspection(operation='period_compare',metric_id='paid_order_count'),))
+    path='/analyses/0/comparisons/0/relative_change_percent'
+    correct=check('增长约20.6%。',summary,[path])
+    assert not correct.errors
+    assert not any('numeric_calculation' in issue for issue in correct.doubts)
+    wrong=check('增长约17.1%。',summary,[path])
+    assert wrong.errors
+
+
 async def run_answer(summary, responses):
     requests = []
 

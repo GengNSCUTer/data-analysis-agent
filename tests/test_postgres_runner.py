@@ -180,6 +180,82 @@ async def test_amount_formula_scalar_changes_are_refused_by_the_complete_tool(ex
 
 
 @pytest.mark.asyncio
+async def test_monthly_state_top_five_executes_all_twelve_partitions(tmp_path):
+    from collections import Counter
+    from data_analysis_agent.query_plan import QueryPlan
+    from data_analysis_agent.question_router import QuestionRouter
+    from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever, ResultContract
+    from data_analysis_agent.semantic_intent import SemanticIntent, select_intent_catalog, route_semantic_intent
+    from data_analysis_agent.result_budget import ResultBudget
+    from data_analysis_agent.runtime_workspace import load_runtime_workspace
+    context = make_context('partition-budget-' + uuid.uuid4().hex)
+    runner = SecurePostgresRunner(workspace=load_runtime_workspace().profile)
+    catalog = CatalogLoader(runner.workspace).load()
+    router = QuestionRouter(CatalogRetriever(catalog),full_results=True)
+    intent = SemanticIntent.model_validate({'request_kind':'data_query','metric_ids':['gmv'],
+        'dimensions':['customer_state'],'top_n':5,'time_grain':'month',
+        'time_range':{'start':'2017-01-01','end':'2018-01-01'}})
+    selection = select_intent_catalog(intent,router.retriever,context.user)
+    route = route_semantic_intent(intent,router,selection,max_result_rows=5000)
+    plan = QueryPlan.from_selection(selection,'',route,
+        {'semantic_intent':intent.as_dict(),'time_range':intent.time_range.model_dump()},
+        result_budget=ResultBudget.aggregate())
+    assert plan.result_budget.aggregate_result_rows == 60
+    contract = ResultContract.from_selection(selection,'',plan.time_range,catalog=catalog,
+        required_result_columns=plan.required_result_columns,requested_dimensions=plan.dimensions,
+        result_budget=plan.result_budget)
+    context.metadata.update({**contract.as_tool_metadata(),'query_plan':plan.as_dict()})
+    sql = ("WITH monthly AS (SELECT DATE_TRUNC('month',o.order_purchase_timestamp) AS time,"
+        "c.customer_state,SUM(i.price) AS gmv FROM analytics.fact_orders o "
+        'JOIN analytics.fact_order_items i ON i.order_id=o.order_id '
+        'JOIN analytics.dim_customers c ON c.customer_id=o.customer_id '
+        "WHERE o.order_status NOT IN ('canceled','unavailable') AND o.order_purchase_timestamp >= DATE '2017-01-01' "
+        "AND o.order_purchase_timestamp < DATE '2018-01-01' GROUP BY 1,2), "
+        'ranked AS (SELECT time,customer_state,gmv,ROW_NUMBER() OVER (PARTITION BY time ORDER BY gmv DESC) AS rn '
+        'FROM monthly) SELECT time,customer_state,gmv FROM ranked WHERE rn<=5 ORDER BY time,gmv DESC')
+    tool = TrustedRunSqlTool(runner,file_system=LocalFileSystem(str(tmp_path)))
+    result = await tool.execute(context,RunSqlToolArgs(sql=sql))
+    assert result.success, (result.error,context.metadata.get('join_evidence'))
+    rows = result.metadata['results']
+    # The disposable fixture has three states/month, still 36 > the old 27
+    # cap. There must be twelve complete partitions without manufacturing rows.
+    counts = Counter(str(row['time'])[:7] for row in rows)
+    assert len(rows)==36 and len(counts)==12
+    assert set(counts.values()) == {3}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('duplicate', [False, True])
+async def test_shared_order_view_join_is_safe_only_when_its_identity_is_preserved(tmp_path, duplicate):
+    context = make_context('shared-view-' + uuid.uuid4().hex)
+    context.metadata.update({'required_result_columns':['gmv'],'metric_result_columns':['gmv'],
+        'metric_fact_grains':{'gmv':'order_item'},
+        'join_source_keys':{'fact_order_items':['order_id','order_item_id'],'fact_orders':['order_id']},
+        'join_source_grains':{'fact_order_items':'order_item','fact_orders':'order'}})
+    projection = "SELECT order_id FROM analytics.fact_orders WHERE order_status NOT IN ('canceled','unavailable')"
+    if duplicate:
+        projection += ' UNION ALL '+projection
+    sql = (f'WITH valid_orders AS ({projection}), amounts AS ('
+        'SELECT i.order_id,SUM(i.price) AS amount FROM analytics.fact_order_items i '
+        'JOIN valid_orders v ON v.order_id=i.order_id GROUP BY i.order_id) '
+        'SELECT SUM(a.amount) AS gmv FROM amounts a JOIN valid_orders v ON v.order_id=a.order_id')
+    tool = TrustedRunSqlTool(SecurePostgresRunner(),file_system=LocalFileSystem(str(tmp_path)))
+    result = await tool.execute(context,RunSqlToolArgs(sql=sql))
+    assert result.success is not duplicate, result.error
+    evidence = context.metadata['join_evidence']
+    assert evidence['status'] == ('amplified' if duplicate else 'partial')
+    if not duplicate:
+        settings = PostgresConnectionSettings.from_environment()
+        with psycopg2.connect(host=settings.host,port=settings.port,database=settings.database,user=settings.reader_user) as reader:
+            reader.set_session(readonly=True)
+            with reader.cursor() as cursor:
+                cursor.execute("SELECT SUM(i.price) FROM analytics.fact_order_items i JOIN analytics.fact_orders o "
+                               "ON o.order_id=i.order_id WHERE o.order_status NOT IN ('canceled','unavailable')")
+                expected = cursor.fetchone()[0]
+        assert float(result.metadata['results'][0]['gmv']) == pytest.approx(float(expected))
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('risk', ['status', 'mean_grain', 'time_source'])
 async def test_catalog_formula_fields_have_positive_and_negative_complete_tool_paths(risk, tmp_path):
     context = make_context('formula-field-' + uuid.uuid4().hex)

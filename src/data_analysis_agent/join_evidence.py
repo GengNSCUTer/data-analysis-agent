@@ -83,6 +83,20 @@ def _unique_keys(source, row_keys):
         return set()  # A scalar aggregate has at most one row.
     if select.args.get('distinct'):
         return set(select.named_selects)
+    # Reused CTEs are intentionally not always flattened. A one-source
+    # projection/filter still preserves a catalog key if every key column is
+    # projected unchanged. No claim is made for joins, expressions or UNION.
+    if not select.args.get('joins') and len(source.selected_sources) == 1:
+        alias, (_, origin) = next(iter(source.selected_sources.items()))
+        keys = _unique_keys(origin,row_keys)
+        if keys is not None:
+            projected = {p.alias_or_name for p in select.selects
+                         if isinstance(p.unalias(),exp.Column) and p.unalias().name in keys
+                         and p.unalias().table in {'',alias}}
+            originals = {p.unalias().name for p in select.selects
+                         if p.alias_or_name in projected and isinstance(p.unalias(),exp.Column)}
+            if originals == keys and len(projected)==len(keys):
+                return projected
     return None
 
 

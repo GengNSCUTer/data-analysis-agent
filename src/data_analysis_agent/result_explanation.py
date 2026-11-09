@@ -243,7 +243,8 @@ def _numbers(
         metric = evidence["analyses"][int(parts[1])].get("metric_id")
     if isinstance(node, (int, float)) and not isinstance(node, bool):
         return [
-            (Decimal(str(node)), "__count__" if parts[-1].endswith("count") else metric)
+            (Decimal(str(node)), '__percent__' if parts[0]=='analyses' and parts[-1] in
+             {'relative_change_percent','share_percent'} else "__count__" if parts[-1].endswith("count") else metric)
         ]
     values = []
     if isinstance(node, dict):
@@ -262,7 +263,8 @@ def _numbers(
                     values.append(
                         (
                             Decimal(str(value)),
-                            "__count__" if key.endswith("count") else metric,
+                            '__percent__' if key in {'relative_change_percent','share_percent'}
+                            else "__count__" if key.endswith("count") else metric,
                         )
                     )
     elif isinstance(node, list):
@@ -281,9 +283,12 @@ def _matches(
     step = Decimal(1).scaleb(shown.as_tuple().exponent) * scale
     expected = value
     if percent:
-        if evidence.get("metric_semantics", {}).get(metric, {}).get("kind") != "rate":
+        if metric == '__percent__':
+            pass  # Calculated growth/share is already expressed in percent.
+        elif evidence.get("metric_semantics", {}).get(metric, {}).get("kind") != "rate":
             return False
-        expected *= 100
+        else:
+            expected *= 100
     return (expected / step).quantize(
         Decimal(1), rounding=ROUND_HALF_UP
     ) * step == shown * scale
@@ -413,7 +418,12 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
                     result.errors
                     if paragraph.kind == "fact"
                     and nodes
-                    and not any(
+                    and ((literal.rstrip().endswith(('%','％')) and any(
+                        ref.startswith('/analyses/') and ref.rsplit('/',1)[-1] in
+                        {'relative_change_percent','share_percent'} for ref in paragraph.evidence_refs
+                    ) and any(
+                        metric == '__percent__' and value >= 0 for value,metric in candidates
+                    )) or (not any(
                         r.startswith("/analyses") for r in paragraph.evidence_refs
                     )
                     and not (not numbers and any(
@@ -422,7 +432,7 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
                     and not unit_conversion
                     and not re.search(
                         r"约|接近|不到|超过|少于|不足|百万|千万|百分之", numeric_text
-                    )
+                    )))
                     else result.doubts
                 )
                 code = (

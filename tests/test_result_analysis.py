@@ -60,6 +60,17 @@ def test_calendar_grains_and_reordering(grain, start, end, periods, freq):
     assert run(frame.sample(frac=1, random_state=7), scope=scope) == expected
 
 
+@pytest.mark.parametrize('years', [[2017.0,2018.0],['2017.0','2018.0'],[2017,2018]])
+def test_postgresql_extract_year_buckets_are_calendar_years_not_epoch_nanoseconds(years):
+    frame = pd.DataFrame({'time':years,'gmv':[44379,53532]})
+    scope = {'time_grain':'year','time_range':{'start':'2017-01-01','end':'2019-01-01'}}
+    result = run(frame,'period_compare',scope=scope)
+    assert result['status'] == 'ready'
+    comparison = result['comparisons'][0]
+    assert comparison['current_period']=='2018' and comparison['baseline_period']=='2017'
+    assert comparison['relative_change_percent'] == pytest.approx(9153/44379*100)
+
+
 def test_state_series_are_not_concatenated_and_top_n_membership_is_not_zero():
     frame = pd.DataFrame({"time": list(pd.date_range("2024-01-01", periods=4, freq="MS")) * 2,
                           "state": ["SP"]*4+["RJ"]*4, "gmv": [1,2,3,4,9,8,7,6]})

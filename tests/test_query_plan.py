@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import pytest
 
 from data_analysis_agent.query_plan import QueryPlan
 from data_analysis_agent.question_router import QuestionRouter
@@ -236,3 +237,25 @@ def test_query_plan_can_use_online_execution_cap_above_display_budget() -> None:
 
     assert decision.allowed is True
     assert decision.estimated_max_rows == 324
+
+
+@pytest.mark.parametrize('dimensions,top_n,expected',[
+    (['customer_state'],5,60),
+    (['customer_state'],50,324),
+    (['customer_state','product_category_name'],5,1620),
+])
+def test_partition_top_n_budget_counts_all_time_buckets(dimensions, top_n, expected):
+    from data_analysis_agent.metric_context import OLIST_RUNTIME_WORKSPACE
+    catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
+    metrics = (catalog.metrics_by_id['gmv'],)
+    interval = {'start':'2017-01-01','end':'2018-01-01','end_semantics':'exclusive'}
+    state = {'time_range':interval,'semantic_intent':{
+        'metric_ids':['gmv'],'dimensions':dimensions,'time_grain':'month','top_n':top_n,
+        'time_range':interval}}
+    admitted = QueryPlan.preflight(metrics,'',state,max_result_rows=5000,
+                                    workspace=OLIST_RUNTIME_WORKSPACE,full_results=True)
+    assert admitted.allowed and admitted.estimated_max_rows == expected
+    if len(dimensions)==1 and top_n==5:
+        rejected = QueryPlan.preflight(metrics,'',state,max_result_rows=59,
+                                       workspace=OLIST_RUNTIME_WORKSPACE,full_results=True)
+        assert not rejected.allowed and rejected.estimated_max_rows==60

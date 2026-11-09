@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 import math
+import re
 from typing import Any, Literal, Mapping, Sequence
 
 import pandas as pd
@@ -158,6 +159,10 @@ def acquisition_scope(requests: Sequence[ResultInspection], scope: Mapping[str, 
 
 
 def _period(value, grain):
+    # EXTRACT(YEAR) is a normal PostgreSQL bucket (often numeric/Decimal),
+    # not a Unix-nanosecond timestamp. Preserve its calendar semantics.
+    if grain == 'year' and re.fullmatch(r'\d{4}(?:\.0+)?',str(value)):
+        value = f'{int(Decimal(str(value))):04d}-01-01'
     stamp = pd.Timestamp(value)
     if stamp.tzinfo is not None:
         stamp = stamp.tz_localize(None)  # Preserve the server's business bucket, not a new timezone.

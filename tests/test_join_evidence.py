@@ -213,6 +213,22 @@ def test_partial_join_risk_distinguishes_preserved_keys_from_cross_fact_fanout(q
     assert any(item['high_risk'] for item in uncovered) is high_risk
 
 
+@pytest.mark.parametrize('duplicate', [False,True])
+def test_shared_projection_preserves_a_catalog_key_but_union_all_does_not(duplicate):
+    projection = 'SELECT order_id FROM analytics.fact_orders'
+    if duplicate:
+        projection += ' UNION ALL SELECT order_id FROM analytics.fact_orders'
+    sql = (f'WITH valid_orders AS ({projection}), amounts AS ('
+        'SELECT i.order_id,SUM(i.price) AS amount FROM analytics.fact_order_items i '
+        'JOIN valid_orders v ON v.order_id=i.order_id GROUP BY i.order_id) '
+        'SELECT SUM(a.amount) AS gmv FROM amounts a JOIN valid_orders v ON v.order_id=a.order_id')
+    _, uncovered = build_join_probes(sql,
+        row_keys={'fact_order_items':('order_id','order_item_id'),'fact_orders':('order_id',)},
+        source_grains={'fact_order_items':'order_item','fact_orders':'order'},metric_grains={'gmv':'order_item'})
+    assert uncovered
+    assert any(item['high_risk'] for item in uncovered) is duplicate
+
+
 def test_summarize_diagnostics_does_not_invent_false_rejection_labels():
     from data_analysis_agent.join_evidence import summarize_join_evidence
 
