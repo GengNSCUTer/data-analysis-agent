@@ -82,7 +82,10 @@ tasks:
     category: comparison
     goal: 半年比较应交付两期总值和增长幅度
     steps:
-      - {question: 2017年下半年有效订单数比上半年增长多少？列两期总数、差额和增长率。, reference: {metric: paid_order_count, grain: half_year, start: '2017-01-01', end: '2018-01-01'}}
+      - question: 2017年下半年有效订单数比上半年增长多少？列两期总数、差额和增长率。
+        reference: {metric: paid_order_count, grain: half_year, start: '2017-01-01', end: '2018-01-01'}
+        acquisition_reference: {metric: paid_order_count, grain: month, start: '2017-01-01', end: '2018-01-01'}
+        analysis: {operation: period_compare, metric: paid_order_count, current_window: ['2017-07-01','2018-01-01'], baseline_window: ['2017-01-01','2017-07-01']}
   - id: o-comparison-3
     dataset: olist
     category: comparison
@@ -294,7 +297,10 @@ tasks:
     category: comparison
     goal: 上下半年对比有两个窗口与计算
     steps:
-      - {question: 2023年下半年已完成成交额比上半年增长多少？给两期总值、差额和增长率。, reference: {metric: completed_sale_amount, grain: half_year, start: '2023-01-01', end: '2024-01-01'}}
+      - question: 2023年下半年已完成成交额比上半年增长多少？给两期总值、差额和增长率。
+        reference: {metric: completed_sale_amount, grain: half_year, start: '2023-01-01', end: '2024-01-01'}
+        acquisition_reference: {metric: completed_sale_amount, grain: month, start: '2023-01-01', end: '2024-01-01'}
+        analysis: {operation: period_compare, metric: completed_sale_amount, current_window: ['2023-07-01','2024-01-01'], baseline_window: ['2023-01-01','2023-07-01']}
   - id: t-comparison-3
     dataset: thelook
     category: comparison

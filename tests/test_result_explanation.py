@@ -87,6 +87,34 @@ def test_calculated_growth_percent_uses_its_own_unit_even_when_metric_is_a_count
     assert wrong.errors
 
 
+@pytest.mark.asyncio
+async def test_reverse_year_growth_cannot_use_absolute_forward_percentage_even_if_reviewer_agrees():
+    from data_analysis_agent.result_analysis import ResultInspection
+    summary=build_result_evidence(pd.DataFrame({'time':['2017','2018'],'paid_order_count':[44379,53532]}),
+        required_columns=('time','paid_order_count'),metric_ids=('paid_order_count',),
+        metric_semantics={'paid_order_count':{'kind':'count','unit':'单'}},
+        inspections=(ResultInspection(operation='compare',metric_id='paid_order_count',row_numbers=(1,2)),))
+    wrong=answer('2018年比2017年增长约17.1%。',refs=('/analyses/0',))
+    right=answer('2018年比2017年增长约20.6%。',refs=('/analyses/0',))
+    checked=check_answer(AnswerDraft.model_validate_json(wrong),parse_result_evidence(summary))
+    assert checked.errors
+    assert not check_answer(AnswerDraft.model_validate_json(right),parse_result_evidence(summary)).errors
+    outcome,requests=await run_answer(summary,[wrong,right,'{"verdict":"supported","issues":[]}'])
+    assert outcome.text=='2018年比2017年增长约20.6%。'
+    assert outcome.revision_count==1 and len(requests)==3
+    assert outcome.calls[0]['check_errors']
+    assert outcome.calls[-1]['review_verdict']=='supported'
+
+
+@pytest.mark.parametrize('decline',['下降约20%。','同比下降20%。','减少了20%。'])
+def test_comparison_decline_can_use_positive_magnitude_without_becoming_positive_growth(decline):
+    from data_analysis_agent.result_analysis import ResultInspection
+    summary=build_result_evidence(pd.DataFrame({'gmv':[80,100]}),required_columns=('gmv',),metric_ids=('gmv',),
+        inspections=(ResultInspection(operation='compare',metric_id='gmv',row_numbers=(1,2)),))
+    assert not check(decline,summary,refs=('/analyses/0',)).errors
+    assert check('增长约20%。',summary,refs=('/analyses/0',)).errors
+
+
 async def run_answer(summary, responses):
     requests = []
 

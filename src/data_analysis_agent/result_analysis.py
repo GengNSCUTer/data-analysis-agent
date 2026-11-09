@@ -30,6 +30,8 @@ class ResultInspection(BaseModel):
     baseline: Literal["previous_period", "previous_year", "first_period"] = "previous_period"
     periods: tuple[str, ...] = ()
     within_period: tuple[str, str] | None = None
+    comparison_windows: tuple[tuple[str,str],tuple[str,str]] | None = Field(default=None,
+        description='period_compare的本期窗口、基期窗口，各为[start,end)，只对可跨时间累加指标汇总。')
     direction: Literal["asc", "desc"] = "desc"
     include_ties: bool = False
     rank_by: Literal["value", "change", "relative_change"] = "value"
@@ -54,6 +56,11 @@ class ResultInspection(BaseModel):
             raise ValueError("periods must contain current and baseline")
         if self.within_period and date.fromisoformat(self.within_period[0]) >= date.fromisoformat(self.within_period[1]):
             raise ValueError("within_period must be a nonempty half-open date interval")
+        if self.comparison_windows:
+            if self.operation != 'period_compare' or self.periods or self.within_period:
+                raise ValueError('comparison_windows is a period_compare alternative to periods/within_period')
+            if any(date.fromisoformat(start) >= date.fromisoformat(end) for start,end in self.comparison_windows):
+                raise ValueError('comparison windows must be nonempty half-open intervals')
         return self
 
 
@@ -114,11 +121,29 @@ def _delta(current, baseline, *, rate: bool = False) -> dict[str, Any]:
 _FREQUENCIES = {"day": "D", "week": "W-SUN", "month": "M", "quarter": "Q-DEC", "year": "Y-DEC"}
 
 
+def _window_requirements(windows, grain):
+    grain = grain if grain in _FREQUENCIES else 'month'
+    if any(_period(value,grain).start_time != pd.Timestamp(value) for window in windows for value in window):
+        grain = 'day'
+    return {'time_range':{'start':min(window[0] for window in windows),
+                         'end':max(window[1] for window in windows),'end_semantics':'exclusive'},
+            'time_grain':grain,'top_n':None}
+
+
 def acquisition_scope(requests: Sequence[ResultInspection], scope: Mapping[str, Any]):
     """Acquire comparison periods before a first SQL, keeping the requested operands explicit."""
     updates, normalized = {}, []
     bounds, grain = scope.get("time_range") or {}, scope.get("time_grain")
     for request in requests:
+        if request.comparison_windows:
+            needed = _window_requirements(request.comparison_windows, updates.get('time_grain',grain))
+            existing = updates.get('time_range',bounds)
+            interval = needed['time_range']
+            needed['time_range'] = {**interval,'start':min(interval['start'],existing.get('start') or interval['start']),
+                                   'end':max(interval['end'],existing.get('end') or interval['end'])}
+            updates.update(needed)
+            normalized.append(request)
+            continue
         if request.operation == "share" and request.denominator == "business_total" and scope.get("top_n"):
             top = scope["top_n"]
             n = top if isinstance(top, int) else next(iter(top.values()))
@@ -279,6 +304,8 @@ def _trend(frame, metric, request, scope, time_column, additive):
 
 
 def _period_compare(frame, metric, request, scope, time_column, additive, rate):
+    if request.comparison_windows:
+        return _window_compare(frame,metric,request,scope,time_column,additive)
     prepared, reason, needed = _series_context(frame, metric, request, scope, time_column, additive)
     if prepared is None:
         return {"status": "query_required", "reason": reason, "query_requirements": needed}
@@ -330,6 +357,40 @@ def _period_compare(frame, metric, request, scope, time_column, additive, rate):
     return {"status": "ready", "comparisons": comparisons, "comparison_count": len(comparisons)}
 
 
+def _window_compare(frame,metric,request,scope,time_column,additive):
+    """Compare explicit windows without summing averages or missing time buckets."""
+    if not additive:
+        return {'status':'unsupported','reason':'该指标不可跨时间累加，两个窗口必须分别按原始口径重算，不能相加均值、比例或重叠去重计数。'}
+    needed = _window_requirements(request.comparison_windows,scope.get('time_grain'))
+    bounds = scope.get('time_range') or {}
+    if (scope.get('top_n') or needed['time_grain'] != scope.get('time_grain')
+            or not time_column or not bounds.get('start') or not bounds.get('end')
+            or bounds['start'] > needed['time_range']['start'] or bounds['end'] < needed['time_range']['end']):
+        return {'status':'query_required','reason':'比较需要完整覆盖两个窗口的同口径时间桶。','query_requirements':needed}
+    prepared,reason,_ = _series_context(frame,metric,request,scope,time_column,additive)
+    if prepared is None:
+        return {'status':'query_required','reason':reason,'query_requirements':needed}
+    work,dimensions,_,_ = prepared
+    if work.empty:
+        return {'status':'unsupported','reason':'两个窗口没有可核对的时间桶，不能将缺失结果当作零。'}
+    comparisons=[]
+    for key,group in _groups(work,dimensions):
+        totals=[]
+        for start,end in request.comparison_windows:
+            first,last = _period(start,scope['time_grain']),_period(pd.Timestamp(end)-pd.Timedelta(nanoseconds=1),scope['time_grain'])
+            window = group.loc[group['__period'].between(first,last)]
+            expected=set(pd.period_range(first,last,freq=_FREQUENCIES[scope['time_grain']]))
+            values=pd.to_numeric(window[metric],errors='coerce').replace([float('inf'),-float('inf')],float('nan'))
+            if (set(window['__period']) != expected or window['__period'].duplicated().any()
+                    or values.isna().any()):
+                return {'status':'query_required','reason':'部分分组缺少完整、唯一且非空的窗口时间桶。','query_requirements':needed}
+            totals.append(_sum(window[metric]))
+        comparisons.append({'group':_group_key(key,dimensions),
+            'current_window':list(request.comparison_windows[0]),'baseline_window':list(request.comparison_windows[1]),
+            **_delta(*totals)})
+    return {'status':'ready','comparisons':comparisons,'comparison_count':len(comparisons)}
+
+
 def analyze_result(frame: pd.DataFrame, *, requests: Sequence[ResultInspection], metric_ids: Sequence[str],
                    scope: Mapping[str, Any] | None = None, additive_metric_ids: Sequence[str] = (),
                    metric_semantics: Mapping[str, Mapping[str, str]] | None = None,
@@ -375,7 +436,9 @@ def analyze_result(frame: pd.DataFrame, *, requests: Sequence[ResultInspection],
                 result = {"status": "unsupported", "reason": "比较需要两个非空数值。"}
             else:
                 result = {**_delta(*selected[metric], rate=spec.get("kind") == "rate"), "row_numbers": list(request.row_numbers),
-                          "operands": _records(selected)}
+                          "operands": _records(selected),
+                          'reverse_comparison':{**_delta(*reversed(selected[metric].tolist()),rate=spec.get('kind')=='rate'),
+                                                'operands':_records(selected.iloc[::-1])}}
         elif request.operation == "trend":
             result = _trend(selected, metric, request, scope, time_column, additive)
         elif request.operation == "period_compare":

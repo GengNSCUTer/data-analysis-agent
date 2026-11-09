@@ -71,6 +71,63 @@ def test_postgresql_extract_year_buckets_are_calendar_years_not_epoch_nanosecond
     assert comparison['relative_change_percent'] == pytest.approx(9153/44379*100)
 
 
+def test_two_window_comparison_uses_six_month_totals_not_last_months_or_averages():
+    windows=(('2024-07-01','2025-01-01'),('2024-01-01','2024-07-01'))
+    request=ResultInspection(operation='period_compare',metric_id='gmv',comparison_windows=windows)
+    scope={'time_grain':'month','time_range':{'start':'2024-01-01','end':'2025-01-01'}}
+    frame=pd.DataFrame({'time':pd.date_range('2024-01-01',periods=12,freq='MS'),
+                        'gmv':[10]*6+[20]*6})
+    result=analyze_result(frame,requests=[request],metric_ids=('gmv',),scope=scope,
+                         additive_metric_ids=('gmv',),time_column='time')[0]
+    assert result['status']=='ready'
+    comparison=result['comparisons'][0]
+    assert (comparison['current'],comparison['baseline'],comparison['difference'])==(120,60,60)
+    assert comparison['relative_change_percent']==100
+    assert comparison['current_window']==list(windows[0])
+    assert comparison['baseline_window']==list(windows[1])
+
+
+def test_window_acquisition_covers_both_operands_and_uses_day_buckets_for_partial_months():
+    request=ResultInspection(operation='period_compare',metric_id='gmv',
+        comparison_windows=(('2024-07-15','2024-08-15'),('2024-01-15','2024-02-15')))
+    scope={'time_grain':'month','time_range':{'start':'2024-07-15','end':'2024-08-15'},'top_n':10}
+    updates, normalized=acquisition_scope([request],scope)
+    assert updates['time_range']=={'start':'2024-01-15','end':'2024-08-15','end_semantics':'exclusive'}
+    assert updates['time_grain']=='day' and updates['top_n'] is None
+    assert normalized[0].comparison_windows==request.comparison_windows
+
+
+@pytest.mark.parametrize('problem',['missing','null','duplicate','non_additive','partial_bucket'])
+def test_window_comparison_does_not_invent_missing_data_or_average_nonadditive_values(problem):
+    windows=(('2024-03-01','2024-05-01'),('2024-01-01','2024-03-01'))
+    if problem=='partial_bucket':
+        windows=(('2024-03-15','2024-05-01'),windows[1])
+    request=ResultInspection(operation='period_compare',metric_id='gmv',comparison_windows=windows)
+    frame=pd.DataFrame({'time':pd.date_range('2024-01-01',periods=4,freq='MS'),'gmv':[10,10,20,20]})
+    if problem=='missing':
+        frame=frame.drop(index=1)
+    if problem=='null':
+        frame.loc[1,'gmv']=None
+    if problem=='duplicate':
+        frame=pd.concat([frame,frame.iloc[:1]],ignore_index=True)
+    result=analyze_result(frame,requests=[request],metric_ids=('gmv',),
+        scope={'time_grain':'month','time_range':{'start':'2024-01-01','end':'2024-05-01'}},
+        additive_metric_ids=() if problem=='non_additive' else ('gmv',),time_column='time')[0]
+    assert result['status'] in {'query_required','unsupported'}
+    assert 'comparisons' not in result
+
+
+@pytest.mark.parametrize('baseline,status',[(0,'zero'),(-5,'negative')])
+def test_two_window_comparison_reports_undefined_growth_for_nonpositive_baseline(baseline,status):
+    request=ResultInspection(operation='period_compare',metric_id='gmv',
+        comparison_windows=(('2024-02-01','2024-03-01'),('2024-01-01','2024-02-01')))
+    result=analyze_result(pd.DataFrame({'time':['2024-01-01','2024-02-01'],'gmv':[baseline,10]}),
+        requests=[request],metric_ids=('gmv',),additive_metric_ids=('gmv',),time_column='time',
+        scope={'time_grain':'month','time_range':{'start':'2024-01-01','end':'2024-03-01'}})[0]
+    assert result['comparisons'][0]['baseline_status']==status
+    assert result['comparisons'][0]['relative_change_percent'] is None
+
+
 def test_state_series_are_not_concatenated_and_top_n_membership_is_not_zero():
     frame = pd.DataFrame({"time": list(pd.date_range("2024-01-01", periods=4, freq="MS")) * 2,
                           "state": ["SP"]*4+["RJ"]*4, "gmv": [1,2,3,4,9,8,7,6]})

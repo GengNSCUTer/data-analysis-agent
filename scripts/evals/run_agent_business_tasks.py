@@ -9,6 +9,7 @@ import argparse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from decimal import Decimal
 import json
 from pathlib import Path
 import sys
@@ -110,6 +111,22 @@ def check_analyses(expectation, payload, expected):
     analyses = [item for item in payload.get("analyses", []) if item["operation"] == operation and item["status"] == "ready"]
     if not analyses:
         return ["analysis_missing:" + operation]
+    if operation=='period_compare':
+        current,baseline=expectation['current_window'],expectation['baseline_window']
+        comparisons=[comparison for result in analyses if result.get('metric_id')==expectation['metric']
+                     for comparison in result.get('comparisons',[])
+                     if comparison.get('current_window')==current and comparison.get('baseline_window')==baseline]
+        if len(comparisons)!=1:
+            return ['analysis_windows']
+        values={pd.Timestamp(row['time']).date().isoformat():Decimal(str(row[expectation['metric']]))
+                for row in expected.to_dict('records')}
+        a,b=values[current[0]],values[baseline[0]]
+        wanted={'current':a,'baseline':b,'difference':a-b,
+                'relative_change_percent':(a-b)/b*100 if b>0 else None}
+        return ['analysis_numeric:'+name for name,value in wanted.items()
+                if (comparisons[0].get(name) is not None if value is None else
+                    not numeric_equal(comparisons[0].get(name),value,
+                        'growth_percent' if name=='relative_change_percent' else expectation['metric']))]
     if operation == "trend":
         values = list(expected["gmv"])
         increasing = all(b > a for a, b in zip(values, values[1:]))
@@ -118,6 +135,14 @@ def check_analyses(expectation, payload, expected):
     target = expected_calculation(expected, expectation["metric"], operation, expectation.get("rows"))
     actual = analyses[0].get("value" if operation == "sum" else "difference")
     return [] if numeric_equal(actual, target, expectation["metric"]) else ["analysis_numeric"]
+
+
+def check_acquisition_frame(observed,expected,acquisition_expected=None,*,ordered=False):
+    """Authored alternative raw shape; final calculated operands remain mandatory."""
+    errors=compare_frames(observed,expected,ordered=ordered)
+    if not errors or acquisition_expected is None:
+        return errors
+    return compare_frames(observed,acquisition_expected,ordered=ordered)
 
 
 def task_status(turns, semantic="pending"):
@@ -190,12 +215,18 @@ def review_saved(output):
                 turn["errors"] = [error for error in turn["errors"] if not error.startswith("scope:")]
                 turn["errors"].extend(check_task_scope(step.get("reference"),turn.get("analysis_state")))
             if csv_path.exists() and expected is not None:
-                errors = compare_frames(read_csv(csv_path.read_text()),expected,ordered=step.get("ordered",False))
+                acquisition_path=Path(str(prefix)+'.expected-acquisition.csv')
+                acquisition_expected=read_csv(acquisition_path.read_text()) if acquisition_path.exists() else None
+                errors = check_acquisition_frame(read_csv(csv_path.read_text()),expected,acquisition_expected,ordered=step.get("ordered",False))
                 # Replace only evaluator-owned numeric errors. SQL, narrative,
                 # state, browser and latency failures remain untouched.
                 turn["errors"] = [error for error in turn["errors"] if not error.startswith(("csv:","DateParseError:"))]
                 turn["errors"].extend("csv:"+error for error in errors)
                 turn["numeric_errors"] = errors
+            if step.get('analysis') and expected is not None and Path(str(prefix)+'.run.json').exists():
+                trace=json.loads(Path(str(prefix)+'.run.json').read_text()).get('catalog_trace') or {}
+                turn['errors']=[error for error in turn['errors'] if not error.startswith('analysis_')]
+                turn['errors'].extend(check_analyses(step['analysis'],evidence_payload(trace),expected))
             chart_path = Path(str(prefix) + ".chart-rechecked.json")
             if chart_path.exists() and expected is not None:
                 chart_errors = check_chart(json.loads(chart_path.read_text()),expected)
@@ -341,15 +372,19 @@ def run_partition(dataset, tasks, output, repetitions, username):
                             "prior_turn_failed":any(turn["errors"] for turn in turns)}
                         turns.append(item)
                         prefix = folder / f"turn-{number}"
-                        expected = None
+                        expected = acquisition_expected = None
                         try:
                             if step.get("reference"):
                                 connection = connect(dataset)
                                 try:
                                     expected = reference_frame(connection, dataset, step["reference"])
+                                    if step.get('acquisition_reference'):
+                                        acquisition_expected=reference_frame(connection,dataset,step['acquisition_reference'])
                                 finally:
                                     connection.close()
                                 expected.to_csv(str(prefix) + ".expected.csv", index=False)
+                                if acquisition_expected is not None:
+                                    acquisition_expected.to_csv(str(prefix)+'.expected-acquisition.csv',index=False)
                             elif previous_frame is not None:
                                 expected = previous_frame
                             if step.get("reload") or step.get("refresh"):
@@ -417,7 +452,7 @@ def run_partition(dataset, tasks, output, repetitions, username):
                                 Path(str(prefix) + ".csv").write_text(csv_response.text())
                                 observed = read_csv(csv_response.text())
                                 if expected is not None:
-                                    item["numeric_errors"] = compare_frames(observed, expected, ordered=step.get("ordered", False))
+                                    item["numeric_errors"] = check_acquisition_frame(observed, expected, acquisition_expected, ordered=step.get("ordered", False))
                                     item["errors"].extend("csv:" + error for error in item["numeric_errors"])
                             if step.get("analysis") and expected is not None:
                                 item["errors"].extend(check_analyses(step["analysis"], payload, expected))
@@ -501,6 +536,9 @@ def main():
                             if step.get("reference"):
                                 frame = reference_frame(connection, dataset, step["reference"])
                                 print(task["id"],n,len(frame),list(frame.columns),flush=True)
+                            if step.get('acquisition_reference'):
+                                frame=reference_frame(connection,dataset,step['acquisition_reference'])
+                                print(task['id'],n,'acquisition',len(frame),list(frame.columns),flush=True)
             finally:
                 connection.close()
         return 0

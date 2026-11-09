@@ -34,6 +34,9 @@ text就是用户看到的原文，服务端不会改成句式模板。kind为fac
 不能引用一个字段却替换它的实体、指标或单位。
 实体名称优先保留来源值。可以使用能确认对应的常见译名或别名；不确定州代码全称时保留代码，不能猜。
 statistics和analyses是服务端计算，样本之外的结论只用已有统计支持，不能从样本猜测。
+期间比较明确current是本期、baseline是基期，增长率分母是baseline；负增长不能取绝对值后换成反方向的增长。
+行比较的operands是实际行顺序，不是语义解释阶段假定的顺序；反方向比较引用reverse_comparison，不能只把difference取绝对值并沿用原增长率。
+时间端点只表示最早/最晚，不表示最大/最小。下降次数使用down_count；first_counterexample只是第一个反例，largest_drop只是最大跌幅，不能把两者当成全部下降月份。
 Top-N合计不等于全业务总额，并列极值不能称唯一；不简单累加均值、比率或非可加计数。
 允许正常四舍五入、万/亿和百分数表达，保留Catalog币种，未知币种不要说成人民币/美元。
 没有原因证据时明确说“可能、假设、尚需验证”，不要把相关性说成确定因果。
@@ -243,8 +246,9 @@ def _numbers(
         metric = evidence["analyses"][int(parts[1])].get("metric_id")
     if isinstance(node, (int, float)) and not isinstance(node, bool):
         return [
-            (Decimal(str(node)), '__percent__' if parts[0]=='analyses' and parts[-1] in
-             {'relative_change_percent','share_percent'} else "__count__" if parts[-1].endswith("count") else metric)
+            (Decimal(str(node)), ('__growth_percent__' if parts[-1]=='relative_change_percent' else '__share_percent__')
+             if parts[0]=='analyses' and parts[-1] in {'relative_change_percent','share_percent'}
+             else "__count__" if parts[-1].endswith("count") else metric)
         ]
     values = []
     if isinstance(node, dict):
@@ -263,7 +267,7 @@ def _numbers(
                     values.append(
                         (
                             Decimal(str(value)),
-                            '__percent__' if key in {'relative_change_percent','share_percent'}
+                            ('__growth_percent__' if key=='relative_change_percent' else '__share_percent__') if key in {'relative_change_percent','share_percent'}
                             else "__count__" if key.endswith("count") else metric,
                         )
                     )
@@ -283,7 +287,7 @@ def _matches(
     step = Decimal(1).scaleb(shown.as_tuple().exponent) * scale
     expected = value
     if percent:
-        if metric == '__percent__':
+        if metric in {'__growth_percent__','__share_percent__'}:
             pass  # Calculated growth/share is already expressed in percent.
         elif evidence.get("metric_semantics", {}).get(metric, {}).get("kind") != "rate":
             return False
@@ -398,6 +402,14 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
                 if before.endswith("负")
                 else match.group()
             )
+            growth_claim = re.search(r'(增长|增幅|增速|同比|环比|下降|降幅|下跌|跌幅|减少|降低|回落)[^。；;\n\d]{0,12}$',before)
+            percent_literal = literal.rstrip().endswith(('%','％'))
+            calculated_growth = percent_literal and growth_claim and any(
+                metric == '__growth_percent__' for _,metric in candidates)
+            if calculated_growth:
+                candidates=[(value,metric) for value,metric in candidates if metric=='__growth_percent__']
+                if re.search(r'(下降|降幅|下跌|跌幅|减少|降低|回落)[^。；;\n\d]{0,12}$',before):
+                    literal='-'+literal.lstrip('+-')
             if count_context and any(
                 _matches(literal, Decimal(value), "__count__", evidence)
                 for value in (
@@ -418,11 +430,11 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
                     result.errors
                     if paragraph.kind == "fact"
                     and nodes
-                    and ((literal.rstrip().endswith(('%','％')) and any(
+                    and (calculated_growth or (literal.rstrip().endswith(('%','％')) and any(
                         ref.startswith('/analyses/') and ref.rsplit('/',1)[-1] in
                         {'relative_change_percent','share_percent'} for ref in paragraph.evidence_refs
                     ) and any(
-                        metric == '__percent__' and value >= 0 for value,metric in candidates
+                        metric in {'__growth_percent__','__share_percent__'} and value >= 0 for value,metric in candidates
                     )) or (not any(
                         r.startswith("/analyses") for r in paragraph.evidence_refs
                     )
@@ -594,6 +606,10 @@ async def generate_result_answer(
                 checked = AnswerCheck(
                     errors=["format：请按paragraphs格式返回你自己撰写的正文"]
                 )
+            # Keep the concrete reason with its existing owner-scoped run,
+            # without storing or streaming the unchecked answer itself.
+            calls[-1]['check_errors']=list(checked.errors)
+            calls[-1]['check_doubts']=list(checked.doubts)
             semantic_doubt_seen |= bool(checked.doubts)
             issues = checked.errors
             for issue in checked.errors + checked.doubts:
@@ -624,6 +640,8 @@ async def generate_result_answer(
                 reviewed = AnswerReview.model_validate_json(
                     _json_content((await call(review, 20)).content or "")
                 )
+                calls[-1]['review_verdict']=reviewed.verdict
+                calls[-1]['review_issues']=list(reviewed.issues)
                 if reviewed.verdict != "supported" or reviewed.issues:
                     issues = reviewed.issues or ["证据不足，请说明不足，不要编造事实"]
                     issue_codes.add("semantic_review")

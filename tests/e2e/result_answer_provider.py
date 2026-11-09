@@ -20,6 +20,9 @@ def model_answer(evidence):
             text = f"模型说明：选定结果合计为{result['value']}。"
         elif op == "compare":
             text = f"模型说明：两项差额为{result['difference']}。"
+        elif op == 'period_compare' and result.get('comparisons'):
+            comparison=result['comparisons'][0]
+            text=f"模型说明：本期为{comparison['current']}，基期为{comparison['baseline']}，差额为{comparison['difference']}。"
         elif op == "distribution":
             text = f"模型说明：中位数为{result['median']}。"
         elif op == "share":

@@ -101,6 +101,24 @@ def test_independent_analysis_and_rendered_chart_check_values():
     assert runner.check_analyses({"operation":"sum","metric":"gmv"},{"analyses":[]},expected) == ["analysis_missing:sum"]
 
 
+def test_two_window_task_accepts_independent_monthly_source_but_checks_both_half_totals_and_growth():
+    expected=read_csv('time,gmv\n2024-01-01,60\n2024-07-01,120\n')
+    monthly=pd.DataFrame({'time':pd.date_range('2024-01-01',periods=12,freq='MS'),'gmv':[10]*6+[20]*6})
+    assert runner.check_acquisition_frame(monthly,expected,monthly.copy())==[]
+    wrong=monthly.copy()
+    wrong.loc[1,'gmv']=100
+    assert runner.check_acquisition_frame(wrong,expected,monthly)
+    target={'operation':'period_compare','metric':'gmv','current_window':['2024-07-01','2025-01-01'],
+            'baseline_window':['2024-01-01','2024-07-01']}
+    comparison={**{k:target[k] for k in ('current_window','baseline_window')},
+                'current':120,'baseline':60,'difference':60,'relative_change_percent':100}
+    payload={'analyses':[{'operation':'period_compare','status':'ready','metric_id':'gmv','comparisons':[comparison]}]}
+    assert runner.check_analyses(target,payload,expected)==[]
+    comparison['relative_change_percent']=50
+    assert runner.check_analyses(target,payload,expected)==['analysis_numeric:relative_change_percent']
+    assert runner.check_analyses(target,{'analyses':[]},expected)==['analysis_missing:period_compare']
+
+
 def test_completed_request_without_semantic_review_is_not_task_success():
     assert runner.task_status([{"errors":[]}]) == "pending_review"
     assert runner.task_status([{"errors":[]}], "fail") == "failed"

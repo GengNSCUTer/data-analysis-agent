@@ -116,6 +116,18 @@ def test_browser_result_evidence_continuity_and_refresh(result_evidence_data, mo
                                       "result_inspections": [{"operation": "sum", "metric_id": "gmv"},
                                                              {"operation": "share", "metric_id": "gmv", "row_numbers": [12]}]},
         "继续解释全年结果": {"request_kind": "result_followup", "action": "keep"},
+        "下半年比上半年增长多少，给两期合计": {"request_kind":"data_query","action":"new_task",
+            "metric_ids":["gmv"],"dimensions":[],"time_grain":"month",
+            "time_range":{"start":"2017-01-01","end":"2018-01-01"},
+            "result_inspections":[{"operation":"period_compare","metric_id":"gmv",
+                "comparison_windows":[["2017-07-01","2018-01-01"],["2017-01-01","2017-07-01"]]}]},
+        "重新查下半年和上半年，不用缓存": {"request_kind":"data_query","action":"new_task",
+            "metric_ids":["gmv"],"dimensions":[],"time_grain":"month",
+            "time_range":{"start":"2017-01-01","end":"2018-01-01"},
+            "requested_answer":{"metric_ids":["gmv"],"time_grain":"month","refresh":True,
+                "time_range":{"start":"2017-01-01","end":"2018-01-01"}},
+            "result_inspections":[{"operation":"period_compare","metric_id":"gmv",
+                "comparison_windows":[["2017-07-01","2018-01-01"],["2017-01-01","2017-07-01"]]}]},
         "新分析，SP州商品品类销售额前十": {"request_kind":"data_query","action":"new_task",
             "metric_ids":["gmv"],"dimensions":["product_category_name"],"top_n":10,
             "filters":[{"dimension":"customer_state","value":"SP"}]},
@@ -216,6 +228,9 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
         async def aclose(self):
             pass
 
+    # The controlled provider completes >30 turns in under a minute. Exercise
+    # this conversation, not the separately tested production admission rate.
+    monkeypatch.setenv('DATA_ANALYSIS_QUESTIONS_PER_MINUTE','100')
     settings = PostgresConnectionSettings.from_environment()
     username = "evidence_" + uuid.uuid4().hex[:12]
     password = secrets.token_hex(16)
@@ -266,8 +281,10 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                 with psycopg2.connect(host=settings.host, port=settings.port, dbname=settings.database,
                                       user=settings.writer_user) as connection:
                     with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-                        cursor.execute("SELECT termination_reason,sql_calls_used,catalog_trace FROM app.agent_runs WHERE conversation_id=%s ORDER BY started_at DESC LIMIT 1", (cid,))
-                        run = dict(cursor.fetchone())
+                        cursor.execute("SELECT termination_reason,sql_calls_used,catalog_trace FROM app.agent_runs WHERE request_id=%s", (pending.value.request.post_data_json['request_id'],))
+                        recorded=cursor.fetchone()
+                        assert recorded is not None, pending.value.text()
+                        run = dict(recorded)
                 if question == "重新查销售额检查重复关联":
                     assert run["termination_reason"] != "completed"
                     assert run["sql_calls_used"] == 1
@@ -276,8 +293,11 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                     observations.append({"question":question, "join_evidence":run["catalog_trace"]["join_evidence"],
                                          "termination_reason":run["termination_reason"]})
                     continue
+                if run['termination_reason'] != 'completed':
+                    (output/'unexpected-run.json').write_text(json.dumps({'question':question,'wire':pending.value.text(),
+                        'detail':detail,**run},ensure_ascii=False,default=str))
                 assert run["termination_reason"] == "completed", (question, run)
-                assert run["sql_calls_used"] == int(question in {categories_question, monthly_question, "刚才前两名占全部品类销售额多少", "补上一个月对比环比", "再看十二月同比，没有基期就说明", "另按客户州统计客单价", "这些州合在一起算总体客单价", "重新正确查询销售额", "新分析，SP州商品品类销售额前十"}), (question, run)
+                assert run["sql_calls_used"] == int(question in {categories_question, monthly_question, "刚才前两名占全部品类销售额多少", "补上一个月对比环比", "再看十二月同比，没有基期就说明", "另按客户州统计客单价", "这些州合在一起算总体客单价", "重新正确查询销售额", "新分析，SP州商品品类销售额前十", "重新查下半年和上半年，不用缓存"}), (question, run)
                 if run["sql_calls_used"]:
                     assert run["catalog_trace"]["join_evidence"]["status"] in {"checked", "partial"}
                 assert detail["trusted_result_artifact"]
@@ -347,6 +367,23 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                     assert current["sample_rows"][0]["average_order_value"] == pytest.approx(float(sum(prices)/len(prices)))
                 elif question == "继续解释全年结果":
                     assert current["coverage"] == "complete" and len(current["sample_rows"]) == 12
+                elif question in {'下半年比上半年增长多少，给两期合计','重新查下半年和上半年，不用缓存'}:
+                    comparison=current['analyses'][0]['comparisons'][0]
+                    with psycopg2.connect(host=settings.host,port=settings.port,dbname=settings.database,
+                                          user=settings.reader_user) as reader:
+                        reader.set_session(readonly=True)
+                        with reader.cursor() as cursor:
+                            cursor.execute("SELECT SUM(i.price) FILTER (WHERE o.order_purchase_timestamp>=DATE '2017-07-01'),"
+                                "SUM(i.price) FILTER (WHERE o.order_purchase_timestamp<DATE '2017-07-01') "
+                                "FROM analytics.fact_order_items i JOIN analytics.fact_orders o ON o.order_id=i.order_id "
+                                "WHERE o.order_status NOT IN ('canceled','unavailable') AND o.order_purchase_timestamp>=DATE '2017-01-01' "
+                                "AND o.order_purchase_timestamp<DATE '2018-01-01'")
+                            current_total,baseline_total=cursor.fetchone()
+                    assert comparison['current']==pytest.approx(float(current_total))
+                    assert comparison['baseline']==pytest.approx(float(baseline_total))
+                    assert comparison['relative_change_percent']==pytest.approx(float((current_total-baseline_total)/baseline_total*100))
+                    if question=='下半年比上半年增长多少，给两期合计':
+                        assert run['catalog_trace']['artifact_reuse']['mode'] in {'DIRECT_REUSE','LOCAL_COMPUTE'}
                 elif question in {'改前五，继承其他条件','这五个只换横向条形图，不查询'}:
                     state = detail['analysis_state']
                     assert state['filters'] == ['customer_state=SP']
