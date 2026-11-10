@@ -174,7 +174,8 @@ async def test_automatic_retrieval_uses_older_metric_without_state_mutation_and_
     assert (await planner.plan(conversation.id,user,intent,state,state)).decision.mode == "SQL_REQUIRED"
 
 
-async def test_local_filter_activation_uses_proven_scope_for_catalog_binding(history_setup):
+@pytest.mark.parametrize("fail_commit", [False, True])
+async def test_local_filter_activation_uses_proven_scope_for_catalog_binding(history_setup, monkeypatch, fail_commit):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     from data_analysis_agent.chat_runtime import BudgetedChatHandler
@@ -207,6 +208,20 @@ async def test_local_filter_activation_uses_proven_scope_for_catalog_binding(his
     handler._tool_free_answer = explain
     request = ChatRequest(message='仅保留刚才指定的范围并给合计',conversation_id=conversation.id,
                           request_context=RequestContext())
+    chunks = []
+    if fail_commit:
+        def reject_commit(*args):
+            raise RuntimeError("injected local derivation commit failure")
+        with monkeypatch.context() as patch:
+            patch.setattr(ArtifactHistory, "commit", reject_commit)
+            with pytest.raises(RuntimeError, match="injected local derivation"):
+                async for piece in handler.handle_stream(request):
+                    chunks.append(piece)
+        saved = await store.get_conversation(conversation.id,user)
+        assert AnalysisState.from_mapping(saved.metadata['working_memory']).as_dict() == state.as_dict()
+        assert len(await history.candidates(conversation.id, user)) == 1
+        assert not any((chunk.rich or {}).get('type') in {'dataframe', 'text'} for chunk in chunks)
+        return
     chunks = [piece async for piece in handler.handle_stream(request)]
     saved = await store.get_conversation(conversation.id,user)
     current = AnalysisState.from_mapping(saved.metadata['working_memory'])

@@ -262,6 +262,8 @@ class BudgetedChatHandler(ChatHandler):
                     route_state["artifact_candidates"] = await self.artifact_reuse_planner.cards(conversation_id, user)
                     last_reply = next((m for m in reversed(conversation.messages) if m.role == "assistant" and not m.tool_calls), None)
                     focus = last_reply.metadata.get("artifact_reuse") if last_reply else None
+                    if focus and focus.get("updates_current_task"):
+                        focus = None
                     route_state["last_history_view"] = {
                         k: focus[k] for k in ("source_artifact_id", "requested_scope", "result_ordinal") if k in focus
                     } if focus else None
@@ -536,7 +538,14 @@ class BudgetedChatHandler(ChatHandler):
                                 **semantic_intent.as_dict(),
                                 **{k: source_scope.get(k) for k in ("metric_ids", "dimensions", "filters", "time_range", "time_grain", "top_n", "comparison_baseline")},
                                 **requirements,
-                                "request_kind": "data_query", "action": "update_task", "state_patch": None,
+                                "request_kind": "data_query", "action": "update_task",
+                                "state_patch": {"operations": [
+                                    {"op": "set", "field": k, "value": v}
+                                    for k, v in {
+                                        **{key: source_scope.get(key) for key in memory.scope()},
+                                        **requirements,
+                                    }.items()
+                                ]},
                                 "result_inspections": [r.model_dump(mode="json") for r in requests],
                             })
                             semantic_intent, proposed_state = resolve_state_intent(
@@ -1225,6 +1234,7 @@ class BudgetedChatHandler(ChatHandler):
     async def _answer_history_result(self, request, conversation, state, user, intent, plan, usage, budget, *, proposed_state):
         """Inspect without mutation, or publish a locally derived task result."""
         artifact, frame, spec = plan.item.artifact, plan.frame, plan.spec
+        activates_task = intent.action in {"new_task", "update_task"} and intent.history_reference is None
         catalog = self.question_router.retriever.catalog
         # A short follow-up need not repeat its inherited dimension/filter.
         # Bind the proven answer scope just as the SQL path binds effective intent.
@@ -1247,7 +1257,7 @@ class BudgetedChatHandler(ChatHandler):
             "result_ordinal": plan.item.ordinal, "snapshot_created_at": artifact.result_metadata.get(
                 "snapshot_created_at", plan.item.created_at.isoformat()),
             "source_row_count": artifact.result_metadata["row_count"], "computed_row_count": len(frame),
-            "candidate_attempts": list(plan.attempts)}
+            "candidate_attempts": list(plan.attempts), "updates_current_task": activates_task}
         usage.record_catalog({"artifact_reuse": provenance, "result_reuse": "validated_result",
             "result_contract": contract.as_evidence(),
             "result_inspection": _result_inspection_trace(artifact, summary,
@@ -1255,8 +1265,6 @@ class BudgetedChatHandler(ChatHandler):
                 metric_ids=spec.metric_ids, columns=columns)})
         usage.set_result_summary(summary)
         usage.mark_result_contract_satisfied()
-        activates_task = (intent.action in {"new_task", "update_task"}
-                          and intent.request_kind != "result_followup" and intent.history_reference is None)
         materializes_result = activates_task and any(
             artifact.query_scope.get(k) != v for k, v in spec.scope().items())
         manifest = None
@@ -1321,6 +1329,7 @@ class BudgetedChatHandler(ChatHandler):
                     plotly_sha256=manifest["plotly_sha256"], plotly_bytes=manifest["plotly_bytes"])
             next_state = replace(proposed_state, run_id=request.request_context.metadata["run_id"],
                 turn_id=request.request_context.metadata["run_id"], active_plan=query_plan.as_dict(),
+                pending_question=None, pending_missing=(),
                 result_shape=artifact.result_metadata["result_shape"]).with_result_artifact(artifact)
             conversation.metadata["working_memory"] = next_state.as_dict()
             if materializes_result:
@@ -1343,7 +1352,8 @@ class BudgetedChatHandler(ChatHandler):
         if records:
             rendered, _ = display_records(records, columns=columns, labels=contract.result_column_labels)
             component = DataFrameComponent.from_records(records=rendered,
-                title="历史结果 · 本地计算" if plan.decision.mode == "LOCAL_COMPUTE" else "历史可信结果",
+                title=("当前分析 · 本地计算" if activates_task else "历史结果 · 本地计算")
+                      if plan.decision.mode == "LOCAL_COMPUTE" else "历史可信结果",
                 max_rows_displayed=budget.preview_rows, exportable=False,
                 **{k:v for k,v in presentation.as_dict().items() if k not in {"columns", "artifact_id"}})
             yield ChatStreamChunk.from_component(UiComponent(rich_component=component), conversation.id, request.request_id)

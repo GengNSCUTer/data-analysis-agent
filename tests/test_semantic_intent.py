@@ -81,6 +81,133 @@ async def test_unknown_answer_metric_is_not_a_repairable_structure_error():
     assert len(calls)==1
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broken", [
+    {"request_kind": "data_query", "action": "update_task", "metric_ids": [],
+     "dimensions": [], "time_grain": None, "time_range": None},
+    {"request_kind": "result_followup", "action": "update_task",
+     "state_patch": {"operations": [{"op": "set", "field": "time_range",
+         "value": {"start": "2017-10-01", "end": "2018-01-01"}}]}},
+    {"request_kind": "result_followup", "action": "keep",
+     "state_patch": {"operations": [{"op": "clear", "field": "dimensions"}]}},
+    {"request_kind": "data_query", "action": "update_task",
+     "history_reference": {"ordinal": 1, "mutation_intent": "inspect"},
+     "state_patch": {"operations": [{"op": "clear", "field": "dimensions"}]}},
+])
+async def test_inconsistent_task_edit_is_corrected_before_any_scope_is_applied(broken):
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.semantic_intent import resolve_state_intent
+
+    catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
+    state = replace(AnalysisState.new(OLIST_RUNTIME_WORKSPACE), metric_ids=("gmv",),
+        time_grain="month", time_range={"start":"2017-01-01", "end":"2018-01-01"})
+    original = state.as_dict()
+    fixed = {"request_kind": "data_query", "action": "update_task", "state_patch": {
+        "operations": [{"op": "set", "field": "time_range",
+            "value": {"start": "2017-10-01", "end": "2018-01-01"}}]}}
+    calls = []
+    async def complete(prompt, user):
+        calls.append(prompt)
+        return json.dumps(broken if len(calls) == 1 else fixed)
+    user = User(id="u", group_memberships=["analyst"])
+    intent = await SemanticIntentInterpreter(catalog, complete).interpret("只保留第四季度，仍按月，不重查", user, state.as_dict())
+    _, effective = resolve_state_intent(intent, state, catalog, user, message_count=4)
+    assert len(calls) == 2 and "校验错误" in calls[1]
+    assert state.as_dict() == original
+    assert effective.metric_ids == ("gmv",) and effective.time_grain == "month"
+    assert effective.time_range == {"start":"2017-10-01", "end":"2018-01-01", "end_semantics":"exclusive"}
+
+
+def test_task_edit_prompt_distinguishes_population_shape_and_read_only_history():
+    prompt = SemanticIntentInterpreter(CatalogLoader(OLIST_RUNTIME_WORKSPACE).load(), None).prompt(
+        "只保留下半年，沿用刚才数据", User(id="u"))
+    assert "是否产生SQL由服务端覆盖证明决定" in prompt
+    assert "不把已有filters复制到dimensions" in prompt
+    assert "不能按猜测的行号代替日期范围" in prompt
+    assert "总体合计" in prompt
+
+
+def test_result_followup_default_action_is_read_only_and_cannot_create_a_task():
+    catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
+    intent = parse_semantic_intent('{"request_kind":"result_followup","metric_ids":["gmv"]}', catalog)
+    assert intent.action == "keep"
+    with pytest.raises(SemanticIntentError, match="invalid_intent_output"):
+        parse_semantic_intent('{"request_kind":"result_followup","action":"new_task","metric_ids":["gmv"]}', catalog)
+
+
+def _current_monthly_scope():
+    return {"metric_ids":["freight_amount"], "dimensions":[], "filters":[], "time_grain":"month",
+        "time_range":{"start":"2018-01-01","end":"2019-01-01","end_semantics":"exclusive"},
+        "previous_result_artifact":{"artifact_id":"current-year"}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("keep", [False, True])
+async def test_current_subset_is_confirmed_once_without_keyword_gates_or_forced_mutation(keep):
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.semantic_intent import resolve_state_intent
+
+    state = _current_monthly_scope()
+    draft = {"request_kind":"result_followup", "action":"keep", "metric_ids":["freight_amount"],
+        "history_reference":{"artifact_id":"current-year","mutation_intent":"inspect"},
+        "result_inspections":[{"operation":"rows","row_numbers":[1,2,3]}]}
+    final = {"operations":[]} if keep else {
+        "operations":[{"op":"set","field":"time_range","value":{"start":"2018-01-01","end":"2018-04-01"}}]}
+    calls = []
+    async def complete(prompt, user):
+        calls.append(prompt)
+        return json.dumps(draft if len(calls) == 1 else final)
+    user = User(id="u", group_memberships=["analyst"])
+    catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
+    intent = await SemanticIntentInterpreter(catalog, complete).interpret(
+        "临时补看前三行，全年任务不变" if keep else "从刚才结果只保留第一季度，每月一行，不重查", user, state)
+    assert len(calls) == 2 and "疑点：" in calls[1]
+    assert "输出schema: " in calls[1]
+    assert "历史摘要" not in calls[1] and "SELECT " not in calls[1]
+    original = AnalysisState.from_mapping(state)
+    _, effective = resolve_state_intent(intent, original, catalog, user, message_count=4)
+    assert effective.time_grain == "month" and effective.metric_ids == ("freight_amount",)
+    assert effective.time_range["end"] == ("2019-01-01" if keep else "2018-04-01")
+    if keep:
+        assert effective == original
+        assert intent.result_inspections[0].row_numbers == (1,2,3)
+    else:
+        assert not intent.result_inspections and intent.history_reference is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("proposal", [
+    {"request_kind":"data_query", "metric_ids":["freight_amount"]},
+    {"request_kind":"result_followup", "action":"keep", "chart_request":"bar"},
+    {"request_kind":"result_followup", "action":"keep", "result_inspections":[{"operation":"sum","metric_id":"freight_amount"}]},
+    {"request_kind":"result_followup", "action":"keep", "result_inspections":[{"operation":"compare","metric_id":"freight_amount","row_numbers":[1,2]}]},
+    {"request_kind":"result_followup", "action":"keep", "history_reference":{"artifact_id":"older-task"},
+     "result_inspections":[{"operation":"rows","row_numbers":[1,2]}]},
+])
+async def test_ordinary_answers_and_other_history_are_not_subject_to_subset_review(proposal):
+    calls = []
+    async def complete(prompt, user):
+        calls.append(prompt)
+        return json.dumps(proposal)
+    await SemanticIntentInterpreter(CatalogLoader(OLIST_RUNTIME_WORKSPACE).load(), complete).interpret(
+        "经营分析", User(id="u"), _current_monthly_scope())
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_subset_confirmation_failure_does_not_apply_the_unconfirmed_proposal():
+    calls = []
+    async def complete(prompt, user):
+        calls.append(prompt)
+        if len(calls) == 2:
+            raise TimeoutError("confirmation failed")
+        return '{"request_kind":"result_followup","action":"keep","result_inspections":[{"operation":"rows","row_numbers":[1,2,3]}]}'
+    with pytest.raises(SemanticIntentError, match="semantic_service_unavailable"):
+        await SemanticIntentInterpreter(CatalogLoader(OLIST_RUNTIME_WORKSPACE).load(), complete).interpret(
+            "从刚才表只保留一部分", User(id="u"), _current_monthly_scope())
+    assert len(calls) == 2
+
+
 def test_intent_preserves_structured_shape_without_reparsing_text() -> None:
     catalog = CatalogLoader().load()
     intent = parse_semantic_intent(

@@ -150,3 +150,32 @@ def test_ranked_entity_drilldown_does_not_apply_parent_limit_to_children():
     }), catalog, user=USER)
     resolved, proposed = resolve_state_intent(intent, state, catalog, USER, message_count=8)
     assert proposed.top_n is None and resolved.top_n is None
+
+
+def test_filter_monthly_regroup_and_filter_removal_do_not_restore_old_grouping():
+    catalog = CatalogLoader(WORKSPACE).load()
+    state = replace(AnalysisState.new(WORKSPACE), metric_ids=("freight_amount",),
+        dimensions=("customer_state",),
+        time_range={"start":"2018-01-01","end":"2019-01-01","end_semantics":"exclusive"})
+    for operations, dimensions, filters, grain in [
+        ([{"op":"clear","field":"dimensions"}, {"op":"add","field":"filters",
+           "value":[{"dimension":"customer_state","value":"SP"}]}], (), ("customer_state=SP",), None),
+        ([{"op":"set","field":"time_grain","value":"month"}], (), ("customer_state=SP",), "month"),
+        ([{"op":"remove","field":"filters","value":[{"dimension":"customer_state","value":"SP"}]}], (), (), "month"),
+    ]:
+        intent = parse_semantic_intent(json.dumps({"request_kind":"data_query", "action":"update_task",
+            "state_patch":{"operations":operations}}), catalog, user=USER)
+        intent, state = resolve_state_intent(intent, state, catalog, USER, message_count=8)
+        assert state.dimensions == dimensions and state.filters == filters and state.time_grain == grain
+        assert intent.metric_ids == ("freight_amount",) and state.time_range["start"] == "2018-01-01"
+
+
+def test_retry_empty_patch_and_complete_answer_scope_are_explicit_edits():
+    catalog = CatalogLoader(WORKSPACE).load()
+    state = replace(AnalysisState.new(WORKSPACE), metric_ids=("gmv",), dimensions=("customer_state",), top_n=10)
+    retry = parse_semantic_intent('{"request_kind":"data_query","action":"update_task","state_patch":{"operations":[]}}', catalog, user=USER)
+    _, same = resolve_state_intent(retry, state, catalog, USER, message_count=8)
+    assert same.scope() == state.scope() and same.task_id == state.task_id
+    total = parse_semantic_intent('{"request_kind":"data_query","action":"update_task","requested_answer":{"metric_ids":["gmv"]}}', catalog, user=USER)
+    _, scalar = resolve_state_intent(total, state, catalog, USER, message_count=8)
+    assert scalar.metric_ids == ("gmv",) and scalar.dimensions == () and scalar.top_n is None

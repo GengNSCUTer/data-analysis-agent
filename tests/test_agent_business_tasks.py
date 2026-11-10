@@ -87,6 +87,26 @@ def test_money_swapped_entities_and_numeric_metadata_fail():
     assert compare_frames(read_csv("customer_state,gmv\nSP,2\nRJ,2\n"), expected) == ["numeric:gmv"]
 
 
+@pytest.mark.parametrize('field,wrong', [
+    ('time_range', {'start':'2018-01-01','end':'2019-01-01'}),
+    ('dimensions', ['customer_state']),
+    ('filters', []),
+    ('metric_ids', ['gmv']),
+])
+def test_completed_state_and_csv_artifact_must_have_matching_scope(field, wrong):
+    scope = {'metric_ids':['freight_amount'], 'dimensions':[],
+             'filters':[{'dimension':'customer_state','value':'SP'}],
+             'time_range':{'start':'2018-01-01','end':'2018-04-01'}, 'time_grain':'month',
+             'comparison_baseline':None, 'top_n':None}
+    state = {**scope, 'status':'completed', 'filters':['customer_state=SP'],
+             'active_plan':{'required_result_columns':['time','freight_amount']}}
+    artifact = {'query_scope':scope,'result_columns':['time','freight_amount']}
+    assert runner.check_active_result_scope(state, artifact) == []
+    mismatch = {**artifact,'query_scope':{**scope,field:wrong}}
+    assert runner.check_active_result_scope(state, mismatch) == ['artifact_scope:'+field]
+    assert runner.check_active_result_scope({**state,'status':'failed'}, mismatch) == []
+
+
 def test_null_and_literal_na_are_preserved_and_extra_rows_fail():
     frame = read_csv("customer_state,gmv\nNA,10\n,20\n")
     expected = pd.DataFrame({"customer_state":["NA",None], "gmv":[Decimal("10"),Decimal("20")]})

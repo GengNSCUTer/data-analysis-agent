@@ -61,6 +61,12 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
         "重新查询最新的全年每月销售额": {"request_kind":"data_query","action":"new_task", **monthly,
             "requested_answer":{**monthly,"refresh":True}},
         "清空后回看之前销售额排行": {"request_kind":"result_followup","action":"keep","history_reference":{"ordinal":1}},
+        "只保留第四季度，仍按月，沿用刚才数据": {"request_kind":"data_query", "action":"update_task",
+            "state_patch":{"operations":[{"op":"set","field":"time_range",
+                "value":{"start":f"{year}-10-01","end":f"{year+1}-01-01"}}]}},
+        "回看全年合计，当前第四季度不要改": {"request_kind":"result_followup", "action":"keep",
+            "requested_answer":monthly, "result_inspections":[{"operation":"sum","metric_id":metric}]},
+        "只给当前第四季度换柱状图": {"request_kind":"result_followup", "action":"keep", "chart_request":"bar"},
     }
     if dataset == 'thelook':
         cases.update({
@@ -123,6 +129,8 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
         async def send_request(self, request):
             if request.metadata.get("purpose") == "semantic_intent":
                 question = request.messages[0].content.rsplit("用户问题: ",1)[1]
+                if request.messages[0].content.startswith("确认当前范围修改"):
+                    return LlmResponse(content='{"operations":[]}')
                 return LlmResponse(content=json.dumps({**cases[question],"confidence":0.99},ensure_ascii=False))
             if request.metadata.get("purpose") == "result_answer_review":
                 return LlmResponse(content='{"verdict":"supported","issues":[]}')
@@ -205,7 +213,35 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
             send(questions[3],1,"SQL_REQUIRED")
             assert sql_plans[-1]["metric_ids"]==[count] and sql_plans[-1]["time_range"]=={**bounds(other_year),"end_semantics":"exclusive"}
             send(questions[4],1,"SQL_REQUIRED")
-            send(questions[5],1,"SQL_REQUIRED")
+            _, full_year, _, _ = send(questions[5],1,"SQL_REQUIRED")
+            full_source = full_year["trusted_result_artifact"]["artifact_id"]
+            cases["回看全年合计，当前第四季度不要改"]["history_reference"] = {"artifact_id":full_source}
+            _, quarter, run, body = send("只保留第四季度，仍按月，沿用刚才数据",0,"LOCAL_COMPUTE")
+            quarter_state = quarter["analysis_state"]
+            quarter_artifact = quarter["trusted_result_artifact"]
+            assert quarter_state["task_id"] == full_year["analysis_state"]["task_id"]
+            assert quarter_state["time_grain"] == "month" and quarter_state["metric_ids"] == [metric]
+            assert quarter_state["time_range"] == {"start":f"{year}-10-01", "end":f"{year+1}-01-01", "end_semantics":"exclusive"}
+            assert quarter_artifact["query_scope"]["time_range"] == quarter_state["time_range"]
+            assert quarter_artifact["artifact_id"] != full_source
+            quarter_csv = client.get(f"/api/project/conversations/{cid}/result.csv").content
+            quarter_rows = list(csv.DictReader(io.StringIO(quarter_csv.decode())))
+            assert len(quarter_rows) == 3 and all(row["time"].startswith(f"{year}-1") for row in quarter_rows)
+            events = [json.loads(line[6:]) for line in body.splitlines() if line.startswith("data: {")]
+            tables = [e["rich"]["data"] for e in events if e.get("rich",{}).get("type")=="dataframe"]
+            assert len(tables) == 1 and tables[0]["total_row_count"] == tables[0]["preview_row_count"] == 3
+            assert run["catalog_trace"]["artifact_reuse"]["updates_current_task"] is True
+            page.reload(wait_until="networkidle")
+            assert client.get(f"/api/project/conversations/{cid}").json()["analysis_state"] == quarter_state
+            _, readonly, run, _ = send("回看全年合计，当前第四季度不要改",0,"LOCAL_COMPUTE")
+            assert readonly["analysis_state"] == quarter_state
+            assert client.get(f"/api/project/conversations/{cid}/result.csv").content == quarter_csv
+            assert run["catalog_trace"]["artifact_reuse"]["updates_current_task"] is False
+            assert run["catalog_trace"]["artifact_reuse"]["computed_row_count"] == 12
+            _, charted, _, _ = send("只给当前第四季度换柱状图",0,"DIRECT_REUSE")
+            assert charted["analysis_state"] == quarter_state
+            assert client.get(f"/api/project/conversations/{cid}/result.csv").content == quarter_csv
+            assert len(chat.locator(".js-plotly-plot").last.evaluate("el => el.data[0].x")) == 3
             before = client.get(f"/api/project/conversations/{cid}").json()["analysis_state"]
             _, detail, run, _ = send(questions[6],0,"LOCAL_COMPUTE")
             inspection = run["catalog_trace"]["result_inspection"]
@@ -238,7 +274,7 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
             page.get_by_text("更多",exact=True).click()
             page.locator("#history-results").click()
             page.locator("#result-browser").wait_for(state="visible")
-            assert page.locator("#history-result-select option").count()==6
+            assert page.locator("#history-result-select option").count()==7
             page.locator("#history-result-select").select_option(index=5)
             page.locator("#result-page-table tbody tr").first.wait_for()
             assert len(sql_plans)==before_sql

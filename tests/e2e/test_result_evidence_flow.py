@@ -170,6 +170,8 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
         async def send_request(self, request):
             if request.metadata.get("purpose") == "semantic_intent":
                 prompt = request.messages[0].content
+                if prompt.startswith("确认当前范围修改"):
+                    return LlmResponse(content='{"operations":[]}')
                 question = prompt.rsplit("用户问题: ", 1)[1]
                 return LlmResponse(content=json.dumps({**intents[question], "confidence": 0.99}, ensure_ascii=False))
             if request.metadata.get("purpose") == "result_answer_review":

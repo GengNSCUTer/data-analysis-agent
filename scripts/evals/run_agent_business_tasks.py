@@ -178,6 +178,32 @@ def check_task_scope(reference, state):
     return errors
 
 
+def check_active_result_scope(state, artifact):
+    """A completed active task must point to the same scope, not just right prose."""
+    if not state or state.get('status') != 'completed' or not artifact:
+        # A failed pending query may retain the previous successful artifact.
+        return []
+    actual = artifact.get('query_scope') or {}
+    filters = [dict(zip(('dimension','value'), value.split('=',1))) for value in state.get('filters') or []]
+    expected = {key: state.get(key) for key in (
+        'metric_ids','dimensions','time_range','time_grain','comparison_baseline','top_n')}
+    expected['filters'] = filters
+    def normalized(key, value):
+        if key == 'top_n':
+            return next(iter(value.values()), None) if isinstance(value, dict) else value or None
+        if key in {'metric_ids','dimensions'}:
+            return list(value or [])
+        if key == 'filters':
+            return sorted((v['dimension'],v['value']) for v in value or [])
+        return value
+    errors = ['artifact_scope:'+key for key,value in expected.items()
+              if normalized(key, actual.get(key)) != normalized(key, value)]
+    required = (state.get('active_plan') or {}).get('required_result_columns')
+    if required and set(artifact.get('result_columns') or []) != set(required):
+        errors.append('artifact_scope:columns')
+    return errors
+
+
 def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, default=str) + "\n")
 
@@ -208,6 +234,11 @@ def review_saved(output):
                 authored = json.loads(source_evidence.read_text())
                 if step["question"] != authored["question"]:
                     turn["errors"].append("evaluation_question_changed_requires_rerun")
+            detail_path = Path(str(prefix)+'.conversation.json')
+            if detail_path.exists():
+                detail = json.loads(detail_path.read_text())
+                turn['errors'] = [e for e in turn['errors'] if not e.startswith('artifact_scope:')]
+                turn['errors'].extend(check_active_result_scope(detail.get('analysis_state'), detail.get('trusted_result_artifact')))
             sse_path = Path(str(prefix) + ".sse.txt")
             if sse_path.exists():
                 turn["persisted_answer"] = turn["answer"]
@@ -491,6 +522,7 @@ def run_partition(dataset, tasks, output, repetitions, username, resume=False):
                                 item["errors"].append("sse_runtime_failure")
                             item["error_type"] = run.get("error_type")
                             item["analysis_state"] = detail["analysis_state"]
+                            item["errors"].extend(check_active_result_scope(detail["analysis_state"], detail.get("trusted_result_artifact")))
                             if not step.get("preserve_state"):
                                 item["errors"].extend(check_task_scope(step.get("reference"),detail["analysis_state"]))
                             if step.get("preserve_state") and previous_state != detail["analysis_state"]:
