@@ -339,7 +339,9 @@ class ObservedLlmService(LlmService):
         explanation = request if followup else LlmRequest(
             user=request.user, messages=[LlmMessage(role="user", content=(
                 f"用户问题：{usage.catalog_question or ''}\n查询范围："
-                + json.dumps(usage.query_plan or {}, ensure_ascii=False)
+                + json.dumps({key: value for key, value in (usage.query_plan or {}).items()
+                              if key in {"metric_ids", "dimensions", "time_range", "time_grain", "filters", "top_n"}},
+                             ensure_ascii=False)
             )), LlmMessage(role="user", content=usage.result_summary)],
             temperature=0.0, max_tokens=usage.budget.max_output_tokens,
         )

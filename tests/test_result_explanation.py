@@ -207,6 +207,26 @@ def test_multiple_entities_and_unsupported_causes_are_doubts_not_language_gates(
     ).doubts
 
 
+def test_a_matching_number_does_not_prove_a_negated_statement(summary):
+    checked = check("SP销售额不是20 BRL。", summary)
+    assert checked.doubts  # The number exists, but the proposition says its opposite.
+
+
+def test_missing_second_entity_citation_is_reviewed_against_complete_evidence(summary):
+    checked = check("SP销售额20，RJ销售额10。", summary, ["/sample_rows/0"])
+    assert not checked.errors and checked.doubts
+
+
+def test_preview_facts_are_distinct_from_model_rows_and_selection_limits():
+    summary = build_result_evidence(pd.DataFrame({"gmv": range(250)}),
+        required_columns=("gmv",), metric_ids=("gmv",), preview_rows=200)
+    data = parse_result_evidence(summary)
+    assert data["presentation"] == {"total_row_count": 250, "preview_row_count": 200, "display_truncated": True}
+    assert data["selection"]["limit"] == 50
+    assert not check("前端预览200行，完整查询结果250行。", summary, ["/presentation"]).errors
+    assert check("销售额为200。", summary, ["/presentation"]).errors
+
+
 def test_multi_entity_comparison_missing_one_citation_is_reviewed_not_a_swap(summary):
     checked = check("RJ销售额为10，与SP相比有差距。", summary, ["/sample_rows/1"])
     assert not checked.errors and checked.doubts
@@ -422,6 +442,7 @@ async def test_review_timeout_keeps_results_but_withholds_answer(summary):
 async def test_review_and_revision_have_separate_timeouts_and_never_enable_tools(
     summary, monkeypatch
 ):
+    monkeypatch.setattr("data_analysis_agent.result_explanation.perf_counter", lambda: 100.0)
     limits = []
     wait = asyncio.wait_for
 
@@ -439,7 +460,7 @@ async def test_review_and_revision_have_separate_timeouts_and_never_enable_tools
             '{"verdict":"supported","issues":[]}',
         ],
     )
-    assert outcome.status == "accepted" and limits == [120, 20, 30, 20]
+    assert outcome.status == "accepted" and limits == [60, 30, 30, 30]
     assert len(requests) == 4 and requests[2].max_tokens == 2048
     assert all(r.tools is None and not r.stream for r in requests)
 
@@ -563,9 +584,169 @@ def test_month_reference_is_not_mistaken_for_an_amount():
         pd.DataFrame({"time": ["2017-12-01T00:00:00"], "gmv": [20]}),
         required_columns=("time", "gmv"),
         metric_ids=("gmv",),
+        query_scope={"time_grain": "month"},
     )
     result = check("12月销售额20。", summary)
-    assert not result.errors and result.doubts
+    assert not result.errors and not result.doubts
+    assert check("11月销售额20。", summary).doubts
+
+
+def monthly_summary():
+    return build_result_evidence(
+        pd.DataFrame({"time": ["2017-01-01", "2017-11-01", "2017-12-01"],
+                      "gmv": [120098.27, 1003862.14, 742183.79]}),
+        required_columns=("time", "gmv"), metric_ids=("gmv",), time_column="time",
+        query_scope={"time_grain": "month", "time_range": {"start": "2017-01-01", "end": "2018-01-01"}},
+        metric_semantics={"gmv": {"kind": "amount", "unit": "BRL"}},
+    )
+
+
+@pytest.mark.parametrize("wrong,right", [
+    ("从1月到11月增长约518%。", "从1月到11月增长约735.9%。"),
+    ("11月比12月高约26.1%。", "11月比12月高约35.3%。"),
+    ("12月比11月下降约35.3%。", "12月比11月下降约26.1%。"),
+])
+def test_percentage_is_bound_to_named_months_and_comparison_direction(wrong, right):
+    summary = monthly_summary()
+    refs = ["/sample_rows", "/analyses/0"]
+    assert any("comparison_binding" in error for error in check(wrong, summary, refs).errors)
+    assert not check(right, summary, refs).errors
+
+
+def test_two_different_months_cannot_both_be_called_annual_peak():
+    summary = monthly_summary()
+    assert any("ranking_binding" in error for error in check(
+        "11月和12月都达到全年峰值。", summary, ["/sample_rows"]).errors)
+    assert not check("11月达到全年峰值。", summary, ["/statistics/gmv/maximum_row"]).errors
+    # A denial or a question is not an affirmative peak claim.
+    assert not check("12月不是全年峰值。", summary, ["/sample_rows"]).errors
+    assert not any("ranking_binding" in error for error in check(
+        "从1月开始观察，全年峰值出现在11月。", summary, ["/sample_rows"]).errors)
+
+
+@pytest.mark.asyncio
+async def test_wrong_month_percentage_is_revised_even_if_all_numbers_exist_elsewhere():
+    wrong = answer("从1月到11月增长约518%。", ["/sample_rows", "/analyses/0"])
+    right = answer("从1月到11月增长约735.9%。", ["/sample_rows", "/analyses/0"])
+    outcome, requests = await run_answer(monthly_summary(), [wrong, right, '{"verdict":"supported","issues":[]}'])
+    assert outcome.status == "accepted" and "735.9%" in outcome.text
+    assert [r.metadata["purpose"] for r in requests] == [
+        "result_answer_draft", "result_answer_revision", "result_answer_review"]
+
+
+@pytest.mark.asyncio
+async def test_year_and_row_value_with_proven_scope_need_only_one_generation():
+    summary = build_result_evidence(pd.DataFrame({"state": ["SP"], "gmv": [20]}),
+        required_columns=("state", "gmv"), metric_ids=("gmv",),
+        query_scope={"time_range": {"start": "2017-01-01", "end": "2018-01-01"}})
+    outcome, requests = await run_answer(summary, [answer("2017年SP销售额为20。")])
+    assert outcome.status == "accepted" and outcome.review_count == 0 and len(requests) == 1
+    assert check("2018年SP销售额为20。", summary).doubts
+
+
+@pytest.mark.asyncio
+async def test_all_time_is_not_a_top_n_population_sum_claim():
+    summary = build_result_evidence(pd.DataFrame({"state": ["SP"], "gmv": [20]}),
+        required_columns=("state", "gmv"), metric_ids=("gmv",), top_n=1)
+    outcome, requests = await run_answer(summary, [answer(
+        "全部时间销售额最高的是SP州，为20。", ["/statistics/gmv/maximum_row"])])
+    assert outcome.status == "accepted" and len(requests) == 1
+    assert check("全部州销售额合计20。", summary).doubts
+
+
+def test_month_row_does_not_prove_an_annual_amount_even_inside_the_right_year():
+    summary = monthly_summary()
+    assert check("2017年销售额为120098.27 BRL。", summary).doubts
+
+
+def test_multiple_months_and_values_do_not_prove_their_pairing():
+    summary = monthly_summary()
+    swapped = check("1月销售额742183.79 BRL，12月销售额120098.27 BRL。", summary,
+                    ["/sample_rows/0", "/sample_rows/2"])
+    assert swapped.errors or swapped.doubts
+
+
+@pytest.mark.asyncio
+async def test_review_excludes_untrusted_narrative_but_keeps_question_and_exact_evidence(summary):
+    requests = []
+    async def send(request):
+        requests.append(request)
+        return LlmResponse(content=answer("SP增长可能来自促销。") if len(requests) == 1
+                           else '{"verdict":"supported","issues":[]}')
+    request = LlmRequest(user=User(id="owner"), messages=[
+        LlmMessage(role="user", content="为什么有差异？\n叙事上下文（不是执行条件或结果事实）：旧回答里有广告增长999%"),
+        LlmMessage(role="user", content=summary)])
+    outcome = await generate_result_answer(request, send, lambda r: r, lambda: None, lambda: None)
+    assert outcome.status == "accepted" and outcome.review_count == 1
+    assert "旧回答" in requests[0].messages[0].content
+    assert requests[1].messages[0].content == "为什么有差异？"
+    assert requests[1].messages[-1].content == requests[0].messages[-1].content == summary
+
+
+@pytest.mark.asyncio
+async def test_delivery_time_direction_is_reviewed_and_revised_without_exposing_bad_prose():
+    summary = build_result_evidence(pd.DataFrame({"delivery_days": [4.016275834]}),
+        required_columns=("delivery_days",), metric_ids=("delivery_days",),
+        metric_definitions={"delivery_days": "已完成订单送达时间减创建时间的平均天数，排除负时长"})
+    refs = ["/sample_rows/0", "/metric_definitions/delivery_days"]
+    wrong = answer("平均为4.02天，送达时间不晚于创建时间。", refs)
+    right = answer("平均为4.02天，排除送达早于创建的负时长订单。", refs)
+    outcome, requests = await run_answer(summary, [wrong,
+        '{"verdict":"revise","issues":["非负时长要求送达不早于创建，原文先后方向反了"]}',
+        right, '{"verdict":"supported","issues":[]}'])
+    assert outcome.status == "accepted" and outcome.text == "平均为4.02天，排除送达早于创建的负时长订单。"
+    assert outcome.revision_count == 1 and outcome.review_count == 2 and len(requests) == 4
+
+
+def test_formatted_display_citation_is_bound_to_its_original_numeric_row(summary):
+    assert not check("SP销售额20 BRL。", summary, ["/formatted_metrics/0"]).errors
+    assert check("SP销售额10 BRL。", summary, ["/formatted_metrics/0"]).errors
+    assert check("RJ销售额20 BRL。", summary, ["/formatted_metrics/0"]).errors
+    assert not check("SP销售额20 BRL。", summary, ["/statistics/gmv/maximum_display"]).errors
+    assert check("SP销售额10 BRL。", summary, ["/statistics/gmv/maximum_display"]).errors
+
+
+def test_rate_trend_keeps_percentage_points_separate_from_relative_growth():
+    summary = build_result_evidence(
+        pd.DataFrame({"time": ["2017-02-01", "2017-03-01"], "rate": [0.8195329087, 0.7553405885]}),
+        required_columns=("time", "rate"), metric_ids=("rate",), time_column="time",
+        metric_semantics={"rate": {"kind": "rate", "unit": "比例0至1"}},
+        query_scope={"time_grain": "month", "time_range": {"start": "2017-02-01", "end": "2017-04-01"}})
+    refs = ["/analyses/0/groups/0/largest_drop"]
+    assert not check("3月环比下降6.42个百分点。", summary, refs).errors
+    assert check("3月环比下降7.83个百分点。", summary, refs).errors
+    assert not check("3月环比下降7.83%。", summary, refs).errors
+    assert check("金额为7.83。", summary, refs).errors or check("金额为7.83。", summary, refs).doubts
+
+
+def test_rate_level_after_a_decline_is_not_the_decline_percentage():
+    summary = build_result_evidence(pd.DataFrame({"time": ["2017-01-01", "2017-12-01"], "rate": [0.0332, 0.0113]}),
+        required_columns=("time", "rate"), metric_ids=("rate",), time_column="time",
+        query_scope={"time_grain": "month"}, metric_semantics={"rate": {"kind": "rate", "unit": "比例0至1"}})
+    text = "整体呈下降趋势：从1月的3.32%下降至12月的1.13%，首尾相对降幅约65.96%。"
+    assert not check(text, summary, ["/analyses/0/groups/0/endpoints"]).errors
+    assert check("从1月到12月下降了1.13%。", summary, ["/analyses/0/groups/0/endpoints"]).errors
+
+
+@pytest.mark.asyncio
+async def test_all_answer_phases_share_one_deadline(summary, monkeypatch):
+    elapsed = [0.0]
+    monkeypatch.setattr("data_analysis_agent.result_explanation.perf_counter", lambda: elapsed[0])
+    limits = []
+    wait = asyncio.wait_for
+    async def observed_wait(awaitable, timeout):
+        limits.append(timeout)
+        result = await wait(awaitable, timeout)
+        elapsed[0] += 25
+        return result
+    monkeypatch.setattr(asyncio, "wait_for", observed_wait)
+    outcome, _ = await run_answer(summary, [
+        answer("SP为10、RJ为20。", ["/sample_rows/0", "/sample_rows/1"]),
+        '{"verdict":"revise","issues":["金额对调"]}',
+        answer("SP为20、RJ为10。", ["/sample_rows/0", "/sample_rows/1"]),
+        '{"verdict":"supported","issues":[]}',
+    ])
+    assert outcome.status == "accepted" and limits == [60, 30, 30, 15]
 
 
 def test_chinese_negative_sign_is_not_a_value_error():

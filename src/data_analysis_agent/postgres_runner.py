@@ -622,6 +622,7 @@ class SecurePostgresRunner(SqlRunner):
                     query_scope=plan,
                     metric_semantics=context.metadata.get("metric_semantics", {}),
                     metric_definitions=context.metadata.get("metric_definitions", {}),
+                    preview_rows=result_budget.preview_rows,
                     inspections=usage.result_inspections if usage is not None else (),
                     numerator_overrides=usage.result_numerators if usage is not None else None,
                     max_tokens=usage.result_evidence_limit() if usage is not None else None,

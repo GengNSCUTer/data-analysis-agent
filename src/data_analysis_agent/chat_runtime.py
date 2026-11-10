@@ -805,12 +805,6 @@ class BudgetedChatHandler(ChatHandler):
                     yield self._budget_chunk(conversation_id, request_id, title, detail)
                     return
 
-                if route.should_generate_sql and semantic_intent is not None and semantic_intent.assumptions:
-                    yield self._text_chunk(
-                        conversation_id, request_id,
-                        "本次采用的理解：" + "；".join(semantic_intent.assumptions),
-                    )
-
                 if not route.should_generate_sql:
                     detail = route.direct_answer or route.clarification or "当前请求无法在受控数据范围内回答。"
                     streamed_tool_free = False
@@ -1246,7 +1240,8 @@ class BudgetedChatHandler(ChatHandler):
             additive_metric_ids=catalog.additive_metrics_for(spec.metric_ids, spec.dimensions),
             time_column="time" if spec.time_grain else None, top_n=spec.top_n,
             inspections=intent.result_inspections, query_scope=spec.scope(), metric_semantics=catalog.metric_semantics,
-            metric_definitions=contract.metric_definitions, max_tokens=usage.result_evidence_limit())
+            metric_definitions=contract.metric_definitions, preview_rows=budget.preview_rows,
+            max_tokens=usage.result_evidence_limit())
         provenance = {**plan.decision.as_dict(), "source_artifact_id": artifact.artifact_id,
             "source_scope": artifact.query_scope, "requested_scope": spec.scope(),
             "result_ordinal": plan.item.ordinal, "snapshot_created_at": artifact.result_metadata.get(

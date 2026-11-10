@@ -222,7 +222,7 @@ def _series_context(frame, metric, request, scope, time_column, additive):
     return (work, dimensions, start, end), None, {}
 
 
-def _trend(frame, metric, request, scope, time_column, additive):
+def _trend(frame, metric, request, scope, time_column, additive, *, rate=False):
     prepared, reason, needed = _series_context(frame, metric, request, scope, time_column, additive)
     if prepared is None:
         return {"status": "query_required", "reason": reason, "query_requirements": needed}
@@ -254,7 +254,7 @@ def _trend(frame, metric, request, scope, time_column, additive):
                     run_up = run_down = 0
                     continue
                 if previous and period.ordinal == previous[0].ordinal + 1:
-                    change = _delta(value, previous[1])
+                    change = _delta(value, previous[1], rate=rate)
                     difference = change["difference"]
                     up += difference > 0
                     down += difference < 0
@@ -272,7 +272,7 @@ def _trend(frame, metric, request, scope, time_column, additive):
         if valid.any():
             clean = group.loc[valid]
             endpoints = {"first_period": str(clean["__period"].iloc[0]), "last_period": str(clean["__period"].iloc[-1]),
-                         **_delta(clean[metric].iloc[-1], clean[metric].iloc[0])}
+                         **_delta(clean[metric].iloc[-1], clean[metric].iloc[0], rate=rate)}
         entry = {"group": _group_key(key, dimensions), "judgment": judgment,
                  "period_count": len(group), "expected_period_count": len(expected),
                  "complete": complete, "missing_periods": missing, "null_count": int((~valid).sum()),
@@ -440,7 +440,7 @@ def analyze_result(frame: pd.DataFrame, *, requests: Sequence[ResultInspection],
                           'reverse_comparison':{**_delta(*reversed(selected[metric].tolist()),rate=spec.get('kind')=='rate'),
                                                 'operands':_records(selected.iloc[::-1])}}
         elif request.operation == "trend":
-            result = _trend(selected, metric, request, scope, time_column, additive)
+            result = _trend(selected, metric, request, scope, time_column, additive, rate=spec.get("kind") == "rate")
         elif request.operation == "period_compare":
             result = _period_compare(selected, metric, request, scope, time_column, additive, spec.get("kind") == "rate")
         elif request.operation == "share":

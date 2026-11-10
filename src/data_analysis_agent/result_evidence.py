@@ -134,6 +134,7 @@ def build_result_evidence(
     query_scope: Mapping[str, Any] | None = None,
     metric_semantics: Mapping[str, Mapping[str, str]] | None = None,
     metric_definitions: Mapping[str, str] | None = None,
+    preview_rows: int | None = None,
     numerator_overrides: Mapping[int, Mapping[str, Any]] | None = None,
     max_tokens: int | None = None,
     counter: TokenCounter = DEFAULT_TOKEN_COUNTER,
@@ -211,12 +212,19 @@ def build_result_evidence(
         "column_labels": {name: _label(name, column_labels or {}) for name in columns},
         "source_row_count": source_count, "row_count": population_count,
         "scope": "returned_top_n" if top_n is not None else "returned_result",
+        "query_scope": {name: scope[name] for name in (
+            "metric_ids", "dimensions", "time_grain", "time_range", "filters", "top_n"
+        ) if name in scope},
         "top_n": top_n, "selection": request.model_dump(mode="json"),
         "statistics": statistics, "analyses": analyses,
         "evidence_token_limit": limit,
         "coverage": "complete" if population_count == 0 else "selected_rows", "included_row_count": 0,
         "row_numbers": [], "sample_rows": [], "formatted_metrics": [],
     }
+    if preview_rows is not None:
+        payload["presentation"] = {"total_row_count": source_count,
+            "preview_row_count": min(source_count, preview_rows),
+            "display_truncated": source_count > preview_rows}
     if time_column:
         time_names = {_normalized(name) for name in (time_column, *(column_aliases or {}).get(time_column, ()))}
         time_matches = [name for name in columns if _normalized(name) in time_names]
