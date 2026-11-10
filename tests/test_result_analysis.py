@@ -26,7 +26,10 @@ def run(frame, operation="trend", *, scope=None, **params):
 def test_trend_uses_every_adjacent_calendar_period(values, mode, judgment, counts):
     frame = pd.DataFrame({"time": pd.date_range("2024-01-01", periods=4, freq="MS"), "gmv": values})
     group = run(frame, trend_mode=mode)["groups"][0]
-    assert group["judgment"] == judgment
+    assert group["monotonicity"] == {
+        "predicate": "never_decreases" if mode == "nondecreasing" else "every_period_strictly_increases",
+        "verdict": judgment,
+    }
     assert (group["up_count"], group["down_count"], group["flat_count"]) == counts
     if values == [100,120,110,150]:
         assert group["first_counterexample"]["period"] == "2024-03"
@@ -43,7 +46,21 @@ def test_trend_uses_every_adjacent_calendar_period(values, mode, judgment, count
 ])
 def test_missing_null_duplicate_and_single_period_are_not_filled_or_summed(times, values, expected):
     group = run(pd.DataFrame({"time": times, "gmv": values}), trend_mode="strict_increase")["groups"][0]
-    assert group["judgment"] == expected
+    assert group["monotonicity"]["verdict"] == expected
+
+
+@pytest.mark.parametrize('values,monotone,endpoint_difference', [
+    ([100, 80, 120, 150], 'false', 50),
+    ([100, 90, 80, 70], 'false', -30),
+    ([100, 100, 100, 100], 'false', 0),
+    ([100, 110, 120, 150], 'true', 50),
+])
+def test_overview_distinguishes_consecutive_growth_from_endpoint_change(values, monotone, endpoint_difference):
+    frame = pd.DataFrame({'time': pd.date_range('2024-01-01', periods=4, freq='MS'), 'gmv': values})
+    group = run(frame)['groups'][0]
+    assert group['monotonicity'] == {'predicate': 'every_period_strictly_increases', 'verdict': monotone}
+    assert group['endpoints']['difference'] == endpoint_difference
+    assert 'judgment' not in group  # A bare true/false used to be mistaken for an overall trend.
 
 
 @pytest.mark.parametrize("grain,start,end,periods,freq", [
@@ -133,9 +150,9 @@ def test_state_series_are_not_concatenated_and_top_n_membership_is_not_zero():
                           "state": ["SP"]*4+["RJ"]*4, "gmv": [1,2,3,4,9,8,7,6]})
     scope = {"dimensions": ["state"], "time_grain": "month", "time_range": {"start":"2024-01-01", "end":"2024-05-01"}}
     groups = run(frame, scope=scope)["groups"]
-    assert [g["judgment"] for g in groups] == ["true", "false"]
+    assert [g["monotonicity"]["verdict"] for g in groups] == ["true", "false"]
     limited = run(frame.iloc[:4], scope={**scope, "top_n": 1})["groups"][0]
-    assert limited["judgment"] == "insufficient" and limited["top_n_limited"]
+    assert limited["monotonicity"]["verdict"] == "insufficient" and limited["top_n_limited"]
 
 
 def test_comparisons_handle_zero_negative_and_percentage_points():
@@ -281,7 +298,7 @@ def test_requested_calculations_produce_evidence_for_the_model_to_explain():
                                     inspections=[ResultInspection(operation="trend", metric_id="gmv", trend_mode="strict_increase")])
     payload = json.loads(summary.removeprefix(RESULT_EVIDENCE_PREFIX))
     group = payload["analyses"][0]["groups"][0]
-    assert group["judgment"] == "false"
+    assert group["monotonicity"]["verdict"] == "false"
     assert group["first_counterexample"]["current"] == 110
     assert group["first_counterexample"]["baseline"] == 120
     assert payload["column_labels"]["gmv"] == "销售额"

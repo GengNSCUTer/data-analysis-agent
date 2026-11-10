@@ -357,6 +357,11 @@ class ObservedLlmService(LlmService):
             usage.record_llm_round if usage else lambda: None,
             usage.finish_llm_round if usage else lambda: None)
         if usage is not None:
+            if outcome.evidence_summary is not None:
+                usage.set_result_summary(outcome.evidence_summary)
+                reuse = usage.catalog_trace.get('artifact_reuse')
+                if reuse and reuse.get('mode') == 'DIRECT_REUSE':
+                    usage.record_catalog({'artifact_reuse': {**reuse, 'mode': 'LOCAL_COMPUTE'}})
             usage.record_catalog({"result_explanation": {
                 "server_calculated":True, "tools_enabled":False, "model_used":True,
                 "answer_status":outcome.status, "review_count":outcome.review_count,

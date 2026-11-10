@@ -99,8 +99,9 @@ def wire_answer(events):
             # SSE updates replace a component's complete content, just as the
             # web component renders them; they are not incremental text deltas.
             text[rich.get("id") or len(text)] = data["content"]
-        if rich.get("type") == "status_card" and data.get("title") == "本次分析未完成":
-            failures.append(data.get("description", "本次分析未完成"))
+        if rich.get("type") == "status_card" and (
+                data.get("status") == "error" or data.get("title") == "本次分析未完成"):
+            failures.append(data.get("description") or data.get("title") or "本次分析未完成")
     return "\n\n".join(text.values() if text else failures), failures
 
 

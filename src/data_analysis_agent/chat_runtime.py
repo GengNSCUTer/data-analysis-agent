@@ -1169,6 +1169,15 @@ class BudgetedChatHandler(ChatHandler):
         system_prompt = TOOL_FREE_SYSTEM_PROMPT
         if hold_followup:
             usage = CURRENT_BUDGET.get()
+            # The observed result metrics and the definitions needed to explain
+            # them differ: payment vs GMV needs both definitions, not both values.
+            # Reuse role-filtered Catalog retrieval, never a global/all-role list.
+            definitions = (self.question_router.retriever.retrieve(request.message, user).metrics
+                           if self.question_router is not None else ())
+            if definitions:
+                payload = json.loads(summary.removeprefix(RESULT_EVIDENCE_PREFIX))
+                payload['metric_definitions'].update({m.metric_id: m.description for m in definitions})
+                summary = RESULT_EVIDENCE_PREFIX + json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
             if usage is not None:
                 # Narrative-only follow-ups also need the actual evidence for
                 # the provenance card; they need not request a calculation.

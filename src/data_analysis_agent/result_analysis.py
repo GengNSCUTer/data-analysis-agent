@@ -273,7 +273,11 @@ def _trend(frame, metric, request, scope, time_column, additive, *, rate=False):
             clean = group.loc[valid]
             endpoints = {"first_period": str(clean["__period"].iloc[0]), "last_period": str(clean["__period"].iloc[-1]),
                          **_delta(clean[metric].iloc[-1], clean[metric].iloc[0], rate=rate)}
-        entry = {"group": _group_key(key, dimensions), "judgment": judgment,
+        entry = {"group": _group_key(key, dimensions),
+                 "monotonicity": {
+                     "predicate": "never_decreases" if request.trend_mode == "nondecreasing" else "every_period_strictly_increases",
+                     "verdict": judgment,
+                 },
                  "period_count": len(group), "expected_period_count": len(expected),
                  "complete": complete, "missing_periods": missing, "null_count": int((~valid).sum()),
                  "duplicate_periods": duplicates, "partial_periods": partial, "top_n_limited": limited,

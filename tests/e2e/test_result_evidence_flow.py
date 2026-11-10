@@ -345,7 +345,7 @@ GROUP BY DATE_TRUNC('month',o.order_purchase_timestamp) ORDER BY time""",
                     assert current["source_row_count"] == 1
                     assert detail["analysis_state"]["time_range"]["start"] == "2017-12-01"
                 elif question == "全年每个月都在增长吗":
-                    assert current["analyses"][0]["groups"][0]["judgment"] == "false"
+                    assert current["analyses"][0]["groups"][0]["monotonicity"]["verdict"] == "false"
                     assert "不成立" in answer and "反例" in answer
                 elif question == "月销售额中位数":
                     assert current["analyses"][0]["median"] == pd.Series([r["gmv"] for r in current["sample_rows"]]).median()

@@ -3,6 +3,19 @@ import pytest
 from data_analysis_agent.plan_sql_guard import sql_plan_mismatch
 
 
+def test_scalar_plan_extra_month_is_repairable_before_execution_not_a_row_budget_failure():
+    plan = {'query_plan_version':'query-plan-v2', 'metric_ids':['average_order_value'],
+            'required_result_columns':['average_order_value'], 'dimensions':[], 'time_grain':None}
+    wrong = ("WITH order_totals AS (SELECT order_id,month,SUM(price) AS total FROM items GROUP BY order_id,month) "
+             "SELECT month AS time,AVG(total) AS average_order_value FROM order_totals GROUP BY month")
+    assert '计划外结果列' in sql_plan_mismatch(wrong, plan)
+    correct = ("WITH order_totals AS (SELECT order_id,month,SUM(price) AS total FROM items GROUP BY order_id,month) "
+               "SELECT AVG(total) AS average_order_value FROM order_totals")
+    assert sql_plan_mismatch(correct, plan) is None
+    monthly = {**plan, 'required_result_columns':['time','average_order_value'], 'time_grain':'month'}
+    assert sql_plan_mismatch(wrong, monthly) is None
+
+
 @pytest.mark.parametrize("condition,accepted", [
     ("category IS NOT NULL", False),
     ("category IS NOT NULL AND price>0", False),

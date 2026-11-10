@@ -37,6 +37,21 @@ def sql_plan_mismatch(
 
     if not isinstance(sql, str) or not sql.strip() or not isinstance(plan, Mapping):
         return None
+    expected_columns = plan.get('required_result_columns')
+    if plan.get('query_plan_version') == 'query-plan-v2' and expected_columns:
+        try:
+            statement = parse_one(sql, read='postgres')
+        except (ParseError, TokenError, RecursionError):
+            statement = None
+        if statement is not None:
+            # Inspect only the final output. Order/entity aggregation CTEs may
+            # retain internal keys and months, provided the final SELECT drops them.
+            unexpected = [column.alias_or_name for column in statement.selects
+                          if not column.is_star and column.alias_or_name not in expected_columns]
+            if unexpected:
+                return (f'SQL 多返回了计划外结果列：{", ".join(unexpected)}；'
+                        f'最终只返回 {", ".join(expected_columns)}。'
+                        '没有time或分组列时应重新按完整范围聚合，不沿用上轮月份/维度分组。')
     folded = sql.casefold()
     filters = plan.get("filters") or []
     if filters or plan.get("lookup_joins"):

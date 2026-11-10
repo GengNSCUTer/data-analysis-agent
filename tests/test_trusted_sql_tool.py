@@ -424,6 +424,20 @@ async def test_plan_mismatch_can_be_repaired_without_executing_original(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_unrequested_month_is_repaired_once_and_never_sent_to_the_database(tmp_path):
+    context = _context()
+    context.metadata['query_plan'] = {'query_plan_version':'query-plan-v2',
+        'metric_ids':['paid_order_count'], 'required_result_columns':['paid_order_count'],
+        'dimensions':[], 'time_grain':None}
+    correct = 'SELECT COUNT(*) AS paid_order_count FROM fact_orders'
+    wrong = "SELECT DATE_TRUNC('month',created_at) AS time,COUNT(*) AS paid_order_count FROM fact_orders GROUP BY time"
+    runner = SequenceRunner([pd.DataFrame({'paid_order_count':[7]})])
+    provider = FakeRepairProvider(correct)
+    result = await _tool(runner, provider, tmp_path).execute(context, RunSqlToolArgs(sql=wrong))
+    assert result.success and runner.calls == [correct] and len(provider.prompts) == 1
+
+
+@pytest.mark.asyncio
 async def test_repair_that_drops_confirmed_filter_is_not_executed(tmp_path):
     original = STATE_COUNT_SQL.replace("o.order_id) AS", "o.missing_column) AS")
     runner = SequenceRunner([SafeSqlExecutionError(

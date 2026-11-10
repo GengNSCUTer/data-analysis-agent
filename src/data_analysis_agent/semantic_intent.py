@@ -506,7 +506,7 @@ class SemanticIntentInterpreter:
                 + json.dumps(SemanticIntent.model_json_schema(), ensure_ascii=False),
                 "最后核对状态操作（优先于‘沿用结果’的措辞）：",
                 "1. 用户让当前表只保留某个范围/拆成新分组/改成总计：data_query+update_task，state_patch只修改对应字段。即使用户说不重查、从刚才结果取，也不能改成history inspect或只挑行；复用只是执行方式。",
-                "2. 只问旧结果里的一个事实/差额/合计、临时看指定行、换图，或明确要求当前分析不变：result_followup+keep，不改当前任务。需要旧来源时才history_reference.inspect；合计仍填写result_inspections的sum。",
+                "2. 只问旧结果里的一个事实/差额/合计、临时看指定行、换图，或明确要求当前分析不变：result_followup+keep，不改当前任务。需要旧来源时才history_reference.inspect；合计仍填写result_inspections的sum。选了历史来源不等于计算完成：第一名减第二名须同时给result_inspections=[{operation:compare,metric_id:该历史来源指标,row_numbers:[1,2]}]，不能仅在assumptions描述做差而漏掉操作。",
                 "3. 当前filters=[州=某州]、dimensions=[]时，‘按月拆开、州和年份保持’只set time_grain=month，不能set dimensions=[州]。已有筛选和分组按各自角色继承。",
                 "4. 总体单值与全部分组不同：要所有地区总额只返回一个数，clear dimensions、time_grain、top_n；要每个地区分别列才保留分组。不要因为数据来自地区表就保留地区列。",
                 "用户问题: " + question,

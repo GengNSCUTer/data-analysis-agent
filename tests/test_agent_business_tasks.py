@@ -196,6 +196,12 @@ def test_sse_answer_replaces_cumulative_component_updates_and_keeps_distinct_par
     assert failures == []
 
 
+def test_internal_sse_error_card_cannot_be_scored_as_completed_even_with_valid_table():
+    text, failures = runner.wire_answer([{'rich':{'type':'status_card','data':{
+        'title':'Error Processing Message', 'status':'error', 'description':'Explanation failed'}}}])
+    assert failures == ['Explanation failed'] and text == 'Explanation failed'
+
+
 def test_saved_chart_reassessment_replaces_old_chart_error_without_erasing_product_failure(tmp_path):
     import json
     directory = tmp_path / 'o-basic-1-attempt-1'

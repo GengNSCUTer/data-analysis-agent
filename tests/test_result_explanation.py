@@ -425,6 +425,48 @@ def test_uncited_group_count_is_reviewed_rather_than_a_fake_amount_error(summary
     assert not result.errors and result.doubts
 
 
+@pytest.mark.parametrize('unit', ['种', '类'])
+def test_result_category_count_is_not_an_amount_even_when_the_author_cites_rows(summary, unit):
+    result = check(f'共有2{unit}客户州，SP销售额20、RJ销售额10。', summary,
+                   ['/sample_rows/0', '/sample_rows/1'])
+    assert not result.errors and result.doubts
+
+
+@pytest.mark.asyncio
+async def test_followup_fetches_named_metric_definitions_without_adding_observed_metrics():
+    from types import SimpleNamespace
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.budget import BudgetUsage, CURRENT_BUDGET, RequestBudget
+    from data_analysis_agent.chat_runtime import BudgetedChatHandler
+    from data_analysis_agent.question_router import QuestionRouter
+    from data_analysis_agent.runtime_paths import RESOURCES
+    from data_analysis_agent.runtime_workspace import load_runtime_workspace
+    from data_analysis_agent.semantic_catalog import CatalogLoader, CatalogRetriever
+    catalog = CatalogLoader(load_runtime_workspace(RESOURCES / 'workspaces/olist.yaml').profile).load()
+    summary = build_result_evidence(pd.DataFrame({'payment_amount':[20]}),
+        required_columns=('payment_amount',), metric_ids=('payment_amount',),
+        metric_definitions={'payment_amount':catalog.metrics_by_id['payment_amount'].description})
+    sent = []
+    async def send(request):
+        sent.append(request)
+        return LlmResponse(content='示例已核验解释')
+    handler = BudgetedChatHandler(SimpleNamespace(_send_llm_request=send), RequestBudget(), None,
+        question_router=QuestionRouter(CatalogRetriever(catalog)))
+    usage = BudgetUsage(RequestBudget())
+    token = CURRENT_BUDGET.set(usage)
+    try:
+        _ = [piece async for piece in handler._tool_free_answer(
+            SimpleNamespace(message='为什么支付金额不能直接当GMV？', conversation_id='c', request_id='r'),
+            SimpleNamespace(intent='result_followup'),
+            AnalysisState(previous_result_summary=summary), User(id='owner',group_memberships=['analyst']))]
+    finally:
+        CURRENT_BUDGET.reset(token)
+    evidence = parse_result_evidence(sent[0].messages[-1].content)
+    assert evidence['metric_ids'] == ['payment_amount'] and evidence['columns'] == ['payment_amount']
+    assert evidence['metric_definitions']['gmv'] == catalog.metrics_by_id['gmv'].description
+    assert evidence['sample_rows'] == [{'payment_amount':20}]
+
+
 @pytest.mark.asyncio
 async def test_review_timeout_keeps_results_but_withholds_answer(summary):
     outcome, requests = await run_answer(
@@ -704,6 +746,171 @@ def test_formatted_display_citation_is_bound_to_its_original_numeric_row(summary
     assert check("RJ销售额20 BRL。", summary, ["/formatted_metrics/0"]).errors
     assert not check("SP销售额20 BRL。", summary, ["/statistics/gmv/maximum_display"]).errors
     assert check("SP销售额10 BRL。", summary, ["/statistics/gmv/maximum_display"]).errors
+
+
+@pytest.mark.parametrize('ref', ['/formatted_metrics', '/sample_rows', '/statistics', '/analyses'])
+def test_parent_evidence_references_never_crash_and_do_not_accept_fabricated_values(summary, ref):
+    if ref != '/analyses':
+        assert not check('SP销售额20、RJ销售额10。', summary, [ref]).errors
+    checked = check('SP销售额999。', summary, [ref])
+    assert checked.errors or checked.doubts
+
+
+@pytest.mark.asyncio
+async def test_parent_formatted_reference_can_finish_without_internal_error(summary):
+    draft = answer('SP销售额20、RJ销售额10。', refs=['/formatted_metrics'])
+    outcome, requests = await run_answer(summary, [draft, '{"verdict":"supported","issues":[]}'])
+    assert outcome.status == 'accepted' and outcome.revision_count == 0 and len(requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_missing_difference_can_be_computed_once_without_sql_or_unchecked_math(summary):
+    request = json.dumps({'paragraphs': [], 'calculations': [
+        {'operation':'compare', 'metric_id':'gmv', 'row_numbers':[1,2]}]})
+    fixed = answer('SP比RJ多10 BRL。', ['/analyses/0'])
+    outcome, requests = await run_answer(summary, [request, fixed,
+        '{"verdict":"supported","issues":[]}'])
+    assert outcome.status == 'accepted' and outcome.text == 'SP比RJ多10 BRL。'
+    assert outcome.revision_count == 1 and len(requests) <= 3
+    evidence = parse_result_evidence(outcome.evidence_summary)
+    assert evidence['analyses'][0]['difference'] == 10
+    assert evidence['analyses'][0]['operands'] == [{'state':'SP','gmv':20},{'state':'RJ','gmv':10}]
+    assert all(not request.tools for request in requests)
+
+
+@pytest.mark.asyncio
+async def test_calculation_rejects_unknown_metric_and_cannot_loop_or_use_partial_rows(summary):
+    for operation in [
+        {'operation':'compare','metric_id':'unknown','row_numbers':[1,2]},
+        {'operation':'compare','metric_id':'gmv','row_numbers':[1,99]},
+        {'operation':'sum','metric_id':'gmv'},
+    ]:
+        data = parse_result_evidence(summary)
+        data['coverage'] = 'selected_rows'
+        partial = '已通过结果合同的可信结果摘要：' + json.dumps(data)
+        calculate = json.dumps({'paragraphs':[], 'calculations':[operation]})
+        outcome, requests = await run_answer(partial, [calculate, calculate])
+        assert outcome.status == 'unverified' and outcome.evidence_summary is None
+        assert len(requests) == 2 and outcome.revision_count == 1
+        assert 'calculation_unavailable' in outcome.calls[0]['check_errors'][0]
+
+
+@pytest.mark.asyncio
+async def test_local_explanation_cannot_sum_a_nonadditive_metric():
+    summary = build_result_evidence(pd.DataFrame({'aov':[20,10]}),
+        required_columns=('aov',), metric_ids=('aov',))
+    calculate = json.dumps({'paragraphs':[], 'calculations':[{'operation':'sum','metric_id':'aov'}]})
+    outcome, requests = await run_answer(summary, [calculate, calculate])
+    assert outcome.status == 'unverified' and outcome.evidence_summary is None and len(requests) == 2
+
+
+def test_global_minimum_is_not_proven_by_a_top_n_extreme_reference():
+    summary = build_result_evidence(pd.DataFrame({'state':['A','B'], 'gmv':[20,10]}),
+        required_columns=('state','gmv'), metric_ids=('gmv',), top_n=2)
+    assert check('全年最低成交额为10。', summary, ['/statistics/gmv/minimum']).errors
+    assert not check('在返回的前2名中，最低成交额为10。', summary, ['/statistics/gmv/minimum']).errors
+    assert not check('不能由前2名判断全年最低成交额。', summary, ['/scope']).errors
+
+
+def test_calendar_month_count_in_formula_explanation_is_not_a_business_amount():
+    summary = build_result_evidence(pd.DataFrame({'average_order_value': [86.80044148686305]}),
+        required_columns=('average_order_value',), metric_ids=('average_order_value',),
+        query_scope={'time_range': {'start':'2023-01-01', 'end':'2024-01-01'}},
+        metric_semantics={'average_order_value': {'kind':'mean', 'unit':'来源金额单位每单'}})
+    checked = check('直接平均12个月的月均值会让每个月权重相同，不能代表全年客单价。',
+                    summary, ['/sample_rows/0'])
+    assert not checked.errors and checked.doubts
+    assert check('全年客单价为12。', summary, ['/sample_rows/0']).errors
+
+
+@pytest.mark.parametrize('text', [
+    '12月为69单，比1月的31单增长约122.6%。',
+    '从1月的31单增长至12月的69单，增幅约122.6%。',
+    '12月有69单，较1月31单增加了约122.6%。',
+    '12月相比1月增长约122.6%。',
+    '与1月的31单相比，12月达到69单，增长约122.6%。',
+    '1月为31单，与之相比，12月达到69单，增长约122.6%。',
+    '12月达到峰值69单，较1月增长约122.6%。',
+    '12月达到69单，比1月增加约122.6%。',
+])
+def test_month_comparison_with_intervening_values_uses_semantic_direction(text):
+    summary = build_result_evidence(pd.DataFrame({'time':['2023-01-01','2023-12-01'],
+        'completed_order_count':[31,69]}), required_columns=('time','completed_order_count'),
+        metric_ids=('completed_order_count',), time_column='time', query_scope={'time_grain':'month'},
+        metric_semantics={'completed_order_count':{'kind':'count','unit':'单'}})
+    assert not check(text, summary, ['/sample_rows', '/analyses/0']).errors
+
+
+@pytest.mark.asyncio
+async def test_month_value_list_is_verified_pairwise_without_a_redundant_review():
+    summary = build_result_evidence(pd.DataFrame({'time':['2023-01-01','2023-02-01'], 'orders':[31,26]}),
+        required_columns=('time','orders'), metric_ids=('orders',), time_column='time',
+        query_scope={'time_grain':'month'}, metric_semantics={'orders':{'kind':'count','unit':'单'}})
+    draft = answer('1月31单，2月26单。', ['/sample_rows'])
+    outcome, requests = await run_answer(summary, [draft])
+    assert outcome.status == 'accepted' and len(requests) == 1
+    wrong = check('1月26单，2月31单。', summary, ['/sample_rows'])
+    assert any('row_value_binding' in error for error in wrong.errors)
+
+
+@pytest.mark.asyncio
+async def test_year_introduction_does_not_invalidate_pairwise_verified_month_values():
+    summary = build_result_evidence(pd.DataFrame({'time': ['2022-01-01', '2022-02-01'], 'orders': [26, 13]}),
+        required_columns=('time', 'orders'), metric_ids=('orders',), time_column='time',
+        query_scope={'time_grain': 'month', 'time_range': {'start': '2022-01-01', 'end': '2023-01-01'}},
+        metric_semantics={'orders': {'kind': 'count', 'unit': '单'}})
+    text = '2022年各月订单数如下：1月26单，2月13单。'
+    outcome, requests = await run_answer(summary, [answer(text, ['/sample_rows'])])
+    assert outcome.status == 'accepted' and outcome.text == text and len(requests) == 1
+    # A valid year and number pool must not certify an annual number or another year.
+    assert check('2022年合计26单。', summary, ['/sample_rows']).doubts
+    assert check('2023年各月订单数：1月26单，2月13单。', summary, ['/sample_rows']).doubts
+    assert check('2022年：1月13单，2月26单。', summary, ['/sample_rows']).errors
+
+
+@pytest.mark.asyncio
+async def test_returned_total_month_range_is_verified_against_half_open_scope():
+    summary = build_result_evidence(pd.DataFrame({'time': pd.date_range('2022-01-01', periods=12, freq='MS'),
+        'orders': [26, 13, 9, 27, 20, 19, 31, 26, 21, 32, 23, 25]}),
+        required_columns=('time', 'orders'), metric_ids=('orders',), additive_metric_ids=('orders',),
+        time_column='time', query_scope={'time_grain': 'month',
+            'time_range': {'start': '2022-01-01', 'end': '2023-01-01'}},
+        metric_semantics={'orders': {'kind': 'count', 'unit': '单'}})
+    ref = '/statistics/orders/sum_of_returned_rows'
+    text = '全年订单总数（1月至12月）为272单。'
+    outcome, requests = await run_answer(summary, [answer(text, [ref])])
+    assert outcome.status == 'accepted' and len(requests) == 1
+    assert check('1月至11月合计272单。', summary, [ref]).doubts
+    assert check('2021年1月至12月合计272单。', summary, [ref]).doubts
+    assert check('1月至12月合计31单。', summary, [ref]).errors
+    assert check('1月至12月合计26单。', summary, ['/sample_rows/0/orders']).doubts
+
+
+@pytest.mark.asyncio
+async def test_month_extrema_parentheses_are_bound_to_the_actual_rows_and_extremes():
+    summary = build_result_evidence(pd.DataFrame({'time': ['2022-03-01', '2022-07-01', '2022-10-01'],
+        'orders': [9, 31, 32]}), required_columns=('time', 'orders'), metric_ids=('orders',),
+        time_column='time', query_scope={'time_grain': 'month'},
+        metric_semantics={'orders': {'kind': 'count', 'unit': '单'}})
+    refs = ['/statistics/orders/maximum_row', '/statistics/orders/minimum_row']
+    text = '最高值出现在10月（32单），最低值出现在3月（9单）。'
+    outcome, requests = await run_answer(summary, [answer(text, refs)])
+    assert outcome.status == 'accepted' and len(requests) == 1
+    wrong = check('最高值出现在7月（31单），最低值出现在3月（9单）。', summary, refs)
+    assert any('ranking_binding' in error for error in wrong.errors)
+    assert check('最高值出现在10月（31单）。', summary, refs).errors
+
+
+def test_overview_evidence_labels_monotonicity_without_denying_endpoint_growth():
+    summary = build_result_evidence(pd.DataFrame({'time': pd.date_range('2023-01-01', periods=4, freq='MS'),
+        'orders': [31, 26, 41, 69]}), required_columns=('time', 'orders'), metric_ids=('orders',),
+        time_column='time', query_scope={'time_grain': 'month'},
+        metric_semantics={'orders': {'kind': 'count', 'unit': '单'}})
+    group = parse_result_evidence(summary)['analyses'][0]['groups'][0]
+    assert group['monotonicity'] == {'predicate': 'every_period_strictly_increases', 'verdict': 'false'}
+    assert group['endpoints']['difference'] == 38
+    checked = check('从1月的31单到4月的69单，上升约122.6%，但并非每月增长。', summary, ['/analyses/0'])
+    assert not checked.errors and checked.doubts
 
 
 def test_rate_trend_keeps_percentage_points_separate_from_relative_growth():

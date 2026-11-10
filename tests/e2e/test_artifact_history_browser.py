@@ -44,7 +44,7 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
         "销售额那张表第一名比第二名高多少": {"request_kind":"result_followup","action":"keep",
             "history_reference":{"ordinal":1}, "metric_ids":[], "dimensions":[],
             "filters":[], "time_range":None, "time_grain":None,
-            "result_inspections":[{"operation":"compare","metric_id":metric,"row_numbers":[1,2]}]},
+            "result_inspections":[]},
         "回到当前订单分析，改成按年统计": {"request_kind":"data_query","action":"update_task",
             "state_patch":{"operations":[{"op":"clear","field":"dimensions"},{"op":"set","field":"time_grain","value":"year"}]}},
         "我想要所有州的全年销售额合计，不是前十": {"request_kind":"data_query","action":"new_task",
@@ -135,6 +135,10 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
             if request.metadata.get("purpose") == "result_answer_review":
                 return LlmResponse(content='{"verdict":"supported","issues":[]}')
             evidence, _ = json.JSONDecoder().raw_decode(request.messages[-1].content.split(RESULT_EVIDENCE_PREFIX,1)[1])
+            if ('销售额那张表第一名比第二名高多少' in request.messages[0].content
+                    and not evidence['analyses']):
+                return LlmResponse(content=json.dumps({'paragraphs':[], 'calculations':[
+                    {'operation':'compare','metric_id':metric,'row_numbers':[1,2]}]}))
             return LlmResponse(content=model_answer(evidence))
 
         async def stream_request(self, request):
@@ -209,6 +213,9 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
             _, detail, run, _ = send(questions[2],0,"LOCAL_COMPUTE")
             assert detail["analysis_state"]==before
             assert run["catalog_trace"]["artifact_reuse"]["result_ordinal"]==1
+            assert run['catalog_trace']['result_explanation']['revision_count'] == 1
+            payload = json.loads(run['catalog_trace']['result_summary'].split(RESULT_EVIDENCE_PREFIX,1)[1])
+            assert payload['analyses'][0]['operation'] == 'compare'
             chat.get_by_text("来源：历史结果#1",exact=False).first.wait_for()
             send(questions[3],1,"SQL_REQUIRED")
             assert sql_plans[-1]["metric_ids"]==[count] and sql_plans[-1]["time_range"]=={**bounds(other_year),"end_semantics":"exclusive"}

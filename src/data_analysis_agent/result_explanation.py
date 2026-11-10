@@ -10,10 +10,12 @@ import re
 from time import perf_counter
 from typing import Any, Awaitable, Callable, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+import pandas as pd
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from vanna.core.llm import LlmMessage, LlmRequest, LlmResponse
 from .result_evidence import RESULT_EVIDENCE_PREFIX
 from .token_budget import ContextCapacityError
+from .result_analysis import ResultInspection, ResultInspectionError, analyze_result
 
 
 ANSWER_UNVERIFIED = (
@@ -25,6 +27,10 @@ ANSWER_PROMPT = """
 表格已在界面完整呈现。用户只要求列出数据或排名时，用一到两句直接结论即可；不要自行增加增长率、全年峰值、入榜次数或原因分析。明确要求解释/比较时才展开相应证据。
 按需提供事实、可能解释或建议，不必凑齐三类；允许自然措辞、列表和Markdown。
 只返回JSON，不加Markdown围栏：{"paragraphs":[{"text":"SP州销售额为20。","kind":"fact","evidence_refs":["/sample_rows/0"]}]}。
+需要差额/比例等计算却没有相应analyses证据时，不自行写结果数字，返回calculations与空paragraphs。
+calculations复用服务端受控操作，例如第一名减第二名：{"paragraphs":[],"calculations":[{"operation":"compare","metric_id":"实际指标ID","row_numbers":[1,2]}]}。
+服务端只对本次完整证据计算并给一次回答修订，不授予SQL或任意代码权限。只读结果仍不改变当前任务。
+sum只用于允许累加的指标；比率/客单价不能相加。行号从1开始，遵循结果顺序，不猜样本外数据。
 text就是用户看到的原文，服务端不会改成句式模板。kind为fact、hypothesis、recommendation。
 事实引用支持该段的证据JSON路径，如/sample_rows/0、/statistics/gmv/maximum_row、
 /statistics/gmv/sum_of_returned_rows、/analyses/0。数组下标从0开始。
@@ -35,12 +41,13 @@ text就是用户看到的原文，服务端不会改成句式模板。kind为fac
 metric_ids和columns只能说明本次结果包含哪些指标/字段、缺少什么证据，不能充当观测数值或证明整个数据库都没有该信息。
 尽量一个独立事实一段。界面已经提供数据表；除非用户明确要求在正文逐行列出，不要重复整张表。
 不能引用一个字段却替换它的实体、指标或单位。
-实体名称优先保留来源值。可以使用能确认对应的常见译名或别名；不确定州代码全称时保留代码，不能猜。
+实体首次出现保留来源原文，可在括号补常见中文译名；不要只给翻译而丢失来源名称。不确定州代码全称时保留代码，不能猜。
 statistics和analyses是服务端计算，样本之外的结论只用已有统计支持，不能从样本猜测。
 期间比较明确current是本期、baseline是基期，增长率分母是baseline；负增长不能取绝对值后换成反方向的增长。
 比率的百分点差使用percentage_points，不能把relative_change_percent的百分比改称百分点。
 行比较的operands是实际行顺序，不是语义解释阶段假定的顺序；反方向比较引用reverse_comparison，不能只把difference取绝对值并沿用原增长率。
 时间端点只表示最早/最晚，不表示最大/最小。下降次数使用down_count；first_counterexample只是第一个反例，largest_drop只是最大跌幅，不能把两者当成全部下降月份。
+趋势monotonicity.verdict只判断predicate声明的逐期严格增长或从未下降，不是首末涨跌或回归趋势。endpoints只比较首末期；期间有下降与年末高于年初可以同时成立，不混为一谈。
 分区排名使用rank的rows和entity_appearances：rank是返回分区内的名次，partition_count是实际出现次数。
 没有进入某期返回Top-N不表示金额为0，也不能推断其准确名次。分区排名已在表格完整展示时，正文简述即可，不重复完整明细或另算无关趋势。
 Top-N合计不等于全业务总额，并列极值不能称唯一；不简单累加均值、比率或非可加计数。
@@ -56,25 +63,21 @@ Top-N合计不等于全业务总额，并列极值不能称唯一；不简单累
 """.strip()
 REVIEW_PROMPT = """
 复核数据分析回答。只返回JSON：{"verdict":"supported","issues":[]}。
-verdict为supported、revise或insufficient，issues用简短中文说明待纠正的问题。
-只输出判定和最多3条简短错误，不逐行重述整表或撰写审核过程；无错误时issues为空列表。
-界面已经向用户展示查询表格，正文是补充解释。列出数据/排名可由表格完成，不要求正文重复整表；不能仅因正文简短或没有逐行复述就判答非所问。只有用户明确要求在正文逐项解释时才检查该要求。
-核对整个回答，不只看其声明的引用：实体、指标、数值、单位、时间筛选、Top-N/总体、
-并列排名、缺期/趋势、因果，是否有遗漏引用、错误计算或答非所问。以真实证据为准。
-query_scope是实际查询范围，metric_definitions是本项目口径。不要用通用GMV或时间默认值替代。
-逐项核对比较的两个对象及分母：1月到11月不能沿用1月到12月增长率；A比B高与B比A低分母不同。
-一个数值出现在证据别处不能证明这句话；“全年最高”必须对应maximum_row和maximum_tie_count。
-条件的先后方向也须正确：非负履约时长要求送达不早于创建。半开日期不能将6月30日称为被排除的实际边界，除非实际end就是该日期。
-实体扩展名称/译名也要核对对应，例如州代码不能错译成另一个州；可靠的常见译名不因缺少逐字别名而判错。
-只指出实际事实错误或证据缺口，不因措辞不同、非排名列表顺序不同而要求修改；只有声称名次时才核排名顺序。
-允许四舍五入/缩放、不同措辞，以及明确标注的假设、示例数字和建议；推测不是已证实原因。
-例如12345.67写成约1.23万、比例12.345%写成约12.3%均可，不要求正文数字逐字存在于证据。
-可以结合完整明细和statistics核对简单合计、占比、极值及分组数量；不能只看作者引用的一行。
-分区排名优先核对analyses中rank的rows和entity_appearances；只知道返回Top-N之外，不能编造第六名或缺失实体金额。
-检查疑点不是已证实错误。只列真正的矛盾或缺口，不因合理精度、已提供统计的极值或不同段落分类而修订。
-不要因未使用固定句式拒绝，不要把“建议进一步验证”视为声称已有因果证据。
-逐句检查hypothesis/recommendation中的确定事实，不能因段首有“可能”就整体放行；证据外背景只能作为待验证假设。
-证据不足时让作者说明不足，不能补造数字。不要生成替代答案、工具调用或SQL。
+verdict为supported、revise或insufficient。issues只列实际错误，最多3条，每条不超过100字：
+“原文具体片段；与哪个证据路径中的什么事实冲突；应怎样改”。不要输出审核过程、正确事项、
+猜测的疑点或自问自答。检查后数值相同/口径一致就没有错误，issues为空；不得写“31应为31”。
+独立核对完整回答和实际证据，不只看作者引用：实体与数值对应、比较方向/分母、单位、
+查询范围、排名、趋势和因果。表格已展示，正文不必重述全表。代码检查疑点不是错误结论。
+metric_definitions是本项目口径，query_scope是实际范围。不要用行业通用GMV定义替代。
+Top-N内极值、合计仅适用于返回榜单，不能称所有业务的极值、总量。时间端点不是峰值；
+有缺月不能断言逐月增长。两个不同月份不能同时称唯一全年最高；注意并列。
+monotonicity.verdict=false只否定predicate声明的“每期严格增长/从未下降”，不否定首末上涨。判断首末变化用endpoints；不把逐期反例改写为“年末没有高于年初”。
+从A到B以A为基期；A比B高与B比A低分母不同。百分点不是相对增长百分比。非负履约时长
+表示送达不早于创建。半开结束日期不含在内，不能把实际7月1日边界写成排除6月30日。
+允许正常四舍五入、万/亿/百分数、已知常见译名和不同措辞，例如7092491.65约709万或
+709.2万均可。仅缺少逐字别名、数字精度不同或句式不同不构成错误；“Guangdong/广东”等明确常见译名不是实体错配，不以“名称不完全相同”为由修订。未知币种不能编造。
+明确标注的假设、示例和建议可保留，其中夹带的既有业务事实仍需证据；不能把营销等假设
+说成已证实原因。缺少证据时应说明不足，不生成替代答案、工具调用或SQL。
 """.strip()
 
 
@@ -87,7 +90,14 @@ class AnswerParagraph(BaseModel):
 
 class AnswerDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    paragraphs: list[AnswerParagraph] = Field(min_length=1)
+    paragraphs: list[AnswerParagraph]
+    calculations: tuple[ResultInspection, ...] = Field(default=(), max_length=4)
+
+    @model_validator(mode='after')
+    def has_answer_or_calculation(self):
+        if not self.paragraphs and not self.calculations:
+            raise ValueError('answer needs paragraphs or an explicit calculation')
+        return self
 
     def text(self) -> str:
         return "\n\n".join(p.text for p in self.paragraphs)
@@ -124,10 +134,28 @@ class AnswerOutcome:
     review_count: int
     revision_count: int
     issue_codes: tuple[str, ...]
+    evidence_summary: str | None = None
 
 
 class AnswerProviderError(RuntimeError):
     pass
+
+
+def _calculate_answer_evidence(evidence, requests):
+    """Use only the complete, authorized population already supplied to the model."""
+    count = evidence['row_count']
+    if (evidence['coverage'] != 'complete' or count != evidence['source_row_count']
+            or count != len(evidence['sample_rows'])
+            or evidence['row_numbers'] != list(range(1, count + 1))):
+        raise ResultInspectionError('本次只有部分明细，不能按样本计算总体或猜测未提供行；使用已有完整统计或说明需要补查。')
+    calculated = analyze_result(pd.DataFrame(evidence['sample_rows'], columns=evidence['columns']),
+        requests=requests, metric_ids=evidence['metric_ids'], scope=evidence['query_scope'],
+        additive_metric_ids=[m for m, stat in evidence['statistics'].items() if stat['sum_allowed']],
+        metric_semantics=evidence['metric_semantics'],
+        time_column='time' if evidence['query_scope'].get('time_grain') else None)
+    if any(item['status'] != 'ready' for item in calculated):
+        raise ResultInspectionError('现有完整结果不支持这项计算；不能通过解释调用重新查库或把缺失数据视为零。')
+    return {**evidence, 'analyses': [*evidence['analyses'], *calculated]}
 
 
 def parse_result_evidence(summary: str) -> dict[str, Any]:
@@ -260,7 +288,7 @@ def _numbers(
     """Typed business values; metadata numbers cannot be used as amounts."""
     parts = ref.split("/")[1:]
     if parts[0] == "formatted_metrics":
-        raw_ref = "/sample_rows/" + "/".join(parts[1:])
+        raw_ref = "/" + "/".join(["sample_rows", *parts[1:]])
         return _numbers(resolve_evidence_ref(evidence, raw_ref), raw_ref, evidence)
     if parts[0] == "statistics" and parts[-1] in {"minimum_display", "maximum_display"}:
         raw_ref = ref.removesuffix("_display")
@@ -389,7 +417,14 @@ def _bound_comparisons(text: str, evidence: Mapping[str, Any]) -> tuple[list[str
             continue  # A selected month cannot stand in for its whole year.
         left, right = operands
         between = text[left[1]:right[0]]
-        forward = bool(re.search(r"到|至", between))
+        connectors = list(re.finditer(r'(?<!达)(?:到|至)|比|较', between))
+        # Use the comparison connector nearest the second operand. A prior
+        # observation (“12月达到峰值，较10月...”) does not reverse its baseline.
+        forward = bool(connectors and connectors[-1].group() in {'到', '至'})
+        if re.search(r"(?:相比|相较)[^，,]*[，,]", between):
+            # “与1月相比，12月...” names the baseline first. The previous
+            # word-presence check reversed that clear forward comparison.
+            forward = True
         if not forward and not re.search(r"比|较", between):
             continue
         a, b = (_label_rows(label, rows) for _, _, label in operands)
@@ -412,22 +447,59 @@ def _bound_comparisons(text: str, evidence: Mapping[str, Any]) -> tuple[list[str
     return errors, calculated
 
 
-def _dates_supported(text: str, nodes: list[Any], evidence: Mapping[str, Any]) -> bool:
+def _dates_supported(text: str, nodes: list[Any], evidence: Mapping[str, Any], refs: list[str]) -> bool:
     labels = list(_DATE.finditer(text))
     if not labels:
         return True
     # Numeric row facts may name their own month/year without an extra LLM call.
     rows = [node for node in nodes if isinstance(node, dict)]
-    if len(rows) > 1 or any(isinstance(node, list) for node in nodes):
-        # Existence of every month and every amount does not bind each pair.
-        # Multi-row prose still needs review for swapped month/value mappings.
+    paired, errors = _dated_value_claims(text, evidence)
+    if errors:
         return False
     bounds = evidence.get("query_scope", {}).get("time_range") or {}
     grain = evidence.get("query_scope", {}).get("time_grain")
+    scope_range = re.search(r'(?:(\d{4})年)?(\d{1,2})月(?:至|到)(?:(\d{4})年)?(\d{1,2})月', text)
+    # An explicit total's month range refers to its whole source interval, not
+    # to an individual monthly row. Verify both endpoints against the half-open
+    # query scope; a scalar from a single row must never prove an annual total.
+    range_supported = False
+    if (scope_range and bounds.get('start') and bounds.get('end') and
+            any(ref.startswith('/statistics/') and ref.endswith('/sum_of_returned_rows') for ref in refs)):
+        first = pd.Timestamp(bounds['start'])
+        last = pd.Timestamp(bounds['end']) - pd.Timedelta(nanoseconds=1)
+        y1, m1, y2, m2 = scope_range.groups()
+        range_supported = (
+            first.day == 1 and first == first.normalize()
+            and pd.Timestamp(bounds['end']) == (last.to_period('M') + 1).start_time
+            and first.month == int(m1) and last.month == int(m2)
+            and (int(y1) == first.year if y1 else first.year == last.year)
+            and (int(y2) == last.year if y2 else first.year == last.year))
+    unpaired = text
+    for start, end in sorted(paired.values(), reverse=True):
+        unpaired = unpaired[:start] + unpaired[end:]
+    all_values_paired = bool(paired) and not _NUMBER.search(_DATE.sub('', unpaired))
     for match in labels:
         label = match.group()
         year = re.fullmatch(r"(\d{4})年", label)
         month = re.fullmatch(r"(?:\d{4}年)?\d{1,2}月", label)
+        if (match.start(), match.end()) in paired:
+            continue
+        if range_supported and scope_range.start() <= match.start() and match.end() <= scope_range.end():
+            continue
+        if (year and all_values_paired and bounds.get("start") == year[1] + "-01-01"
+                and bounds.get("end") == str(int(year[1]) + 1) + "-01-01"):
+            # “2022年：1月26单，2月13单...” has a scope introduction plus
+            # individually verified observations. A matching number elsewhere
+            # in the year never suffices: unpaired amounts still need review.
+            continue
+        if len(rows) > 1 or any(isinstance(node, list) for node in nodes):
+            # Unknown month/value phrasing still needs review. Only pairs
+            # individually checked above may skip it, never a number pool.
+            return False
+        if year and bounds.get("start") == year[1] + "-01-01" and bounds.get("end") == str(int(year[1]) + 1) + "-01-01":
+            # A year is also the scope of a returned-row total, not a monthly value.
+            if any(not isinstance(node, (dict, list)) for node in nodes) or not _NUMBER.search(_DATE.sub('', text)):
+                continue
         if year and grain not in {None, "year"} or month and grain != "month":
             return False
         if len(_label_rows(label, rows)) == 1 and (not year or grain == "year"):
@@ -438,25 +510,63 @@ def _dates_supported(text: str, nodes: list[Any], evidence: Mapping[str, Any]) -
     return True
 
 
-def _check_named_peak(text: str, evidence: Mapping[str, Any]) -> list[str]:
+def _dated_value_claims(text: str, evidence: Mapping[str, Any]):
+    """Bind explicit month/value pairs; a list of valid numbers is insufficient."""
+    paired, errors = {}, []
+    if len(evidence['metric_ids']) != 1:
+        return paired, errors
+    metric = evidence['metric_ids'][0]
+    column = next((c for c, m in evidence.get('metric_columns', {}).items() if m == metric), metric)
+    name = re.escape(evidence.get('column_labels', {}).get(column, ''))
+    label = r'(?:\d{4}年)?\d{1,2}月'
+    pattern = rf'(?P<label>{label})(?:的)?(?:{name})?(?:为|是|有|：|:)?\s*[（(]?\s*(?P<value>[-+]?\d+(?:,\d{{3}})*(?:\.\d+)?\s*(?:万|亿)?\s*[%％]?)'
+    for claim in re.finditer(pattern, text):
+        rows = _label_rows(claim['label'], _evidence_rows(evidence))
+        if len(rows) != 1 or not isinstance(rows[0].get(column), (int, float)):
+            continue
+        # A subsequent 月/日 is another date, not this month's amount.
+        if text[claim.end():].lstrip().startswith(('月', '日', '年')):
+            continue
+        paired[claim.span('label')] = claim.span()
+        if not _matches(claim['value'], Decimal(str(rows[0][column])), metric, evidence):
+            errors.append(f'row_value_binding：{claim["label"]}的{metric}为{rows[0][column]}，不是{claim["value"].strip()}')
+    return paired, errors
+
+
+def _check_named_extrema(text: str, evidence: Mapping[str, Any]) -> list[str]:
     # Only affirmative, explicit global extrema. A local high, a question or a
     # negation needs semantic review rather than this deterministic check.
     if len(evidence["metric_ids"]) != 1 or re.search(r"不是|并非|不能|是否|吗|假设", text):
         return []
     month = r"(?:\d{4}年)?\d{1,2}月"
     names = rf"{month}(?:[、和及与]{month})*"
-    claims = [*re.finditer(rf"(?P<names>{names})(?:均|都|共同)?(?:达到|达到了|创下|为|是)全年(?:最高|峰值)", text),
-              *re.finditer(rf"全年(?:最高|峰值)(?:出现在|位于|为|是)(?P<names>{names})", text)]
+    claims = [*re.finditer(rf"(?P<names>{names})(?:均|都|共同)?(?:达到|达到了|创下|为|是)全年(?P<kind>最高|峰值|最低)", text),
+              *re.finditer(rf"(?:全年)?(?P<kind>最高|峰值|最低)(?:值)?(?:出现在|位于|为|是)(?P<names>{names})", text)]
     errors = []
-    for label in (label for claim in claims for label in _DATE.finditer(claim["names"])):
-        rows = _label_rows(label.group(), _evidence_rows(evidence))
-        if len(rows) != 1:
-            continue
-        for column, metric in evidence.get("metric_columns", {}).items():
-            maximum = evidence.get("statistics", {}).get(metric, {}).get("maximum")
-            if maximum is not None and rows[0].get(column) is not None and rows[0][column] != maximum:
-                errors.append(f"ranking_binding：{label.group()}的{metric}不是本次结果最大值，不能称全年峰值")
+    for claim in claims:
+        kind = 'minimum' if claim['kind'] == '最低' else 'maximum'
+        for label in _DATE.finditer(claim['names']):
+            rows = _label_rows(label.group(), _evidence_rows(evidence))
+            if len(rows) != 1:
+                continue
+            for column, metric in evidence.get("metric_columns", {}).items():
+                extreme = evidence.get("statistics", {}).get(metric, {}).get(kind)
+                if extreme is not None and rows[0].get(column) is not None and rows[0][column] != extreme:
+                    errors.append(f"ranking_binding：{label.group()}的{metric}不等于本次结果{kind}，不能称为对应极值")
     return errors
+
+
+def _check_limited_extreme(text: str, evidence: Mapping[str, Any]) -> list[str]:
+    """A returned Top-N minimum is not a population minimum, even if cited."""
+    if (not evidence.get('top_n') or not re.search(r'全年|所有|总体|全体|全国|全业务', text)
+            or re.search(r'不能|并非|不是|是否|吗|假设', text)
+            or re.search(r'前\s*\d+|Top\s*[- ]?\d+|榜单|返回.{0,8}(?:中|内)', text, re.I)):
+        return []
+    # The returned scope alone does not prove this extreme against excluded
+    # entities; the author may qualify the sentence rather than invent a value.
+    if re.search(r'最低|最少|垫底', text):
+        return ['population_scope：现有数据是Top-N，最低值仅在返回榜单内成立，不能称全年/所有实体最低。请明确限定返回范围。']
+    return []
 
 
 def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck:
@@ -472,6 +582,7 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
         for ref in paragraph.evidence_refs:
             try:
                 node = resolve_evidence_ref(evidence, ref)
+                referenced_numbers = _numbers(node, ref, evidence)
             except (ValueError, KeyError, IndexError):
                 result.errors.append(
                     prefix + f"invalid_reference：引用 {ref!r} 不存在或不在本次证据中"
@@ -482,12 +593,14 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
             if parts[0] in {'metric_semantics', 'metric_definitions', 'statistics'} and len(parts) > 1:
                 if parts[1] in evidence['metric_ids']:
                     referenced_metrics.add(parts[1])
-            numbers.extend(_numbers(node, ref, evidence))
+            numbers.extend(referenced_numbers)
             entities.update(_entities(node, evidence))
             # A scalar amount still belongs to its row, not a global number pool.
             parts = ref.split("/")[1:]
-            if parts[0] == "formatted_metrics" and len(parts) > 1:
-                entities.update(_entities(evidence["sample_rows"][int(parts[1])], evidence))
+            if parts[0] == "formatted_metrics":
+                raw = (evidence["sample_rows"][int(parts[1])] if len(parts) > 1
+                       else evidence["sample_rows"])
+                entities.update(_entities(raw, evidence))
             if parts[0] == "sample_rows" and len(parts) > 2:
                 entities.update(
                     _entities(evidence["sample_rows"][int(parts[1])], evidence)
@@ -506,7 +619,9 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
         comparison_errors, calculated = _bound_comparisons(text, evidence) if paragraph.kind == "fact" else ([], [])
         result.errors.extend(prefix + error for error in comparison_errors)
         if paragraph.kind == "fact":
-            result.errors.extend(prefix + error for error in _check_named_peak(text, evidence))
+            result.errors.extend(prefix + error for error in _check_named_extrema(text, evidence))
+            result.errors.extend(prefix + error for error in _check_limited_extreme(text, evidence))
+            result.errors.extend(prefix + error for error in _dated_value_claims(text, evidence)[1])
         numbers.extend(calculated)
         mentioned = {entity for entity in known_entities if _contains(text, entity)}
         if mentioned - entities:
@@ -555,7 +670,12 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
                     continue
                 result.doubts.append(prefix + "scope：核对排名项数")
                 continue
-            count_context = bool(re.match(r"(?:行|组|条|名|个|项)", after))
+            if re.match(r"(?:个)?(?:月|季度|周|年)", after):
+                # Calendar counts in formula prose are not observed amounts.
+                # Their correctness is reviewed against scope, not the AOV.
+                result.doubts.append(prefix + "calendar_scope：核对期间数量与查询范围或公式说明")
+                continue
+            count_context = bool(re.match(r"(?:行|组|条|名|个|项|种|类)", after))
             candidates = [
                 (v, m) for v, m in numbers if m != "__count__" or count_context
             ]
@@ -654,7 +774,7 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
                 )
         if paragraph.kind == "fact" and not paragraph.evidence_refs:
             result.doubts.append(prefix + "uncited_fact：事实未引用证据")
-        dates_supported = _dates_supported(text, nodes, evidence)
+        dates_supported = _dates_supported(text, nodes, evidence, paragraph.evidence_refs)
         if entities and not mentioned and _NUMBER.search(text) and not (_DATE.search(text) and dates_supported):
             result.doubts.append(
                 prefix + "entity_resolution：正文未能明确对应引用的实体"
@@ -742,6 +862,7 @@ async def generate_result_answer(
     deadline = perf_counter() + 90
     reviews = revisions = 0
     semantic_doubt_seen = False
+    extended_summary = None
     issue_codes: set[str] = set()
     base = request.model_copy(
         update={
@@ -785,7 +906,7 @@ async def generate_result_answer(
 
     def outcome(text, status):
         return AnswerOutcome(
-            text, status, calls, reviews, revisions, tuple(sorted(issue_codes))
+            text, status, calls, reviews, revisions, tuple(sorted(issue_codes)), extended_summary
         )
 
     try:
@@ -795,7 +916,21 @@ async def generate_result_answer(
         for attempt in range(2):
             try:
                 draft = parse_answer_draft(response.content or "")
-                checked = check_answer(draft, evidence)
+                if draft.calculations:
+                    calls[-1]['calculation_requests'] = [r.model_dump(mode='json') for r in draft.calculations]
+                    if attempt:
+                        checked = AnswerCheck(errors=['calculation_budget：修订已经用过，不能继续请求计算或循环回答'])
+                    else:
+                        try:
+                            evidence = _calculate_answer_evidence(evidence, draft.calculations)
+                            extended_summary = RESULT_EVIDENCE_PREFIX + json.dumps(evidence, ensure_ascii=False, separators=(',', ':'))
+                            base = base.model_copy(update={'messages': [*base.messages[:-1],
+                                LlmMessage(role='user', content=extended_summary)]})
+                            checked = AnswerCheck(errors=['calculation_ready：服务端已把计算结果追加到analyses。现在引用该证据回答原问题，不再请求计算。'])
+                        except ResultInspectionError as error:
+                            checked = AnswerCheck(errors=['calculation_unavailable：' + str(error)])
+                else:
+                    checked = check_answer(draft, evidence)
             except ValidationError:
                 draft = None
                 checked = AnswerCheck(
@@ -814,7 +949,7 @@ async def generate_result_answer(
                 review = base.model_copy(
                     update={
                         "system_prompt": REVIEW_PROMPT,
-                        "max_tokens": 768,
+                        "max_tokens": 512,
                         "messages": [
                             # Dialogue helps the author understand a follow-up,
                             # but it is not evidence and need not be re-judged.

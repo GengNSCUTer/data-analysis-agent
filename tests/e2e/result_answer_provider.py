@@ -10,7 +10,7 @@ def model_answer(evidence):
         if result["status"] != "ready":
             text = "模型说明：目前证据还不足，" + result["reason"]
         elif op == "trend":
-            judgments = [g["judgment"] for g in result["groups"]]
+            judgments = [g["monotonicity"]["verdict"] for g in result["groups"]]
             text = "模型说明：增长判断" + (
                 "不成立，反例可见本次计算。"
                 if "false" in judgments
