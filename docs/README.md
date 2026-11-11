@@ -11,7 +11,7 @@
 | 参与开发、独立试用与核对资产许可 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) / [`../SECURITY.md`](../SECURITY.md) / [`../THIRD_PARTY.md`](../THIRD_PARTY.md) | 提交与脱敏反馈、实际安全边界、代码/数据/模型分开授权 |
 | 面试前核对项目贡献、证据与局限 | [`interview/project-release-facts-v1.md`](interview/project-release-facts-v1.md) | 当前事实入口，避免把研究模型或定向复测写成上线成果 |
 | 查看单实例并发、取消、登录失效与工件保留验证 | [`../evals/results/runtime_capacity.md`](../evals/results/runtime_capacity.md) | 1/5/10 并发实测、真实浏览器故障及在线模型时延分列 |
-| 查看最新同条件完整业务任务成绩 | [`../evals/results/agent_business_quality_official60_20261111.md`](../evals/results/agent_business_quality_official60_20261111.md) | 官方deepseek-flash单批60项/122轮53/60；7项失败保留，区别于历史跨批54/60 |
+| 查看最新同条件完整业务任务成绩 | [`../evals/results/agent_business_quality_closeout60_20261111.md`](../evals/results/agent_business_quality_closeout60_20261111.md) | 收尾提交14ab842、官方deepseek-flash完整60项/122轮60/60；保留上批53/60，有限开发题集不代表开放域100% |
 | 了解项目目标、当前阶段和技术决策 | [`../PROJECT.md`](../PROJECT.md) | 当前项目基线 |
 | 查看新的四周产品完善、代码学习与实习面试路线 | [`../plan/process-agent-internship-improvement-v1.md`](../plan/process-agent-internship-improvement-v1.md) | 2026-10-10 计划；不重复计算机基础，不自动启动训练 |
 | 查看六项产品完善工作的实施顺序 | [`../plan/process-agent-product-readiness-v1.md`](../plan/process-agent-product-readiness-v1.md) | 四周计划的工程执行清单；逐项实现并记录证据 |

@@ -1,0 +1,746 @@
+{
+  "date": "2026-11-11",
+  "scope": "single_complete_run",
+  "code": "14ab8426263e28fc1e6434aa87289a66f85df46b",
+  "provider": "DeepSeek official",
+  "model": "deepseek-flash",
+  "extra_body": {
+    "thinking": {
+      "type": "disabled"
+    }
+  },
+  "started_at_shanghai": "2026-11-11T19:14:13.463932+08:00",
+  "finished_at_shanghai": "2026-11-11T19:19:51.526516+08:00",
+  "tasks": 60,
+  "turns": 122,
+  "status_counts": {
+    "passed": 60
+  },
+  "task_success_percent": 100.0,
+  "by_category": {
+    "basic": {
+      "passed": 10
+    },
+    "formula": {
+      "passed": 10
+    },
+    "comparison": {
+      "passed": 10
+    },
+    "continuity": {
+      "passed": 10
+    },
+    "history": {
+      "passed": 10
+    },
+    "explanation": {
+      "passed": 10
+    }
+  },
+  "by_dataset": {
+    "olist": {
+      "passed": 30
+    },
+    "thelook": {
+      "passed": 30
+    }
+  },
+  "numeric_pass_turns": 122,
+  "automatic_error_free_turns": 122,
+  "chart_replayed": 19,
+  "reuse_turns": 34,
+  "reuse_sql_calls": 0,
+  "sql_tool_calls": 88,
+  "sql_audit_count": 88,
+  "sql_audit_statuses": {
+    "allowed": 88
+  },
+  "sql_error_count": 0,
+  "explanation_statuses": {
+    "accepted": 115,
+    "not_applicable": 7
+  },
+  "explanation_reviews": 96,
+  "explanation_revisions": 2,
+  "explanation_call_statuses": {
+    "stop": 213
+  },
+  "explanation_calls": 213,
+  "explanation_supplement_calls": 0,
+  "api_error_count": 0,
+  "elapsed_seconds": {
+    "p50": 5.0115,
+    "p95": 6.7696999999999985,
+    "maximum": 10.395
+  },
+  "first_effective_seconds": {
+    "p50": 3.04235000038147,
+    "p95": 4.867529998874663,
+    "maximum": 6.502399999618531
+  },
+  "workspace_unchanged": true,
+  "code_unchanged": true,
+  "note": "One unchanged authored 60-task/122-turn batch, no selective retry or historical score replacement. Visible prose reviewed by assistant against recorded evidence and independent SQL; not third-party blind review or production accuracy.",
+  "records": [
+    {
+      "id": "o-basic-1",
+      "dataset": "olist",
+      "category": "basic",
+      "goal": "获取商品成交额总量，区分含运费金额",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "GMV13494400.74 BRL与独立参考一致，明确不含运费。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-basic-2",
+      "dataset": "olist",
+      "category": "basic",
+      "goal": "区分全部订单与有效订单",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "全部99441单正确，包含canceled/unavailable，不混有效订单。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-basic-3",
+      "dataset": "olist",
+      "category": "basic",
+      "goal": "正确使用客户归属州并列出排行",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "完整前十州表排序及SP5163867.22、ES273532.13均正确。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-basic-4",
+      "dataset": "olist",
+      "category": "basic",
+      "goal": "返回完整月度序列",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "2017十二个月完整有序，无图；1月最低及11月最高与独立参考一致。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-basic-5",
+      "dataset": "olist",
+      "category": "basic",
+      "goal": "无数据年份计数为零且不伪造交易",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "2000年全部订单0正确，没有沿用其他年份。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-comparison-1",
+      "dataset": "olist",
+      "category": "comparison",
+      "goal": "跨年比较要有两年数据与差额，不能用全期总数",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "2017/2018有效订单44379/53532、差9153及增长20.62%正确。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-comparison-2",
+      "dataset": "olist",
+      "category": "comparison",
+      "goal": "半年比较应交付两期总值和增长幅度",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "下半年30035、上半年14344、差15691及109.39%均按独立期间核对。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-comparison-3",
+      "dataset": "olist",
+      "category": "comparison",
+      "goal": "增长判断必须检查完整序列",
+      "status": "passed",
+      "turns": 2,
+      "semantic_review": "pass",
+      "semantic_note": "2017月序列正确；非逐月增长、8涨3跌、首反例4月及最大跌幅12月数值正确，不重查。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-comparison-4",
+      "dataset": "olist",
+      "category": "comparison",
+      "goal": "每月州排名必须在各月内取前五",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "12个完整月分区各前五正确；SP全年第一、各州入榜次数可从完整60行与排名证据核对。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-comparison-5",
+      "dataset": "olist",
+      "category": "comparison",
+      "goal": "月度复购率不能跨月累计",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "逐月独立复购率正确，1月3.32%/12月1.13%、8降3升符合实际序列，不是累计老客率。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-continuity-1",
+      "dataset": "olist",
+      "category": "continuity",
+      "goal": "最高州下钻品类、改排名、换图时保留正确州",
+      "status": "passed",
+      "turns": 4,
+      "semantic_review": "pass",
+      "semantic_note": "SP最高州到州内品类前十、前五与横图连续正确，无澄清失败；榜内合计与CSV一致。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-continuity-2",
+      "dataset": "olist",
+      "category": "continuity",
+      "goal": "支付金额筛选与时间修改保持指标和归属",
+      "status": "passed",
+      "turns": 4,
+      "semantic_review": "pass",
+      "semantic_note": "全州支付到SP标量、2017月度、取消SP筛选连续正确，金额与状态/CSV均一致。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-continuity-3",
+      "dataset": "olist",
+      "category": "continuity",
+      "goal": "年度切换不丢失州筛选与指标",
+      "status": "passed",
+      "turns": 4,
+      "semantic_review": "pass",
+      "semantic_note": "SP2017改2018月度，去月份得23599，再去州得53532；2018缺月如实说明，状态和结果一致。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-continuity-4",
+      "dataset": "olist",
+      "category": "continuity",
+      "goal": "更换指标不残留旧金额口径",
+      "status": "passed",
+      "turns": 4,
+      "semantic_review": "pass",
+      "semantic_note": "2017州GMV前五切有效订单前五，取消TopN列27州并换图正确，保留年份。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-continuity-5",
+      "dataset": "olist",
+      "category": "continuity",
+      "goal": "用户更正指标后保持新口径并可移除时间",
+      "status": "passed",
+      "turns": 4,
+      "semantic_review": "pass",
+      "semantic_note": "SP2017GMV纠正支付金额及去年份正确；解释支付与GMV/运费/净收入口径有边界。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-explanation-1",
+      "dataset": "olist",
+      "category": "explanation",
+      "goal": "单位和经营建议有边界",
+      "status": "passed",
+      "turns": 2,
+      "semantic_review": "pass",
+      "semantic_note": "榜内头部金额、前三占前十72.10%与独立数据一致；两条建议明确为行动与待验证判断，无确定因果。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-explanation-2",
+      "dataset": "olist",
+      "category": "explanation",
+      "goal": "时间趋势解释不能由少数点推断逐月增长",
+      "status": "passed",
+      "turns": 2,
+      "semantic_review": "pass",
+      "semantic_note": "2017月表/图正确，11月峰值1003862.14、8涨3跌及4月/12月下降证据正确，不称逐月增长。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-explanation-3",
+      "dataset": "olist",
+      "category": "explanation",
+      "goal": "支付额不能被解释成净收入",
+      "status": "passed",
+      "turns": 2,
+      "semantic_review": "pass",
+      "semantic_note": "支付方式金额及合计15739137.01正确，明确不能直接称退款后净收入，图表匹配。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-explanation-4",
+      "dataset": "olist",
+      "category": "explanation",
+      "goal": "完整品类含未分类且下载一致",
+      "status": "passed",
+      "turns": 2,
+      "semantic_review": "pass",
+      "semantic_note": "完整74品类含未分类178572.55及总额13494400.74正确，未分类含在总量中，完整下载通过。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-explanation-5",
+      "dataset": "olist",
+      "category": "explanation",
+      "goal": "不支持的原因归因不应伪造因果",
+      "status": "passed",
+      "turns": 2,
+      "semantic_review": "pass",
+      "semantic_note": "11月峰值正确，广告因果说明缺投放/曝光/转化证据，不编背景与相关关系。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-formula-1",
+      "dataset": "olist",
+      "category": "formula",
+      "goal": "按订单粒度计算客单价",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "全部有效订单客单价137.42与订单级聚合参考137.4189221886169920一致，未用支付或商品行均值。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-formula-2",
+      "dataset": "olist",
+      "category": "formula",
+      "goal": "支付事实金额不与商品事实相乘",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "有效订单支付金额15739137.01正确，明确不是GMV。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-formula-3",
+      "dataset": "olist",
+      "category": "formula",
+      "goal": "运费占比使用金额之和而非行比例的均值",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "运费占商品加运费14.24%与独立公式一致。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-formula-4",
+      "dataset": "olist",
+      "category": "formula",
+      "goal": "复购率正确按客户去重且使用有效订单",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "期间复购3.04%正确，customer_unique_id及2笔/1笔有效订单定义准确，不将阈值当观测金额。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-formula-5",
+      "dataset": "olist",
+      "category": "formula",
+      "goal": "评价率使用评价事实时间和粒度",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "评价创建日期12月好评率正确；1月82.01%/12月73.08%、8.93百分点及5涨6跌可从实际序列核对。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-history-1",
+      "dataset": "olist",
+      "category": "history",
+      "goal": "回看销售额不能覆盖当前订单分析",
+      "status": "passed",
+      "turns": 3,
+      "semantic_review": "pass",
+      "semantic_note": "新订单任务后回看旧州榜差3352243.80正确，0SQL且当前订单状态不变。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-history-2",
+      "dataset": "olist",
+      "category": "history",
+      "goal": "全年月度来源覆盖季度，但回看不改季度任务",
+      "status": "passed",
+      "turns": 3,
+      "semantic_review": "pass",
+      "semantic_note": "季度本地修改正确，回看全年6108492.27不覆盖当前Q4范围与CSV。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-history-3",
+      "dataset": "olist",
+      "category": "history",
+      "goal": "Top-N不能冒充所有州总体",
+      "status": "passed",
+      "turns": 3,
+      "semantic_review": "pass",
+      "semantic_note": "前十榜与总体独立正确；本次显式两来源比较差1637982.91及占总体12.14%正确，当前总体状态保持。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-history-4",
+      "dataset": "olist",
+      "category": "history",
+      "goal": "明确要求刷新不能使用旧结果代替查询",
+      "status": "passed",
+      "turns": 3,
+      "semantic_review": "pass",
+      "semantic_note": "主动刷新真实SQL，随后折线0SQL，全年金额及月极值正确。",
+      "failed_turns": []
+    },
+    {
+      "id": "o-history-5",
+      "dataset": "olist",
+      "category": "history",
+      "goal": "不把月均客单价直接相加或简单平均为全年客单价",
+      "status": "passed",
+      "turns": 3,
+      "semantic_review": "pass",
+      "semantic_note": "全年AOV137.66重新查订单级值，明确月均值不能简单平均，不以月值代全年。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-basic-1",
+      "dataset": "thelook",
+      "category": "basic",
+      "goal": "完成成交额不编造来源币种",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "已完成成交额2715783.74正确，未编造币种。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-basic-2",
+      "dataset": "thelook",
+      "category": "basic",
+      "goal": "全部订单不默认只统计Complete",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "全部125226订单正确，包含全部状态。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-basic-3",
+      "dataset": "thelook",
+      "category": "basic",
+      "goal": "品牌销量金额正确关联产品维度",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "品牌前十及Diesel54921.03、榜内Joe's Jeans26466.01与CSV独立一致。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-basic-4",
+      "dataset": "thelook",
+      "category": "basic",
+      "goal": "事件不丢弃匿名用户",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "product/cart/department/purchase/cancel/home六类事件数及最多最少正确。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-basic-5",
+      "dataset": "thelook",
+      "category": "basic",
+      "goal": "无历史交易年份返回真实零计数",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "2000年全部订单0正确，包含全状态。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-comparison-1",
+      "dataset": "thelook",
+      "category": "comparison",
+      "goal": "对比两年完成订单而非注册数",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "2023/2022订单14817/7281及差7536、约2.03倍正确。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-comparison-2",
+      "dataset": "thelook",
+      "category": "comparison",
+      "goal": "上下半年对比有两个窗口与计算",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "半年489448.76/796673.38、差307224.62及增长62.77%正确，不假定币种。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-comparison-3",
+      "dataset": "thelook",
+      "category": "comparison",
+      "goal": "库存周转时长按真实时间计算",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "已售库存周期29.93天与参考一致，sold_at归属准确。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-comparison-4",
+      "dataset": "thelook",
+      "category": "comparison",
+      "goal": "各月独立客户州Top5",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "2023十二月各前五完整，州入榜次数与60行排名证据一致。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-comparison-5",
+      "dataset": "thelook",
+      "category": "comparison",
+      "goal": "完成订单复购率按月独立计算",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "逐月独立完成订单复购正确，2月最低0.12%/11月最高1.74%、4升7降及首末率准确。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-continuity-1",
+      "dataset": "thelook",
+      "category": "continuity",
+      "goal": "州→商品品类→改排名→换图保持实体指代",
+      "status": "passed",
+      "turns": 4,
+      "semantic_review": "pass",
+      "semantic_note": "Guangdong最高州后品类前十/前五与横图正确，指标/筛选继承且换图0SQL。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-continuity-2",
+      "dataset": "thelook",
+      "category": "continuity",
+      "goal": "库存部门筛选和品类下钻保持快照含义",
+      "status": "passed",
+      "turns": 4,
+      "semantic_review": "pass",
+      "semantic_note": "当前部门未售库存成本到Women标量、部门内品类前五和横图正确，不继承历史时间。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-continuity-3",
+      "dataset": "thelook",
+      "category": "continuity",
+      "goal": "入库指标时间与取消筛选不串线",
+      "status": "passed",
+      "turns": 5,
+      "semantic_review": "pass",
+      "semantic_note": "未售数切入库数、2023部门差694、移除部门按月及取消全部时间得490705正确，正文无calculation_budget降级。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-continuity-4",
+      "dataset": "thelook",
+      "category": "continuity",
+      "goal": "订单量年份改变不丢失客户州",
+      "status": "passed",
+      "turns": 4,
+      "semantic_review": "pass",
+      "semantic_note": "California2022改2023、月表去月份得523、去州得14817正确；月极值与变化证据准确。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-continuity-5",
+      "dataset": "thelook",
+      "category": "continuity",
+      "goal": "销售金额更正为商品行数后不残留金额解释",
+      "status": "passed",
+      "turns": 4,
+      "semantic_review": "pass",
+      "semantic_note": "2023部门金额切商品行10815/10710，去年份22852/22757及换图正确，无错误排除12月31日。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-explanation-1",
+      "dataset": "thelook",
+      "category": "explanation",
+      "goal": "未知币种下仍能给有据的比较和建议",
+      "status": "passed",
+      "turns": 2,
+      "semantic_review": "pass",
+      "semantic_note": "Top10金额、中位数63163.68及前三占榜内46.17%正确；建议不假定币种，不将成因推测作为事实。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-explanation-2",
+      "dataset": "thelook",
+      "category": "explanation",
+      "goal": "原因追问能区分数据观察与待验证假设",
+      "status": "passed",
+      "turns": 2,
+      "semantic_review": "pass",
+      "semantic_note": "2023月成交与12月峰值179674.56正确，广告追问不假设因果，说明需要补证。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-explanation-3",
+      "dataset": "thelook",
+      "category": "explanation",
+      "goal": "库存成本不能说成利润，建议有事实边界",
+      "status": "passed",
+      "turns": 2,
+      "semantic_review": "pass",
+      "semantic_note": "部门成本、合计8854752.58及差557943.89正确，不称利润，库存建议和币种边界清楚。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-explanation-4",
+      "dataset": "thelook",
+      "category": "explanation",
+      "goal": "两百行预览不影响完整下载和总体解释",
+      "status": "passed",
+      "turns": 2,
+      "semantic_review": "pass",
+      "semantic_note": "228州全部订单与取消率独立正确，Ceuta50%/6单、Corse0%/14单引用匹配，完整228/预览200和125226合计准确。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-explanation-5",
+      "dataset": "thelook",
+      "category": "explanation",
+      "goal": "事件会话统计不能凭空推断转化率",
+      "status": "passed",
+      "turns": 2,
+      "semantic_review": "pass",
+      "semantic_note": "浏览器去重会话数正确，说明当前只有会话规模，不能据此判断购买转化率，不扩大为数据库不存在购买数据。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-formula-1",
+      "dataset": "thelook",
+      "category": "formula",
+      "goal": "完成订单客单价先按订单归并",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "订单级平均金额86.62与独立参考86.6168190042189194一致，未用商品行均值。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-formula-2",
+      "dataset": "thelook",
+      "category": "formula",
+      "goal": "取消率分母包括全部状态订单",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "取消率14.86%正确，分母全状态订单。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-formula-3",
+      "dataset": "thelook",
+      "category": "formula",
+      "goal": "复购按客户而非商品行判定",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "期间完成订单复购11.94%正确，user_id及Complete期间口径正确。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-formula-4",
+      "dataset": "thelook",
+      "category": "formula",
+      "goal": "时间间隔保留不足一天且排除负时长",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "完整时长平均4.02天正确，未截断不足一天部分。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-formula-5",
+      "dataset": "thelook",
+      "category": "formula",
+      "goal": "库存成本仅来自当前未售单元",
+      "status": "passed",
+      "turns": 1,
+      "semantic_review": "pass",
+      "semantic_note": "未售库存成本8854752.58正确，当前快照且不编币种。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-history-1",
+      "dataset": "thelook",
+      "category": "history",
+      "goal": "销售旧结果与订单当前任务互不覆盖",
+      "status": "passed",
+      "turns": 3,
+      "semantic_review": "pass",
+      "semantic_note": "旧州榜第一减第二28890.81正确，0SQL只读回看不覆盖2022订单任务。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-history-2",
+      "dataset": "thelook",
+      "category": "history",
+      "goal": "全年到季度本地复用、刷新后回看保持当前状态",
+      "status": "passed",
+      "turns": 3,
+      "semantic_review": "pass",
+      "semantic_note": "Q4本地筛选和35.94%正确，回看全年1286122.14不覆盖Q4，0SQL。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-history-3",
+      "dataset": "thelook",
+      "category": "history",
+      "goal": "所有州总额不能从前十州外推",
+      "status": "passed",
+      "turns": 3,
+      "semantic_review": "pass",
+      "semantic_note": "Top10与总体2715783.74正确，解释区分子集/总体且明确完整州分组合计等于总体，未错误否定可加性。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-history-4",
+      "dataset": "thelook",
+      "category": "history",
+      "goal": "用户主动刷新时不返回缓存冒充新查询",
+      "status": "passed",
+      "turns": 3,
+      "semantic_review": "pass",
+      "semantic_note": "明确刷新实际重查，随后换图不查，全年合计与月极值正确。",
+      "failed_turns": []
+    },
+    {
+      "id": "t-history-5",
+      "dataset": "thelook",
+      "category": "history",
+      "goal": "不将月平均完成订单金额直接相加或平均",
+      "status": "passed",
+      "turns": 3,
+      "semantic_review": "pass",
+      "semantic_note": "全年订单级均值86.80实际重查，解释月均值权重问题正确，不平均非可加月均值。",
+      "failed_turns": []
+    }
+  ]
+}
