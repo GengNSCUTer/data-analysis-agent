@@ -187,6 +187,24 @@ def test_completed_request_without_semantic_review_is_not_task_success():
     assert runner.task_status([{"errors":[]}],"pass") == "passed"
 
 
+@pytest.mark.parametrize('values,predicate,verdict,passes', [
+    ([1, 3, 2], 'every_period_strictly_increases', 'false', True),
+    ([1, 3, 2], 'every_period_strictly_increases', 'true', False),
+    ([1, 3, 2], 'every_period_strictly_increases', 'insufficient', False),
+    ([1, 3, 2], 'endpoint_increases', 'false', False),
+    ([1, 2, 3], 'every_period_strictly_increases', 'true', True),
+    ([1, 2, 3], 'every_period_strictly_increases', 'false', False),
+])
+def test_trend_evaluation_reads_current_predicate_and_checks_every_transition(values, predicate, verdict, passes):
+    expected = pd.DataFrame({'gmv': values})
+    payload = {'analyses': [{'operation': 'trend', 'status': 'ready', 'groups': [
+        {'monotonicity': {'predicate': predicate, 'verdict': verdict}}]}]}
+    result = runner.check_analyses({'operation': 'trend'}, payload, expected)
+    assert result == ([] if passes else ['trend_judgment'])
+    payload['analyses'][0]['groups'] = []
+    assert runner.check_analyses({'operation': 'trend'}, payload, expected) == ['trend_judgment']
+
+
 def test_sse_answer_replaces_cumulative_component_updates_and_keeps_distinct_paragraphs():
     events = [{'rich':{'id':key,'type':'text','lifecycle':kind,'data':{'content':content}}}
               for key,kind,content in [('a','create','主'),('a','update','主要结论'),

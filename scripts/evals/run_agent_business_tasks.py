@@ -135,7 +135,9 @@ def check_analyses(expectation, payload, expected):
         values = list(expected["gmv"])
         increasing = all(b > a for a, b in zip(values, values[1:]))
         groups = analyses[0].get("groups", [])
-        return [] if len(groups) == 1 and groups[0].get("judgment") == str(increasing).lower() else ["trend_judgment"]
+        monotonicity = groups[0].get("monotonicity", {}) if len(groups) == 1 else {}
+        return [] if (monotonicity.get("predicate") == "every_period_strictly_increases"
+                      and monotonicity.get("verdict") == str(increasing).lower()) else ["trend_judgment"]
     target = expected_calculation(expected, expectation["metric"], operation, expectation.get("rows"))
     actual = analyses[0].get("value" if operation == "sum" else "difference")
     return [] if numeric_equal(actual, target, expectation["metric"]) else ["analysis_numeric"]
