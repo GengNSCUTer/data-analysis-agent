@@ -39,7 +39,7 @@ SQLGlot参与SQL安全与计划AST检查，当前在`pyproject.toml`固定30.24.
 
 先按 [部署说明](deployment.md) 只在空的独立数据库中初始化合成数据，导出其中的受限连接、
 状态目录与 `PGPASSFILE`。以下测试会写应用元数据，不能指向正式用户库。路由测试需要构造
-模型客户端，但不调用公网，可把 `SILICONFLOW_API_KEY` 设为 `test-no-network`。
+模型客户端，但不调用公网，可把 `OPENAI_API_KEY` 设为 `test-no-network`。
 
 ```bash
 RUN_PROJECT_DB=1 python -m pytest -q -m postgres \

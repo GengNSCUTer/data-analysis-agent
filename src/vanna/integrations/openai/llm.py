@@ -32,6 +32,8 @@ class OpenAILlmService(LlmService):
         api_key: API key; falls back to env `OPENAI_API_KEY`.
         organization: Optional org; env `OPENAI_ORG` if unset.
         base_url: Optional custom base URL; env `OPENAI_BASE_URL` if unset.
+        extra_body: Optional provider-specific request fields, shared by stream
+            and non-stream calls (for example DeepSeek's thinking mode).
         extra_client_kwargs: Extra kwargs forwarded to `openai.OpenAI()`.
     """
 
@@ -41,6 +43,7 @@ class OpenAILlmService(LlmService):
         api_key: Optional[str] = None,
         organization: Optional[str] = None,
         base_url: Optional[str] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
         **extra_client_kwargs: Any,
     ) -> None:
         try:
@@ -52,6 +55,7 @@ class OpenAILlmService(LlmService):
             ) from e
 
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-5")
+        self.extra_body = dict(extra_body or {})
         api_key = api_key or os.getenv("OPENAI_API_KEY")
         organization = organization or os.getenv("OPENAI_ORG")
         base_url = base_url or os.getenv("OPENAI_BASE_URL")
@@ -275,6 +279,9 @@ class OpenAILlmService(LlmService):
         if tools_payload:
             payload["tools"] = tools_payload
             payload["tool_choice"] = request.tool_choice
+
+        if self.extra_body:
+            payload["extra_body"] = self.extra_body
 
         return payload
 

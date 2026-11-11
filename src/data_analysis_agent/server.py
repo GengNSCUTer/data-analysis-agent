@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import asyncio
+import json
 import secrets
 import logging
 from pathlib import Path
@@ -181,17 +182,17 @@ def create_app(*, llm_provider=None) -> FastAPI:
     os.environ.setdefault("PGOPTIONS", "-c statement_timeout=10000 -c lock_timeout=5000")
     limits = RuntimeLimits.from_environment()
     control = RuntimeControl(limits)
-    api_key = os.getenv("SILICONFLOW_API_KEY", "")
+    api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key and llm_provider is None:
         raise RuntimeError(
-            "SILICONFLOW_API_KEY is required; set it in the environment or DATA_ANALYSIS_ENV_FILE."
+            "OPENAI_API_KEY is required; set it in the environment or DATA_ANALYSIS_ENV_FILE."
         )
     if not (WEB_COMPONENT_DIST / "vanna-components.js").is_file():
         raise RuntimeError(
             "Build frontends/webcomponent before starting the trusted demo."
         )
 
-    model_name = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V3.2")
+    model_name = os.getenv("OPENAI_MODEL", "deepseek-flash")
     runtime_workspace = load_runtime_workspace()
     workspace = runtime_workspace.profile
     settings = replace(PostgresConnectionSettings.from_environment(),
@@ -265,8 +266,9 @@ def create_app(*, llm_provider=None) -> FastAPI:
     reuse_planner = ArtifactReusePlanner(artifact_history, result_artifact_store, catalog_retriever.catalog)
     provider_llm_service = llm_provider or OpenAILlmService(
         api_key=api_key,
-        base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
         model=model_name,
+        extra_body=json.loads(os.getenv("OPENAI_EXTRA_BODY", "{}")),
         connect_timeout_seconds=budget.llm_connect_timeout_seconds,
     )
     llm_service = ObservedLlmService(

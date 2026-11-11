@@ -69,10 +69,15 @@ python -m pip install 'dist/vanna-2.0.2-py3-none-any.whl[product]'
 
 将下面变量填入一个仓库外、权限为 600 的私有环境文件。`STATE_DIR` 使用自己的绝对目录；`PGPASSFILE` 必须指向该目录中的 `pgpass`。不要复用现有真实业务库运行 `--synthetic`。
 
+在线模型统一使用`OPENAI_*`连接配置；升级旧实例时将原`SILICONFLOW_*`三项改名，
+旧名称不再读取。下面示例为DeepSeek官方API；`OPENAI_EXTRA_BODY`是传给兼容API的JSON字段，
+本项目使用非思考工具调用，因此显式关闭DeepSeek默认thinking。其他提供方按其API要求配置。
+
 ```dotenv
-SILICONFLOW_API_KEY=your-api-key
-SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
-SILICONFLOW_MODEL=deepseek-ai/DeepSeek-V3.2
+OPENAI_API_KEY=your-api-key
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_MODEL=deepseek-flash
+OPENAI_EXTRA_BODY={"thinking":{"type":"disabled"}}
 DATA_ANALYSIS_ADMIN_DSN=postgresql://app_admin:your-hex-admin-password@127.0.0.1:5433/data_analysis_agent
 DATA_ANALYSIS_READER_PASSWORD=your-hex-reader-password
 DATA_ANALYSIS_WRITER_PASSWORD=your-hex-writer-password

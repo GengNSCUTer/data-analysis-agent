@@ -429,7 +429,7 @@ def main():
         ),
         "CAPACITY_TEST_PASSWORD": password,
         "CAPACITY_ACCOUNT_PREFIX": ACCOUNT_PREFIX,
-        "SILICONFLOW_MODEL": "controlled-capacity-provider",
+        "OPENAI_MODEL": "controlled-capacity-provider",
     }
     # Unique account passwords must remain consistent on reruns, outside Git.
     credentials = args.output / "credentials.json"

@@ -322,9 +322,10 @@ async def test_live_sql_repair_keeps_full_filtered_plan(tmp_path):
     route = route_semantic_intent(intent, QuestionRouter(retriever), selection)
     plan = QueryPlan.from_selection(selection, "SP州销售额最高的十个品类", route, {"semantic_intent": intent.as_dict()})
     budget = RequestBudget()
-    llm = ObservedLlmService(OpenAILlmService(api_key=os.environ["SILICONFLOW_API_KEY"],
-        base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
-        model=os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-V3.2")))
+    llm = ObservedLlmService(OpenAILlmService(api_key=os.environ["OPENAI_API_KEY"],
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
+        model=os.getenv("OPENAI_MODEL", "deepseek-flash"),
+        extra_body=json.loads(os.getenv("OPENAI_EXTRA_BODY", "{}"))))
     cid = "repair-acceptance-" + uuid.uuid4().hex
     store = PostgresConversationStore()
     await store.update_conversation(Conversation(id=cid, user=user))

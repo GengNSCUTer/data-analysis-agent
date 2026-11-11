@@ -1,7 +1,7 @@
 """Verify an installed wheel against a new, disposable native PostgreSQL cluster.
 
 Run with the NEW environment's Python, not PYTHONPATH or an editable install.
-Requires PostgreSQL >=16 binaries, Playwright Chromium and SILICONFLOW_API_KEY.
+Requires PostgreSQL >=16 binaries, Playwright Chromium and OPENAI_API_KEY.
 All state/logs stay in the generated directory, and existing services are untouched.
 """
 from __future__ import annotations

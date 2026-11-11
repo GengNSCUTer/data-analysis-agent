@@ -84,21 +84,35 @@ async def test_third_schema_reuses_prompt_intent_plan_policy_and_help(workshop):
 def test_server_uses_configured_workspace_for_storage_and_writer(tmp_path, monkeypatch):
     from data_analysis_agent import server
     stores = []
+    providers = []
     original = server.PostgresConversationStore
+    original_provider = server.OpenAILlmService
 
     def store(settings, **kwargs):
         result = original(settings, **kwargs)
         stores.append(result)
         return result
 
-    monkeypatch.setenv("SILICONFLOW_API_KEY", "unit-test-placeholder")
+    def provider(**kwargs):
+        providers.append(kwargs)
+        return original_provider(**kwargs)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "unit-test-placeholder")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://example.invalid")
+    monkeypatch.setenv("OPENAI_MODEL", "configured-test-model")
+    monkeypatch.setenv("OPENAI_EXTRA_BODY", '{"thinking":{"type":"disabled"}}')
     monkeypatch.setenv("DATA_ANALYSIS_STATE_DIR", str(tmp_path))
     monkeypatch.setenv("DATA_ANALYSIS_WORKSPACE_CONFIG", str(RESOURCES / "workspaces/thelook.yaml"))
     monkeypatch.delenv("DATA_ANALYSIS_CATALOG_PATH", raising=False)
     monkeypatch.delenv("DATA_ANALYSIS_DATASET_VERSION", raising=False)
     monkeypatch.setattr(server, "PostgresConversationStore", store)
+    monkeypatch.setattr(server, "OpenAILlmService", provider)
     monkeypatch.setattr(server, "ensure_bootstrap_account", lambda _: None)
     server.create_app()
+    assert providers[0]["api_key"] == "unit-test-placeholder"
+    assert providers[0]["base_url"] == "https://example.invalid"
+    assert providers[0]["model"] == "configured-test-model"
+    assert providers[0]["extra_body"] == {"thinking": {"type": "disabled"}}
     assert stores[0].default_workspace_id == "thelook-demo"
     assert stores[0].default_dataset_version == "thelook-kaggle-mirror-v1-20260908"
     assert stores[0].default_metric_version == "0.3.2-online"

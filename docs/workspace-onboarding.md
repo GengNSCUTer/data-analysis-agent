@@ -52,8 +52,10 @@ DATA_ANALYSIS_STATE_DIR=/private/thelook-state
 PGPASSFILE=/private/thelook-state/pgpass
 DATA_ANALYSIS_DEMO_HOST=127.0.0.1
 DATA_ANALYSIS_DEMO_PORT=32104
-SILICONFLOW_API_KEY=your-private-key
-SILICONFLOW_MODEL=deepseek-ai/DeepSeek-V3.2
+OPENAI_API_KEY=your-private-key
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_MODEL=deepseek-flash
+OPENAI_EXTRA_BODY={"thinking":{"type":"disabled"}}
 ```
 
 只在初始化进程中提供管理员 `DATA_ANALYSIS_ADMIN_DSN`、现有 `DATA_ANALYSIS_READER_PASSWORD` 和专用 writer 的 `DATA_ANALYSIS_WRITER_PASSWORD`，执行：

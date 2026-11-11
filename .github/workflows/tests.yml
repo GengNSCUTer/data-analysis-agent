@@ -96,6 +96,7 @@ jobs:
           tests/test_budget_streaming.py \
           tests/test_runtime_control.py \
           tests/test_llm_observability.py \
+          tests/test_openai_llm_async.py \
           tests/test_result_artifact_store.py \
           tests/test_context_builder.py
     - name: Run deterministic evaluation inventory
@@ -145,8 +146,8 @@ jobs:
       DATA_ANALYSIS_STATE_DIR: /tmp/copilot-ci-state
       PGPASSFILE: /tmp/copilot-ci-state/pgpass
       # Dummy credential: route tests never call the public provider.
-      SILICONFLOW_API_KEY: ci-no-network
-      SILICONFLOW_BASE_URL: http://127.0.0.1:1
+      OPENAI_API_KEY: ci-no-network
+      OPENAI_BASE_URL: http://127.0.0.1:1
       RUN_PROJECT_DB: '1'
     steps:
     - uses: actions/checkout@v4
