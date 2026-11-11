@@ -18,6 +18,7 @@
 | 按小段亲自阅读 Agent 代码并复述 | [`learning/agent-project-walkthrough-v1.md`](learning/agent-project-walkthrough-v1.md) | Day 1 请求入口；问答随用户学习更新 |
 | 查看趋势、比较、占比等服务端结果分析 | [`../plan/feature-result-analysis-operations-v1.md`](../plan/feature-result-analysis-operations-v1.md) / [`architecture/result-budget-v2.md`](architecture/result-budget-v2.md) | 计算已实现；当前由无工具模型解释，按疑点核验 |
 | 查看自由回答、事实检查与有限修订 | [`architecture/product-request-architecture-v1.md`](architecture/product-request-architecture-v1.md) / [`../evals/results/free-result-answer-20261027.md`](../evals/results/free-result-answer-20261027.md) | 模型写正常正文；代码先检查，有疑点才复核；旧引用模板已删除 |
+| 查看粒度、解释补证和双来源比较收尾 | [`architecture/business-answer-evidence-closeout.md`](architecture/business-answer-evidence-closeout.md) | 完整维度唯一性、有限补证、日期边界、显式双工件数值比较；不做任意SQL等价证明 |
 | 核对 SQL-only 训练与真实候选输入的对齐改造 | [`../plan/refactor-runtime-candidate-sft-alignment-v1.md`](../plan/refactor-runtime-candidate-sft-alignment-v1.md) | 5,980 train / 1,500 validation、长度4,096、best=step2,500；训练与matching已完成。端点语义使旧Gold口径不一致，结论见[r3报告](post-training/experiments/runtime-candidate-matching-v2-r3.md)，不将一致子集当整体100% |
 | 了解本周已核实的用户请求/可信执行链 | [`architecture/project-v1-baseline-review.md`](architecture/project-v1-baseline-review.md) | Week 1 当前审查基线 |
 | 查看有证据支持的产品优化候选与暂不处理项 | [`architecture/project-v1-gap-map.md`](architecture/project-v1-gap-map.md) | Week 1 缺口地图，不是实时任务台账 |

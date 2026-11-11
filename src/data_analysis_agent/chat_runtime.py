@@ -351,6 +351,11 @@ class BudgetedChatHandler(ChatHandler):
                                 })
                     if semantic_intent is not None:
                         usage.record_catalog({'semantic_intent': semantic_intent.as_dict()})
+                        if self.artifact_reuse_planner is not None and semantic_intent.artifact_comparison:
+                            async for chunk in self._answer_artifact_comparison(
+                                    request, conversation, memory, user, semantic_intent, usage):
+                                yield chunk
+                            return
                         if (self.artifact_reuse_planner is not None
                                 and semantic_intent.request_kind in {"data_query", "data_analysis", "mixed_request", "result_followup"}
                                 and semantic_intent.action != "clear_task" and reference_error is None
@@ -1240,6 +1245,39 @@ class BudgetedChatHandler(ChatHandler):
         content = (response.content or "").strip()
         yield content
 
+    async def _answer_artifact_comparison(self, request, conversation, state, user, intent, usage):
+        """Read-only two-result comparison; never activates a synthetic task."""
+        try:
+            summary, sources = await self.artifact_reuse_planner.comparison_evidence(
+                conversation.id, user, intent.artifact_comparison, max_tokens=usage.result_evidence_limit())
+            usage.set_result_summary(summary)
+            provenance = {'mode':'LOCAL_COMPUTE', 'source_artifact_ids':[s.artifact.artifact_id for s in sources],
+                'requested_scope':{'metric_ids':[intent.artifact_comparison.metric_id]},
+                'updates_current_task':False, 'operation':intent.artifact_comparison.operation}
+            usage.record_catalog({'artifact_reuse':provenance, 'result_reuse':'validated_result'})
+            # A temporary evidence view is separate from the active task. The
+            # standard no-tools author/reviewer receives both source scopes.
+            view = replace(state, previous_result_artifact=sources[0].artifact, previous_result_summary=summary)
+            route = QuestionRoute('result_followup', (), (intent.artifact_comparison.metric_id,), None, 'verified_artifact_comparison')
+            detail = ''
+            async for piece in self._tool_free_answer(request, route, view, user, intent=intent):
+                if isinstance(piece, str):
+                    detail = piece
+            for item in sources:
+                await self.artifact_reuse_planner.verified(conversation.id, user, item.artifact.artifact_id)
+        except (ResultInspectionError, FileNotFoundError, PermissionError, ResultArtifactIntegrityError) as exc:
+            detail = f'现有历史结果不足以完成这次比较：{exc}'
+            provenance = {'mode':'CLARIFY', 'updates_current_task':False, 'reason':'comparison_evidence_unavailable'}
+            usage.record_catalog({'artifact_reuse':provenance})
+            usage.terminate('clarification_required')
+        conversation.add_message(Message(role='user', content=request.message))
+        conversation.add_message(Message(role='assistant', content=detail, metadata={'artifact_reuse':provenance}))
+        await self.agent.conversation_store.update_conversation(conversation)
+        yield self._text_chunk(conversation.id, request.request_id, detail)
+        if provenance['mode'] == 'LOCAL_COMPUTE':
+            yield self._trusted_result_evidence_chunk(conversation.id, request.request_id, usage)
+            usage.terminate('completed')
+
     async def _answer_history_result(self, request, conversation, state, user, intent, plan, usage, budget, *, proposed_state):
         """Inspect without mutation, or publish a locally derived task result."""
         artifact, frame, spec = plan.item.artifact, plan.frame, plan.spec
@@ -1259,6 +1297,7 @@ class BudgetedChatHandler(ChatHandler):
             additive_metric_ids=catalog.additive_metrics_for(spec.metric_ids, spec.dimensions),
             time_column="time" if spec.time_grain else None, top_n=spec.top_n,
             inspections=intent.result_inspections, query_scope=spec.scope(), metric_semantics=catalog.metric_semantics,
+            metric_rollup_dimensions=catalog.rollup_dimensions_for(spec.metric_ids),
             metric_definitions=contract.metric_definitions, preview_rows=budget.preview_rows,
             max_tokens=usage.result_evidence_limit())
         provenance = {**plan.decision.as_dict(), "source_artifact_id": artifact.artifact_id,
@@ -1404,6 +1443,7 @@ class BudgetedChatHandler(ChatHandler):
             query_scope=artifact.query_scope,
             metric_semantics=catalog.metric_semantics,
             metric_definitions={m: catalog.metrics_by_id[m].description for m in artifact.metric_ids},
+            metric_rollup_dimensions=catalog.rollup_dimensions_for(artifact.metric_ids),
             max_tokens=CURRENT_BUDGET.get().result_evidence_limit() if CURRENT_BUDGET.get() else None,
         )
         usage = CURRENT_BUDGET.get()

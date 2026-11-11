@@ -42,24 +42,25 @@ async def history_setup(tmp_path):
         "metric_version":workspace.metric_version, "working_memory":AnalysisState.new(workspace).as_dict()})
     await store.update_conversation(conversation)
 
-    async def add(conversation, *, metric="gmv", rows=None, expires_at=None):
+    async def add(conversation, *, metric="gmv", rows=None, expires_at=None, scope=None):
         run = await recorder.start(request_id=uuid4().hex, conversation_id=conversation.id, user=user,
             question="受控历史索引测试", budget=RequestBudget(), dataset_version_id=workspace.dataset_version_id,
             metric_version=workspace.metric_version)
         aid = "history_" + uuid4().hex
         rows = rows or [{"customer_state":"SP",metric:300}, {"customer_state":"RJ",metric:200}]
+        columns = list(rows[0])
         manifest = files.save_result_csv(artifact_id=aid, user_id=user.id, workspace_id=workspace.workspace_id,
-            columns=["customer_state",metric], rows=rows, row_count=len(rows),
+            columns=columns, rows=rows, row_count=len(rows),
             dataset_version=workspace.dataset_version_id, metric_version=workspace.metric_version, expires_at=expires_at,
             result_metadata={"validation_status":"valid", "result_complete":True,
                 "population_coverage":"complete", "row_count":len(rows), "source_tables":["fact_orders"],
                 "history_index_required":True, "ordering":[{"column":metric,"direction":"desc"}]})
         artifact = ResultArtifact(artifact_id=aid, summary="可信结果", metric_ids=(metric,),
-            result_columns=("customer_state",metric), dataset_version=workspace.dataset_version_id,
+            result_columns=tuple(columns), dataset_version=workspace.dataset_version_id,
             metric_version=workspace.metric_version, workspace_id=workspace.workspace_id, chart_state="not_rendered",
             csv_sha256=manifest["csv_sha256"], csv_ref="result.csv", csv_bytes=manifest["csv_bytes"],
             result_metadata=manifest["result_metadata"], query_scope={"metric_ids":[metric], "dimensions":["customer_state"],
-                "filters":[], "time_range":None, "time_grain":None, "comparison_baseline":None, "top_n":None})
+                "filters":[], "time_range":None, "time_grain":None, "comparison_baseline":None, "top_n":None} if scope is None else scope)
         conversation.add_message(Message(role="user", content="受控问题", metadata={"run_id":run.run_id}))
         conversation.add_message(Message(role="assistant", content="受控回答", metadata={"run_id":run.run_id}))
         conversation.metadata["working_memory"] = AnalysisState.from_mapping(conversation.metadata["working_memory"]).with_result_artifact(artifact).as_dict()
@@ -69,6 +70,52 @@ async def history_setup(tmp_path):
         return artifact
     yield workspace, catalog, store, files, history, user, conversation, add
     await store.delete_conversation(conversation.id, user)
+
+
+async def test_two_historical_operands_are_revalidated_and_never_overwrite_current_state(history_setup):
+    from data_analysis_agent.semantic_intent import ArtifactComparison
+    from data_analysis_agent.result_explanation import parse_result_evidence
+    ws, catalog, store, files, history, user, conversation, add = history_setup
+    top_scope = {'metric_ids':['gmv'],'dimensions':['customer_state'],'filters':[],
+                 'time_range':None,'time_grain':None,'top_n':2}
+    first = await add(conversation, scope=top_scope)
+    second = await add(conversation, rows=[{'gmv':600}], scope={**top_scope, 'dimensions':[], 'top_n':None})
+    state = (await store.get_conversation(conversation.id,user)).metadata['working_memory']
+    planner = ArtifactReusePlanner(history, files, catalog)
+    request = ArtifactComparison(metric_id='gmv', sources=({'artifact_id':first.artifact_id},{'artifact_id':second.artifact_id}))
+    summary, sources = await planner.comparison_evidence(conversation.id,user,request)
+    evidence = parse_result_evidence(summary)
+    assert evidence['analyses'][0]['difference'] == -100
+    assert evidence['artifact_sources'][0]['operand'] == 'returned_top_n_sum'
+    assert [s.artifact.artifact_id for s in sources] == [first.artifact_id,second.artifact_id]
+    share = request.model_copy(update={'operation':'share'})
+    share_summary, _ = await planner.comparison_evidence(conversation.id,user,share)
+    share_evidence = parse_result_evidence(share_summary)
+    assert share_evidence['analyses'][-1]['share_percent'] == pytest.approx(500/600*100)
+    assert (await store.get_conversation(conversation.id,user)).metadata['working_memory']==state
+    other = User(id='intruder',group_memberships=['analyst'])
+    with pytest.raises(ValueError,match='来源不唯一或已失效'):
+        await planner.comparison_evidence(conversation.id,other,request)
+    await store.truncate_from_last_user_message(conversation.id,user)
+    with pytest.raises(ValueError,match='来源不唯一或已失效'):
+        await planner.comparison_evidence(conversation.id,user,request)
+
+
+async def test_two_artifact_comparison_refuses_nonadditive_rollup_and_invalid_share(history_setup):
+    from data_analysis_agent.semantic_intent import ArtifactComparison
+    from data_analysis_agent.result_analysis import ResultInspectionError
+    ws,catalog,store,files,history,user,conversation,add = history_setup
+    first = await add(conversation, metric='average_order_value')
+    second = await add(conversation, metric='average_order_value')
+    planner=ArtifactReusePlanner(history,files,catalog)
+    request=ArtifactComparison(metric_id='average_order_value',sources=({'artifact_id':first.artifact_id},{'artifact_id':second.artifact_id}))
+    with pytest.raises(ResultInspectionError,match='不可加指标'):
+        await planner.comparison_evidence(conversation.id,user,request)
+    a = await add(conversation)
+    b = await add(conversation)
+    request=ArtifactComparison(metric_id='gmv',operation='share',sources=({'artifact_id':a.artifact_id},{'artifact_id':b.artifact_id}))
+    with pytest.raises(ResultInspectionError,match='完整总体分母'):
+        await planner.comparison_evidence(conversation.id,user,request)
 
 
 async def test_index_is_scoped_by_user_workspace_conversation_role_and_epoch(history_setup):

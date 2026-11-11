@@ -111,7 +111,7 @@ def test_patch_cannot_introduce_hidden_metric_or_multiple_state_filters():
     intent = parse_semantic_intent(json.dumps({"request_kind": "data_query", "action": "update_task", "state_patch": {
         "operations": [{"op": "set", "field": "metric_ids", "value": ["invented_metric"]}]
     }}), catalog, user=USER)
-    with pytest.raises(ValueError, match="invalid_state_patch"):
+    with pytest.raises(ValueError, match="unknown_or_invisible_metric"):
         resolve_state_intent(intent, state, catalog, USER, message_count=8)
     intent = parse_semantic_intent(json.dumps({"request_kind": "data_query", "action": "update_task", "state_patch": {
         "operations": [{"op": "add", "field": "filters", "value": ["customer_state=SP", "customer_state=RJ"]}]

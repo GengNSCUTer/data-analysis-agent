@@ -613,7 +613,7 @@ async def test_runner_executes_allowed_query_and_audits_policy_rejection() -> No
         "required_result_columns": ["customer_state", "paid_order_count"],
         "metric_result_columns": ["paid_order_count"],
         "additive_metric_ids": ["paid_order_count"],
-        "query_plan": {**envelope, "top_n": {"customer_state": 5}},
+        "query_plan": {**envelope, "dimensions":["customer_state"], "top_n": {"customer_state": 5}},
     })
 
     dataframe = await runner.run_sql(

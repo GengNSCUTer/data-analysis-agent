@@ -37,6 +37,8 @@ text就是用户看到的原文，服务端不会改成句式模板。kind为fac
 只使用证据中实际存在的路径。不确定子路径时引用确实存在的父对象，如/statistics/gmv或/analyses/0；不要编造字段。
 指标口径引用/metric_definitions/实际指标ID；它解释计算定义，不是观测数值。范围/单位可引用/scope、/metric_semantics或/column_labels。
 引用只能来自本次提供的sample_rows、formatted_metrics、statistics、analyses、time_endpoints、metric_semantics、metric_definitions、column_labels、metric_ids、columns、query_scope、presentation和结果行数/coverage范围字段。
+公式中的阈值数字应单独一段引用metric_definitions，观测结果单独引用实际结果；月份用“1月”而不是裸数字1。
+metric_rollup_dimensions列出Catalog允许完整分组相加的维度；相同指标口径、时间、筛选下，全部这些分组（含未分类）合计等于总体，Top-N仅为子集。不能为解释Top-N而否定合法的全分组合计。
 前端表格预览行数只看presentation.preview_row_count；included_row_count是模型读到的明细数，selection.limit是分析读取参数，都不是前端预览。未提供presentation时不能猜前端行数。
 metric_ids和columns只能说明本次结果包含哪些指标/字段、缺少什么证据，不能充当观测数值或证明整个数据库都没有该信息。
 尽量一个独立事实一段。界面已经提供数据表；除非用户明确要求在正文逐行列出，不要重复整张表。
@@ -69,6 +71,7 @@ verdict为supported、revise或insufficient。issues只列实际错误，最多3
 独立核对完整回答和实际证据，不只看作者引用：实体与数值对应、比较方向/分母、单位、
 查询范围、排名、趋势和因果。表格已展示，正文不必重述全表。代码检查疑点不是错误结论。
 metric_definitions是本项目口径，query_scope是实际范围。不要用行业通用GMV定义替代。
+metric_rollup_dimensions是Catalog批准的可加维度：同口径、同时间与筛选、包含未分类的全部分组合计等于总体。Top-N子集不代表总体，不意味着全部州金额之和也不等于总体。分别检查这两个命题，不因前一句正确就放行后一句。
 Top-N内极值、合计仅适用于返回榜单，不能称所有业务的极值、总量。时间端点不是峰值；
 有缺月不能断言逐月增长。两个不同月份不能同时称唯一全年最高；注意并列。
 monotonicity.verdict=false只否定predicate声明的“每期严格增长/从未下降”，不否定首末上涨。判断首末变化用endpoints；不把逐期反例改写为“年末没有高于年初”。
@@ -124,6 +127,7 @@ def parse_answer_draft(text: str) -> AnswerDraft:
 class AnswerCheck:
     errors: list[str] = field(default_factory=list)
     doubts: list[str] = field(default_factory=list)
+    missing_evidence: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -156,6 +160,26 @@ def _calculate_answer_evidence(evidence, requests):
     if any(item['status'] != 'ready' for item in calculated):
         raise ResultInspectionError('现有完整结果不支持这项计算；不能通过解释调用重新查库或把缺失数据视为零。')
     return {**evidence, 'analyses': [*evidence['analyses'], *calculated]}
+
+
+def _prepare_pair_evidence(evidence):
+    """Two-row results have one bounded comparison; calculate before writing.
+
+    No pair explosion for large tables and no computation over partial rows.
+    An author may use or ignore this evidence without inventing arithmetic.
+    """
+    if not (evidence['coverage'] == 'complete' and evidence['row_count'] == evidence['source_row_count'] == 2
+            and len(evidence['sample_rows']) == 2 and evidence['row_numbers'] == [1, 2]):
+        return evidence
+    requests = [ResultInspection(operation='compare', metric_id=m, row_numbers=(1, 2))
+                for m in evidence['metric_ids'] if not any(
+                    a.get('operation') == 'compare' and a.get('metric_id') == m for a in evidence['analyses'])]
+    if not requests:
+        return evidence
+    try:
+        return _calculate_answer_evidence(evidence, requests)
+    except ResultInspectionError:
+        return evidence
 
 
 def parse_result_evidence(summary: str) -> dict[str, Any]:
@@ -204,6 +228,8 @@ _REF_ROOTS = {
     "metric_ids",
     "columns",
     "query_scope",
+    "metric_rollup_dimensions",
+    "artifact_sources",
 }
 _NUMBER = re.compile(r"(?<![0-9_.])[-+]?\d+(?:,\d{3})*(?:\.\d+)?\s*(?:万|亿)?\s*[%％]?")
 _DATE = re.compile(
@@ -287,6 +313,8 @@ def _numbers(
 ) -> list[tuple[Decimal, str | None]]:
     """Typed business values; metadata numbers cannot be used as amounts."""
     parts = ref.split("/")[1:]
+    if parts[0] in {'artifact_sources', 'metric_rollup_dimensions', 'query_scope', 'metric_definitions', 'metric_semantics'}:
+        return []
     if parts[0] == "formatted_metrics":
         raw_ref = "/" + "/".join(["sample_rows", *parts[1:]])
         return _numbers(resolve_evidence_ref(evidence, raw_ref), raw_ref, evidence)
@@ -510,6 +538,26 @@ def _dates_supported(text: str, nodes: list[Any], evidence: Mapping[str, Any], r
     return True
 
 
+def _scope_boundary_errors(text, evidence):
+    """Check unambiguous date intervals, leaving other wording to review."""
+    bounds = evidence.get('query_scope', {}).get('time_range') or {}
+    if not bounds.get('start') or not bounds.get('end'):
+        return []
+    errors = []
+    for match in re.finditer(r'(\d{4}-\d{2}-\d{2})\s*(?:至|到|~|—)\s*(\d{4}-\d{2}-\d{2})([^。；\n]{0,24})', text):
+        start, end, suffix = match.groups()
+        if not re.search(r'不含|不包含|左闭右开|含结束|包含结束', suffix):
+            continue
+        try:
+            exclusive = bool(re.search(r'不含|不包含|左闭右开', suffix))
+            claimed_end = pd.Timestamp(end) + (pd.Timedelta(0) if exclusive else pd.Timedelta(days=1))
+            if pd.Timestamp(start) != pd.Timestamp(bounds['start']) or claimed_end != pd.Timestamp(bounds['end']):
+                errors.append(f'time_boundary：正文区间与实际[{bounds["start"]},{bounds["end"]})不一致；可用实际半开边界，或明确最后一天包含在内。')
+        except ValueError:
+            errors.append('time_boundary：正文日期不是有效日期')
+    return errors
+
+
 def _dated_value_claims(text: str, evidence: Mapping[str, Any]):
     """Bind explicit month/value pairs; a list of valid numbers is insufficient."""
     paired, errors = {}, []
@@ -619,6 +667,7 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
         comparison_errors, calculated = _bound_comparisons(text, evidence) if paragraph.kind == "fact" else ([], [])
         result.errors.extend(prefix + error for error in comparison_errors)
         if paragraph.kind == "fact":
+            result.errors.extend(prefix + error for error in _scope_boundary_errors(text, evidence))
             result.errors.extend(prefix + error for error in _check_named_extrema(text, evidence))
             result.errors.extend(prefix + error for error in _check_limited_extreme(text, evidence))
             result.errors.extend(prefix + error for error in _dated_value_claims(text, evidence)[1])
@@ -674,6 +723,16 @@ def check_answer(draft: AnswerDraft, evidence: Mapping[str, Any]) -> AnswerCheck
                 # Calendar counts in formula prose are not observed amounts.
                 # Their correctness is reviewed against scope, not the AOV.
                 result.doubts.append(prefix + "calendar_scope：核对期间数量与查询范围或公式说明")
+                continue
+            # A definition can contain 1/2-order thresholds next to the real
+            # observed percentage. Do not call that a measured value, and do
+            # not silently approve it: the reviewer checks the cited formula.
+            definition_refs = [ref for ref in paragraph.evidence_refs if ref.startswith('/metric_definitions/')]
+            definition_numbers = {m.group().strip() for ref in definition_refs
+                                  for m in _NUMBER.finditer(str(resolve_evidence_ref(evidence, ref)))}
+            if (match.group().strip() in definition_numbers and re.match(r'单|笔|次|个|人', after)
+                    and re.search(r'至少|不少于|达到|超过|多于|复购|分子|分母', before[-20:])):
+                result.doubts.append(prefix + 'formula_threshold：数字属于口径阈值，核对定义而非观测值')
                 continue
             count_context = bool(re.match(r"(?:行|组|条|名|个|项|种|类)", after))
             candidates = [
@@ -862,6 +921,7 @@ async def generate_result_answer(
     deadline = perf_counter() + 90
     reviews = revisions = 0
     semantic_doubt_seen = False
+    calculation_used = False
     extended_summary = None
     issue_codes: set[str] = set()
     base = request.model_copy(
@@ -878,6 +938,8 @@ async def generate_result_answer(
 
     async def call(req, seconds, *, prepared=False):
         nonlocal reviews, revisions
+        if len(calls) >= 4:
+            raise AnswerProviderError('explanation call budget exhausted')
         if not prepared:
             req = prepare(req)
         started = perf_counter()
@@ -912,23 +974,36 @@ async def generate_result_answer(
     try:
         base = prepare(base)
         evidence = parse_result_evidence(base.messages[-1].content)
+        prepared_evidence = _prepare_pair_evidence(evidence)
+        if prepared_evidence is not evidence:
+            evidence = prepared_evidence
+            extended_summary = RESULT_EVIDENCE_PREFIX + json.dumps(evidence, ensure_ascii=False, separators=(',', ':'))
+            base = prepare(base.model_copy(update={'messages': [*base.messages[:-1], LlmMessage(role='user', content=extended_summary)]}))
+            # Preparation may reduce detailed rows to fit the request budget.
+            evidence = parse_result_evidence(base.messages[-1].content)
         response = await call(base, 60, prepared=True)
-        for attempt in range(2):
+        while True:
             try:
                 draft = parse_answer_draft(response.content or "")
                 if draft.calculations:
                     calls[-1]['calculation_requests'] = [r.model_dump(mode='json') for r in draft.calculations]
-                    if attempt:
-                        checked = AnswerCheck(errors=['calculation_budget：修订已经用过，不能继续请求计算或循环回答'])
+                    if calculation_used:
+                        checked = AnswerCheck(errors=['calculation_budget：补证已经用过，不能继续请求计算或循环回答'])
                     else:
+                        calculation_used = True
                         try:
                             evidence = _calculate_answer_evidence(evidence, draft.calculations)
                             extended_summary = RESULT_EVIDENCE_PREFIX + json.dumps(evidence, ensure_ascii=False, separators=(',', ':'))
                             base = base.model_copy(update={'messages': [*base.messages[:-1],
                                 LlmMessage(role='user', content=extended_summary)]})
-                            checked = AnswerCheck(errors=['calculation_ready：服务端已把计算结果追加到analyses。现在引用该证据回答原问题，不再请求计算。'])
+                            calls[-1]['check_missing_evidence'] = ['calculation_requested：已用本次完整可信数据补证']
+                            supplement = base.model_copy(update={'messages': [*base.messages[:-1],
+                                LlmMessage(role='user', content='所需计算已补充到analyses；现在回答原问题并引用结果，不再请求计算。'), base.messages[-1]],
+                                'metadata': {**base.metadata, 'purpose':'result_answer_evidence'}})
+                            response = await call(supplement, 30)
+                            continue
                         except ResultInspectionError as error:
-                            checked = AnswerCheck(errors=['calculation_unavailable：' + str(error)])
+                            checked = AnswerCheck(missing_evidence=['calculation_unavailable：' + str(error)])
                 else:
                     checked = check_answer(draft, evidence)
             except ValidationError:
@@ -940,9 +1015,17 @@ async def generate_result_answer(
             # without storing or streaming the unchecked answer itself.
             calls[-1]['check_errors']=list(checked.errors)
             calls[-1]['check_doubts']=list(checked.doubts)
+            calls[-1]['check_missing_evidence']=list(checked.missing_evidence)
+            # Owner-scoped run audit, never SSE or conversation prose. Store
+            # only the bounded failing snippets and refs needed to diagnose a
+            # numeric/formula/row-binding failure, not every generated draft.
+            if draft and (checked.errors or checked.missing_evidence):
+                calls[-1]['failed_claims'] = [
+                    {'text': p.text[:500], 'kind': p.kind, 'evidence_refs': p.evidence_refs[:12]}
+                    for p in draft.paragraphs[:6]]
             semantic_doubt_seen |= bool(checked.doubts)
-            issues = checked.errors
-            for issue in checked.errors + checked.doubts:
+            issues = [*checked.errors, *checked.missing_evidence]
+            for issue in checked.errors + checked.doubts + checked.missing_evidence:
                 parts = issue.split("：")
                 issue_codes.add(parts[1] if parts[0].startswith("第") else parts[0])
             if not issues and semantic_doubt_seen:
@@ -971,16 +1054,19 @@ async def generate_result_answer(
                     }
                 )
                 reviewed = AnswerReview.model_validate_json(
-                    _json_content((await call(review, 30)).content or "")
+                    _json_content((await call(review, 20)).content or "")
                 )
                 calls[-1]['review_verdict']=reviewed.verdict
                 calls[-1]['review_issues']=list(reviewed.issues)
                 if reviewed.verdict != "supported" or reviewed.issues:
                     issues = reviewed.issues or ["证据不足，请说明不足，不要编造事实"]
+                    if reviewed.verdict == 'insufficient':
+                        calls[-1]['check_missing_evidence'] = list(issues)
+                        issue_codes.add('missing_evidence')
                     issue_codes.add("semantic_review")
             if not issues:
                 return outcome(draft.text(), "accepted")
-            if attempt:
+            if revisions:
                 break
             revision = base.model_copy(
                 update={

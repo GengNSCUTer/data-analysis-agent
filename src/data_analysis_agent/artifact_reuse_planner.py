@@ -1,4 +1,4 @@
-"""Retrieve scoped candidates and choose one proven result; never merge artifacts."""
+"""Proven single-result reuse and explicit scalar comparison; never JOIN artifacts."""
 from __future__ import annotations
 
 import asyncio
@@ -8,8 +8,11 @@ import pandas as pd
 from .artifact_coverage import CoverageDecision, CoverageProver
 from .artifact_history import HistoryArtifact
 from .result_artifact_store import ResultArtifactIntegrityError
-from .result_analysis import ResultInspectionError, analyze_result
+from .result_analysis import ResultInspection, ResultInspectionError, analyze_result
 from .semantic_intent import RequestedAnswerSpec
+from .result_evidence import build_result_evidence, RESULT_EVIDENCE_PREFIX
+from decimal import Decimal
+import json
 
 
 @dataclass
@@ -46,6 +49,70 @@ class ArtifactReusePlanner:
                 artifact.result_metadata["row_count"]):
             raise ResultArtifactIntegrityError("历史索引与完整CSV不一致。")
         return item, manifest
+
+    async def comparison_evidence(self, conversation_id, user, request, *, max_tokens=None):
+        """Re-read two authorized complete snapshots and compute only scalars.
+
+        Top-N may be an explicitly labelled operand, never a whole-population
+        total. Ratios/means/distinct counts are usable only as scalar results,
+        not as values to sum across their returned groups.
+        """
+        sources, rows = [], []
+        metric = request.metric_id
+        for ref in request.sources:
+            items = await self.history.candidates(conversation_id, user, metric_ids=(metric,), artifact_id=ref.artifact_id)
+            items = [item for item in items if ref.ordinal is None or item.ordinal == ref.ordinal]
+            if len(items) != 1:
+                raise ResultInspectionError('比较来源不唯一或已失效；请明确两个历史结果。')
+            item, _ = await self.verified(conversation_id, user, items[0].artifact.artifact_id)
+            artifact, metadata = item.artifact, item.artifact.result_metadata
+            if (metric not in artifact.metric_ids or metadata.get('validation_status') != 'valid'
+                    or metadata.get('result_complete') is not True):
+                raise ResultInspectionError('比较来源没有完整的已验证指标结果，需重新查询。')
+            frame = await asyncio.to_thread(self.store.read_result_frame,
+                artifact_id=artifact.artifact_id, user_id=user.id, workspace_id=artifact.workspace_id,
+                dataset_version=artifact.dataset_version, metric_version=artifact.metric_version,
+                dimensions=artifact.query_scope.get('dimensions', ()))
+            if len(frame) != metadata['row_count'] or frame.empty or metric not in frame:
+                raise ResultInspectionError('来源没有可核对的完整指标值，需重新查询。')
+            scope = artifact.query_scope
+            grouped = bool(scope.get('dimensions') or scope.get('time_grain'))
+            if grouped and metric not in self.catalog.additive_metrics_for((metric,), scope.get('dimensions', ())):
+                raise ResultInspectionError('不能把比率、均值或不可加指标的分组值当总额相加。')
+            if not grouped and len(frame) != 1:
+                raise ResultInspectionError('来源不是合法单值聚合，需重新查询。')
+            values = pd.to_numeric(frame[metric], errors='raise')
+            if values.isna().any() or any(not Decimal(str(v)).is_finite() for v in values):
+                raise ResultInspectionError('比较来源含空值或非有限值，不能猜测为零。')
+            value = sum((Decimal(str(v)) for v in values), Decimal(0))
+            sources.append(item)
+            rows.append({'source_result': f'历史结果{item.ordinal}', metric: float(value)})
+        if sources[0].artifact.artifact_id == sources[1].artifact.artifact_id:
+            raise ResultInspectionError('请选择两个不同的历史结果。')
+        if request.operation == 'share':
+            a, b = (item.artifact.query_scope for item in sources)
+            if (any(a.get(k) != b.get(k) for k in ('time_range','filters')) or b.get('top_n')
+                    or b.get('dimensions') or b.get('time_grain')
+                    or metric not in self.catalog.additive_metrics_for((metric,), a.get('dimensions', ()))
+                    or rows[1][metric] <= 0 or rows[0][metric] < 0 or rows[0][metric] > rows[1][metric]):
+                raise ResultInspectionError('占比需要同口径同范围的完整总体分母及可加子集；现有来源无法证明。')
+        summary = build_result_evidence(pd.DataFrame(rows), required_columns=('source_result',metric),
+            metric_ids=(metric,), column_labels={'source_result':'历史结果', metric:self.catalog.metrics_by_id[metric].name},
+            metric_semantics=self.catalog.metric_semantics,
+            metric_definitions={metric:self.catalog.metrics_by_id[metric].description},
+            inspections=(ResultInspection(operation='compare', metric_id=metric, row_numbers=(1,2)),),
+            query_scope={'metric_ids':[metric], 'dimensions':['source_result'], 'comparison_baseline':'explicit_artifact_comparison'},
+            max_tokens=max_tokens)
+        payload = json.loads(summary.removeprefix(RESULT_EVIDENCE_PREFIX))
+        payload['artifact_sources'] = [dict(artifact_id=s.artifact.artifact_id, ordinal=s.ordinal,
+            query_scope=s.artifact.query_scope, source_row_count=s.artifact.result_metadata['row_count'],
+            operand='returned_top_n_sum' if s.artifact.query_scope.get('top_n') else 'complete_result_value',
+            snapshot_created_at=s.artifact.result_metadata.get('snapshot_created_at', s.created_at.isoformat())) for s in sources]
+        if request.operation == 'share':
+            payload['analyses'].append({'operation':'share','metric_id':metric,'status':'ready',
+                'share_percent':float(Decimal(str(rows[0][metric])) / Decimal(str(rows[1][metric])) * 100),
+                'scope':'explicit_artifact_subset_of_total', 'numerator':rows[0][metric], 'denominator':rows[1][metric]})
+        return RESULT_EVIDENCE_PREFIX + json.dumps(payload, ensure_ascii=False, separators=(',', ':')), sources
 
     def requested_spec(self, intent, effective, state, source=None):
         if intent.requested_answer is not None:

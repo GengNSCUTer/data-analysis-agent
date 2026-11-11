@@ -206,6 +206,7 @@ class ResultValidator:
         join_evidence: Mapping[str, Any] | None = None,
         exact_columns: bool = False,
         metric_value_constraints: Mapping[str, Mapping[str, float | bool]] | None = None,
+        group_columns: Sequence[str] | None = None,
     ) -> ResultValidation:
         if not isinstance(frame, pd.DataFrame):
             return ResultValidation("refuse", "结果不是受支持的表格类型。", 0, ())
@@ -230,6 +231,18 @@ class ResultValidator:
                 columns,
                 missing_columns=missing,
             )
+        if group_columns is not None and not missing_shape:
+            # The online plan owns the *complete* key. Repeated states are
+            # legitimate for (state, category), but not for state alone.
+            keys = [next((c for c in (name, *aliases.get(name, ())) if c in frame.columns), None)
+                    for name in group_columns]
+            if all(key is not None for key in keys):
+                duplicate = frame.duplicated(subset=keys).any() if keys else len(frame) > 1
+                if duplicate:
+                    return ResultValidation(
+                        "refuse", "结果不符合查询计划的聚合粒度：完整维度组合不唯一，不能将实体明细当作分组统计。",
+                        len(frame), columns,
+                    )
         unexpected: tuple[str, ...] = ()
         if exact_columns:
             allowed_actual_columns: set[str] = set()

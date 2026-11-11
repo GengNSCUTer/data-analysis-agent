@@ -25,6 +25,41 @@ from data_analysis_agent.semantic_catalog import ResultContract
 from data_analysis_agent.candidate_sql_generator import build_runtime_candidate_request
 
 
+@pytest.mark.asyncio
+async def test_invalid_effective_patch_uses_existing_single_correction_and_does_not_mutate_state():
+    from data_analysis_agent.analysis_state import AnalysisState
+    from data_analysis_agent.semantic_intent import resolve_state_intent
+    catalog = CatalogLoader(OLIST_RUNTIME_WORKSPACE).load()
+    state = replace(AnalysisState.new(OLIST_RUNTIME_WORKSPACE), metric_ids=('gmv',), filters=('customer_state=SP',))
+    original = state.as_dict()
+    broken = {'request_kind':'data_query', 'action':'update_task', 'state_patch':{'operations':[
+        {'op':'set','field':'dimensions','value':12}]}}
+    fixed = {'request_kind':'data_query', 'action':'update_task', 'state_patch':{'operations':[
+        {'op':'set','field':'dimensions','value':['product_category_name']}, {'op':'set','field':'top_n','value':10}]}}
+    prompts = []
+    async def complete(prompt, user):
+        prompts.append(prompt)
+        return json.dumps(broken if len(prompts)==1 else fixed)
+    user = User(id='u', group_memberships=['analyst'])
+    intent = await SemanticIntentInterpreter(catalog, complete).interpret('这个州哪些品类卖得好，前十', user, state.as_dict())
+    _, result = resolve_state_intent(intent, state, catalog, user, message_count=2)
+    assert len(prompts)==2 and 'dimensions requires a list' in prompts[1]
+    assert state.as_dict()==original
+    assert result.filters==('customer_state=SP',) and result.dimensions==('product_category_name',) and result.top_n==10
+
+
+@pytest.mark.parametrize('extra', [
+    {'action':'update_task', 'state_patch':{'operations':[]}},
+    {'chart_request':'bar'},
+    {'history_reference':{'ordinal':1}},
+])
+def test_two_artifact_comparison_cannot_modify_task_or_mix_ambiguous_routes(extra):
+    proposal={'request_kind':'result_followup','action':'keep', 'artifact_comparison':{
+        'metric_id':'gmv','sources':[{'ordinal':1},{'ordinal':2}]}, **extra}
+    with pytest.raises(SemanticIntentError):
+        parse_semantic_intent(json.dumps(proposal),CatalogLoader(OLIST_RUNTIME_WORKSPACE).load())
+
+
 def test_parse_semantic_intent_rejects_unknown_catalog_objects() -> None:
     catalog = CatalogLoader().load()
     with pytest.raises(SemanticIntentError, match="unknown_or_invisible_metric"):

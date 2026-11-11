@@ -134,6 +134,7 @@ def build_result_evidence(
     query_scope: Mapping[str, Any] | None = None,
     metric_semantics: Mapping[str, Mapping[str, str]] | None = None,
     metric_definitions: Mapping[str, str] | None = None,
+    metric_rollup_dimensions: Mapping[str, Sequence[str]] | None = None,
     preview_rows: int | None = None,
     numerator_overrides: Mapping[int, Mapping[str, Any]] | None = None,
     max_tokens: int | None = None,
@@ -209,6 +210,7 @@ def build_result_evidence(
                              if metric_id in metric_ids},
         "metric_definitions": {metric_id: description for metric_id, description in (metric_definitions or {}).items()
                                if metric_id in metric_ids},
+        "metric_rollup_dimensions": {m: list(dims) for m, dims in (metric_rollup_dimensions or {}).items() if m in metric_ids},
         "column_labels": {name: _label(name, column_labels or {}) for name in columns},
         "source_row_count": source_count, "row_count": population_count,
         "scope": "returned_top_n" if top_n is not None else "returned_result",

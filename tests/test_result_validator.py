@@ -6,6 +6,31 @@ import pytest
 from data_analysis_agent.result_validator import ResultValidator, build_result_summary
 
 
+@pytest.mark.parametrize('keys,rows,valid', [
+    (['state'], [('SP','A',10),('SP','B',20)], False),
+    (['state','category'], [('SP','A',10),('SP','B',20)], True),
+    (['state','category'], [('SP','A',10),('SP','A',20)], False),
+    (['state','category'], [(None,'A',10),(None,'A',20)], False),
+    (['state','category'], [('SP','A',10),('RJ','A',10)], True),
+    ([], [('SP','A',10),('RJ','A',20)], False),
+    ([], [('SP','A',10)], True),
+])
+def test_plan_grain_checks_complete_dimension_key_not_metric_values(keys, rows, valid):
+    frame = pd.DataFrame(rows, columns=['state','category','gmv'])
+    result = ResultValidator().validate(frame, group_columns=keys, metric_columns=['gmv'])
+    assert result.safe_to_answer is valid
+
+
+def test_time_is_part_of_the_group_key_and_aliases_are_resolved():
+    frame = pd.DataFrame({'region':['SP','SP'], 'month':['2023-01-01','2023-02-01'], 'gmv':[10,10]})
+    result = ResultValidator().validate(frame, group_columns=['state','time'],
+        required_column_aliases={'state':['region'], 'time':['month']})
+    assert result.safe_to_answer
+    frame.loc[1,'month'] = '2023-01-01'
+    assert not ResultValidator().validate(frame, group_columns=['state','time'],
+        required_column_aliases={'state':['region'], 'time':['month']}).safe_to_answer
+
+
 @pytest.mark.parametrize('status,high_risk,valid', [
     ('partial', True, False), ('partial', False, True), ('checked', False, True), ('not_applicable', False, True),
     ('amplified', False, False),

@@ -145,8 +145,43 @@ def sql_plan_mismatch(
             return f"SQL 必须包含分组列 {dimension}，并允许同一订单进入多个分组。"
     missing_groups = _unrequested_null_group_filter(sql, plan, column_schema or {})
     return (missing_groups
+            or _output_grain_mismatch(sql, plan)
             or _metric_value_source_mismatch(sql, plan, metric_value_sources or {}, column_schema or {})
             or _metric_plan_field_mismatch(sql,plan,column_schema or {},table_grains or {}))
+
+
+def _output_grain_mismatch(sql, plan):
+    """Detect grouping by a preaggregated metric instead of reaggregating it.
+
+    This catches the real user-total-as-state-total query, even when LIMIT 1
+    hides duplicate states. It does not claim arbitrary SQL equivalence.
+    """
+    if plan.get('query_mode') != 'aggregate':
+        return None
+    try:
+        root = build_scope(parse_one(sql, read='postgres'))
+    except (ParseError, TokenError, RecursionError):
+        return None
+    if root is None:
+        return None
+    branches = root.set_operation_scopes if isinstance(root.expression, exp.SetOperation) else (root,)
+    for branch in branches:
+        selects = branch.expression.selects
+        group = branch.expression.args.get('group')
+        if group is None:
+            continue
+        for key in group.expressions:
+            value = key
+            if isinstance(key, exp.Literal) and key.is_int and 0 < int(key.this) <= len(selects):
+                value = selects[int(key.this) - 1].unalias()
+            for projection in selects:
+                if projection.alias_or_name not in plan.get('metric_ids', ()):
+                    continue
+                if value == projection.unalias() or (isinstance(value, exp.Column)
+                        and not value.table and value.name == projection.alias_or_name):
+                    return (f'指标 {projection.alias_or_name} 被用作最终分组键；应按计划完整维度重新聚合，'
+                            '不能把用户/订单等实体的预聚合金额直接当作州或品类总额。')
+    return None
 
 
 def _metric_plan_field_mismatch(sql, plan, schema, table_grains):

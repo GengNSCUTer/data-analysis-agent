@@ -562,6 +562,10 @@ class SecurePostgresRunner(SqlRunner):
                 metric_value_constraints=context.metadata.get(
                     "metric_value_constraints", {}
                 ),
+                group_columns=(
+                    [*query_plan.get("dimensions", ()), *(["time"] if time_bucket_grain else [])]
+                    if isinstance(query_plan, dict) and query_plan.get("query_mode") == "aggregate" else None
+                ),
             )
             context.metadata["result_validation"] = validation.as_dict()
             context.metadata["display_result_row_budget"] = result_budget.preview_rows if result_budget else validator.display_row_budget
@@ -622,6 +626,7 @@ class SecurePostgresRunner(SqlRunner):
                     query_scope=plan,
                     metric_semantics=context.metadata.get("metric_semantics", {}),
                     metric_definitions=context.metadata.get("metric_definitions", {}),
+                    metric_rollup_dimensions=context.metadata.get("metric_rollup_dimensions", {}),
                     preview_rows=result_budget.preview_rows,
                     inspections=usage.result_inspections if usage is not None else (),
                     numerator_overrides=usage.result_numerators if usage is not None else None,

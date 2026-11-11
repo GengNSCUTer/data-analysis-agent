@@ -183,6 +183,11 @@ class Catalog:
             if dimension in dimensions
         ))
 
+    def rollup_dimensions_for(self, metric_ids: Sequence[str]) -> dict[str, list[str]]:
+        """Catalog-approved disjoint groupings, not a claim about any old CSV."""
+        return {m: [d for d in self.metrics_by_id[m].allowed_dimensions
+                    if m in self.additive_metrics_for((m,), (d,))] for m in metric_ids}
+
     def has_available_attribution_rule(self, rule_id: str | None) -> bool:
         """Whether a server implementation, not a prompt, owns the rule."""
 
@@ -276,6 +281,7 @@ class ResultContract:
     join_source_grains: Mapping[str, str] = field(default_factory=dict)
     metric_value_sources: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     metric_definitions: Mapping[str, str] = field(default_factory=dict)
+    metric_rollup_dimensions: Mapping[str, Sequence[str]] = field(default_factory=dict)
 
     @classmethod
     def from_selection(
@@ -369,6 +375,7 @@ class ResultContract:
             join_source_grains={t.table_id: t.grain for t in selection.tables},
             metric_value_sources=cls._amount_value_sources(selection, catalog),
             metric_definitions={m.metric_id: m.description for m in selection.metrics},
+            metric_rollup_dimensions=catalog.rollup_dimensions_for(metric_ids),
         )
 
     @staticmethod
@@ -470,6 +477,7 @@ class ResultContract:
             result["join_source_grains"] = dict(self.join_source_grains)
             result['metric_value_sources'] = {m: dict(rule) for m, rule in self.metric_value_sources.items()}
             result["metric_definitions"] = dict(self.metric_definitions)
+            result["metric_rollup_dimensions"] = dict(self.metric_rollup_dimensions)
         return result
 
     def as_evidence(self) -> dict[str, Any]:

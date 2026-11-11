@@ -37,6 +37,51 @@ def answer(text, refs=("/sample_rows/0",), kind="fact"):
     )
 
 
+@pytest.mark.parametrize('text,invalid', [
+    ('查询2023-01-01至2023-12-31（不含结束日）。', True),
+    ('查询2023-01-01至2024-01-01（不含结束日）。', False),
+    ('查询2023-01-01至2023-12-31（含结束日）。', False),
+])
+def test_explicit_interval_checks_inclusive_last_day_against_actual_scope(text, invalid):
+    summary = build_result_evidence(pd.DataFrame({'n':[1]}), required_columns=('n',), metric_ids=('n',),
+        query_scope={'time_range':{'start':'2023-01-01','end':'2024-01-01','end_semantics':'exclusive'}})
+    checked = check_answer(AnswerDraft.model_validate_json(answer(text, ['/query_scope'])), parse_result_evidence(summary))
+    assert any('time_boundary' in e for e in checked.errors) is invalid
+
+
+@pytest.mark.asyncio
+async def test_two_row_difference_is_available_before_authoring_without_a_revision():
+    summary = build_result_evidence(pd.DataFrame({'department':['Men','Women'], 'inventory_item_count':[83958,84652]}),
+        required_columns=('department','inventory_item_count'),metric_ids=('inventory_item_count',))
+    text = 'Women比Men多694件。'
+    draft = answer(text, ['/analyses/0'])
+    result, requests = await run_answer(summary, [draft, '{"verdict":"supported","issues":[]}'])
+    evidence = parse_result_evidence(requests[0].messages[-1].content)
+    assert evidence['analyses'][0]['difference'] == -694
+    assert evidence['analyses'][0]['reverse_comparison']['difference'] == 694
+    assert result.status == 'accepted' and result.revision_count == 0
+
+
+def test_mixed_observed_rate_and_cited_formula_threshold_needs_review_not_false_amount_error():
+    summary = build_result_evidence(pd.DataFrame({'repeat_rate':[0.0304032]}), required_columns=('repeat_rate',),
+        metric_ids=('repeat_rate',), metric_semantics={'repeat_rate':{'kind':'rate','unit':'比例0至1'}},
+        metric_definitions={'repeat_rate':'同期至少2笔有效订单的客户数 / 至少1笔有效订单的客户数'})
+    checked = check_answer(AnswerDraft.model_validate_json(answer('复购率为3.04%，指同期至少2笔有效订单的客户占比。',
+        ['/sample_rows/0','/metric_definitions/repeat_rate'])), parse_result_evidence(summary))
+    assert not checked.errors and any('formula_threshold' in d for d in checked.doubts)
+    wrong = check_answer(AnswerDraft.model_validate_json(answer('复购率为2%。',
+        ['/sample_rows/0','/metric_definitions/repeat_rate'])), parse_result_evidence(summary))
+    assert wrong.errors
+
+
+def test_zero_in_another_row_does_not_authorize_zero_rate_for_ceuta():
+    summary = build_result_evidence(pd.DataFrame({'state':['Ceuta','A'], 'cancellation_rate':[0.5,0]}),
+        required_columns=('state','cancellation_rate'),metric_ids=('cancellation_rate',),
+        metric_semantics={'cancellation_rate':{'kind':'rate','unit':'比例0至1'}})
+    bad = check_answer(AnswerDraft.model_validate_json(answer('Ceuta取消率为0%。', ['/sample_rows/0'])), parse_result_evidence(summary))
+    assert any('numeric_mismatch' in e for e in bad.errors)
+
+
 @pytest.mark.asyncio
 async def test_catalog_metric_definition_is_evidence_for_formula_but_not_an_observed_value():
     summary = build_result_evidence(pd.DataFrame({"period_repeat_customer_rate": [0.2]}),
@@ -339,7 +384,8 @@ async def test_semantic_review_repairs_entity_swap_and_rechecks_once(summary):
         or "SP为10" in requests[1].messages[-2].content
     )
     assert all(request.tools is None for request in requests)
-    assert all(request.messages[-1].content == summary for request in requests)
+    assert all(request.messages[-1].content == requests[0].messages[-1].content for request in requests)
+    assert parse_result_evidence(requests[0].messages[-1].content)['sample_rows'] == parse_result_evidence(summary)['sample_rows']
     assert all("2017" in request.messages[0].content for request in requests)
 
 
@@ -502,7 +548,7 @@ async def test_review_and_revision_have_separate_timeouts_and_never_enable_tools
             '{"verdict":"supported","issues":[]}',
         ],
     )
-    assert outcome.status == "accepted" and limits == [60, 30, 30, 30]
+    assert outcome.status == "accepted" and limits == [60, 20, 30, 20]
     assert len(requests) == 4 and requests[2].max_tokens == 2048
     assert all(r.tools is None and not r.stream for r in requests)
 
@@ -722,7 +768,8 @@ async def test_review_excludes_untrusted_narrative_but_keeps_question_and_exact_
     assert outcome.status == "accepted" and outcome.review_count == 1
     assert "旧回答" in requests[0].messages[0].content
     assert requests[1].messages[0].content == "为什么有差异？"
-    assert requests[1].messages[-1].content == requests[0].messages[-1].content == summary
+    assert requests[1].messages[-1].content == requests[0].messages[-1].content
+    assert parse_result_evidence(requests[1].messages[-1].content)['sample_rows'] == parse_result_evidence(summary)['sample_rows']
 
 
 @pytest.mark.asyncio
@@ -771,7 +818,7 @@ async def test_missing_difference_can_be_computed_once_without_sql_or_unchecked_
     outcome, requests = await run_answer(summary, [request, fixed,
         '{"verdict":"supported","issues":[]}'])
     assert outcome.status == 'accepted' and outcome.text == 'SP比RJ多10 BRL。'
-    assert outcome.revision_count == 1 and len(requests) <= 3
+    assert outcome.revision_count == 0 and len(requests) <= 3
     evidence = parse_result_evidence(outcome.evidence_summary)
     assert evidence['analyses'][0]['difference'] == 10
     assert evidence['analyses'][0]['operands'] == [{'state':'SP','gmv':20},{'state':'RJ','gmv':10}]
@@ -792,7 +839,8 @@ async def test_calculation_rejects_unknown_metric_and_cannot_loop_or_use_partial
         outcome, requests = await run_answer(partial, [calculate, calculate])
         assert outcome.status == 'unverified' and outcome.evidence_summary is None
         assert len(requests) == 2 and outcome.revision_count == 1
-        assert 'calculation_unavailable' in outcome.calls[0]['check_errors'][0]
+        assert not outcome.calls[0]['check_errors']
+        assert 'calculation_unavailable' in outcome.calls[0]['check_missing_evidence'][0]
 
 
 @pytest.mark.asyncio
@@ -801,7 +849,8 @@ async def test_local_explanation_cannot_sum_a_nonadditive_metric():
         required_columns=('aov',), metric_ids=('aov',))
     calculate = json.dumps({'paragraphs':[], 'calculations':[{'operation':'sum','metric_id':'aov'}]})
     outcome, requests = await run_answer(summary, [calculate, calculate])
-    assert outcome.status == 'unverified' and outcome.evidence_summary is None and len(requests) == 2
+    assert outcome.status == 'unverified' and len(requests) == 2
+    assert not any(a['operation']=='sum' for a in parse_result_evidence(outcome.evidence_summary)['analyses'])
 
 
 def test_global_minimum_is_not_proven_by_a_top_n_extreme_reference():
@@ -953,7 +1002,7 @@ async def test_all_answer_phases_share_one_deadline(summary, monkeypatch):
         answer("SP为20、RJ为10。", ["/sample_rows/0", "/sample_rows/1"]),
         '{"verdict":"supported","issues":[]}',
     ])
-    assert outcome.status == "accepted" and limits == [60, 30, 30, 15]
+    assert outcome.status == "accepted" and limits == [60, 20, 30, 15]
 
 
 def test_chinese_negative_sign_is_not_a_value_error():

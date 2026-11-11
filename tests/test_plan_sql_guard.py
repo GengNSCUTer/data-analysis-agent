@@ -3,6 +3,18 @@ import pytest
 from data_analysis_agent.plan_sql_guard import sql_plan_mismatch
 
 
+@pytest.mark.parametrize('group', ['u.state,om.amount', 'u.state,completed_sale_amount', '1,2'])
+def test_user_totals_are_not_state_totals_even_when_limit_hides_duplicate_states(group):
+    sql = ("WITH om AS (SELECT user_id,SUM(sale_price) amount FROM order_items GROUP BY user_id) "
+           "SELECT u.state AS customer_state,om.amount AS completed_sale_amount "
+           f"FROM om JOIN users u ON om.user_id=u.id GROUP BY {group} ORDER BY completed_sale_amount DESC LIMIT 1")
+    plan = {'query_mode':'aggregate','dimensions':['customer_state'], 'metric_ids':['completed_sale_amount']}
+    assert '最终分组键' in sql_plan_mismatch(sql, plan)
+    good = sql.replace('om.amount AS completed_sale_amount', 'SUM(om.amount) AS completed_sale_amount').replace(
+        f'GROUP BY {group}', 'GROUP BY u.state')
+    assert sql_plan_mismatch(good, plan) is None
+
+
 def test_scalar_plan_extra_month_is_repairable_before_execution_not_a_row_budget_failure():
     plan = {'query_plan_version':'query-plan-v2', 'metric_ids':['average_order_value'],
             'required_result_columns':['average_order_value'], 'dimensions':[], 'time_grain':None}

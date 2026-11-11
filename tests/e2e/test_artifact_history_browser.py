@@ -67,6 +67,9 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
         "回看全年合计，当前第四季度不要改": {"request_kind":"result_followup", "action":"keep",
             "requested_answer":monthly, "result_inspections":[{"operation":"sum","metric_id":metric}]},
         "只给当前第四季度换柱状图": {"request_kind":"result_followup", "action":"keep", "chart_request":"bar"},
+        "比较旧前十合计与全年总体的差额，当前分析不要改": {
+            "request_kind":"result_followup", "action":"keep",
+            "artifact_comparison":{"metric_id":metric,"operation":"compare", "sources":[{"ordinal":1},{"ordinal":4}]}},
     }
     if dataset == 'thelook':
         cases.update({
@@ -213,13 +216,26 @@ def test_history_coverage_isolation_local_compute_and_safe_sql_fallback(dataset,
             _, detail, run, _ = send(questions[2],0,"LOCAL_COMPUTE")
             assert detail["analysis_state"]==before
             assert run["catalog_trace"]["artifact_reuse"]["result_ordinal"]==1
-            assert run['catalog_trace']['result_explanation']['revision_count'] == 1
+            assert run['catalog_trace']['result_explanation']['revision_count'] == 0
+            assert any(call['phase']=='result_answer_evidence' for call in run['catalog_trace']['result_explanation']['calls'])
             payload = json.loads(run['catalog_trace']['result_summary'].split(RESULT_EVIDENCE_PREFIX,1)[1])
             assert payload['analyses'][0]['operation'] == 'compare'
             chat.get_by_text("来源：历史结果#1",exact=False).first.wait_for()
             send(questions[3],1,"SQL_REQUIRED")
             assert sql_plans[-1]["metric_ids"]==[count] and sql_plans[-1]["time_range"]=={**bounds(other_year),"end_semantics":"exclusive"}
-            send(questions[4],1,"SQL_REQUIRED")
+            _, total_detail, _, _ = send(questions[4],1,"SQL_REQUIRED")
+            total_state = total_detail['analysis_state']
+            total_csv = client.get(f'/api/project/conversations/{cid}/result.csv').content
+            _, compared, run, _ = send('比较旧前十合计与全年总体的差额，当前分析不要改',0,'LOCAL_COMPUTE')
+            assert compared['analysis_state'] == total_state
+            assert client.get(f'/api/project/conversations/{cid}/result.csv').content == total_csv
+            payload=json.loads(run['catalog_trace']['result_summary'].split(RESULT_EVIDENCE_PREFIX,1)[1])
+            assert len(payload['artifact_sources'])==2
+            source_csv=client.get(f'/api/project/conversations/{cid}/result.csv',params={
+                'artifact_id':payload['artifact_sources'][0]['artifact_id']}).content
+            top_sum=sum(float(row[metric]) for row in csv.DictReader(io.StringIO(source_csv.decode())))
+            total=float(next(csv.DictReader(io.StringIO(total_csv.decode())))[metric])
+            assert payload['analyses'][0]['difference']==pytest.approx(top_sum-total)
             _, full_year, _, _ = send(questions[5],1,"SQL_REQUIRED")
             full_source = full_year["trusted_result_artifact"]["artifact_id"]
             cases["回看全年合计，当前第四季度不要改"]["history_reference"] = {"artifact_id":full_source}
