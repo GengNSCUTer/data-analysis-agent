@@ -23,6 +23,8 @@ SiliconFlow配置移除，不加兼容分支；私有.env与真实key不提交�
 [60项来源清单](evals/results/agent_business_quality_latest_20261111.json)及
 [余额不足专项原记录](evals/results/continuity_history_rerun_20261111.md)。
 飞书项目文档已追加本批及跨模型汇总并回读确认（revision 335）。
+代码提交`a46ae06`的远端Project Quality Checks已全部通过（build、postgres-and-browser）；
+后续仅补充验收记录与北京时间更正，不再次消耗模型额度。
 
 ## 2026-11-10｜回答可靠性根因修复与双库复验
 
