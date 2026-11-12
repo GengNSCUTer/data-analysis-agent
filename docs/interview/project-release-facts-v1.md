@@ -1,6 +1,6 @@
 # 面试项目事实与贡献
 
-更新于2026-11-09。此页汇总能由代码和报告支持的说法，不代替用户亲自审阅代码与复述。
+更新于2026-11-12。此页汇总能由代码和报告支持的说法，不代替用户亲自审阅代码与复述。
 在线产品、离线模型、工程回归分别计量，不拼成一个“准确率”。
 
 ## 如何介绍这个项目
@@ -18,7 +18,8 @@ Vanna 提供 Agent、工具注册、HTTP/SSE 和 Web Component 底座；本项�
 | 业务理解与计划 | `semantic_intent.py`、`query_plan.py`、`chat_runtime.py` | 模型理解自然语言，代码校验可用指标、维度、时间和结果要求；不再用旧关键词入口决定能否查询 |
 | 执行边界 | `plan_sql_guard.py`、`sql_policy.py`、`postgres_runner.py`、`trusted_sql_tool.py` | 候选与计划对照、AST、受限角色、取消/超时、结果校验及审计 |
 | 连续分析 | `conversation_store.py`、`analysis_state.py`、`analysis_context.py`、`execution_memory.py` | 会话事务、分析状态、token历史、后台增量摘要和可信结果引用；摘要不授权 SQL 条件 |
-| 结果呈现 | `result_artifact_store.py`、`result_presentation.py`、`chart_contract.py` | 同一验证工件用于预览/分页/CSV与服务端图表，隐藏行不进入模型摘要 |
+| 结果呈现与解释 | `result_artifact_store.py`、`result_presentation.py`、`result_explanation.py`、`chart_contract.py` | 同一验证工件用于预览/分页/CSV和图表；服务端计算可信证据，模型自由组织正文，代码检查及按疑点复核 |
+| 历史结果复用 | `artifact_history.py`、`artifact_coverage.py`、`execution_memory.py` | 自动检索同会话候选、重新核验归属和覆盖；充分时直接复用或本地计算，不靠聊天中的数字作比较 |
 | 接库与身份 | `runtime_workspace.py`、`local_auth.py`、`server.py` | 工作区配置、Catalog和权限、服务端身份与来源绑定嵌入令牌 |
 | 运行与交付 | `runtime_control.py`、`deployment.py`、`.github/workflows/tests.yml` | 单进程容量、取消、生命周期、wheel及合成数据初始化、分层 CI |
 
@@ -30,17 +31,17 @@ Vanna 提供 Agent、工具注册、HTTP/SSE 和 Web Component 底座；本项�
 
 | 范围 | 实际结果 | 正确解释与来源 |
 | --- | --- | --- |
-| 当前在线业务任务 | 两库60项122轮，严格34/60完整通过；另新变体12项24轮7/12通过 | Olist15/30、TheLook19/30；新题2/6与5/6。保留2次采集中断；不是任意问答准确率，目标90%尚未达，见[最终报告](../../evals/results/agent_business_quality_final_20261109.md) |
-| 独立结果对照 | 原60项115/120轮、新题19/24轮严格CSV对照通过 | 差异含形状/范围和提前舍入，不统称金额公式错误；已显示解释仍有误述和错误比较，不用数据检查代替完整任务成功 |
-| 历史复用 | 原60项32轮DIRECT_REUSE/LOCAL_COMPUTE均0SQL，回看未覆盖当前分析 | 有角色/版本/TTL/编辑删除/失败事务负例；新题仍有子范围只在正文体现的问题，0SQL不等于复用正确 |
+| 当前在线业务任务 | 两库60项122轮完整通过60/60，Olist与TheLook各30/30 | 2026-11-11固定14ab842和官方deepseek-flash连续全量运行；非选择性拼分，助手语义审阅非第三方盲审，见[收尾报告](../../evals/results/agent_business_quality_closeout60_20261111.md) |
+| 独立结果与解释对照 | 122/122轮CSV独立对照，19/19份图表重放；115轮正文accepted、7轮仅换图 | 包含范围、形状、数值和正文核对；96次复核、2次修订、213次解释调用，不宣称成本下降或任意业务语义已证明 |
+| 历史复用 | 34轮DIRECT_REUSE/LOCAL_COMPUTE均0业务SQL，完整任务通过 | 同会话授权、版本、TTL、完整性及覆盖检查；显式双工件比较各自重新取证，不提供任意多结果JOIN |
 | 部署与恢复 | 新venv安装wheel、独立PG18.3、300行独立对照、分页下载/重启及数据库与工件联合恢复至新库新目录 | 同集群已有角色，不是集群灾难恢复；Docker实运行未验证，见[部署](../deployment.md)及最终报告 |
-| 单实例容量 | 受控provider每调用100ms；1/5/10并发各20项通过，整轮P95约1.02/2.00/2.99秒 | 真实模型原60项P50约44.4秒/P95约94.0秒，不能用受控容量宣传线上SLA |
+| 单实例容量 | 受控provider每调用100ms；1/5/10并发各20项通过，整轮P95约1.02/2.00/2.99秒 | 最新真实60项整轮P50 5.01秒/P95 6.77秒；不同条件分列，均不能宣传生产SLA |
 | 离线1.5B SQL-only LoRA | 6,000 train / 1,500 validation；两个750条留出集 ordered Gold为403/750、396/750 | 两个Schema均在训练中；未证明未见Schema泛化，也未接入在线默认路径，见[模型说明](../post-training/experiments/project-v1-model-baseline.md) |
 | 后续运行时输入对齐实验 | 1,500固定分母，1,453条可生成输入，发现704条Olist时间端点与旧Gold不一致 | 749条语义一致子集的诊断结果不能宣称全量100%，也不据此构造DPO负例，见[r3审计](../post-training/experiments/runtime-candidate-matching-v2-r3.md) |
 | 本轮交付回归 | 纯测试、真实PG集成、受控模型的真实Chromium分别记录 | 不调用付费模型、不重跑protected final；见[交付报告](../../evals/results/product_handoff.md) |
 
-在线产品默认使用 SiliconFlow 的 `deepseek-ai/DeepSeek-V3.2`。旧材料中的V4-Flash是历史运行
-记录。离线模型保留SFT、validation-best及Gold评测证据；DPO因缺少足够真实、可复核的错误pair
+在线产品当前使用官方DeepSeek的 `deepseek-flash`，OpenAI兼容接口，关闭thinking。
+旧材料中的SiliconFlow模型是历史运行记录。离线模型保留SFT、validation-best及Gold评测证据；DPO因缺少足够真实、可复核的错误pair
 暂停，不能写成已经完成偏好优化。
 
 ## 三个可以深入讲的实际问题

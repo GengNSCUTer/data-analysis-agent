@@ -1,6 +1,6 @@
 # 项目代码目录地图
 
-**状态：** 2026-08-30 初稿，2026-10-20 更新产品安装和启动入口。本文描述职责和审阅顺序，不代表启动了新训练。
+**状态：** 2026-11-12核对当前入口与职责。本文描述代码地图，不代表启动新训练。
 
 ## 1. 根目录先分三类
 
@@ -35,7 +35,9 @@
 | 请求与会话 | `chat_runtime.py`、`semantic_intent.py`、`analysis_state.py`、`conversation_store.py`、`analysis_context.py`、`budget.py`、`llm_observability.py` | 解释当前意图、维护分析状态和历史摘要、限制预算并记录模型观测；旧语言分类不作为在线入口。 |
 | 语义与计划 | `semantic_catalog.py`、`metric_context.py`、`query_plan.py`、`workspace.py` | 从工作区配置和 Catalog 得到指标、可见表列/Join、查询粒度和版本化结果合同。 |
 | 安全执行与审计 | `sql_policy.py`、`postgres_runner.py`、`result_validator.py`、`sql_repair.py`、`trusted_sql_tool.py`、`run_recorder.py` | AST 约束、PostgreSQL 双角色执行、结果合同、一次受控修复和审计证据。 |
-| 呈现与 Demo | `chart_contract.py`、`visualization.py`、`trusted_workflow.py`、`demo_session.py` | 约束图表和结果呈现，定制 Demo 工作流与演示身份。 |
+| 身份与运行控制 | `local_auth.py`、`copilot_contract.py`、`runtime_control.py`、`runtime_workspace.py` | 登录和嵌入权限、workspace、单进程排队/取消；旧demo_session已删除。 |
+| 工件与历史复用 | `result_artifact.py`、`result_artifact_store.py`、`artifact_history.py`、`artifact_coverage.py`、`execution_memory.py` | 完整结果文件、授权读回、同会话检索及确定性覆盖证明；候选检索不等于授权复用。 |
+| 呈现与解释 | `chart_contract.py`、`visualization.py`、`result_presentation.py`、`result_evidence.py`、`result_analysis.py`、`result_explanation.py` | 服务端图表/计算、模型自由正文与事实检查/疑点复核，预览与完整结果分离。 |
 | 离线 Text-to-SQL 研究 | `spider_sft_format.py`、`frozen_sqlite_baseline.py`、`sqlite_benchmark.py`、`spider_test_suite.py`、`post_training_comparison.py`、`candidate_sql_generator.py`、`olist_candidate_sql_evaluation.py`、`external_artifacts.py` | 建模输入格式、候选生成、SQLite/Spider 诊断、业务迁移评测和仓库外原始产物边界；其中 `candidate_sql_generator.unwrap_sql_completion()` 是所有离线 completion 的唯一、有界展示包装清洗入口。 |
 
 产品运行时最值得先掌握的一条线是：
@@ -44,7 +46,9 @@
 data-analysis-agent -> src/data_analysis_agent/server.py:create_app()
 -> chat_runtime.py
 -> semantic_intent.py / analysis_state.py / semantic_catalog.py / query_plan.py
--> trusted_sql_tool.py / sql_policy.py / postgres_runner.py / result_validator.py
+-> 历史候选与覆盖证明，或 trusted_sql_tool.py / plan_sql_guard.py
+-> sql_policy.py / postgres_runner.py / result_validator.py
+-> result_artifact_store.py / result_evidence.py / result_explanation.py
 -> chart_contract.py / visualization.py / run_recorder.py
 ```
 
@@ -54,7 +58,8 @@ data-analysis-agent -> src/data_analysis_agent/server.py:create_app()
 
 ### 当前结构中应保留的边界
 
-- `src/vanna/` 与 `src/data_analysis_agent/` 必须继续区分：前者是上游框架，后者才是项目的可信数据分析能力。将二者混合会让升级、问题归因和简历表述都变得模糊。
+- `src/vanna/` 是上游框架及本项目必要的集成改动，`src/data_analysis_agent/` 是自有业务核心；区分来源，不将fork全部代码作为个人贡献。
+- `examples/embeddable_copilot_shell.html` 是页面源码，`src/data_analysis_agent/resources/` 下同名文件是构建生成的安装资源。两者由`_build.py`串联，不按重复源码删除。
 - `scripts/post_training/` 与生产运行时必须继续分开：离线实验能够读取 Spider/模型资产，但不能拥有线上数据库执行权限或绕过结果合同。
 - 后训练只使用 `scripts/post_training/` 的规范入口。根目录17个同名Python转发器、辅助兼容模块和3个shell包装器已删除；测试与保留启动器直接调用规范位置。历史报告保留原命令，重跑时使用规范模块，不恢复兼容层。
 

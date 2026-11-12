@@ -1,5 +1,8 @@
 # Project v1 基线审查记录
 
+> Historical：保留2026年9月的审查原文。演示身份、入口和路由已被替代；当前实现见
+> [请求架构](product-request-architecture-v1.md)与[项目现状](../../PROJECT.md)。
+
 > **审查日期：** 2026-09-18  
 > **范围：** Week 1；恢复并验证当前用户请求入口、意图路由、结构化查询计划、可信 SQL 执行、结果呈现、会话状态和本地模型运行时边界。  
 > **非范围：** 不改写运行时行为；不启动 SFT/DPO；不读取或重跑 protected final test；不改动冻结数据、模型或 Adapter。

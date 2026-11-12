@@ -5,20 +5,20 @@
 前两层可以在本地或 CI 中重复运行，在线模型评测需要本地模型密钥，不能在 GitHub Actions
 中运行，也不能用 SQL 可执行代替语义正确。
 
-当前在线质量以[2026-11-09最终验收](../evals/results/agent_business_quality_final_20261109.md)为准：
-60项122轮34项完整通过，另12项24轮新变体7项通过；严格CSV分别115/120和19/24。
-采集中断、解释错误/降级、范围与精度差异分开记录。旧
-[product_release_dev_v1](../evals/results/product_release_dev_v1.md)及下方有日期的批次保留为历史，
-不能用修复后定向成功拼成当前全量成绩；工程CI不调用公网模型。
+当前在线质量以[2026-11-11完整收尾](../evals/results/agent_business_quality_closeout60_20261111.md)为准：
+代码14ab842、官方deepseek-flash非思考模式，原60项122轮完整通过60/60；122轮独立CSV
+对照及19份图表重放通过，34轮复用不执行业务SQL。正文由助手结合独立数据审阅，非第三方
+盲审，也不证明开放问题100%正确。此前53/60、43/60、34/60与额外12题7/12原报告保留，
+不拼成最新全量成绩；工程CI不调用公网模型。
 
 两套清单为`evals/cases/agent_business_tasks_v1.yaml`和`agent_business_variants_v1.yaml`，入口
 为`scripts/evals/run_agent_business_tasks.py`；输出必须在仓库外。进程中断可用同一`--output`
 加`--resume`续跑，读取原tasks.json与已采集轮次，不覆盖失败或重发已到服务端的请求；缺失
 响应记中断，不宣称已交付。重审用`--review-directory`，图表重放用`--audit-saved-charts`。
 
-## Text-to-SQL v2 确定性评测
+## 历史 Text-to-SQL v2 确定性评测
 
-`evals/cases/text_to_sql_v2.yaml` 是当前版本化 golden 集，共 60 条用例，覆盖：
+`evals/cases/text_to_sql_v2.yaml` 是旧规则路由的版本化 golden 集，共 60 条用例，覆盖：
 
 - help、指标定义、通用业务/知识问题与混合请求；
 - 单指标、时间粒度、地区/品类/支付方式维度和多指标概览/分组计划；

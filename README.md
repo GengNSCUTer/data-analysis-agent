@@ -8,12 +8,13 @@
 
 - **业务查询与澄清**：结构化语义解释器理解问题与上下文，AnalysisState 保存当前分析；Semantic Catalog 和 QueryPlan 校验指标、时间、分组与追问。缺少必要条件时做最小澄清。
 - **可信执行**：`sqlglot` AST Policy 校验单条只读查询、Schema/表/列白名单、敏感字段投影和函数；PostgreSQL reader role、超时与行数预算提供数据库层约束；ResultValidator 校验结果合同。合同通过不等于业务语义已被证明。
-- **结果与图表**：聚合结果按查询计划派生预算，另有进程行数/字节/超时上限；页面预览最多 200 行。模型在 token 预算内读取完整小结果或服务端统计，追问可补读同一授权工件；服务端计算、模型解释。支持柱状图、横向柱状图、折线图、面积图和环形图，服务端基于有效 ChartContract 直接绘图。
+- **结果与图表**：聚合结果按查询计划派生预算，默认查询上限5,000行、预览200行，用户可设置并受服务端上限约束。模型按 token 预算读取完整小结果或全结果统计与选定行；服务端计算、模型解释。支持柱状图、横向柱状图、折线图、面积图和环形图，服务端基于有效 ChartContract 直接绘图。
 - **会话与上下文**：PostgreSQL 会话存储、workspace 隔离、状态版本冲突检测、可信结果追问与回答后后台摘要；历史按 token 读取，24K 触发压缩、约 16K 保留原文，摘要失败保留未压缩历史；摘要不能成为 SQL 条件或权限依据。
 - **工件与下载**：完整 CSV/Plotly 工件保存在仓库外，绑定用户、工作区和版本；完整 CSV 下载检查归属与完整性并记录导出审计。通用预览导出按钮关闭。
+- **历史结果复用**：同会话按指标与范围检索候选，代码证明覆盖后从完整CSV筛选、汇总或换图；显式两份结果可做受限数值比较。每份来源重新验证，不自动JOIN、不从聊天文字取金额，也不覆盖当前分析。
 - **嵌入与身份**：`/embedded-copilot` 提供会话列表、保存分析、查看依据和移动端适配；支持本地账号会话和绑定允许来源的 5 分钟嵌入令牌。产品身份解析器不接受旧演示角色 cookie。
 - **运行保障**：单进程默认同时执行4个分析、等待8个、排队15秒、整轮180秒，前台与摘要共用4个模型调用槽；支持停止生成、SQL取消和退出后的凭证失效。断流不自动重发，完整结果/缓存默认保留7天。配置与实测见 [部署说明](docs/deployment.md#单实例容量取消与结果保留) 和 [容量报告](evals/results/runtime_capacity.md)。
-- **模型实验**：完成 Qwen2.5-Coder-1.5B Base 的 bf16 LoRA SQL-only SFT、validation-best checkpoint 选择和完整 Gold 对照；在线页面仍使用 SiliconFlow，本地 Adapter 尚未接入。
+- **模型实验**：完成 Qwen2.5-Coder-1.5B Base 的 bf16 LoRA SQL-only SFT、validation-best checkpoint 选择和完整 Gold 对照；在线默认使用官方DeepSeek `deepseek-flash`（关闭thinking），本地 Adapter 尚未接入。
 
 偏好目前只保存供回看，尚未实际改变展示或 SQL；长期业务事实记忆和组织级行权限尚未实现。
 
@@ -48,6 +49,11 @@ curl -f http://127.0.0.1:32013/health
 ## 评测与后训练证据
 
 在线产品评测与离线小模型评测分别记录。确定性测试通过、SQL 能执行、ResultContract 有效、Gold denotation 一致是不同层次，不能互相替代。
+
+最新在线完整验收为**60项、122轮，60/60通过**：两库各30项，122轮CSV独立对照、
+19份图表重放通过，34轮复用0业务SQL。提交`14ab842`、官方`deepseek-flash`固定条件下
+单批完成，无选择性重发。助手审阅正文，不是第三方盲审；有限开发题集成绩不代表开放域
+100%或生产SLA。完整条件、旧53/60及边界见[收尾报告](evals/results/agent_business_quality_closeout60_20261111.md)。
 
 主模型使用 Olist 与 TheLook 各 3,000 条训练、750 条 validation，共 6,000/1,500；最终测试各 750 条。两个 Schema 都进入过训练，因此这是已见 Schema 的留出评测。adapter_best 在 Olist ordered Gold 对照为 403/750，TheLook 为 396/750；详情见 [模型实验卡](docs/post-training/experiments/project-v1-model-card.md)。DPO 因缺少真实、可复核的 rejected pair 暂停，未训练。
 

@@ -13,14 +13,14 @@
 | 查看单实例并发、取消、登录失效与工件保留验证 | [`../evals/results/runtime_capacity.md`](../evals/results/runtime_capacity.md) | 1/5/10 并发实测、真实浏览器故障及在线模型时延分列 |
 | 查看最新同条件完整业务任务成绩 | [`../evals/results/agent_business_quality_closeout60_20261111.md`](../evals/results/agent_business_quality_closeout60_20261111.md) | 收尾提交14ab842、官方deepseek-flash完整60项/122轮60/60；保留上批53/60，有限开发题集不代表开放域100% |
 | 了解项目目标、当前阶段和技术决策 | [`../PROJECT.md`](../PROJECT.md) | 当前项目基线 |
-| 查看新的四周产品完善、代码学习与实习面试路线 | [`../plan/process-agent-internship-improvement-v1.md`](../plan/process-agent-internship-improvement-v1.md) | 2026-10-10 计划；不重复计算机基础，不自动启动训练 |
+| 继续当前两周代码学习与实习面试路线 | [`../plan/process-agent-internship-improvement-v2-2week.md`](../plan/process-agent-internship-improvement-v2-2week.md) | Day 4阶段收尾、Day 5进行中；旧四周方案仅供回顾 |
 | 查看六项产品完善工作的实施顺序 | [`../plan/process-agent-product-readiness-v1.md`](../plan/process-agent-product-readiness-v1.md) | 四周计划的工程执行清单；逐项实现并记录证据 |
-| 按小段亲自阅读 Agent 代码并复述 | [`learning/agent-project-walkthrough-v1.md`](learning/agent-project-walkthrough-v1.md) | Day 1 请求入口；问答随用户学习更新 |
+| 亲自阅读连贯的 Agent 代码链并复述 | [`learning/agent-project-walkthrough-v1.md`](learning/agent-project-walkthrough-v1.md) | 保留历史问答；当前学习位置见顶部和文末 |
 | 查看趋势、比较、占比等服务端结果分析 | [`../plan/feature-result-analysis-operations-v1.md`](../plan/feature-result-analysis-operations-v1.md) / [`architecture/result-budget-v2.md`](architecture/result-budget-v2.md) | 计算已实现；当前由无工具模型解释，按疑点核验 |
 | 查看自由回答、事实检查与有限修订 | [`architecture/product-request-architecture-v1.md`](architecture/product-request-architecture-v1.md) / [`../evals/results/free-result-answer-20261027.md`](../evals/results/free-result-answer-20261027.md) | 模型写正常正文；代码先检查，有疑点才复核；旧引用模板已删除 |
 | 查看粒度、解释补证和双来源比较收尾 | [`architecture/business-answer-evidence-closeout.md`](architecture/business-answer-evidence-closeout.md) | 完整维度唯一性、有限补证、日期边界、显式双工件数值比较；不做任意SQL等价证明 |
 | 核对 SQL-only 训练与真实候选输入的对齐改造 | [`../plan/refactor-runtime-candidate-sft-alignment-v1.md`](../plan/refactor-runtime-candidate-sft-alignment-v1.md) | 5,980 train / 1,500 validation、长度4,096、best=step2,500；训练与matching已完成。端点语义使旧Gold口径不一致，结论见[r3报告](post-training/experiments/runtime-candidate-matching-v2-r3.md)，不将一致子集当整体100% |
-| 了解本周已核实的用户请求/可信执行链 | [`architecture/project-v1-baseline-review.md`](architecture/project-v1-baseline-review.md) | Week 1 当前审查基线 |
+| 回顾早期用户请求/可信执行链 | [`architecture/project-v1-baseline-review.md`](architecture/project-v1-baseline-review.md) | 历史Week 1审查，不作为当前启动说明 |
 | 查看有证据支持的产品优化候选与暂不处理项 | [`architecture/project-v1-gap-map.md`](architecture/project-v1-gap-map.md) | Week 1 缺口地图，不是实时任务台账 |
 | 查看嵌入式 Copilot 与长对话状态的目标架构 | [`architecture/embedded-copilot-and-memory-design-v1.md`](architecture/embedded-copilot-and-memory-design-v1.md) | M1 宿主合同入口；按 M1–M7 状态阅读 |
 | 查看对话历史、分析状态、执行记忆与上下文装配 | [`../plan/architecture-analysis-context-memory-v2.md`](../plan/architecture-analysis-context-memory-v2.md) / [`architecture/analysis-context-memory-v2.md`](architecture/analysis-context-memory-v2.md) | Phase 0–4：可信实体下钻、任务内近期问答、持久增量摘要和整体请求预算；实际验收证据见 PROJECT.md |
@@ -54,7 +54,7 @@
 - [`architecture/project-v1-baseline-review.md`](architecture/project-v1-baseline-review.md)：Week 1 以真实代码和定向测试核实的 Web 请求、Router、QueryPlan、SQL Policy、reader role、ResultValidator、repair 与审计链；明确区分已验证行为与待验证项。
 - [`architecture/project-v1-gap-map.md`](architecture/project-v1-gap-map.md)：从本周审查证据提炼的运行时优化候选、优先级、验收条件与明确不做项；不替代 `PROJECT.md` 的项目进度。
 - [`architecture/embedded-copilot-and-memory-design-v1.md`](architecture/embedded-copilot-and-memory-design-v1.md)：将当前可信 Demo 收束为可嵌入 Copilot 的 Host Integration Contract、可信结果 artifact 驱动的会话状态模型、上下文装配优先级与分步实施门；设计提案，不代表实现完成。
-- [`architecture/embeddable-copilot-shell-v1.md`](architecture/embeddable-copilot-shell-v1.md)：当前唯一产品页 `/embedded-copilot`。演示角色和审计在「管理」后面，`/embedded-demo` 重定向到此页。
+- [`architecture/embeddable-copilot-shell-v1.md`](architecture/embeddable-copilot-shell-v1.md)：当前产品页 `/embedded-copilot`；身份由本地登录或嵌入令牌提供，不提供演示角色签发。
 - [`architecture/open-source-agent-context-research-v1.md`](architecture/open-source-agent-context-research-v1.md)：对 Codex CLI、Aider、LangGraph 和 Mem0 的实际 session/context/memory 代码做的限定调研；给出可吸收的实现模式、许可证与本项目不直接复用/不采用的边界。
 - [`architecture/data-model.md`](architecture/data-model.md)：运行时数据模型和持久化边界。
 - [`data-dictionary.md`](data-dictionary.md)：当前工作区字段字典。
@@ -89,7 +89,7 @@
 - [`architecture/product-request-architecture-v1.md`](architecture/product-request-architecture-v1.md)：当前请求、SQL 治理、会话结果和本地模型的位置。
 - [`自然语言入口 Phase 0/1`](../plan/feature-semantic-intent-phase01.md)：旧路由基线、结构化意图实现、真实请求验收及当前能力边界。
 - [`自然语言入口 Phase 2/3`](../plan/feature-semantic-intent-phase23.md)：语义范围修复、在线 scope probe、重试和运行验收。
-- [`architecture/execution-row-cap-v1.md`](architecture/execution-row-cap-v1.md)：1,000 行执行上限下，完整与截断如何告知用户。
+- [`architecture/execution-row-cap-v1.md`](architecture/execution-row-cap-v1.md)：历史1,000行上限设计；当前默认5,000、可配置的执行和展示预算见v2。
 - [`architecture/result-budget-v2.md`](architecture/result-budget-v2.md)：aggregate、detail_page、export 的分层预算设计，以及当前已接入的在线计划/合同字段、执行前校验和未启用能力边界。
 - [`architecture/result-budget-v2-performance-baseline.md`](architecture/result-budget-v2-performance-baseline.md)：100,000/1,000,000 订单 `perf_shop` 的聚合、分页、高基数分组、CSV 体积与 `EXPLAIN` 基线。
 - [`interview-qa-v1.md`](interview-qa-v1.md)：SFT、LoRA、AdamW、DPO、泄漏和 Gold denotation 的简答。
@@ -97,7 +97,8 @@
 
 ### 评测与验收
 
-- [`../evals/results/agent_business_quality_official60_20261111.md`](../evals/results/agent_business_quality_official60_20261111.md)：当前同条件完整60项/122轮53/60；独立数值、19图表及60项正文审阅，逐项失败归因。
+- [`../evals/results/agent_business_quality_closeout60_20261111.md`](../evals/results/agent_business_quality_closeout60_20261111.md)：最新完整60项/122轮60/60，含独立数值、图表、正文审阅及适用边界。
+- [`../evals/results/agent_business_quality_official60_20261111.md`](../evals/results/agent_business_quality_official60_20261111.md)：上一批同条件完整60项53/60，保留失败归因，不作为最新成绩。
 - [`../evals/results/history_official_deepseek_rerun_20261111.md`](../evals/results/history_official_deepseek_rerun_20261111.md)：历史类别汇总54/60（跨批次/代码/模型），官方历史专项9/10；原始来源和成绩保留。
 - [`../evals/results/agent_business_quality_rerun_20261110.md`](../evals/results/agent_business_quality_rerun_20261110.md)：此前同批完整60项结果43/60，作为历史对照保留。
 - [`../evals/results/agent_business_quality_final_20261109.md`](../evals/results/agent_business_quality_final_20261109.md)：早期60项34通过、另12项新变体7通过；保留原始失败及交付证据，当前进展看上方新报告。
@@ -126,24 +127,17 @@
 - `post-training/experiments/`：实验台账，只记录配置、聚合结果和结论。
 - `post-training/archive/`：不再作为实时状态依据的旧路线和旧笔记。
 
-根目录以下文件保留为兼容入口，不再追加新内容：
-
-- [`post-training-index.md`](post-training-index.md)
-- [`post-training-learning-guide.md`](post-training-learning-guide.md)
-- [`post-training-learning-notes-v1.md`](post-training-learning-notes-v1.md)
-- [`post-training-learning-roadmap.md`](post-training-learning-roadmap.md)
-- [`post-training-learning-walkthrough-v1.md`](post-training-learning-walkthrough-v1.md)
-- [`post-training-experiment-log.md`](post-training-experiment-log.md)
-- [`post-training-data-protocol.md`](post-training-data-protocol.md)
-
-根目录中带 `post-training-` 前缀、但不在上述兼容清单内的文件是历史实验报告，例如 Spider 全量分析、Olist 业务迁移、Base/Adapter 对照和数据候选审计。它们保留原路径与内容，避免破坏 GitHub、飞书和实验报告中的引用；后续新实验只在 `post-training/experiments/log.md` 增加索引，并单独创建带版本号的报告。
+2026-11-12删除了7个仅作跳转的根目录后训练页面，仓库链接直接指向上述规范目录。
+其余根目录 `post-training-*.md` 是有独立内容的历史实验报告，保留原路径与证据；新实验从
+`post-training/experiments/log.md` 索引，不新增兼容页。
 
 ### 其他目录
 
 - `docs/qlora-environment.md`：后训练环境安装与 GPU 约定。
 - `docs/text-to-sql-data-acquisition.md`：公开数据集获取和来源说明。
 - `docs/spider-1.0-data-provenance.md`：Spider 版本与文件哈希溯源。
-- `docs/resume-project-entry.md`：简历项目条目草稿。
+- [`interview/project-release-facts-v1.md`](interview/project-release-facts-v1.md)：统一的面试事实与简历草稿，替代旧根目录草稿。
+- [`archive/project-history-through-20261111.md`](archive/project-history-through-20261111.md)：完整项目历史；当前状态统一看根目录 `PROJECT.md`。
 
 ## 当前整理决定
 

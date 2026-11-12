@@ -2,7 +2,7 @@
 title: Result Budget Contract v2
 status: implemented
 date: 2026-10-12
-last_updated: 2026-11-04
+last_updated: 2026-11-12
 ---
 
 # Result Budget Contract v2
@@ -15,7 +15,7 @@ last_updated: 2026-11-04
 | --- | --- | --- |
 | `aggregate` | Catalog 准入的指标 SQL，经 QueryPlan、Policy、只读 Runner、ResultValidator | 返回完整聚合或明确 Top-N；超出合同不把截取结果当答案 |
 | `detail_page` | 浏览现有已验证 CSV 工件的一页，不重新执行 SQL | 默认 200 行，最多 500；行位置 cursor 固定在不可变工件中，用户/会话/workspace/版本隔离 |
-| `export` | 用户点击现有鉴权 CSV 下载接口，服务端 FileResponse 返回完整工件并记录导出审计 | 下载已经通过验证的结果，不重新执行查询，文件不进入模型上下文 |
+| `export` | 用户点击鉴权CSV下载接口，`ArtifactCsvResponse`从同一已验证文件句柄分块传输并记录导出审计 | 不重新执行查询、不将文件整份读入Python内存；不宣称零拷贝 |
 
 本版本不开放任意原始订单/客户明细 SQL，也不建立异步导出任务平台。`run_sql` 只执行 aggregate；分页和下载是独立的工件读取接口，复用现有认证和审计。
 
@@ -95,7 +95,7 @@ Runner 使用 PostgreSQL named cursor，每批最多 1,000 行；资源 LIMIT �
 时说明缺口，不重复查询。计算结论作为证据交给无工具模型，由模型自由组织正文；首次查询和
 追问共用`generate_result_answer()`，不再直接调用服务端业务模板。代码先核对引用/数值等，
 有疑点才复核，最多修订一次，仍失败隐藏正文并保留数据。机制与局限见
-[当前解释流程](product-request-architecture-v1.md#2026-10-27自主解释与按疑点复核)。
+[当前解释流程](product-request-architecture-v1.md)。
 
 `BudgetUsage.result_evidence_limit()`先从完整请求预算扣除输出预留、当前问题、计划、已选历史
 及包装开销，为结果分配剩余空间。实际发送时`_fit_result_request()`再计量系统、消息、工具

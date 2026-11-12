@@ -74,7 +74,7 @@ packages avoids a misleading situation where those tests only run with
 
 Every follow-up experiment must use an explicitly licensed base model and a
 separately audited corpus following
-[`docs/post-training-data-protocol.md`](post-training-data-protocol.md). The 60 cases in
+[`post-training/data/protocol.md`](post-training/data/protocol.md). The 60 cases in
 [`evals/manifests/post_training_holdout_v1.yaml`](../evals/manifests/post_training_holdout_v1.yaml)
 remain permanently excluded from SFT, LoRA, preference optimization, prompt
 examples and synthetic rewrites.

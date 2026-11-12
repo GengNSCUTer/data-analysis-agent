@@ -1,5 +1,8 @@
 # 产品能力基线测试 v1
 
+> Historical：下文保留2026年9月的分阶段测试和未完成状态；当前完整任务结果见
+> [60项收尾报告](../../evals/results/agent_business_quality_closeout60_20261111.md)。
+
 > **状态：** Phase 0、A 已完成。Phase B 自动运行已完成，人工语义审核仍待完成。Phase C 已有会话复测。Phase D、E 还没有收成总表。  
 > **日期：** 2026-09-20  
 > **用途：** 用分层测试回答“当前 Agent 到底能做什么、哪些场景不可靠”；不作为本地模型训练、验证、checkpoint 选择或 protected final test 的替代。
