@@ -109,7 +109,9 @@ def test_explicit_new_question_does_not_append_stale_metrics_to_retrieval() -> N
 def test_working_memory_accepts_only_bounded_trusted_result_summary() -> None:
     memory = WorkingMemory(metric_ids=("gmv",))
 
-    updated = memory.with_result_summary("可信结果摘要：" + "x" * 5000)
+    updated = WorkingMemory.from_mapping(
+        {**memory.as_dict(), "previous_result_summary": "可信结果摘要：" + "x" * 5000}
+    )
 
     assert updated.metric_ids == ("gmv",)
     assert updated.previous_result_summary is not None

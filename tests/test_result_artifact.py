@@ -23,7 +23,6 @@ def test_trusted_result_artifact_is_bounded_and_replayable_without_sql() -> None
     assert restored.previous_result_artifact == artifact
     assert restored.previous_result_summary == artifact.summary
     assert artifact.summary.endswith("x" * 2_000)
-    assert "不会重新执行 SQL" in artifact.replay_text()
     assert "SELECT" not in str(artifact.as_dict())
 
 
@@ -77,7 +76,6 @@ def test_chart_history_survives_a_later_result_without_a_chart() -> None:
     assert len(restored.chart_history) == 1
     assert restored.chart_history[0].artifact_id == chart.artifact_id
     assert replayable_chart_refs(restored, restored.previous_result_artifact) == restored.chart_history
-    assert "图表已保存在会话中" in chart.replay_text()
     legacy = WorkingMemory(previous_result_artifact=chart)
     assert legacy.chart_history == ()
     assert replayable_chart_refs(legacy, chart)[0].artifact_id == chart.artifact_id

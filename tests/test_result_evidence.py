@@ -206,7 +206,7 @@ def test_refresh_preserves_structured_evidence_larger_than_old_character_limit()
     assert restored.previous_result_summary == summary
     assert payload(restored.previous_result_summary)["sample_rows"][-1]["category"] == "类别26"
     with pytest.raises(ContextCapacityError):
-        WorkingMemory().with_result_summary("长" * 80_000)
+        WorkingMemory.from_mapping({"previous_result_summary": "长" * 80_000})
 
 
 @pytest.fixture

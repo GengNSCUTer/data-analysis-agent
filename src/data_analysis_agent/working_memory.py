@@ -126,28 +126,6 @@ class WorkingMemory:
             pending_missing=tuple(pending_missing),
         )
 
-    def with_result_summary(self, summary: str | None) -> "WorkingMemory":
-        """Attach a bounded summary produced by the trusted result gate.
-
-        This is the only supported path for setting ``previous_result_summary``;
-        assistant prose and client metadata are never accepted as result
-        evidence.
-        """
-        value = bound_result_evidence(summary)
-        return WorkingMemory(
-            metric_ids=self.metric_ids,
-            time_range=self.time_range,
-            dimensions=self.dimensions,
-            filters=self.filters,
-            comparison_baseline=self.comparison_baseline,
-            time_grain=self.time_grain,
-            previous_result_summary=value,
-            previous_result_artifact=self.previous_result_artifact,
-            chart_history=self.chart_history,
-            pending_question=self.pending_question,
-            pending_missing=self.pending_missing,
-        )
-
     def with_result_artifact(self, artifact: ResultArtifact) -> "WorkingMemory":
         """Persist the latest replayable artifact after ResultContract success."""
         if not isinstance(artifact, ResultArtifact) or not artifact.summary:

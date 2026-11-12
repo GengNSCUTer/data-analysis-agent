@@ -18,7 +18,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict
 
-from data_analysis_agent.demo_session import SESSION_COOKIE_NAME
 from data_analysis_agent.export_audit import ExportAudit
 from data_analysis_agent.result_download import ArtifactCsvResponse, open_csv_download
 from data_analysis_agent.local_auth import (
@@ -919,7 +918,7 @@ def create_app(*, llm_provider=None) -> FastAPI:
             secure=_cookie_secure(request),
             path="/",
         )
-        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        response.delete_cookie("daa_demo_session", path="/")
         return response
 
     @app.post("/api/auth/logout")
@@ -930,7 +929,7 @@ def create_app(*, llm_provider=None) -> FastAPI:
         await asyncio.to_thread(account_store.revoke_sessions, user.id)
         response = JSONResponse({"authenticated": False})
         response.delete_cookie(LOCAL_SESSION_COOKIE, path="/")
-        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        response.delete_cookie("daa_demo_session", path="/")
         return response
 
     @app.get("/api/auth/session")

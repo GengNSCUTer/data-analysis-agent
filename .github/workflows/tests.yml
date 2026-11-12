@@ -90,7 +90,6 @@ jobs:
           tests/test_artifact_history.py \
           tests/test_local_auth.py \
           tests/test_trusted_workflow.py \
-          tests/test_demo_session.py \
           tests/test_demo_scenarios.py \
           tests/test_budget.py \
           tests/test_budget_streaming.py \

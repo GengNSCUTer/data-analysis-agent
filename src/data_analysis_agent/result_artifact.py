@@ -156,17 +156,6 @@ class ResultArtifact:
             "result_metadata": self.result_metadata,
         }
 
-    def replay_text(self) -> str:
-        """Render an explicit replay notice; this never triggers a new query."""
-        metrics = "、".join(self.metric_ids) or "受控指标"
-        chart_note = "；图表已保存在会话中" if self.chart_replay_ref() is not None else ""
-        return (
-            "已恢复上一轮已验证的数据结果摘要（不会重新执行 SQL）。\n"
-            f"指标：{metrics}；数据版本：{self.dataset_version}；"
-            f"指标版本：{self.metric_version}{chart_note}\n\n"
-            f"{self.summary}"
-        )
-
 
 @dataclass(frozen=True)
 class ChartReplayRef:
